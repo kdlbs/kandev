@@ -103,17 +103,13 @@ function buildBottomTerminalActions(set: ImmerSet) {
       set((draft) => {
         const newValue = !draft.bottomTerminal.isOpen;
         draft.bottomTerminal.isOpen = newValue;
-        if (typeof window !== "undefined") {
-          localStorage.setItem("bottom-terminal-open", String(newValue));
-        }
+        setLocalStorage("bottom-terminal-open", String(newValue));
       }),
     openBottomTerminalWithCommand: (command: string) =>
       set((draft) => {
         draft.bottomTerminal.isOpen = true;
         draft.bottomTerminal.pendingCommand = command;
-        if (typeof window !== "undefined") {
-          localStorage.setItem("bottom-terminal-open", "true");
-        }
+        setLocalStorage("bottom-terminal-open", "true");
       }),
     clearBottomTerminalCommand: () =>
       set((draft) => {

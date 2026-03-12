@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import {
   IconAlertTriangle,
   IconRefresh,
@@ -27,9 +27,16 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   sessionState?: TaskSessionState;
 }) {
   const [state, setState] = useState<RecoveryState>("pending");
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metadata = comment.metadata as RecoveryMetadata | undefined;
   const canRecover = Boolean(metadata?.task_id && metadata?.session_id);
   const storeApi = useAppStoreApi();
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    };
+  }, []);
 
   const openBottomTerminal = useCallback(() => {
     const store = storeApi.getState();
@@ -48,6 +55,10 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   const handleRecover = useCallback(
     async (action: "resume" | "fresh_start") => {
       if (!canRecover || !metadata) return;
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
       const client = getWebSocketClient();
       if (!client) return;
       setState("recovering");
@@ -61,7 +72,10 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
       } catch (error) {
         console.error("Failed to recover session:", error);
         setState("error");
-        setTimeout(() => setState("pending"), 3000);
+        resetTimerRef.current = setTimeout(() => {
+          setState("pending");
+          resetTimerRef.current = null;
+        }, 3000);
       }
     },
     [canRecover, metadata],
@@ -258,6 +272,14 @@ function GenericAuthPanel({ onOpenTerminal }: { onOpenTerminal: () => void }) {
   );
 }
 
+function buildFullCommand(termAuth: RecoveryAuthMethod["terminal_auth"]): string | null {
+  if (!termAuth) return null;
+  if (termAuth.args && termAuth.args.length > 0) {
+    return `${termAuth.command} ${termAuth.args.join(" ")}`;
+  }
+  return termAuth.command;
+}
+
 function AuthMethodRow({
   method,
   onOpenTerminal,
@@ -268,9 +290,7 @@ function AuthMethodRow({
   const [copied, setCopied] = useState(false);
   const termAuth = method.terminal_auth;
 
-  const fullCommand = termAuth
-    ? `${termAuth.command}${termAuth.args ? ` ${termAuth.args.join(" ")}` : ""}`
-    : null;
+  const fullCommand = buildFullCommand(termAuth);
 
   const handleCopy = useCallback(async () => {
     if (!fullCommand) return;
@@ -299,6 +319,7 @@ function AuthMethodRow({
                 size="sm"
                 className="h-6 w-6 p-0 cursor-pointer shrink-0"
                 onClick={handleCopy}
+                aria-label={copied ? "Command copied" : "Copy command"}
               >
                 {copied ? (
                   <IconCheck className="h-3 w-3 text-green-500" />
