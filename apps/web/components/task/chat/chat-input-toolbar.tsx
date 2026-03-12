@@ -34,7 +34,6 @@ import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
-import { ConfigOptionsDisplay } from "@/components/task/config-options-display";
 import { ContextPopover } from "./context-popover";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
@@ -364,9 +363,7 @@ function ToolbarRightSection({
         />
       )}
       <TokenUsageDisplay sessionId={sessionId} />
-      <ModeSelector sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />
-      <ConfigOptionsDisplay sessionId={sessionId} />
       {/* AuthMethodsIndicator hidden — UX needs rethinking */}
       {showEnhance && (
         <EnhancePromptButton
@@ -388,6 +385,25 @@ function ToolbarRightSection({
         />
       </div>
     </div>
+  );
+}
+
+function AttachFilesButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+          onClick={onClick}
+        >
+          <IconPaperclip className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Attach files</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -432,22 +448,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
 
         <McpIndicator mcpServers={mcpServers} />
 
-        {onAttachFiles && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-                onClick={onAttachFiles}
-              >
-                <IconPaperclip className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Attach files</TooltipContent>
-          </Tooltip>
-        )}
+        {onAttachFiles && <AttachFilesButton onClick={onAttachFiles} />}
 
         <ContextPopover
           open={contextPopoverOpen}
@@ -472,6 +473,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
           contextFiles={contextFiles}
           onToggleFile={onToggleFile ?? (() => {})}
         />
+        <ModeSelector sessionId={sessionId} />
       </div>
 
       <div className="flex-1" />

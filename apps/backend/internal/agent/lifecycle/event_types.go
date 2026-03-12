@@ -151,6 +151,9 @@ type AgentStreamEventData struct {
 
 	// Plan entries (from "plan" event — ACP/Codex agent todos)
 	PlanEntries []streams.PlanEntry `json:"plan_entries,omitempty"`
+
+	// PlanContent contains rich markdown plan content (from "agent_plan" event).
+	PlanContent string `json:"plan_content,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).

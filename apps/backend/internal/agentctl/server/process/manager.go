@@ -913,6 +913,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 			zap.String("pending_id", pendingID),
 			zap.String("option_id", resp.OptionID),
 			zap.Bool("cancelled", resp.Cancelled))
+		if resp.Cancelled {
+			m.sendPermissionCancelledNotification(pending)
+		}
 		return resp, nil
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
@@ -1042,6 +1045,26 @@ func (m *Manager) RespondToPermission(pendingID string, optionID string, cancell
 		return nil
 	default:
 		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
+	}
+}
+
+// CancelPendingPermissions cancels all pending permission requests.
+// Called before sending a new prompt so the agent isn't blocked waiting for responses.
+func (m *Manager) CancelPendingPermissions() {
+	m.permissionMu.RLock()
+	pending := make([]*PendingPermission, 0, len(m.pendingPermissions))
+	for _, p := range m.pendingPermissions {
+		pending = append(pending, p)
+	}
+	m.permissionMu.RUnlock()
+
+	for _, p := range pending {
+		m.logger.Info("cancelling pending permission before new prompt",
+			zap.String("pending_id", p.ID))
+		select {
+		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
 	}
 }
 

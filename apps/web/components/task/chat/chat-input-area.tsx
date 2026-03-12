@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconBrain, IconGitMerge, IconX } from "@tabler/icons-react";
+import { IconGitMerge, IconX } from "@tabler/icons-react";
 import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -309,20 +309,6 @@ function SessionStatusBar({ todoItems }: { todoItems: TodoDisplayItem[] }) {
   );
 }
 
-function AgentModeIndicator({ sessionId }: { sessionId: string | null }) {
-  const modeState = useAppStore((state) =>
-    sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
-  );
-  const modeId = modeState?.currentModeId;
-  if (!modeId || modeId === "default") return null;
-  return (
-    <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
-      <IconBrain className="h-3 w-3" />
-      <span className="capitalize">{modeId} mode</span>
-    </div>
-  );
-}
-
 type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
   clarificationKey: number;
@@ -393,7 +379,6 @@ export function ChatInputArea({
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <SessionStatusBar todoItems={todoItems} />
-      <AgentModeIndicator sessionId={resolvedSessionId} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       <ChatInputContainer
         ref={chatInputRef}

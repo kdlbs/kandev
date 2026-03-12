@@ -547,6 +547,113 @@ func TestNormalizerExecute(t *testing.T) {
 	})
 }
 
+// TestParseShellOutputPlainString tests that plain string output (Claude Code format)
+// is correctly treated as stdout.
+func TestParseShellOutputPlainString(t *testing.T) {
+	normalizer := NewNormalizer()
+
+	t.Run("plain string rawOutput becomes stdout", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind":      "execute",
+			"raw_input": map[string]any{"command": "pwd"},
+		})
+
+		// Claude Code sends rawOutput as a direct string, not XML-wrapped
+		normalizer.NormalizeToolResult(payload, "/Users/cfl/Projects/1code")
+
+		if payload.ShellExec().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		if payload.ShellExec().Output.Stdout != "/Users/cfl/Projects/1code" {
+			t.Errorf("expected Stdout '/Users/cfl/Projects/1code', got %q", payload.ShellExec().Output.Stdout)
+		}
+		if payload.ShellExec().Output.ExitCode != 0 {
+			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec().Output.ExitCode)
+		}
+	})
+
+	t.Run("XML-wrapped output still works", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind":      "execute",
+			"raw_input": map[string]any{"command": "ls"},
+		})
+
+		normalizer.NormalizeToolResult(payload, map[string]any{
+			"rawOutput": map[string]any{
+				"output": "<return-code>\n0\n</return-code>\n<output>\nfile1.txt\nfile2.txt\n</output>",
+			},
+		})
+
+		if payload.ShellExec().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		if payload.ShellExec().Output.Stdout != "file1.txt\nfile2.txt" {
+			t.Errorf("expected Stdout 'file1.txt\\nfile2.txt', got %q", payload.ShellExec().Output.Stdout)
+		}
+	})
+}
+
+// TestUpdatePayloadInput tests incremental rawInput updates (Claude Code pattern).
+func TestUpdatePayloadInput(t *testing.T) {
+	normalizer := NewNormalizer()
+
+	t.Run("updates empty command from rawInput", func(t *testing.T) {
+		// Initial tool_call with empty rawInput (Claude Code sends this)
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind":      "execute",
+			"raw_input": map[string]any{},
+		})
+
+		if payload.ShellExec().Command != "" {
+			t.Errorf("expected empty initial Command, got %q", payload.ShellExec().Command)
+		}
+
+		// Subsequent tool_call_update provides the actual command
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"command":     "pwd",
+			"description": "Print working directory",
+		})
+
+		if payload.ShellExec().Command != "pwd" {
+			t.Errorf("expected Command 'pwd', got %q", payload.ShellExec().Command)
+		}
+		if payload.ShellExec().Description != "Print working directory" {
+			t.Errorf("expected Description 'Print working directory', got %q", payload.ShellExec().Description)
+		}
+	})
+
+	t.Run("does not overwrite existing command", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind": "execute",
+			"raw_input": map[string]any{
+				"command": "ls -la",
+			},
+		})
+
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"command": "pwd",
+		})
+
+		if payload.ShellExec().Command != "ls -la" {
+			t.Errorf("expected Command 'ls -la' (unchanged), got %q", payload.ShellExec().Command)
+		}
+	})
+
+	t.Run("handles nil payload gracefully", func(t *testing.T) {
+		// Should not panic
+		normalizer.UpdatePayloadInput(nil, map[string]any{"command": "pwd"})
+	})
+
+	t.Run("handles non-map rawInput gracefully", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind":      "execute",
+			"raw_input": map[string]any{},
+		})
+		// Should not panic
+		normalizer.UpdatePayloadInput(payload, "not a map")
+	})
+}
+
 // TestSplitLines tests the line splitting utility.
 func TestSplitLines(t *testing.T) {
 	tests := []struct {

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -124,7 +125,13 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 		return
 	}
 
-	err := m.instMgr.StopInstance(c.Request.Context(), id)
+	// Use a detached context so cleanup isn't canceled when the HTTP client disconnects.
+	// The ControlClient has a 30s http.Client.Timeout; if it fires, the request context
+	// is canceled, which cascades into force-killing processes mid-cleanup.
+	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	err := m.instMgr.StopInstance(stopCtx, id)
 	if err != nil {
 		m.logger.Error("failed to stop instance", zap.String("id", id), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{

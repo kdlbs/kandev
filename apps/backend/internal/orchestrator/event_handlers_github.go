@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -315,6 +316,8 @@ func (s *Service) detectPushAndAssociatePR(
 }
 
 // resolveSessionRepo looks up the repository owner and name for a session.
+// If provider info is missing but a local path exists, it detects from the git remote
+// and backfills the DB record for future calls.
 func (s *Service) resolveSessionRepo(ctx context.Context, sessionID string) (string, string) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.RepositoryID == "" {
@@ -328,7 +331,30 @@ func (s *Service) resolveSessionRepo(ctx context.Context, sessionID string) (str
 	if err != nil || repoObj == nil {
 		return "", ""
 	}
+	if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
+		if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
+			repoObj.Provider = p
+			repoObj.ProviderOwner = o
+			repoObj.ProviderName = n
+			go s.backfillRepoProvider(store, repoObj)
+		}
+	}
 	return repoObj.ProviderOwner, repoObj.ProviderName
+}
+
+// backfillRepoProvider persists auto-detected provider info to the DB.
+func (s *Service) backfillRepoProvider(store repoStore, repo *models.Repository) {
+	if err := store.UpdateRepository(context.Background(), repo); err != nil {
+		s.logger.Warn("failed to backfill repository provider info",
+			zap.String("repository_id", repo.ID),
+			zap.Error(err))
+	} else {
+		s.logger.Info("backfilled repository provider info from git remote",
+			zap.String("repository_id", repo.ID),
+			zap.String("provider", repo.Provider),
+			zap.String("owner", repo.ProviderOwner),
+			zap.String("name", repo.ProviderName))
+	}
 }
 
 // ensureSessionPRWatch creates a PRWatch (pr_number=0) for a session's branch
@@ -352,6 +378,8 @@ func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, b
 }
 
 // resolveTaskRepo looks up the GitHub owner and repo name for a task's primary repository.
+// If provider info is missing but a local path exists, it detects from the git remote
+// and backfills the DB record for future calls.
 func (s *Service) resolveTaskRepo(ctx context.Context, taskID string) (string, string) {
 	store, ok := s.repo.(repoStore)
 	if !ok {
@@ -364,6 +392,14 @@ func (s *Service) resolveTaskRepo(ctx context.Context, taskID string) (string, s
 	repoObj, err := store.GetRepository(ctx, taskRepo.RepositoryID)
 	if err != nil || repoObj == nil {
 		return "", ""
+	}
+	if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
+		if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
+			repoObj.Provider = p
+			repoObj.ProviderOwner = o
+			repoObj.ProviderName = n
+			go s.backfillRepoProvider(store, repoObj)
+		}
 	}
 	if repoObj.Provider != "github" {
 		return "", ""

@@ -230,6 +230,15 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		DevScript:            req.DevScript,
 	}
 
+	// Auto-detect GitHub provider info from git remote if not provided
+	if repository.Provider == "" && repository.LocalPath != "" {
+		if p, o, n := ResolveGitRemoteProvider(repository.LocalPath); p != "" {
+			repository.Provider = p
+			repository.ProviderOwner = o
+			repository.ProviderName = n
+		}
+	}
+
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
 		return nil, err

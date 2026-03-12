@@ -484,6 +484,105 @@ func collectRemoteBranches(remoteRefsRoot string, branchMap map[string]Branch) {
 	})
 }
 
+// readGitRemoteOriginURL reads the origin remote URL from a git repository's config.
+// Handles both normal repos and worktrees by resolving the common git dir.
+func readGitRemoteOriginURL(repoPath string) (string, error) {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return "", err
+	}
+	configDir := resolveCommonGitDir(gitDir)
+	configPath := filepath.Join(configDir, "config")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", err
+	}
+	return parseGitConfigOriginURL(string(content)), nil
+}
+
+// parseGitConfigOriginURL extracts the origin remote URL from git config content.
+func parseGitConfigOriginURL(config string) string {
+	inOrigin := false
+	for line := range strings.SplitSeq(config, "\n") {
+		line = strings.TrimSpace(line)
+		if line == `[remote "origin"]` {
+			inOrigin = true
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			inOrigin = false
+			continue
+		}
+		if inOrigin {
+			if url, ok := strings.CutPrefix(line, "url = "); ok {
+				return url
+			}
+		}
+	}
+	return ""
+}
+
+// ParseGitRemoteURL extracts provider, owner, and repo name from a git remote URL.
+// Supports HTTPS (https://github.com/owner/repo.git), SSH (git@github.com:owner/repo.git),
+// and ssh:// (ssh://git@github.com/owner/repo.git) formats.
+// Returns empty strings for unrecognized URLs or non-GitHub providers.
+func ParseGitRemoteURL(remoteURL string) (provider, owner, name string) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return "", "", ""
+	}
+
+	host, path := splitRemoteURL(remoteURL)
+	if host == "" || path == "" {
+		return "", "", ""
+	}
+
+	if !strings.Contains(strings.ToLower(host), "github.com") {
+		return "", "", ""
+	}
+
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.Trim(path, "/")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", ""
+	}
+	return "github", parts[0], parts[1]
+}
+
+// splitRemoteURL splits a git remote URL into host and path components.
+func splitRemoteURL(remoteURL string) (host, path string) {
+	switch {
+	case strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://"):
+		trimmed := strings.TrimPrefix(remoteURL, "https://")
+		trimmed = strings.TrimPrefix(trimmed, "http://")
+		host, path, _ = strings.Cut(trimmed, "/")
+
+	case strings.HasPrefix(remoteURL, "ssh://"):
+		trimmed := strings.TrimPrefix(remoteURL, "ssh://")
+		if _, after, ok := strings.Cut(trimmed, "@"); ok {
+			trimmed = after
+		}
+		host, path, _ = strings.Cut(trimmed, "/")
+
+	case strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":"):
+		// git@github.com:owner/repo.git
+		_, afterAt, _ := strings.Cut(remoteURL, "@")
+		host, path, _ = strings.Cut(afterAt, ":")
+	}
+	return host, path
+}
+
+// ResolveGitRemoteProvider detects the provider, owner, and repo name from a
+// local git repository's origin remote. Returns empty strings on any error.
+func ResolveGitRemoteProvider(repoPath string) (provider, owner, name string) {
+	url, err := readGitRemoteOriginURL(repoPath)
+	if err != nil || url == "" {
+		return "", "", ""
+	}
+	return ParseGitRemoteURL(url)
+}
+
 func parsePackedRefs(refsRoot string, branchMap map[string]Branch) {
 	content, err := os.ReadFile(filepath.Join(refsRoot, "packed-refs"))
 	if err != nil {

@@ -272,6 +272,113 @@ func writeRef(t *testing.T, path string) {
 	}
 }
 
+func TestParseGitRemoteURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		url          string
+		wantProvider string
+		wantOwner    string
+		wantName     string
+	}{
+		{"https with .git", "https://github.com/owner/repo.git", "github", "owner", "repo"},
+		{"https without .git", "https://github.com/owner/repo", "github", "owner", "repo"},
+		{"http", "http://github.com/owner/repo.git", "github", "owner", "repo"},
+		{"ssh colon", "git@github.com:owner/repo.git", "github", "owner", "repo"},
+		{"ssh colon no .git", "git@github.com:owner/repo", "github", "owner", "repo"},
+		{"ssh protocol", "ssh://git@github.com/owner/repo.git", "github", "owner", "repo"},
+		{"ssh protocol no .git", "ssh://git@github.com/owner/repo", "github", "owner", "repo"},
+		{"trailing slash", "https://github.com/owner/repo/", "github", "owner", "repo"},
+		{"empty", "", "", "", ""},
+		{"not github", "https://gitlab.com/owner/repo.git", "", "", ""},
+		{"no path", "https://github.com", "", "", ""},
+		{"no repo", "https://github.com/owner", "", "", ""},
+		{"malformed", "not-a-url", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, owner, name := ParseGitRemoteURL(tt.url)
+			if provider != tt.wantProvider {
+				t.Errorf("provider = %q, want %q", provider, tt.wantProvider)
+			}
+			if owner != tt.wantOwner {
+				t.Errorf("owner = %q, want %q", owner, tt.wantOwner)
+			}
+			if name != tt.wantName {
+				t.Errorf("name = %q, want %q", name, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestParseGitConfigOriginURL(t *testing.T) {
+	config := `[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = https://github.com/owner/repo.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+`
+	got := parseGitConfigOriginURL(config)
+	if got != "https://github.com/owner/repo.git" {
+		t.Errorf("parseGitConfigOriginURL = %q, want %q", got, "https://github.com/owner/repo.git")
+	}
+}
+
+func TestParseGitConfigOriginURL_NoOrigin(t *testing.T) {
+	config := `[core]
+	repositoryformatversion = 0
+[remote "upstream"]
+	url = https://github.com/other/repo.git
+`
+	got := parseGitConfigOriginURL(config)
+	if got != "" {
+		t.Errorf("parseGitConfigOriginURL = %q, want empty", got)
+	}
+}
+
+func TestResolveGitRemoteProvider(t *testing.T) {
+	// Create a temp git repo with an origin remote
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write HEAD
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Write config with origin remote
+	config := `[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = git@github.com:myorg/myrepo.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+`
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, owner, name := ResolveGitRemoteProvider(dir)
+	if provider != "github" {
+		t.Errorf("provider = %q, want %q", provider, "github")
+	}
+	if owner != "myorg" {
+		t.Errorf("owner = %q, want %q", owner, "myorg")
+	}
+	if name != "myrepo" {
+		t.Errorf("name = %q, want %q", name, "myrepo")
+	}
+}
+
+func TestResolveGitRemoteProvider_NonGitDir(t *testing.T) {
+	dir := t.TempDir()
+	provider, owner, name := ResolveGitRemoteProvider(dir)
+	if provider != "" || owner != "" || name != "" {
+		t.Errorf("expected empty for non-git dir, got %q %q %q", provider, owner, name)
+	}
+}
+
 func newDiscoveryService(t *testing.T, root string) *Service {
 	t.Helper()
 	tmpDir := t.TempDir()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   IconLayout,
   IconCheck,
@@ -212,6 +212,7 @@ export function LayoutPresetSelector() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  const recentlyClosedRef = useRef(false);
   const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
@@ -235,10 +236,29 @@ export function LayoutPresetSelector() {
     [savedLayouts],
   );
 
+  const handleDropdownOpenChange = useCallback((open: boolean) => {
+    setDropdownOpen(open);
+    if (!open) {
+      recentlyClosedRef.current = true;
+      setTooltipOpen(false);
+      setTimeout(() => {
+        recentlyClosedRef.current = false;
+      }, 200);
+    }
+  }, []);
+
+  const handleTooltipOpenChange = useCallback(
+    (open: boolean) => {
+      if (open && (dropdownOpen || recentlyClosedRef.current)) return;
+      setTooltipOpen(open);
+    },
+    [dropdownOpen],
+  );
+
   return (
     <>
-      <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-        <Tooltip open={dropdownOpen ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
+      <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
+        <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="outline" className="cursor-pointer px-2">

@@ -521,6 +521,10 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		return err
 	}
 
+	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
+	// tool_call without a terminal status update from the agent).
+	a.cancelActiveToolCalls(sessionID)
+
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
@@ -735,7 +739,13 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		}
 	}
 
+	sessionID := string(n.SessionId)
+
 	event := a.convertNotification(n)
+	if event == nil {
+		// Try untyped updates not yet supported by the ACP SDK.
+		event = a.tryConvertUntypedUpdate(rawData, sessionID)
+	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -743,7 +753,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		a.sendUpdate(*event)
 	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
 		a.logger.Warn("unhandled ACP session notification",
-			zap.String("session_id", string(n.SessionId)),
+			zap.String("session_id", sessionID),
 			zap.String("update_json", string(updateJSON)))
 	}
 }
@@ -799,9 +809,60 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			SessionID:     sessionID,
 			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
 		}
+
+	case u.ConfigOptionUpdate != nil:
+		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
+		if len(configOptions) > 0 {
+			return &AgentEvent{
+				Type:          streams.EventTypeSessionModels,
+				SessionID:     sessionID,
+				ConfigOptions: configOptions,
+			}
+		}
 	}
 
 	return nil
+}
+
+// acpUsageUpdate represents the ACP "usage_update" session notification.
+// TODO: Replace with acp.SessionUsageUpdate when the ACP SDK adds native support.
+type acpUsageUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	Size          int64  `json:"size"`
+	Used          int64  `json:"used"`
+	Cost          *struct {
+		Amount   float64 `json:"amount"`
+		Currency string  `json:"currency"`
+	} `json:"cost,omitempty"`
+}
+
+// tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
+// When the SDK adds native support, move the handling into convertNotification and delete this.
+func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
+	var envelope struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
+		return nil
+	}
+
+	var usage acpUsageUpdate
+	if err := json.Unmarshal(envelope.Update, &usage); err != nil {
+		return nil
+	}
+	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
+		return nil
+	}
+
+	remaining := max(usage.Size-usage.Used, 0)
+	return &AgentEvent{
+		Type:                   streams.EventTypeContextWindow,
+		SessionID:              sessionID,
+		ContextWindowSize:      usage.Size,
+		ContextWindowUsed:      usage.Used,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      float64(usage.Used) / float64(usage.Size) * 100,
+	}
 }
 
 // convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.
@@ -836,8 +897,13 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 // convertAvailableCommands converts an ACP AvailableCommandsUpdate to an AgentEvent,
 // including input hints when available.
 func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.SessionAvailableCommandsUpdate) *AgentEvent {
-	commands := make([]streams.AvailableCommand, len(update.AvailableCommands))
-	for i, cmd := range update.AvailableCommands {
+	seen := make(map[string]struct{}, len(update.AvailableCommands))
+	commands := make([]streams.AvailableCommand, 0, len(update.AvailableCommands))
+	for _, cmd := range update.AvailableCommands {
+		if _, dup := seen[cmd.Name]; dup {
+			continue
+		}
+		seen[cmd.Name] = struct{}{}
 		ac := streams.AvailableCommand{
 			Name:        cmd.Name,
 			Description: cmd.Description,
@@ -845,7 +911,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint
 		}
-		commands[i] = ac
+		commands = append(commands, ac)
 	}
 	return &AgentEvent{
 		Type:              streams.EventTypeAvailableCommands,
@@ -1191,32 +1257,54 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		status = toolStatusComplete
 	}
 
-	// Look up the stored payload and update with result if we have rawOutput
-	var normalizedPayload *streams.NormalizedPayload
-	if tcu.RawOutput != nil {
-		a.mu.Lock()
-		if payload, ok := a.activeToolCalls[toolCallID]; ok {
-			a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
-			normalizedPayload = payload
-			if status == toolStatusComplete || status == toolStatusError {
-				delete(a.activeToolCalls, toolCallID)
+	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
+
+	a.mu.Lock()
+	payload := a.activeToolCalls[toolCallID]
+
+	// Update stored payload with incremental rawInput (e.g. Claude Code sends
+	// command/cwd in a tool_call_update after the initial empty tool_call)
+	if tcu.RawInput != nil && payload != nil {
+		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput)
+	}
+
+	// Update stored payload with tool result output
+	if tcu.RawOutput != nil && payload != nil {
+		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+	}
+
+	if isTerminal {
+		delete(a.activeToolCalls, toolCallID)
+	}
+	a.mu.Unlock()
+
+	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
+	// as an agent_plan event so the orchestrator creates a visible plan message.
+	if tcu.RawInput != nil {
+		if inputMap, ok := tcu.RawInput.(map[string]any); ok {
+			if planContent, ok := inputMap["plan"].(string); ok && planContent != "" {
+				a.sendUpdate(AgentEvent{
+					Type:        streams.EventTypeAgentPlan,
+					SessionID:   sessionID,
+					PlanContent: planContent,
+				})
 			}
 		}
-		a.mu.Unlock()
-	} else if status == toolStatusComplete || status == toolStatusError {
-		// Clean up even without output
-		a.mu.Lock()
-		normalizedPayload = a.activeToolCalls[toolCallID]
-		delete(a.activeToolCalls, toolCallID)
-		a.mu.Unlock()
+	}
+
+	// Extract title from update if present
+	var title string
+	if tcu.Title != nil {
+		title = *tcu.Title
 	}
 
 	return &AgentEvent{
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ToolTitle:         title,
 		ToolStatus:        status,
-		NormalizedPayload: normalizedPayload,
+		NormalizedPayload: payload,
 		ToolCallContents:  a.convertToolCallContents(tcu.Content),
 	}
 }
@@ -1236,22 +1324,27 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 		sessionID = fallbackSessionID
 	}
 
-	// Emit a tool_call event so a message is created in the database.
-	// This is needed because permission requests bypass the normal ToolCall notification flow.
-	// Without this, when the tool completes (ToolCallUpdate), there's no message to update.
-	toolCallEvent := AgentEvent{
-		Type:       streams.EventTypeToolCall,
-		SessionID:  sessionID,
-		ToolCallID: req.ToolCallID,
-		ToolName:   req.ActionType, // Use action type as tool name (e.g., "run_shell_command")
-		ToolTitle:  req.Title,
-		ToolStatus: "pending_permission", // Mark as pending permission
-	}
+	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
+	// When a ToolCall notification exists (tracked in activeToolCalls), the message
+	// was already created by convertToolCallUpdate → handleToolCallEvent.
+	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
+	a.mu.RLock()
+	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
+	a.mu.RUnlock()
 
-	// Emit the tool_call event
-	a.sendUpdate(toolCallEvent)
-	a.logger.Debug("emitted tool_call event for permission request",
-		zap.String("tool_call_id", req.ToolCallID))
+	if !alreadyTracked {
+		toolCallEvent := AgentEvent{
+			Type:       streams.EventTypeToolCall,
+			SessionID:  sessionID,
+			ToolCallID: req.ToolCallID,
+			ToolName:   req.ActionType,
+			ToolTitle:  req.Title,
+			ToolStatus: "pending_permission",
+		}
+		a.sendUpdate(toolCallEvent)
+		a.logger.Debug("emitted synthetic tool_call for permission (no prior ToolCall)",
+			zap.String("tool_call_id", req.ToolCallID))
+	}
 
 	if handler == nil {
 		// Auto-approve if no handler

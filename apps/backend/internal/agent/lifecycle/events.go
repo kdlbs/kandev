@@ -158,6 +158,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ConfigOptions:           event.ConfigOptions,
 		Usage:                   event.Usage,
 		PlanEntries:             event.PlanEntries,
+		PlanContent:             event.PlanContent,
 	}
 
 	// Build agent event message payload

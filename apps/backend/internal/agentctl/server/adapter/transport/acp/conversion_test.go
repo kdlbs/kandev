@@ -702,6 +702,162 @@ func TestConvertAvailableCommands_Empty(t *testing.T) {
 	}
 }
 
+func TestConvertAvailableCommands_Dedup(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "push-pr", Description: "Push and open PR"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-dedup", update)
+
+	if len(result.AvailableCommands) != 2 {
+		t.Fatalf("expected 2 commands after dedup, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Name != "pr-comments" {
+		t.Errorf("command[0].Name = %q, want %q", result.AvailableCommands[0].Name, "pr-comments")
+	}
+	if result.AvailableCommands[1].Name != "push-pr" {
+		t.Errorf("command[1].Name = %q, want %q", result.AvailableCommands[1].Name, "push-pr")
+	}
+}
+
+func TestConvertAvailableCommands_DedupPreservesFirst(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "review", Description: "First description"},
+			{Name: "review", Description: "Second description"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-first", update)
+
+	if len(result.AvailableCommands) != 1 {
+		t.Fatalf("expected 1 command after dedup, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "First description" {
+		t.Errorf("Description = %q, want %q (first occurrence should win)",
+			result.AvailableCommands[0].Description, "First description")
+	}
+}
+
+func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "commit", Description: "Commit changes"},
+			{Name: "review", Description: "Review code"},
+			{Name: "push-pr", Description: "Push and open PR"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-nodup", update)
+
+	if len(result.AvailableCommands) != 3 {
+		t.Fatalf("expected 3 commands (no dedup needed), got %d", len(result.AvailableCommands))
+	}
+}
+
+// --- tryConvertUntypedUpdate ---
+
+func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":56047,"cost":{"amount":9.76,"currency":"USD"}}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected non-nil result for usage_update")
+	}
+	if result.Type != streams.EventTypeContextWindow {
+		t.Errorf("Type = %q, want %q", result.Type, streams.EventTypeContextWindow)
+	}
+	if result.SessionID != "s1" {
+		t.Errorf("SessionID = %q, want %q", result.SessionID, "s1")
+	}
+	if result.ContextWindowSize != 200000 {
+		t.Errorf("ContextWindowSize = %d, want 200000", result.ContextWindowSize)
+	}
+	if result.ContextWindowUsed != 56047 {
+		t.Errorf("ContextWindowUsed = %d, want 56047", result.ContextWindowUsed)
+	}
+	if result.ContextWindowRemaining != 143953 {
+		t.Errorf("ContextWindowRemaining = %d, want 143953", result.ContextWindowRemaining)
+	}
+	expectedEff := float64(56047) / float64(200000) * 100
+	if result.ContextEfficiency != expectedEff {
+		t.Errorf("ContextEfficiency = %f, want %f", result.ContextEfficiency, expectedEff)
+	}
+}
+
+func TestTryConvertUntypedUpdate_ZeroUsed(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":0}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ContextWindowRemaining != 200000 {
+		t.Errorf("ContextWindowRemaining = %d, want 200000", result.ContextWindowRemaining)
+	}
+	if result.ContextEfficiency != 0 {
+		t.Errorf("ContextEfficiency = %f, want 0", result.ContextEfficiency)
+	}
+}
+
+func TestTryConvertUntypedUpdate_UsedExceedsSize(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":100000,"used":110000}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ContextWindowRemaining != 0 {
+		t.Errorf("ContextWindowRemaining = %d, want 0 (clamped)", result.ContextWindowRemaining)
+	}
+}
+
+func TestTryConvertUntypedUpdate_UnknownUpdateType(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"something_else","foo":"bar"}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result != nil {
+		t.Errorf("expected nil for unknown update type, got %+v", result)
+	}
+}
+
+func TestTryConvertUntypedUpdate_InvalidJSON(t *testing.T) {
+	a := newTestAdapter()
+
+	result := a.tryConvertUntypedUpdate([]byte(`{invalid`), "s1")
+
+	if result != nil {
+		t.Errorf("expected nil for invalid JSON, got %+v", result)
+	}
+}
+
+func TestTryConvertUntypedUpdate_ZeroSize(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":0,"used":0}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result != nil {
+		t.Errorf("expected nil for zero size (division by zero guard), got %+v", result)
+	}
+}
+
 // --- emitInitialModeState ---
 
 func TestEmitInitialModeState(t *testing.T) {
