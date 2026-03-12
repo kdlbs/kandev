@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -120,6 +122,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
 	}
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
@@ -159,6 +162,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
 	}
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
@@ -171,9 +175,15 @@ func (h *Handlers) handleDeleteWorkflowStep(ctx context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_id is required", nil)
 	}
 
+	// Fetch step before deleting to get workflow_id for the event
+	stepResp, _ := h.workflowCtrl.GetStep(ctx, stepID)
+
 	if err := h.workflowCtrl.DeleteStep(ctx, stepID); err != nil {
 		h.logger.Error("failed to delete workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow step", nil)
+	}
+	if stepResp != nil {
+		h.publishWorkflowStepEvent(ctx, events.WorkflowStepDeleted, stepResp.Step)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
@@ -201,4 +211,31 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder workflow steps", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// publishWorkflowStepEvent publishes a workflow step event to the event bus.
+func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *wfmodels.WorkflowStep) {
+	if h.eventBus == nil || step == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"step": map[string]interface{}{
+			"id":                       step.ID,
+			"workflow_id":              step.WorkflowID,
+			"name":                     step.Name,
+			"position":                 step.Position,
+			"color":                    step.Color,
+			"events":                   step.Events,
+			"show_in_command_panel":    step.ShowInCommandPanel,
+			"allow_manual_move":        step.AllowManualMove,
+			"is_start_step":            step.IsStartStep,
+			"auto_archive_after_hours": step.AutoArchiveAfterHours,
+		},
+	}
+	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
+		h.logger.Error("failed to publish workflow step event",
+			zap.String("event_type", eventType),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+	}
 }

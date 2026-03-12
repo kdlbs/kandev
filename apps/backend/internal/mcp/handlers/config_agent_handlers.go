@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -132,6 +134,7 @@ func (h *Handlers) handleCreateAgentProfile(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create agent profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create agent profile: "+err.Error(), nil)
 	}
+	h.publishAgentProfileEvent(ctx, events.AgentProfileCreated, profile)
 	return ws.NewResponse(msg.ID, msg.Action, profile)
 }
 
@@ -152,6 +155,7 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent profile: "+err.Error(), nil)
 	}
+	h.publishAgentProfileEvent(ctx, events.AgentProfileDeleted, profile)
 	return ws.NewResponse(msg.ID, msg.Action, profile)
 }
 
@@ -179,5 +183,23 @@ func (h *Handlers) handleUpdateAgentProfile(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update agent profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update agent profile", nil)
 	}
+	h.publishAgentProfileEvent(ctx, events.AgentProfileUpdated, profile)
 	return ws.NewResponse(msg.ID, msg.Action, profile)
+}
+
+// publishAgentProfileEvent publishes an agent profile event to the event bus.
+// The payload wraps the profile in a "profile" key to match the format expected
+// by existing frontend WS handlers (same format as HTTP agent settings handlers).
+func (h *Handlers) publishAgentProfileEvent(ctx context.Context, eventType string, profile interface{}) {
+	if h.eventBus == nil || profile == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"profile": profile,
+	}
+	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
+		h.logger.Error("failed to publish agent profile event",
+			zap.String("event_type", eventType),
+			zap.Error(err))
+	}
 }

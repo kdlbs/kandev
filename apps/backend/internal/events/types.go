@@ -24,6 +24,13 @@ const (
 	WorkflowDeleted = "workflow.deleted"
 )
 
+// Event types for workflow steps
+const (
+	WorkflowStepCreated = "workflow_step.created"
+	WorkflowStepUpdated = "workflow_step.updated"
+	WorkflowStepDeleted = "workflow_step.deleted"
+)
+
 // Event types for comments
 const (
 	MessageAdded   = "message.added"
@@ -97,6 +104,13 @@ const (
 	EnvironmentCreated = "environment.created"
 	EnvironmentUpdated = "environment.updated"
 	EnvironmentDeleted = "environment.deleted"
+)
+
+// Event types for agent profiles (settings)
+const (
+	AgentProfileCreated = "agent_profile.created"
+	AgentProfileUpdated = "agent_profile.updated"
+	AgentProfileDeleted = "agent_profile.deleted"
 )
 
 // Event types for agents

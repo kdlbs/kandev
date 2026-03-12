@@ -2,6 +2,21 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stepFromPayload(step: any) {
+  return {
+    id: step.id as string,
+    title: (step.name ?? step.title) as string,
+    color: (step.color ?? "bg-neutral-400") as string,
+    position: (step.position ?? 0) as number,
+    events: step.events,
+    show_in_command_panel: step.show_in_command_panel,
+    allow_manual_move: step.allow_manual_move,
+    prompt: step.prompt,
+    is_start_step: step.is_start_step,
+  };
+}
+
 export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "workflow.created": (message) => {
@@ -58,6 +73,35 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
               ? { workflowId: nextActiveId, steps: [], tasks: [] }
               : state.kanban,
         };
+      });
+    },
+    "workflow.step.created": (message) => {
+      const step = message.payload.step;
+      store.setState((state) => {
+        if (state.kanban.workflowId !== step.workflow_id) return state;
+        if (state.kanban.steps.some((s) => s.id === step.id)) return state;
+        const steps = [...state.kanban.steps, stepFromPayload(step)].sort(
+          (a, b) => a.position - b.position,
+        );
+        return { ...state, kanban: { ...state.kanban, steps } };
+      });
+    },
+    "workflow.step.updated": (message) => {
+      const step = message.payload.step;
+      store.setState((state) => {
+        if (state.kanban.workflowId !== step.workflow_id) return state;
+        const steps = state.kanban.steps
+          .map((s) => (s.id === step.id ? stepFromPayload(step) : s))
+          .sort((a, b) => a.position - b.position);
+        return { ...state, kanban: { ...state.kanban, steps } };
+      });
+    },
+    "workflow.step.deleted": (message) => {
+      const step = message.payload.step;
+      store.setState((state) => {
+        if (state.kanban.workflowId !== step.workflow_id) return state;
+        const steps = state.kanban.steps.filter((s) => s.id !== step.id);
+        return { ...state, kanban: { ...state.kanban, steps } };
       });
     },
   };
