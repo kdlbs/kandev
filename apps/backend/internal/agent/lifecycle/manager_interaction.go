@@ -83,6 +83,7 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		case <-time.After(10 * time.Second):
 			m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel",
 				zap.String("execution_id", executionID))
+			return fmt.Errorf("timed out waiting for in-flight prompt to finish after cancel")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
