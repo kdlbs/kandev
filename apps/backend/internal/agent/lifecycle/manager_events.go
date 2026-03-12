@@ -11,6 +11,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/events"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const toolStatusComplete = "complete"
@@ -296,6 +297,25 @@ func (m *Manager) recordActivity(execution *AgentExecution) {
 	execution.firstActivityOnce.Do(func() {
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	})
+}
+
+// handleStreamDisconnect handles unexpected updates stream disconnections.
+// It proactively updates execution status and publishes an error event so the
+// orchestrator can transition the session state without waiting for a future prompt.
+func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
+	m.logger.Warn("agent updates stream disconnected",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.Error(err))
+
+	if m.executionStore != nil {
+		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusFailed)
+	}
+
+	m.eventPublisher.PublishAgentctlEvent(
+		context.Background(), events.AgentctlError, execution,
+		"agent stream disconnected: "+err.Error(),
+	)
 }
 
 // handleAgentEvent processes incoming agent events from the agent

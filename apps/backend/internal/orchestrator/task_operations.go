@@ -1229,7 +1229,12 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 		// Revert session state so it doesn't stay stuck in RUNNING.
 		// Use repo directly to bypass state machine guards that block transitions from terminal states.
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, previousSessionState, "")
+		if revertErr := s.repo.UpdateTaskSessionState(ctx, sessionID, previousSessionState, ""); revertErr != nil {
+			s.logger.Error("failed to revert session state after prompt error",
+				zap.String("session_id", sessionID),
+				zap.String("target_state", string(previousSessionState)),
+				zap.Error(revertErr))
+		}
 		if !isTransientPromptError(err) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 		}

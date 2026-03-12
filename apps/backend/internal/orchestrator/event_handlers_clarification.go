@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // subscribeClarificationEvents subscribes to clarification-related events.
@@ -196,10 +197,17 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("session_id", data.SessionID))
 
 	if err := s.CancelAgent(ctx, data.SessionID); err != nil {
-		s.logger.Error("failed to cancel stuck agent for clarification recovery",
+		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return false
+		// Force-revert session state so the retry prompt can proceed
+		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
+			s.logger.Error("failed to force-revert session state for clarification recovery",
+				zap.String("session_id", data.SessionID),
+				zap.Error(revertErr))
+			return false
+		}
+		s.completeTurnForSession(ctx, data.SessionID)
 	}
 
 	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
