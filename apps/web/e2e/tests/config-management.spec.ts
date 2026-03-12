@@ -167,6 +167,10 @@ test.describe("Config-mode MCP — workflow management", () => {
 
   test("agent can delete a workflow", async ({ testPage, apiClient, seedData }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Deletable Workflow");
+    // Create a bumper workflow so the config-chat session (which picks the newest
+    // workflow via ORDER BY created_at DESC) doesn't land on the deletable one.
+    // Otherwise ON DELETE CASCADE would wipe the config task/session mid-run.
+    await apiClient.createWorkflow(seedData.workspaceId, "Config Anchor");
 
     const session = await startConfigSession(
       apiClient,
