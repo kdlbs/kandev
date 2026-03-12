@@ -204,6 +204,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:              c.LogFormat,
 		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
 		VscodeCommand:          c.VscodeCommand,
+		McpMode:                "task",
 	}
 
 	applyOverrides(cfg, overrides)

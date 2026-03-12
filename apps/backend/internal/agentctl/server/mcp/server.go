@@ -32,6 +32,14 @@ const (
 	ModeConfig = "config"
 )
 
+// normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
+func normalizeMode(mode string) string {
+	if mode == ModeConfig {
+		return ModeConfig
+	}
+	return ModeTask
+}
+
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
 	backend            BackendClient
@@ -51,9 +59,7 @@ type Server struct {
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
 func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
-	if mcpMode == "" {
-		mcpMode = ModeTask
-	}
+	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
 		sessionID:          sessionID,
@@ -207,10 +213,7 @@ func (s *Server) SetMode(mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if mode == "" {
-		mode = ModeTask
-	}
-	s.mode = mode
+	s.mode = normalizeMode(mode)
 	// Clear all existing tools and re-register for the new mode.
 	s.mcpServer.SetTools() // empty call clears all tools
 	s.registerTools()

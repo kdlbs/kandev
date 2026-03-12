@@ -471,22 +471,13 @@ func TestHandleUpdateTaskState_InvalidPayload(t *testing.T) {
 
 // --- Registration tests ---
 
-func TestRegisterHandlers_ConfigDepsNil_SkipsConfigHandlers(t *testing.T) {
+func TestRegisterHandlers_NilDeps_DoesNotPanic(t *testing.T) {
 	log := testLogger(t)
 	h := &Handlers{logger: log}
 	d := ws.NewDispatcher()
 
-	// Should not panic with nil config deps - config handlers simply not registered.
-	h.RegisterHandlers(d)
-}
-
-func TestRegisterHandlers_WithTaskSvc_RegistersTaskHandlers(t *testing.T) {
-	log := testLogger(t)
-	h := &Handlers{logger: log}
-	d := ws.NewDispatcher()
-
-	// Without SetConfigDeps, config handlers should be skipped but no panic
-	h.RegisterHandlers(d)
+	// Should not panic with nil config/task deps — handlers simply not registered.
+	assert.NotPanics(t, func() { h.RegisterHandlers(d) })
 }
 
 // --- Helper function tests ---
