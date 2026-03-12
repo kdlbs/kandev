@@ -88,6 +88,8 @@ type GenerateButtonProps = {
   isGenerating: boolean;
   disabled?: boolean;
   tooltip: string;
+  notConfiguredTooltip?: string;
+  isConfigured?: boolean;
   size?: "icon" | "sm";
   showLabel?: boolean;
 };
@@ -97,9 +99,14 @@ function GenerateButton({
   isGenerating,
   disabled,
   tooltip,
+  notConfiguredTooltip = "Configure a utility agent in settings to enable AI generation",
+  isConfigured = true,
   size = "icon",
   showLabel,
 }: GenerateButtonProps) {
+  const isDisabled = !isConfigured || disabled || isGenerating;
+  const tooltipText = isConfigured ? tooltip : notConfiguredTooltip;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -110,8 +117,8 @@ function GenerateButton({
           className={
             size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
           }
-          onClick={onClick}
-          disabled={disabled || isGenerating}
+          onClick={isConfigured ? onClick : undefined}
+          disabled={isDisabled}
         >
           {isGenerating ? (
             <IconLoader2 className="h-4 w-4 animate-spin" />
@@ -121,7 +128,7 @@ function GenerateButton({
           {showLabel && "Generate"}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>{tooltipText}</TooltipContent>
     </Tooltip>
   );
 }
@@ -136,8 +143,9 @@ type CommitDialogProps = {
   onStageAllChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCommit: () => void;
-  onGenerateMessage?: () => void;
-  isGenerating?: boolean;
+  onGenerateMessage: () => void;
+  isGenerating: boolean;
+  isUtilityConfigured: boolean;
 };
 
 function CommitDialog({
@@ -152,6 +160,7 @@ function CommitDialog({
   onCommit,
   onGenerateMessage,
   isGenerating,
+  isUtilityConfigured,
 }: CommitDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -174,16 +183,15 @@ function CommitDialog({
               className="pr-10"
               autoFocus
             />
-            {onGenerateMessage && (
-              <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                <GenerateButton
-                  onClick={onGenerateMessage}
-                  isGenerating={isGenerating ?? false}
-                  disabled={fileSummary.count === 0}
-                  tooltip="Generate commit message with AI"
-                />
-              </div>
-            )}
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+              <GenerateButton
+                onClick={onGenerateMessage}
+                isGenerating={isGenerating}
+                disabled={fileSummary.count === 0}
+                tooltip="Generate commit message with AI"
+                isConfigured={isUtilityConfigured}
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Checkbox
@@ -234,8 +242,9 @@ type PRDialogProps = {
   onPrDraftChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCreatePR: () => void;
-  onGenerateDescription?: () => void;
-  isGenerating?: boolean;
+  onGenerateDescription: () => void;
+  isGenerating: boolean;
+  isUtilityConfigured: boolean;
 };
 
 function PRBranchSummary({
@@ -278,6 +287,7 @@ function PRDialog({
   onCreatePR,
   onGenerateDescription,
   isGenerating,
+  isUtilityConfigured,
 }: PRDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -307,15 +317,14 @@ function PRDialog({
               <Label htmlFor="vcs-pr-body" className="text-sm">
                 Description
               </Label>
-              {onGenerateDescription && (
-                <GenerateButton
-                  onClick={onGenerateDescription}
-                  isGenerating={isGenerating ?? false}
-                  tooltip="Generate PR description with AI"
-                  size="sm"
-                  showLabel
-                />
-              )}
+              <GenerateButton
+                onClick={onGenerateDescription}
+                isGenerating={isGenerating}
+                tooltip="Generate PR description with AI"
+                isConfigured={isUtilityConfigured}
+                size="sm"
+                showLabel
+              />
             </div>
             <Textarea
               id="vcs-pr-body"
@@ -499,10 +508,9 @@ export function VcsDialogsProvider({
         onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
-        onGenerateMessage={
-          isUtilityConfigured ? () => generateCommitMessage(cs.setMessage) : undefined
-        }
-        isGenerating={isUtilityConfigured ? isGeneratingCommitMessage : undefined}
+        onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
+        isGenerating={isGeneratingCommitMessage}
+        isUtilityConfigured={isUtilityConfigured}
       />
       <PRDialog
         open={ps.open}
@@ -517,10 +525,9 @@ export function VcsDialogsProvider({
         onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
-        onGenerateDescription={
-          isUtilityConfigured ? () => generatePRDescription(ps.setBody) : undefined
-        }
-        isGenerating={isUtilityConfigured ? isGeneratingPRDescription : undefined}
+        onGenerateDescription={() => generatePRDescription(ps.setBody)}
+        isGenerating={isGeneratingPRDescription}
+        isUtilityConfigured={isUtilityConfigured}
       />
     </VcsDialogsContext.Provider>
   );
