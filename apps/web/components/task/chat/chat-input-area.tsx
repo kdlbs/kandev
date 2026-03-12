@@ -373,13 +373,15 @@ export function ChatInputArea({
   );
 
   const hasClarification = !!panelState.pendingClarification;
-  const placeholder = placeholderOverride ?? resolveInputPlaceholder(
-    isAgentBusy,
-    activeDocument?.type,
-    planModeEnabled,
-    hasClarification,
-    needsRecovery,
-  );
+  const placeholder =
+    placeholderOverride ??
+    resolveInputPlaceholder(
+      isAgentBusy,
+      activeDocument?.type,
+      planModeEnabled,
+      hasClarification,
+      needsRecovery,
+    );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <SessionStatusBar todoItems={todoItems} />

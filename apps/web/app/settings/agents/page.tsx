@@ -377,9 +377,7 @@ function ConfigChatAgentSection() {
     (s) => s.workspaces.items.find((w) => w.id === s.workspaces.activeId) ?? null,
   );
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
-  const [selectedId, setSelectedId] = useState(
-    workspace?.default_config_agent_profile_id ?? "",
-  );
+  const [selectedId, setSelectedId] = useState(workspace?.default_config_agent_profile_id ?? "");
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 

@@ -48,16 +48,12 @@ test.describe("Config chat popover", () => {
 
     // Wait for the agent response to appear in the chat area.
     const chatArea = popover.locator(".chat-message-list");
-    await expect(
-      chatArea.getByText("completed the analysis", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(chatArea.getByText("completed the analysis", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
   });
 
-  test("opens config chat via command panel (Cmd+K)", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("opens config chat via command panel (Cmd+K)", async ({ testPage, apiClient, seedData }) => {
     // Set the mock agent profile as the default config chat profile.
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_config_agent_profile_id: seedData.agentProfileId,

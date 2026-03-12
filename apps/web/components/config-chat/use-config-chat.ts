@@ -83,10 +83,7 @@ export function useConfigChat(workspaceId: string) {
         if (prompt) setPendingPrompt(prompt);
 
         store.openConfigChat(response.session_id, workspaceId);
-        store.renameConfigChatSession(
-          response.session_id,
-          prompt?.slice(0, 40) || "Config Chat",
-        );
+        store.renameConfigChatSession(response.session_id, prompt?.slice(0, 40) || "Config Chat");
 
         // Save the selected profile as the workspace default for future sessions
         if (!workspace?.default_config_agent_profile_id) {
@@ -108,7 +105,14 @@ export function useConfigChat(workspaceId: string) {
         setIsStarting(false);
       }
     },
-    [workspaceId, isStarting, store, storeApi, workspace?.default_config_agent_profile_id, updateWorkspaceInStore],
+    [
+      workspaceId,
+      isStarting,
+      store,
+      storeApi,
+      workspace?.default_config_agent_profile_id,
+      updateWorkspaceInStore,
+    ],
   );
 
   const close = useCallback(() => {
