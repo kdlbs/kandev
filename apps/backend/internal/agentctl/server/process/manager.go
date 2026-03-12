@@ -1045,6 +1045,26 @@ func (m *Manager) RespondToPermission(pendingID string, optionID string, cancell
 	}
 }
 
+// CancelPendingPermissions cancels all pending permission requests.
+// Called before sending a new prompt so the agent isn't blocked waiting for responses.
+func (m *Manager) CancelPendingPermissions() {
+	m.permissionMu.RLock()
+	pending := make([]*PendingPermission, 0, len(m.pendingPermissions))
+	for _, p := range m.pendingPermissions {
+		pending = append(pending, p)
+	}
+	m.permissionMu.RUnlock()
+
+	for _, p := range pending {
+		m.logger.Info("cancelling pending permission before new prompt",
+			zap.String("pending_id", p.ID))
+		select {
+		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+	}
+}
+
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {
 	m.mu.RLock()

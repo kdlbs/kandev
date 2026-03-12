@@ -50,10 +50,13 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
     }
   }, []);
 
-  const handleTooltipOpenChange = useCallback((open: boolean) => {
-    if (open && (dropdownOpen || recentlyClosedRef.current)) return;
-    setTooltipOpen(open);
-  }, [dropdownOpen]);
+  const handleTooltipOpenChange = useCallback(
+    (open: boolean) => {
+      if (open && (dropdownOpen || recentlyClosedRef.current)) return;
+      setTooltipOpen(open);
+    },
+    [dropdownOpen],
+  );
 
   if (
     !sessionId ||

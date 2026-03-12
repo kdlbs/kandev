@@ -72,6 +72,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
+	case "agent_plan":
+		s.handleAgentPlanEvent(ctx, payload)
+
 	case "permission_cancelled":
 		s.handlePermissionCancelledEvent(ctx, payload)
 
@@ -484,6 +487,24 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	}
 
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
+// and creates a dedicated agent_plan message in the session.
+func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.SessionID == "" || payload.Data.PlanContent == "" || s.messageCreator == nil {
+		return
+	}
+	sessionID := payload.SessionID
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
+		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	); err != nil {
+		s.logger.Error("failed to create agent plan message",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // publishAgentPlanIfPresent extracts plan_content from a complete event and creates

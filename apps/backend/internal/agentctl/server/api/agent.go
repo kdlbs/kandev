@@ -417,6 +417,10 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		return resp
 	}
 
+	// Cancel any pending permissions so the agent isn't blocked waiting for
+	// the user to approve a previous tool call while processing the new prompt.
+	s.procMgr.CancelPendingPermissions()
+
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
 	// Pass ctx (which carries remote trace context) so acp.prompt spans become children of the session.

@@ -521,6 +521,10 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		return err
 	}
 
+	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
+	// tool_call without a terminal status update from the agent).
+	a.cancelActiveToolCalls(sessionID)
+
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
@@ -804,6 +808,16 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
 			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
+		}
+
+	case u.ConfigOptionUpdate != nil:
+		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
+		if len(configOptions) > 0 {
+			return &AgentEvent{
+				Type:          streams.EventTypeSessionModels,
+				SessionID:     sessionID,
+				ConfigOptions: configOptions,
+			}
 		}
 	}
 
@@ -1243,7 +1257,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		status = toolStatusComplete
 	}
 
-	isTerminal := status == toolStatusComplete || status == toolStatusError
+	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
 
 	a.mu.Lock()
 	payload := a.activeToolCalls[toolCallID]
@@ -1263,6 +1277,20 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		delete(a.activeToolCalls, toolCallID)
 	}
 	a.mu.Unlock()
+
+	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
+	// as an agent_plan event so the orchestrator creates a visible plan message.
+	if tcu.RawInput != nil {
+		if inputMap, ok := tcu.RawInput.(map[string]any); ok {
+			if planContent, ok := inputMap["plan"].(string); ok && planContent != "" {
+				a.sendUpdate(AgentEvent{
+					Type:        streams.EventTypeAgentPlan,
+					SessionID:   sessionID,
+					PlanContent: planContent,
+				})
+			}
+		}
+	}
 
 	// Extract title from update if present
 	var title string
@@ -1296,22 +1324,27 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 		sessionID = fallbackSessionID
 	}
 
-	// Emit a tool_call event so a message is created in the database.
-	// This is needed because permission requests bypass the normal ToolCall notification flow.
-	// Without this, when the tool completes (ToolCallUpdate), there's no message to update.
-	toolCallEvent := AgentEvent{
-		Type:       streams.EventTypeToolCall,
-		SessionID:  sessionID,
-		ToolCallID: req.ToolCallID,
-		ToolName:   req.ActionType, // Use action type as tool name (e.g., "run_shell_command")
-		ToolTitle:  req.Title,
-		ToolStatus: "pending_permission", // Mark as pending permission
-	}
+	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
+	// When a ToolCall notification exists (tracked in activeToolCalls), the message
+	// was already created by convertToolCallUpdate → handleToolCallEvent.
+	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
+	a.mu.RLock()
+	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
+	a.mu.RUnlock()
 
-	// Emit the tool_call event
-	a.sendUpdate(toolCallEvent)
-	a.logger.Debug("emitted tool_call event for permission request",
-		zap.String("tool_call_id", req.ToolCallID))
+	if !alreadyTracked {
+		toolCallEvent := AgentEvent{
+			Type:       streams.EventTypeToolCall,
+			SessionID:  sessionID,
+			ToolCallID: req.ToolCallID,
+			ToolName:   req.ActionType,
+			ToolTitle:  req.Title,
+			ToolStatus: "pending_permission",
+		}
+		a.sendUpdate(toolCallEvent)
+		a.logger.Debug("emitted synthetic tool_call for permission (no prior ToolCall)",
+			zap.String("tool_call_id", req.ToolCallID))
+	}
 
 	if handler == nil {
 		// Auto-approve if no handler

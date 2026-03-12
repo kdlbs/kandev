@@ -17,6 +17,9 @@ const (
 	// EventTypePlan indicates agent plan/task list updates.
 	EventTypePlan = "plan"
 
+	// EventTypeAgentPlan indicates rich plan content (markdown) from the agent.
+	EventTypeAgentPlan = "agent_plan"
+
 	// EventTypeComplete indicates the turn or session has completed.
 	EventTypeComplete = "complete"
 
@@ -116,10 +119,13 @@ type AgentEvent struct {
 	// Populated when tools modify files, providing the aggregated diff.
 	Diff string `json:"diff,omitempty"`
 
-	// --- Plan fields (for "plan" type) ---
+	// --- Plan fields (for "plan" and "agent_plan" types) ---
 
 	// PlanEntries contains the agent's execution plan/task list.
 	PlanEntries []PlanEntry `json:"plan_entries,omitempty"`
+
+	// PlanContent contains rich markdown plan content (for "agent_plan" type).
+	PlanContent string `json:"plan_content,omitempty"`
 
 	// --- Error fields (for "error" type) ---
 
