@@ -88,16 +88,13 @@ export function useChangesGitHandlers(
   };
 }
 
-function useChangesDiscardCommitHandlers(
+function useChangesDiscardAmendHandlers(
   gitOps: GitOps,
   toast: Toast,
   handleGitOperation: GitOperationFn,
 ) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [isAmendCommit, setIsAmendCommit] = useState(false);
 
   const handleDiscardClick = useCallback((filePath: string) => {
     setFileToDiscard(filePath);
@@ -125,23 +122,6 @@ function useChangesDiscardCommitHandlers(
     }
   }, [fileToDiscard, gitOps, toast]);
 
-  const handleOpenCommitDialog = useCallback(() => {
-    setCommitMessage("");
-    setIsAmendCommit(false);
-    setCommitDialogOpen(true);
-  }, []);
-  const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    setCommitDialogOpen(false);
-    const operationName = isAmendCommit ? "Amend commit" : "Commit";
-    await handleGitOperation(
-      () => gitOps.commit(commitMessage.trim(), false, isAmendCommit),
-      operationName,
-    );
-    setCommitMessage("");
-    setIsAmendCommit(false);
-  }, [commitMessage, isAmendCommit, handleGitOperation, gitOps]);
-
   // Amend dialog state (for editing last commit message directly)
   const [amendDialogOpen, setAmendDialogOpen] = useState(false);
   const [amendMessage, setAmendMessage] = useState("");
@@ -162,16 +142,8 @@ function useChangesDiscardCommitHandlers(
     showDiscardDialog,
     setShowDiscardDialog,
     fileToDiscard,
-    commitDialogOpen,
-    setCommitDialogOpen,
-    commitMessage,
-    setCommitMessage,
-    isAmendCommit,
-    setIsAmendCommit,
     handleDiscardClick,
     handleDiscardConfirm,
-    handleOpenCommitDialog,
-    handleCommit,
     // Amend dialog
     amendDialogOpen,
     setAmendDialogOpen,
@@ -211,76 +183,12 @@ function useChangesResetHandlers(gitOps: GitOps, handleGitOperation: GitOperatio
   };
 }
 
-function useChangesPRHandlers(
-  gitOps: GitOps,
-  toast: Toast,
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
-  firstCommitMessage: string | undefined,
-) {
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prTitle, setPrTitle] = useState("");
-  const [prBody, setPrBody] = useState("");
-  const [prDraft, setPrDraft] = useState(true);
-
-  const handleOpenPRDialog = useCallback(() => {
-    setPrTitle(firstCommitMessage || taskTitle || "");
-    setPrBody("");
-    setPrDialogOpen(true);
-  }, [firstCommitMessage, taskTitle]);
-  const handleCreatePR = useCallback(async () => {
-    if (!prTitle.trim()) return;
-    setPrDialogOpen(false);
-    try {
-      const result = await gitOps.createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
-      if (result.success) {
-        toast({
-          title: prDraft ? "Draft PR created" : "PR created",
-          description: result.pr_url || "PR created successfully",
-          variant: "success",
-        });
-        if (result.pr_url) window.open(result.pr_url, "_blank");
-      } else {
-        toast({
-          title: "Create PR failed",
-          description: result.error || "An error occurred",
-          variant: "error",
-        });
-      }
-    } catch (e) {
-      toast({
-        title: "Create PR failed",
-        description: e instanceof Error ? e.message : "An error occurred",
-        variant: "error",
-      });
-    }
-    setPrTitle("");
-    setPrBody("");
-  }, [prTitle, prBody, baseBranch, prDraft, gitOps, toast]);
-
-  return {
-    prDialogOpen,
-    setPrDialogOpen,
-    prTitle,
-    setPrTitle,
-    prBody,
-    setPrBody,
-    prDraft,
-    setPrDraft,
-    handleOpenPRDialog,
-    handleCreatePR,
-  };
-}
-
 export function useChangesDialogHandlers(
   gitOps: GitOps,
   toast: Toast,
   handleGitOperation: GitOperationFn,
-  prDefaults: { taskTitle?: string; baseBranch?: string; firstCommitMessage?: string },
 ) {
-  const { taskTitle, baseBranch, firstCommitMessage } = prDefaults;
-  const discardCommit = useChangesDiscardCommitHandlers(gitOps, toast, handleGitOperation);
+  const discardAmend = useChangesDiscardAmendHandlers(gitOps, toast, handleGitOperation);
   const reset = useChangesResetHandlers(gitOps, handleGitOperation);
-  const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch, firstCommitMessage);
-  return { ...discardCommit, ...reset, ...pr };
+  return { ...discardAmend, ...reset };
 }

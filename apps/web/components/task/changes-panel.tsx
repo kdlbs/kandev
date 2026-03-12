@@ -9,15 +9,8 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
-import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
-import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import {
-  DiscardDialog,
-  CommitDialog,
-  PRDialog,
-  AmendDialog,
-  ResetDialog,
-} from "./changes-panel-dialogs";
+import { DiscardDialog, AmendDialog, ResetDialog } from "./changes-panel-dialogs";
+import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { ChangesPanelHeader } from "./changes-panel-header";
 import {
   FileListSection,
@@ -180,6 +173,8 @@ function useChangesPanelStoreData() {
   return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
 
+type DialogsType = ReturnType<typeof useChangesDialogHandlers> & ReturnType<typeof useVcsDialogs>;
+
 type ChangesPanelBodyProps = {
   hasAnything: boolean;
   hasUnstaged: boolean;
@@ -201,7 +196,7 @@ type ChangesPanelBodyProps = {
   aheadCount: number;
   isLoading: boolean;
   loadingOperation: string | null;
-  dialogs: ReturnType<typeof useChangesDialogHandlers>;
+  dialogs: DialogsType;
   onOpenDiffFile: (path: string) => void;
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string) => void;
@@ -216,35 +211,12 @@ type ChangesPanelBodyProps = {
   stagedFileCount: number;
   stagedAdditions: number;
   stagedDeletions: number;
-  displayBranch: string | null;
-  baseBranch: string | undefined;
-  utilityGen?: ReturnType<typeof useUtilityAgentGenerator>;
-  isUtilityConfigured?: boolean;
 };
 
 function ChangesPanelDialogsSection({
   dialogs,
   isLoading,
-  stagedFileCount,
-  stagedAdditions,
-  stagedDeletions,
-  displayBranch,
-  baseBranch,
-  lastCommitMessage,
-  utilityGen,
-  isUtilityConfigured,
-}: Pick<
-  ChangesPanelBodyProps,
-  | "dialogs"
-  | "isLoading"
-  | "stagedFileCount"
-  | "stagedAdditions"
-  | "stagedDeletions"
-  | "displayBranch"
-  | "baseBranch"
-  | "utilityGen"
-  | "isUtilityConfigured"
-> & { lastCommitMessage?: string | null }) {
+}: Pick<ChangesPanelBodyProps, "dialogs" | "isLoading">) {
   return (
     <>
       <DiscardDialog
@@ -252,46 +224,6 @@ function ChangesPanelDialogsSection({
         onOpenChange={dialogs.setShowDiscardDialog}
         fileToDiscard={dialogs.fileToDiscard}
         onConfirm={dialogs.handleDiscardConfirm}
-      />
-      <CommitDialog
-        open={dialogs.commitDialogOpen}
-        onOpenChange={dialogs.setCommitDialogOpen}
-        commitMessage={dialogs.commitMessage}
-        onCommitMessageChange={dialogs.setCommitMessage}
-        onCommit={dialogs.handleCommit}
-        isLoading={isLoading}
-        stagedFileCount={stagedFileCount}
-        stagedAdditions={stagedAdditions}
-        stagedDeletions={stagedDeletions}
-        isAmend={dialogs.isAmendCommit}
-        onAmendChange={dialogs.setIsAmendCommit}
-        lastCommitMessage={lastCommitMessage}
-        onGenerateMessage={
-          isUtilityConfigured && utilityGen
-            ? () => utilityGen.generateCommitMessage(dialogs.setCommitMessage)
-            : undefined
-        }
-        isGenerating={utilityGen?.isGeneratingCommitMessage}
-      />
-      <PRDialog
-        open={dialogs.prDialogOpen}
-        onOpenChange={dialogs.setPrDialogOpen}
-        prTitle={dialogs.prTitle}
-        onPrTitleChange={dialogs.setPrTitle}
-        prBody={dialogs.prBody}
-        onPrBodyChange={dialogs.setPrBody}
-        prDraft={dialogs.prDraft}
-        onPrDraftChange={dialogs.setPrDraft}
-        onCreatePR={dialogs.handleCreatePR}
-        isLoading={isLoading}
-        displayBranch={displayBranch}
-        baseBranch={baseBranch}
-        onGenerateDescription={
-          isUtilityConfigured && utilityGen
-            ? () => utilityGen.generatePRDescription(dialogs.setPrBody)
-            : undefined
-        }
-        isGenerating={utilityGen?.isGeneratingPRDescription}
       />
       <AmendDialog
         open={dialogs.amendDialogOpen}
@@ -378,7 +310,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           isLast={!showCommits}
           actionLabel="Commit"
           isActionLoading={props.loadingOperation === "commit"}
-          onAction={props.dialogs.handleOpenCommitDialog}
+          onAction={props.dialogs.openCommitDialog}
           secondaryActionLabel="Unstage all"
           isSecondaryActionLoading={isBulkOp && props.loadingOperation === "unstage"}
           onSecondaryAction={props.onUnstageAll}
@@ -401,7 +333,7 @@ function TimelineLocalChanges(props: TimelineProps) {
       )}
       {showCommits && (
         <ActionButtonsSection
-          onOpenPRDialog={props.dialogs.handleOpenPRDialog}
+          onOpenPRDialog={props.dialogs.openPRDialog}
           onPush={props.onPush}
           isLoading={props.isLoading}
           loadingOperation={props.loadingOperation}
@@ -453,9 +385,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
 }
 
 function ChangesPanelBody(props: ChangesPanelBodyProps) {
-  // Get last commit message for amend feature
-  const lastCommitMessage = props.commits?.[0]?.commit_message ?? null;
-
   return (
     <PanelBody className="flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
@@ -466,18 +395,7 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         totalFileCount={props.totalFileCount}
         onOpenReview={props.onOpenReview}
       />
-      <ChangesPanelDialogsSection
-        dialogs={props.dialogs}
-        isLoading={props.isLoading}
-        stagedFileCount={props.stagedFileCount}
-        stagedAdditions={props.stagedAdditions}
-        stagedDeletions={props.stagedDeletions}
-        displayBranch={props.displayBranch}
-        baseBranch={props.baseBranch}
-        lastCommitMessage={lastCommitMessage}
-        utilityGen={props.utilityGen}
-        isUtilityConfigured={props.isUtilityConfigured}
-      />
+      <ChangesPanelDialogsSection dialogs={props.dialogs} isLoading={props.isLoading} />
     </PanelBody>
   );
 }
@@ -515,6 +433,7 @@ const ChangesPanel = memo(function ChangesPanel({
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
+  const vcsDialogs = useVcsDialogs();
 
   // Periodically check for a PR when the session has a branch but no PR yet
   useTaskPRDetection(
@@ -534,14 +453,8 @@ const ChangesPanel = memo(function ChangesPanel({
   const staged = useMemo(() => computeStagedStats(git.stagedFiles), [git.stagedFiles]);
 
   const gitHandlers = useChangesGitHandlers(git, toast, baseBranch);
-  const firstCommitMessage = git.commits?.[0]?.commit_message;
-  const dialogs = useChangesDialogHandlers(git, toast, gitHandlers.handleGitOperation, {
-    taskTitle,
-    baseBranch,
-    firstCommitMessage,
-  });
-  const isUtilityConfigured = useIsUtilityConfigured();
-  const utilityGen = useUtilityAgentGenerator({ sessionId: activeSessionId ?? null, taskTitle });
+  const localDialogs = useChangesDialogHandlers(git, toast, gitHandlers.handleGitOperation);
+  const dialogs = { ...localDialogs, ...vcsDialogs };
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -597,10 +510,6 @@ const ChangesPanel = memo(function ChangesPanel({
         stagedFileCount={staged.stagedFileCount}
         stagedAdditions={staged.stagedAdditions}
         stagedDeletions={staged.stagedDeletions}
-        displayBranch={git.branch}
-        baseBranch={baseBranch}
-        utilityGen={utilityGen}
-        isUtilityConfigured={isUtilityConfigured}
       />
     </PanelRoot>
   );
