@@ -336,7 +336,8 @@ function KanbanCardMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete task</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &quot;{task.title}&quot;? This action cannot be undone.
+              Are you sure you want to delete &quot;{task.title}&quot;? This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
