@@ -104,6 +104,36 @@ func TestCreateWorkflowStepHandler_Success(t *testing.T) {
 	assert.Equal(t, ws.ActionMCPCreateWorkflowStep, backend.lastAction)
 }
 
+func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}},
+	}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "create_workflow_step", map[string]interface{}{
+		"workflow_id":           "wf-123",
+		"name":                  "Deploy",
+		"position":              float64(0),
+		"color":                 "#22c55e",
+		"prompt":                "Deploy prompt",
+		"is_start_step":         true,
+		"allow_manual_move":     true,
+		"show_in_command_panel": true,
+		"events": map[string]interface{}{
+			"on_enter": []interface{}{map[string]interface{}{"type": "auto_start_agent"}},
+		},
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCreateWorkflowStep, backend.lastAction)
+	// Verify optional fields are forwarded in the payload
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["allow_manual_move"])
+	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.NotNil(t, payload["events"])
+}
+
 func TestCreateWorkflowStepHandler_MissingWorkflowID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
@@ -139,6 +169,34 @@ func TestUpdateWorkflowStepHandler_Success(t *testing.T) {
 
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPUpdateWorkflowStep, backend.lastAction)
+}
+
+func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}},
+	}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "update_workflow_step", map[string]interface{}{
+		"step_id":                  "step-1",
+		"name":                     "In Review",
+		"color":                    "#3b82f6",
+		"allow_manual_move":        true,
+		"show_in_command_panel":    true,
+		"auto_archive_after_hours": float64(48),
+		"events": map[string]interface{}{
+			"on_enter": []interface{}{map[string]interface{}{"type": "enable_plan_mode"}},
+		},
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPUpdateWorkflowStep, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["allow_manual_move"])
+	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
+	assert.NotNil(t, payload["events"])
 }
 
 func TestUpdateWorkflowStepHandler_MissingStepID(t *testing.T) {

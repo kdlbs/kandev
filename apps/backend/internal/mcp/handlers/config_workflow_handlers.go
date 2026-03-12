@@ -5,18 +5,22 @@ import (
 	"encoding/json"
 
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkflowID  string `json:"workflow_id"`
-		Name        string `json:"name"`
-		Position    int    `json:"position"`
-		Color       string `json:"color"`
-		Prompt      string `json:"prompt"`
-		IsStartStep *bool  `json:"is_start_step"`
+		WorkflowID         string               `json:"workflow_id"`
+		Name               string               `json:"name"`
+		Position           int                  `json:"position"`
+		Color              string               `json:"color"`
+		Prompt             string               `json:"prompt"`
+		IsStartStep        *bool                `json:"is_start_step"`
+		AllowManualMove    *bool                `json:"allow_manual_move"`
+		ShowInCommandPanel *bool                `json:"show_in_command_panel"`
+		Events             *wfmodels.StepEvents `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -29,12 +33,17 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 	}
 
 	createReq := workflowctrl.CreateStepRequest{
-		WorkflowID:  req.WorkflowID,
-		Name:        req.Name,
-		Position:    req.Position,
-		Color:       req.Color,
-		Prompt:      req.Prompt,
-		IsStartStep: req.IsStartStep,
+		WorkflowID:         req.WorkflowID,
+		Name:               req.Name,
+		Position:           req.Position,
+		Color:              req.Color,
+		Prompt:             req.Prompt,
+		IsStartStep:        req.IsStartStep,
+		ShowInCommandPanel: req.ShowInCommandPanel,
+		Events:             req.Events,
+	}
+	if req.AllowManualMove != nil {
+		createReq.AllowManualMove = *req.AllowManualMove
 	}
 
 	resp, err := h.workflowCtrl.CreateStep(ctx, createReq)
@@ -47,11 +56,15 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 
 func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		StepID      string  `json:"step_id"`
-		Name        *string `json:"name"`
-		Color       *string `json:"color"`
-		Prompt      *string `json:"prompt"`
-		IsStartStep *bool   `json:"is_start_step"`
+		StepID                string               `json:"step_id"`
+		Name                  *string              `json:"name"`
+		Color                 *string              `json:"color"`
+		Prompt                *string              `json:"prompt"`
+		IsStartStep           *bool                `json:"is_start_step"`
+		AllowManualMove       *bool                `json:"allow_manual_move"`
+		ShowInCommandPanel    *bool                `json:"show_in_command_panel"`
+		AutoArchiveAfterHours *int                 `json:"auto_archive_after_hours"`
+		Events                *wfmodels.StepEvents `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -61,11 +74,15 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 	}
 
 	updateReq := workflowctrl.UpdateStepRequest{
-		ID:          req.StepID,
-		Name:        req.Name,
-		Color:       req.Color,
-		Prompt:      req.Prompt,
-		IsStartStep: req.IsStartStep,
+		ID:                    req.StepID,
+		Name:                  req.Name,
+		Color:                 req.Color,
+		Prompt:                req.Prompt,
+		IsStartStep:           req.IsStartStep,
+		AllowManualMove:       req.AllowManualMove,
+		ShowInCommandPanel:    req.ShowInCommandPanel,
+		AutoArchiveAfterHours: req.AutoArchiveAfterHours,
+		Events:                req.Events,
 	}
 
 	resp, err := h.workflowCtrl.UpdateStep(ctx, updateReq)

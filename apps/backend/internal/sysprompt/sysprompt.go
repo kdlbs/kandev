@@ -98,8 +98,8 @@ WORKFLOW TOOLS:
 - list_workspaces_kandev: List all workspaces to get workspace IDs.
 - list_workflows_kandev: List workflows in a workspace. Required: workspace_id.
 - list_workflow_steps_kandev: List workflow steps (columns) in a workflow. Required: workflow_id.
-- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step.
-- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step.
+- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, events.
+- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, events.
 
 AGENT TOOLS:
 - list_agents_kandev: List all configured agents and their profiles.

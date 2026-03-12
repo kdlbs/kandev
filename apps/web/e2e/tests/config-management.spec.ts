@@ -85,12 +85,26 @@ test.describe("Config-mode MCP — workflow management", () => {
   }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Full Fields Workflow");
 
+    const createArgs = JSON.stringify({
+      workflow_id: workflow.id,
+      name: "Deploy",
+      position: 0,
+      color: "#22c55e",
+      prompt: "Deploy to production",
+      is_start_step: true,
+      allow_manual_move: true,
+      show_in_command_panel: true,
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+      },
+    });
+
     const session = await startConfigSession(
       apiClient,
       seedData,
       [
         'e2e:message("Creating step with all fields...")',
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Deploy","position":0,"color":"#22c55e","prompt":"Deploy to production","is_start_step":true})`,
+        `e2e:mcp:kandev:create_workflow_step(${createArgs})`,
         'e2e:message("Step created")',
       ].join("\n"),
     );
@@ -104,18 +118,34 @@ test.describe("Config-mode MCP — workflow management", () => {
     expect(deploy!.color).toBe("#22c55e");
     expect(deploy!.prompt).toBe("Deploy to production");
     expect(deploy!.is_start_step).toBe(true);
+    expect(deploy!.allow_manual_move).toBe(true);
+    expect(deploy!.show_in_command_panel).toBe(true);
+    expect(deploy!.events?.on_enter).toEqual([{ type: "auto_start_agent" }]);
   });
 
   test("agent can update a workflow step", async ({ testPage, apiClient, seedData }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Update Step Workflow");
     const step = await apiClient.createWorkflowStep(workflow.id, "Draft", 0);
 
+    const updateArgs = JSON.stringify({
+      step_id: step.id,
+      name: "In Review",
+      color: "#3b82f6",
+      allow_manual_move: true,
+      show_in_command_panel: true,
+      auto_archive_after_hours: 48,
+      events: {
+        on_enter: [{ type: "enable_plan_mode" }],
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+    });
+
     const session = await startConfigSession(
       apiClient,
       seedData,
       [
         'e2e:message("Updating step...")',
-        `e2e:mcp:kandev:update_workflow_step({"step_id":"${step.id}","name":"In Review","color":"#3b82f6"})`,
+        `e2e:mcp:kandev:update_workflow_step(${updateArgs})`,
         'e2e:message("Step updated")',
       ].join("\n"),
     );
@@ -127,6 +157,11 @@ test.describe("Config-mode MCP — workflow management", () => {
     const updated = steps.find((s) => s.id === step.id);
     expect(updated?.name).toBe("In Review");
     expect(updated?.color).toBe("#3b82f6");
+    expect(updated?.allow_manual_move).toBe(true);
+    expect(updated?.show_in_command_panel).toBe(true);
+    expect(updated?.auto_archive_after_hours).toBe(48);
+    expect(updated?.events?.on_enter).toEqual([{ type: "enable_plan_mode" }]);
+    expect(updated?.events?.on_turn_complete).toEqual([{ type: "move_to_next" }]);
   });
 });
 

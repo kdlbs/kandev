@@ -42,6 +42,9 @@ func (s *Server) registerConfigWorkflowTools() {
 			mcp.WithString("color", mcp.Description("Step color hex code (e.g. '#3b82f6')")),
 			mcp.WithString("prompt", mcp.Description("System prompt for agents in this step")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
+			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step (default: false)")),
+			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
+			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete. Each is an array of {type, config} objects.")),
 		),
 		s.wrapHandler("create_workflow_step", s.createWorkflowStepHandler()),
 	)
@@ -53,6 +56,10 @@ func (s *Server) registerConfigWorkflowTools() {
 			mcp.WithString("color", mcp.Description("New color hex code")),
 			mcp.WithString("prompt", mcp.Description("New system prompt")),
 			mcp.WithBoolean("is_start_step", mcp.Description("Whether this is the start step")),
+			mcp.WithBoolean("allow_manual_move", mcp.Description("Allow manual task moves into this step")),
+			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
+			mcp.WithNumber("auto_archive_after_hours", mcp.Description("Auto-archive tasks after N hours in this step (0 to disable)")),
+			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete.")),
 		),
 		s.wrapHandler("update_workflow_step", s.updateWorkflowStepHandler()),
 	)
@@ -192,11 +199,11 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 		if prompt := req.GetString("prompt", ""); prompt != "" {
 			payload["prompt"] = prompt
 		}
-		if args := req.GetArguments(); args["position"] != nil {
-			payload["position"] = args["position"]
-		}
-		if args := req.GetArguments(); args["is_start_step"] != nil {
-			payload["is_start_step"] = args["is_start_step"]
+		args := req.GetArguments()
+		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "events"} {
+			if args[key] != nil {
+				payload[key] = args[key]
+			}
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflowStep, payload)
 	}
@@ -218,8 +225,11 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 		if prompt := req.GetString("prompt", ""); prompt != "" {
 			payload["prompt"] = prompt
 		}
-		if args := req.GetArguments(); args["is_start_step"] != nil {
-			payload["is_start_step"] = args["is_start_step"]
+		args := req.GetArguments()
+		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "auto_archive_after_hours", "events"} {
+			if args[key] != nil {
+				payload[key] = args[key]
+			}
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflowStep, payload)
 	}
