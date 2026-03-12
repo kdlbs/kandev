@@ -124,6 +124,9 @@ export function GlobalCommands() {
   const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
   const openQuickChat = useAppStore((s) => s.openQuickChat);
   const openConfigChatModal = useAppStore((s) => s.openConfigChatModal);
+  const openConfigChat = useAppStore((s) => s.openConfigChat);
+  const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
+  const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
 
   const handleOpenQuickChat = useCallback(() => {
     if (!activeWorkspaceId) {
@@ -142,8 +145,13 @@ export function GlobalCommands() {
 
   const handleOpenConfigChat = useCallback(() => {
     if (!activeWorkspaceId) return;
+    // Reuse existing session if one is active for this workspace (mirrors FAB behavior)
+    if (configChatActiveSessionId && configChatWorkspaceId === activeWorkspaceId) {
+      openConfigChat(configChatActiveSessionId, activeWorkspaceId);
+      return;
+    }
     openConfigChatModal(activeWorkspaceId);
-  }, [activeWorkspaceId, openConfigChatModal]);
+  }, [activeWorkspaceId, configChatActiveSessionId, configChatWorkspaceId, openConfigChat, openConfigChatModal]);
 
   const quickChatCommand: CommandItem = useMemo(
     () => ({
