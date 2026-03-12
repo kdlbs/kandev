@@ -69,14 +69,6 @@ func (s *Server) registerConfigAgentTools() {
 		s.wrapHandler("list_agents", s.listAgentsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_agent",
-			mcp.WithDescription("Create a new agent configuration."),
-			mcp.WithString("name", mcp.Required(), mcp.Description("Agent name")),
-			mcp.WithString("workspace_id", mcp.Description("Optional workspace ID to scope the agent")),
-		),
-		s.wrapHandler("create_agent", s.createAgentHandler()),
-	)
-	s.mcpServer.AddTool(
 		mcp.NewTool("update_agent",
 			mcp.WithDescription("Update an existing agent."),
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID")),
@@ -86,11 +78,21 @@ func (s *Server) registerConfigAgentTools() {
 		s.wrapHandler("update_agent", s.updateAgentHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_agent",
-			mcp.WithDescription("Delete an agent and all its profiles."),
-			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID to delete")),
+		mcp.NewTool("create_agent_profile",
+			mcp.WithDescription("Create a new agent profile for an agent."),
+			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID to create a profile for")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
+			mcp.WithString("model", mcp.Required(), mcp.Description("Model name (e.g. 'claude-sonnet-4-5-20250514')")),
+			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions (default: false)")),
 		),
-		s.wrapHandler("delete_agent", s.deleteAgentHandler()),
+		s.wrapHandler("create_agent_profile", s.createAgentProfileHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_agent_profile",
+			mcp.WithDescription("Delete an agent profile. Fails if the profile is used by an active session."),
+			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The profile ID to delete")),
+		),
+		s.wrapHandler("delete_agent_profile", s.deleteAgentProfileHandler()),
 	)
 }
 
@@ -229,17 +231,29 @@ func (s *Server) listAgentsHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) createAgentHandler() server.ToolHandlerFunc {
+func (s *Server) createAgentProfileHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		agentID, err := req.RequireString("agent_id")
+		if err != nil {
+			return mcp.NewToolResultError("agent_id is required"), nil
+		}
 		name, err := req.RequireString("name")
 		if err != nil {
 			return mcp.NewToolResultError("name is required"), nil
 		}
-		payload := map[string]interface{}{"name": name}
-		if wsID := req.GetString("workspace_id", ""); wsID != "" {
-			payload["workspace_id"] = wsID
+		model, err := req.RequireString("model")
+		if err != nil {
+			return mcp.NewToolResultError("model is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateAgent, payload)
+		payload := map[string]interface{}{
+			"agent_id": agentID,
+			"name":     name,
+			"model":    model,
+		}
+		if args := req.GetArguments(); args["auto_approve"] != nil {
+			payload["auto_approve"] = args["auto_approve"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateAgentProfile, payload)
 	}
 }
 
@@ -260,14 +274,14 @@ func (s *Server) updateAgentHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) deleteAgentHandler() server.ToolHandlerFunc {
+func (s *Server) deleteAgentProfileHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		agentID, err := req.RequireString("agent_id")
+		profileID, err := req.RequireString("profile_id")
 		if err != nil {
-			return mcp.NewToolResultError("agent_id is required"), nil
+			return mcp.NewToolResultError("profile_id is required"), nil
 		}
-		payload := map[string]string{"agent_id": agentID}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteAgent, payload)
+		payload := map[string]string{"profile_id": profileID}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteAgentProfile, payload)
 	}
 }
 

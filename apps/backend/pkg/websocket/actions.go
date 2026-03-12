@@ -312,7 +312,9 @@ const (
 	ActionMCPDeleteAgent = "mcp.delete_agent"
 
 	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
+	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"
 	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
+	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
 
