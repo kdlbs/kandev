@@ -331,7 +331,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.handleErrorEvent(execution, event)
 		return
 
-	case "complete":
+	case toolStatusComplete:
 		m.handleCompleteEvent(execution, &event)
 
 	case "permission_request":
