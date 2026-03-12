@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -16,15 +16,20 @@ type QuickChatContentProps = {
   sessionId: string;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
+  initialPrompt?: string;
+  onInitialPromptSent?: () => void;
 };
 
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
   placeholderOverride,
+  initialPrompt,
+  onInitialPromptSent,
 }: QuickChatContentProps) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const [clarificationKey, setClarificationKey] = useState(0);
+  const initialPromptSent = useRef(false);
 
   useSettingsData(true);
   const panelState = useChatPanelState({
@@ -48,6 +53,16 @@ export const QuickChatContent = memo(function QuickChatContent({
     pendingClarification,
   } = panelState;
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, cancelQueue, chatInputRef);
+
+  // Auto-send the initial prompt once the session is ready (has taskId).
+  // This is used by config chat which creates the session first, then sends
+  // the user's prompt through normal WS message flow.
+  useEffect(() => {
+    if (!initialPrompt || !taskId || initialPromptSent.current) return;
+    initialPromptSent.current = true;
+    handleSubmit(initialPrompt);
+    onInitialPromptSent?.();
+  }, [initialPrompt, taskId, handleSubmit, onInitialPromptSent]);
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
 

@@ -5,6 +5,7 @@ const defaultDevOrigins = [
   "localhost:3000",
   "192.168.1.116", // Maintainer dev server
   "100.105.155.17", // Maintainer dev server (Tailscale)
+  "100.108.172.100"
 ];
 const extraDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS
   ? process.env.NEXT_ALLOWED_DEV_ORIGINS.split(",").map((s) => s.trim())

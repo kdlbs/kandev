@@ -316,9 +316,12 @@ export type AppState = {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  openConfigChat: (sessionId: string, taskId: string, workspaceId: string) => void;
+  openConfigChat: (sessionId: string, workspaceId: string) => void;
   openConfigChatModal: (workspaceId: string) => void;
   closeConfigChat: () => void;
+  closeConfigChatSession: (sessionId: string) => void;
+  setActiveConfigChatSession: (sessionId: string) => void;
+  renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;

@@ -63,10 +63,16 @@ export type QuickChatState = {
   activeSessionId: string | null;
 };
 
+export type ConfigChatSession = {
+  sessionId: string;
+  workspaceId: string;
+  name?: string;
+};
+
 export type ConfigChatState = {
   isOpen: boolean;
-  sessionId: string | null;
-  taskId: string | null;
+  sessions: ConfigChatSession[];
+  activeSessionId: string | null;
   workspaceId: string | null;
 };
 
@@ -121,9 +127,12 @@ export type UISliceActions = {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  openConfigChat: (sessionId: string, taskId: string, workspaceId: string) => void;
+  openConfigChat: (sessionId: string, workspaceId: string) => void;
   openConfigChatModal: (workspaceId: string) => void;
   closeConfigChat: () => void;
+  closeConfigChatSession: (sessionId: string) => void;
+  setActiveConfigChatSession: (sessionId: string) => void;
+  renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
