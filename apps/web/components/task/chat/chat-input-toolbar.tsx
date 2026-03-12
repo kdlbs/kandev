@@ -410,15 +410,13 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
 }
 
 export const ChatInputToolbar = memo(function ChatInputToolbar(props: ChatInputToolbarProps) {
-  const {
-    planModeEnabled, planModeAvailable = true, mcpServers = [], onPlanModeChange,
-    sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isDisabled,
-    isSending, onCancel, onSubmit, submitKey = "cmd_enter", contextCount = 0,
-    contextPopoverOpen = false, onContextPopoverOpenChange, planContextEnabled = false,
-    contextFiles = [], onToggleFile, onImplementPlan, onEnhancePrompt,
-    isEnhancingPrompt = false, isUtilityConfigured = false, onAttachFiles,
-    hideSessionsDropdown, minimalToolbar,
-  } = props;
+  const { planModeEnabled, planModeAvailable = true, mcpServers = [] } = props;
+  const { onPlanModeChange, sessionId, taskId, taskTitle, taskDescription } = props;
+  const { isAgentBusy, isDisabled, isSending, onCancel, onSubmit } = props;
+  const { submitKey = "cmd_enter", contextCount = 0, contextPopoverOpen = false } = props;
+  const { onContextPopoverOpenChange, planContextEnabled = false, contextFiles = [] } = props;
+  const { onToggleFile, onImplementPlan, onEnhancePrompt, isEnhancingPrompt = false } = props;
+  const { isUtilityConfigured = false, onAttachFiles, hideSessionsDropdown, minimalToolbar } = props;
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
   if (minimalToolbar) {
@@ -477,7 +475,6 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(props: ChatInputT
       </div>
 
       <div className="flex-1" />
-
       <ToolbarRightSection
         taskId={taskId}
         sessionId={sessionId}

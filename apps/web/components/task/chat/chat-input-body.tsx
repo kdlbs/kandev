@@ -111,17 +111,15 @@ function FileInput({
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
-  const {
-    inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder,
-    isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers,
-    submitKey, setIsInputFocused, sessionId, taskId, onAddContextFile,
-    onToggleContextFile, planContextEnabled, handleAgentCommand, addFiles,
-    fileInputRef, showRequestChangesTooltip, isAgentBusy, onPlanModeChange,
-    taskTitle, taskDescription, isSending, onCancel, contextCount,
-    contextPopoverOpen, setContextPopoverOpen, contextFiles, onImplementPlan,
-    onEnhancePrompt, isEnhancingPrompt, isUtilityConfigured,
-    hideSessionsDropdown, minimalToolbar,
-  } = p;
+  const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
+  const { isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers } = p;
+  const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
+  const { onAddContextFile, onToggleContextFile, handleAgentCommand, addFiles, fileInputRef } = p;
+  const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
+    p;
+  const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
+  const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
+  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar } = p;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
