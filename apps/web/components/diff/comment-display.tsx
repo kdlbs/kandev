@@ -51,6 +51,8 @@ function CommentActionButtons({
           size="sm"
           variant="ghost"
           onClick={wrap(onRun)}
+          aria-label="Run comment"
+          title="Run comment"
           className={`cursor-pointer ${btnClass} text-emerald-600 hover:text-emerald-500 dark:text-emerald-400`}
         >
           <IconPlayerPlay className="h-3 w-3" />
@@ -61,6 +63,8 @@ function CommentActionButtons({
           size="sm"
           variant="ghost"
           onClick={wrap(onEdit)}
+          aria-label="Edit comment"
+          title="Edit comment"
           className={`cursor-pointer ${btnClass}`}
         >
           <IconEdit className="h-3 w-3" />
@@ -71,6 +75,8 @@ function CommentActionButtons({
           size="sm"
           variant="ghost"
           onClick={wrap(onDelete)}
+          aria-label="Delete comment"
+          title="Delete comment"
           className={`cursor-pointer ${btnClass} hover:text-destructive`}
         >
           <IconTrash className="h-3 w-3" />

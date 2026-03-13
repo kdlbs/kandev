@@ -106,6 +106,8 @@ function PopoverBody({
   const previewText =
     selectedText.length > 100 ? selectedText.slice(0, 100).trim() + "…" : selectedText;
   const isDisabled = !comment.trim();
+  const isMac = typeof navigator !== "undefined" && navigator.platform?.includes("Mac");
+  const modKey = isMac ? "\u2318" : "Ctrl";
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -136,7 +138,7 @@ function PopoverBody({
       />
       <div className="mt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground/70">
-          {"\u2318"}+Enter to add{handleSubmitAndRun ? `, ${"\u2318"}+Shift+Enter to run` : ""}
+          {modKey}+Enter to add{handleSubmitAndRun ? `, ${modKey}+Shift+Enter to run` : ""}
         </span>
         <TooltipProvider delayDuration={400}>
           <div className="inline-flex">
@@ -154,7 +156,7 @@ function PopoverBody({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>Save comment for review ({"\u2318"}+Enter)</p>
+                <p>Save comment for review ({modKey}+Enter)</p>
               </TooltipContent>
             </Tooltip>
             {handleSubmitAndRun && (
@@ -171,7 +173,7 @@ function PopoverBody({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p>Save and send to agent ({"\u2318"}+Shift+Enter)</p>
+                  <p>Save and send to agent ({modKey}+Shift+Enter)</p>
                 </TooltipContent>
               </Tooltip>
             )}

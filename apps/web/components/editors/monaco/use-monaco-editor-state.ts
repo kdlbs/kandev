@@ -391,26 +391,34 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    (annotation: string) => {
+    async (annotation: string) => {
       const comment = createCommentFromForm(annotation);
       if (comment) {
-        runComment(comment);
-        toast({
-          title: "Comment sent",
-          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
-        });
+        try {
+          await runComment(comment);
+          toast({
+            title: "Comment sent",
+            description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+          });
+        } catch {
+          toast({ title: "Failed to send comment", description: "Please try again.", variant: "error" });
+        }
       }
     },
     [createCommentFromForm, runComment, isAgentBusy, toast],
   );
 
   const handleCommentRun = useCallback(
-    (comment: DiffComment) => {
-      runComment(comment);
-      toast({
-        title: "Comment sent",
-        description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
-      });
+    async (comment: DiffComment) => {
+      try {
+        await runComment(comment);
+        toast({
+          title: "Comment sent",
+          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+        });
+      } catch {
+        toast({ title: "Failed to send comment", description: "Please try again.", variant: "error" });
+      }
     },
     [runComment, isAgentBusy, toast],
   );
