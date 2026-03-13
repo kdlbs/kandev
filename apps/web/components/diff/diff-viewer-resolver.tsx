@@ -32,14 +32,26 @@ interface DiffViewerResolverProps {
   enableExpansion?: boolean;
   /** Base git ref for fetching old content (pierre-diffs only) */
   baseRef?: string;
+  /** Controlled expand-unchanged state (pierre-diffs only) */
+  expandUnchanged?: boolean;
+  /** Callback when expand-unchanged is toggled (pierre-diffs only) */
+  onToggleExpandUnchanged?: () => void;
 }
 
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {
   const provider = useEditorProvider("diff-viewer");
   if (provider === "monaco") {
     // Strip pierre-diffs-only props
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { enableComments, baseRef, enableExpansion, ...rest } = props;
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const {
+      enableComments,
+      baseRef,
+      enableExpansion,
+      expandUnchanged,
+      onToggleExpandUnchanged,
+      ...rest
+    } = props;
+    /* eslint-enable @typescript-eslint/no-unused-vars */
     return <MonacoDiffViewer {...rest} />;
   }
   return <PierreDiffViewer {...props} />;

@@ -272,9 +272,18 @@ func (s *Server) notifyClarificationTimeout() {
 	}
 }
 
+// resolveTaskID returns the server-injected taskID if available, otherwise falls back
+// to the agent-provided value. This prevents LLM hallucination of task IDs.
+func (s *Server) resolveTaskID(req mcp.CallToolRequest) (string, error) {
+	if s.taskID != "" {
+		return s.taskID, nil
+	}
+	return req.RequireString("task_id")
+}
+
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
@@ -301,7 +310,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 
 func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
@@ -329,7 +338,7 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
@@ -359,7 +368,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 
 func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}

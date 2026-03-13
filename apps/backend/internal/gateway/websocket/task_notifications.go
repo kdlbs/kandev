@@ -70,6 +70,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
+	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
 
 	go func() {
 		<-ctx.Done()

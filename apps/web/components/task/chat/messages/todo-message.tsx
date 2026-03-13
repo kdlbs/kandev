@@ -35,39 +35,44 @@ export function TodoMessage({
   if (!todoItems.length) return null;
 
   const completed = todoItems.filter((t) => resolveStatus(t) === "completed").length;
+  const currentTask = todoItems.find((t) => resolveStatus(t) === "in_progress");
 
   return (
-    <div className="w-full rounded-lg border border-border/60 bg-background/60 text-xs">
-      <ExpandableRow
-        icon={<IconListCheck className="h-4 w-4 text-muted-foreground" />}
-        header={
-          <div className="flex items-center justify-between w-full">
-            <span className="text-muted-foreground text-[11px] uppercase tracking-wide">
-              Updated Todos
-            </span>
-            <span className="text-muted-foreground text-[11px]">
-              {completed}/{todoItems.length}
-            </span>
-          </div>
-        }
-        hasExpandableContent={todoItems.length > 0}
-        isExpanded={isExpanded}
-        onToggle={() => setIsExpanded((prev) => !prev)}
-      >
-        <div className="space-y-1.5 pb-2">
-          {todoItems.map((todo, idx) => {
-            const s = resolveStatus(todo);
-            return (
-              <div key={idx} className="flex items-start gap-2">
-                <StatusIcon status={s} className="mt-0.5 shrink-0 h-3.5 w-3.5" />
-                <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
-                  {todo.text}
-                </span>
-              </div>
-            );
-          })}
+    <ExpandableRow
+      icon={<IconListCheck className="h-4 w-4 text-muted-foreground" />}
+      header={
+        <div className="flex items-center gap-2 text-xs min-w-0">
+          <span className="text-muted-foreground text-[11px] uppercase tracking-wide shrink-0">
+            Updated Todos
+          </span>
+          <span className="text-muted-foreground text-[11px] shrink-0">
+            ({completed}/{todoItems.length})
+          </span>
+          {currentTask && (
+            <>
+              <span className="text-muted-foreground/40 shrink-0">·</span>
+              <span className="text-muted-foreground text-[11px] truncate">{currentTask.text}</span>
+            </>
+          )}
         </div>
-      </ExpandableRow>
-    </div>
+      }
+      hasExpandableContent={todoItems.length > 0}
+      isExpanded={isExpanded}
+      onToggle={() => setIsExpanded((prev) => !prev)}
+    >
+      <div className="space-y-1.5 pb-2">
+        {todoItems.map((todo, idx) => {
+          const s = resolveStatus(todo);
+          return (
+            <div key={idx} className="flex items-start gap-2">
+              <StatusIcon status={s} className="mt-0.5 shrink-0 h-3.5 w-3.5" />
+              <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
+                {todo.text}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </ExpandableRow>
   );
 }

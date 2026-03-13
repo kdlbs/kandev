@@ -346,6 +346,23 @@
   animation: shimmer-vertical 1.5s ease-in-out infinite;
 }
 
+@keyframes changes-tab-flash {
+  0% {
+    background-color: transparent;
+  }
+  25% {
+    background-color: color-mix(in oklab, var(--primary) 25%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-changes-flash {
+  animation: changes-tab-flash 1s ease-out;
+  border-radius: 4px;
+}
+
 @keyframes chat-input-running {
   0%,
   100% {

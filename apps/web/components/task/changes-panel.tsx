@@ -402,15 +402,18 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
 
 function useChangesPanelPRData() {
   const taskPR = useActiveTaskPR();
+  const refreshKey = taskPR?.last_synced_at ?? null;
   const { files: prDiffFiles } = usePRDiff(
     taskPR?.owner ?? null,
     taskPR?.repo ?? null,
     taskPR?.pr_number ?? null,
+    refreshKey,
   );
   const { commits: prCommitsList } = usePRCommits(
     taskPR?.owner ?? null,
     taskPR?.repo ?? null,
     taskPR?.pr_number ?? null,
+    refreshKey,
   );
   const hasPRFiles = prDiffFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;

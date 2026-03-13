@@ -16,6 +16,7 @@ type SimplePanelOpts = {
   id: string;
   component: string;
   title: string;
+  tabComponent?: string;
   params?: Record<string, unknown>;
 };
 
@@ -45,6 +46,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         id: "changes",
         component: "changes",
         title: "Changes",
+        tabComponent: "changesTab",
       });
     },
     addFilesPanel: (groupId?: string) => {

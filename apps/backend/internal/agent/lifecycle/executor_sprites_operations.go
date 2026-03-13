@@ -226,6 +226,7 @@ func (r *SpritesExecutor) createAgentInstance(
 		ID:            req.InstanceID,
 		WorkspacePath: spritesWorkspacePath,
 		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
 		Protocol:      req.Protocol,
 		AgentType:     agentTypeFromReq(req),
 		McpServers:    req.McpServers,

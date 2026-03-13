@@ -91,11 +91,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
           <div className="whitespace-pre-wrap text-foreground/80">{metadata.thinking}</div>
         </div>
       )}
-      {hasTodos && (
-        <div className="mt-3">
-          <TodoMessage comment={comment} />
-        </div>
-      )}
+      {hasTodos && <TodoMessage comment={comment} />}
       {diffData && <DiffViewBlock data={diffData} />}
       {!diffData && diffText && (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">

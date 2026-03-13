@@ -27,6 +27,10 @@ interface FileDiffViewerProps {
   enableExpansion?: boolean;
   /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
   baseRef?: string;
+  /** Controlled expand-unchanged state */
+  expandUnchanged?: boolean;
+  /** Callback when expand-unchanged is toggled (controlled mode) */
+  onToggleExpandUnchanged?: () => void;
 }
 
 /**
@@ -57,6 +61,8 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   wordWrap,
   enableExpansion,
   baseRef,
+  expandUnchanged,
+  onToggleExpandUnchanged,
 }: FileDiffViewerProps) {
   const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
@@ -78,6 +84,8 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       wordWrap={wordWrap}
       enableExpansion={enableExpansion}
       baseRef={baseRef}
+      expandUnchanged={expandUnchanged}
+      onToggleExpandUnchanged={onToggleExpandUnchanged}
     />
   );
 });

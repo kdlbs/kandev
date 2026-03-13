@@ -37,6 +37,10 @@ interface DiffViewerProps {
   enableExpansion?: boolean;
   /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
   baseRef?: string;
+  /** Controlled expand-unchanged state (when provided, component is controlled) */
+  expandUnchanged?: boolean;
+  /** Callback when expand-unchanged is toggled (controlled mode) */
+  onToggleExpandUnchanged?: () => void;
 }
 
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
@@ -52,6 +56,8 @@ const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "wordWrap",
   "enableExpansion",
   "baseRef",
+  "expandUnchanged",
+  "onToggleExpandUnchanged",
 ];
 
 const DATA_KEYS: (keyof FileDiffData)[] = ["filePath", "diff", "oldContent", "newContent"];
@@ -116,11 +122,17 @@ export const DiffViewer = memo(function DiffViewer({
   wordWrap: wordWrapProp,
   enableExpansion = false,
   baseRef,
+  expandUnchanged: expandUnchangedProp,
+  onToggleExpandUnchanged: onToggleExpandUnchangedProp,
 }: DiffViewerProps) {
   const [wordWrapLocal, setWordWrap] = useState(false);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
-  const [expandUnchanged, setExpandUnchanged] = useState(false);
-  const toggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
+  const [expandUnchangedLocal, setExpandUnchangedLocal] = useState(false);
+  const expandUnchanged = expandUnchangedProp ?? expandUnchangedLocal;
+  const toggleExpandUnchanged = useCallback(() => {
+    if (onToggleExpandUnchangedProp) onToggleExpandUnchangedProp();
+    else setExpandUnchangedLocal((v) => !v);
+  }, [onToggleExpandUnchangedProp]);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const state = useDiffViewerState({

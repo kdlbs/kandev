@@ -106,6 +106,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		AutoStart:          false,
 		McpServers:         req.McpServers,
 		SessionID:          req.SessionID,
+		TaskID:             req.TaskID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
 		McpMode:            req.McpMode,

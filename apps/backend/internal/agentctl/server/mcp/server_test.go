@@ -30,7 +30,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -84,7 +84,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -146,7 +146,7 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, "")
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, "")
 	require.NotNil(t, s)
 	assert.Equal(t, ModeTask, s.mode)
 
@@ -161,7 +161,7 @@ func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", true, ModeConfig)
+	s := New(backend, "test-session", "test-task", 10005, log, "", true, ModeConfig)
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -175,7 +175,7 @@ func TestServerModeTask_DisableAskQuestion(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", true, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", true, ModeTask)
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -189,7 +189,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
 	// 6 kanban + 1 interaction + 4 plan = 11
 	assert.Equal(t, 11, len(tools))
@@ -200,7 +200,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
 	// 10 workflow + 4 agent + 4 mcp + 5 executor + 5 task + 1 interaction = 29
 	assert.Equal(t, 29, len(tools))
@@ -211,7 +211,7 @@ func TestServerModeConfig_ToolDescriptions(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 
 	toolsMap := s.mcpServer.ListTools()
 

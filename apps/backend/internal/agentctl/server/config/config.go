@@ -144,6 +144,9 @@ type InstanceConfig struct {
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
+	// TaskID is the task ID for this agent instance (used in MCP plan tool calls)
+	TaskID string
+
 	// ContinueCommand is the command template for follow-up prompts in one-shot agents.
 	// When set, the adapter spawns a new process per prompt using this command for
 	// continuation (thread ID appended at runtime). Only used by Amp.
@@ -260,6 +263,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.SessionID != "" {
 		cfg.SessionID = overrides.SessionID
 	}
+	if overrides.TaskID != "" {
+		cfg.TaskID = overrides.TaskID
+	}
 	if overrides.DisableAskQuestion {
 		cfg.DisableAskQuestion = true
 	}
@@ -282,6 +288,7 @@ type InstanceOverrides struct {
 	AgentType          string
 	McpServers         []McpServerConfig
 	SessionID          string
+	TaskID             string
 	DisableAskQuestion bool
 	AssumeMcpSse       bool
 	McpMode            string

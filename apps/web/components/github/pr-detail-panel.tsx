@@ -299,6 +299,7 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
 function StateBadge({ state }: { state: string }) {
   const styles: Record<string, string> = {
     open: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    draft: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
     merged: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
     closed: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   };
@@ -421,7 +422,7 @@ function PRHeader({
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
-  const showWarnings = isDraft || (!isMergeable && liveState === "open");
+  const showWarnings = !isMergeable && liveState === "open";
 
   return (
     <div className="p-3 space-y-2">
@@ -432,7 +433,7 @@ function PRHeader({
         <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
-        <StateBadge state={liveState} />
+        <StateBadge state={isDraft && liveState === "open" ? "draft" : liveState} />
         <span className="text-xs text-muted-foreground">#{taskPR.pr_number}</span>
         <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
           {taskPR.head_branch}
@@ -444,20 +445,10 @@ function PRHeader({
       </div>
       {showWarnings && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          {isDraft && (
-            <Badge
-              variant="secondary"
-              className="text-[10px] px-1.5 py-0 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
-            >
-              Draft
-            </Badge>
-          )}
-          {!isMergeable && liveState === "open" && (
-            <span className="flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400">
-              <IconAlertTriangle className="h-3 w-3" />
-              Not mergeable
-            </span>
-          )}
+          <span className="flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400">
+            <IconAlertTriangle className="h-3 w-3" />
+            Not mergeable
+          </span>
         </div>
       )}
       <HeaderDateLine taskPR={taskPR} />

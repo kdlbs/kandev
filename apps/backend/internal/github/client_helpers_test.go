@@ -264,6 +264,60 @@ func TestConvertRawStatusContextsAndMergeChecks(t *testing.T) {
 	}
 }
 
+func TestMergeChecksDuplicateCheckRunsByName(t *testing.T) {
+	t1 := time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 11, 0, 0, 0, time.UTC)
+
+	// Two check-runs with the same name but different URLs (different check suites).
+	checkRuns := []CheckRun{
+		{Name: "Analyze (go)", Source: checkSourceCheckRun, Status: "in_progress", HTMLURL: "https://github.com/o/r/runs/1", StartedAt: &t1},
+		{Name: "Analyze (go)", Source: checkSourceCheckRun, Status: "in_progress", HTMLURL: "https://github.com/o/r/runs/2", StartedAt: &t2},
+	}
+	merged := mergeChecks(checkRuns, nil)
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 check after dedupe, got %d", len(merged))
+	}
+	if merged[0].HTMLURL != "https://github.com/o/r/runs/2" {
+		t.Errorf("expected newer check-run to win, got URL %s", merged[0].HTMLURL)
+	}
+}
+
+func TestMergeChecksCheckRunWinsOverStatusDifferentURL(t *testing.T) {
+	t1 := time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	checkRuns := []CheckRun{
+		{Name: "ci/test", Source: checkSourceCheckRun, Status: "completed", Conclusion: "success", HTMLURL: "https://github.com/o/r/runs/1", StartedAt: &t1},
+	}
+	statuses := []CheckRun{
+		{Name: "ci/test", Source: checkSourceStatusContext, Status: "in_progress", HTMLURL: "https://other-url.com/status/1", StartedAt: &t1},
+	}
+	merged := mergeChecks(checkRuns, statuses)
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 check after dedupe, got %d", len(merged))
+	}
+	if merged[0].Source != checkSourceCheckRun {
+		t.Errorf("expected check_run to win over status_context, got source %s", merged[0].Source)
+	}
+}
+
+func TestIsNewerCheck(t *testing.T) {
+	t1 := time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 6, 1, 11, 0, 0, 0, time.UTC)
+
+	if isNewerCheck(CheckRun{StartedAt: &t1}, CheckRun{StartedAt: &t2}) {
+		t.Error("older should not be newer")
+	}
+	if !isNewerCheck(CheckRun{StartedAt: &t2}, CheckRun{StartedAt: &t1}) {
+		t.Error("newer should be newer")
+	}
+	if isNewerCheck(CheckRun{StartedAt: nil}, CheckRun{StartedAt: &t1}) {
+		t.Error("nil StartedAt should not be newer")
+	}
+	if !isNewerCheck(CheckRun{StartedAt: &t1}, CheckRun{StartedAt: nil}) {
+		t.Error("non-nil should be newer than nil")
+	}
+}
+
 func TestConvertSearchItemToPR(t *testing.T) {
 	now := time.Now()
 	pr := convertSearchItemToPR(

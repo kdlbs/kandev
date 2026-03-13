@@ -46,7 +46,12 @@ async function fetchPRCommits(
  * Fetches the commits in a pull request via WebSocket.
  * Returns commit metadata from the GitHub API.
  */
-export function usePRCommits(owner: string | null, repo: string | null, prNumber: number | null) {
+export function usePRCommits(
+  owner: string | null,
+  repo: string | null,
+  prNumber: number | null,
+  refreshKey?: string | null,
+) {
   const [state, setState] = useState<PRCommitsState>(INITIAL_STATE);
   const hasParams = !!owner && !!repo && !!prNumber;
   const paramsKeyRef = useRef<string>("");
@@ -62,7 +67,7 @@ export function usePRCommits(owner: string | null, repo: string | null, prNumber
   }, [owner, repo, prNumber]);
 
   useEffect(() => {
-    const key = hasParams ? `${owner}/${repo}/${prNumber}` : "";
+    const key = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
     if (key === paramsKeyRef.current) return;
     paramsKeyRef.current = key;
     if (!owner || !repo || !prNumber) {
@@ -74,7 +79,7 @@ export function usePRCommits(owner: string | null, repo: string | null, prNumber
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [owner, repo, prNumber, hasParams]);
+  }, [owner, repo, prNumber, hasParams, refreshKey]);
 
   // Return initial state when params are null to clear stale data
   if (!hasParams) return { ...INITIAL_STATE, refresh };

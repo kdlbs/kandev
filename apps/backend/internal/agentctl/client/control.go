@@ -44,6 +44,7 @@ type CreateInstanceRequest struct {
 	AutoStart          bool              `json:"auto_start,omitempty"`
 	McpServers         []McpServerConfig `json:"mcp_servers,omitempty"`
 	SessionID          string            `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
+	TaskID             string            `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
 	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
 	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"

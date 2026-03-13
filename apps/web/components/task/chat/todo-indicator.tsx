@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { IconCheck, IconCircle, IconCircleFilled, IconListCheck, IconX } from "@tabler/icons-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,33 @@ function StatusIcon({ status, className }: { status: string; className?: string 
     default:
       return <IconCircle className={cn("h-3.5 w-3.5 text-muted-foreground/40", className)} />;
   }
+}
+
+function TodoList({ todos }: { todos: TodoDisplayItem[] }) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, []);
+
+  return (
+    <div ref={listRef} className="space-y-1.5 max-h-48 overflow-y-auto">
+      {todos.map((todo, idx) => {
+        const s = resolveStatus(todo);
+        return (
+          <div key={idx} className="flex items-start gap-2 text-xs">
+            <span className="text-muted-foreground/60 shrink-0 w-4 text-right tabular-nums">
+              {idx + 1}
+            </span>
+            <StatusIcon status={s} className="mt-0.5 shrink-0 h-3 w-3" />
+            <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
+              {todo.text}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function TodoIndicator({ todos }: TodoIndicatorProps) {
@@ -70,19 +98,7 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-          {todos.map((todo, idx) => {
-            const s = resolveStatus(todo);
-            return (
-              <div key={idx} className="flex items-start gap-2 text-xs">
-                <StatusIcon status={s} className="mt-0.5 shrink-0 h-3 w-3" />
-                <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
-                  {todo.text}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        <TodoList todos={todos} />
       </HoverCardContent>
     </HoverCard>
   );

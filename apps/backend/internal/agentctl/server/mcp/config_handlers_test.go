@@ -36,7 +36,7 @@ func (tb *testBackend) RequestPayload(_ context.Context, action string, payload,
 func newTestServer(t *testing.T, backend BackendClient) *Server {
 	t.Helper()
 	log := newTestLogger(t)
-	return New(backend, "test-session", 10005, log, "", false, ModeConfig)
+	return New(backend, "test-session", "", 10005, log, "", false, ModeConfig)
 }
 
 func callTool(t *testing.T, s *Server, toolName string, args map[string]interface{}) *mcplib.CallToolResult {

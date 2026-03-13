@@ -33,6 +33,7 @@ import { FileEditorPanel } from "./file-editor-panel";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
+import { ChangesTab } from "./changes-tab";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -145,6 +146,7 @@ function PermanentTab(props: IDockviewPanelHeaderProps) {
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   permanentTab: PermanentTab,
+  changesTab: ChangesTab,
 };
 
 // ---------------------------------------------------------------------------

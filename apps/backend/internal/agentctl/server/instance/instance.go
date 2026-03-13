@@ -84,6 +84,9 @@ type CreateRequest struct {
 	// SessionID is the task session ID for MCP tool calls (used by ask_user_question).
 	SessionID string `json:"session_id,omitempty"`
 
+	// TaskID is the task ID for MCP plan tool calls (server-side injection).
+	TaskID string `json:"task_id,omitempty"`
+
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 

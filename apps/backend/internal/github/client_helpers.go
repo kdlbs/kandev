@@ -195,21 +195,30 @@ func convertRawStatusContexts(raw []ghStatusContext) []CheckRun {
 	return checks
 }
 
-// mergeChecks deduplicates check runs and commit statuses by normalized name/url.
-// If both sources refer to the same item, check-run data wins.
+// mergeChecks deduplicates check runs and commit statuses by normalized name.
+// Check-run source wins over status-context; among same-source duplicates the
+// most recent entry (by StartedAt) is kept.
 func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 	merged := make([]CheckRun, 0, len(checkRuns)+len(statusChecks))
 	byKey := make(map[string]int)
 
 	for _, check := range statusChecks {
 		key := checkMergeKey(check)
+		if idx, ok := byKey[key]; ok {
+			if isNewerCheck(check, merged[idx]) {
+				merged[idx] = check
+			}
+			continue
+		}
 		byKey[key] = len(merged)
 		merged = append(merged, check)
 	}
 	for _, check := range checkRuns {
 		key := checkMergeKey(check)
 		if idx, ok := byKey[key]; ok {
-			merged[idx] = check
+			if merged[idx].Source == checkSourceStatusContext || isNewerCheck(check, merged[idx]) {
+				merged[idx] = check
+			}
 			continue
 		}
 		byKey[key] = len(merged)
@@ -219,9 +228,18 @@ func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 }
 
 func checkMergeKey(check CheckRun) string {
-	name := strings.ToLower(strings.TrimSpace(check.Name))
-	url := strings.ToLower(strings.TrimSpace(check.HTMLURL))
-	return name + "|" + url
+	return strings.ToLower(strings.TrimSpace(check.Name))
+}
+
+// isNewerCheck reports whether a started more recently than b.
+func isNewerCheck(a, b CheckRun) bool {
+	if a.StartedAt == nil {
+		return false
+	}
+	if b.StartedAt == nil {
+		return true
+	}
+	return a.StartedAt.After(*b.StartedAt)
 }
 
 // convertSearchItemToPR converts common search result fields into a PR struct.

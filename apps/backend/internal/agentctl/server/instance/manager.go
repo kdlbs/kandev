@@ -89,6 +89,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AgentType:          req.AgentType,
 		McpServers:         mcpServers,
 		SessionID:          req.SessionID,
+		TaskID:             req.TaskID,
 		DisableAskQuestion: req.DisableAskQuestion,
 		AssumeMcpSse:       req.AssumeMcpSse,
 		McpMode:            req.McpMode,

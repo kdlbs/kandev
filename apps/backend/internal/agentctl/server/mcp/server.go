@@ -44,6 +44,7 @@ func normalizeMode(mode string) string {
 type Server struct {
 	backend            BackendClient
 	sessionID          string
+	taskID             string
 	disableAskQuestion bool
 	mode               string // "task" (default) or "config"
 	mcpServer          *server.MCPServer
@@ -58,11 +59,12 @@ type Server struct {
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
+func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
 	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
 		sessionID:          sessionID,
+		taskID:             taskID,
 		disableAskQuestion: disableAskQuestion,
 		mode:               mcpMode,
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
