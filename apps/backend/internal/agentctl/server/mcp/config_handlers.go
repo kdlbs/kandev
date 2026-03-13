@@ -51,6 +51,10 @@ func (s *Server) registerConfigWorkflowTools() {
 		),
 		s.wrapHandler("delete_workflow", s.deleteWorkflowHandler()),
 	)
+	s.registerConfigWorkflowStepTools()
+}
+
+func (s *Server) registerConfigWorkflowStepTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps",
 			mcp.WithDescription("List all workflow steps (columns) in a workflow."),

@@ -416,7 +416,12 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(props: ChatInputT
   const { submitKey = "cmd_enter", contextCount = 0, contextPopoverOpen = false } = props;
   const { onContextPopoverOpenChange, planContextEnabled = false, contextFiles = [] } = props;
   const { onToggleFile, onImplementPlan, onEnhancePrompt, isEnhancingPrompt = false } = props;
-  const { isUtilityConfigured = false, onAttachFiles, hideSessionsDropdown, minimalToolbar } = props;
+  const {
+    isUtilityConfigured = false,
+    onAttachFiles,
+    hideSessionsDropdown,
+    minimalToolbar,
+  } = props;
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
   if (minimalToolbar) {

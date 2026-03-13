@@ -151,7 +151,13 @@ export function GlobalCommands() {
       return;
     }
     startNewConfigChat(activeWorkspaceId);
-  }, [activeWorkspaceId, configChatActiveSessionId, configChatWorkspaceId, openConfigChat, startNewConfigChat]);
+  }, [
+    activeWorkspaceId,
+    configChatActiveSessionId,
+    configChatWorkspaceId,
+    openConfigChat,
+    startNewConfigChat,
+  ]);
 
   const quickChatCommand: CommandItem = useMemo(
     () => ({
