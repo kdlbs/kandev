@@ -525,7 +525,9 @@ test.describe("Config-mode MCP — executor management", () => {
     );
 
     const page = await runAndWait(testPage, session.session_id, "Executors listed");
-    await expect(page.chat.getByText("list_executors")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_executors", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("agent can create and delete an executor profile", async ({
@@ -573,9 +575,6 @@ test.describe("Config-mode MCP — executor management", () => {
     const { executors: afterDelete } = await apiClient.listExecutors();
     const execAfter = afterDelete.find((e) => e.id === executor.id);
     expect(execAfter?.profiles?.find((p) => p.id === profile!.id)).toBeUndefined();
-
-    // Cleanup: delete the test executor
-    await apiClient.deleteExecutor(executor.id);
   });
 });
 
