@@ -377,7 +377,7 @@ function ConfigChatAgentSection() {
     (s) => s.workspaces.items.find((w) => w.id === s.workspaces.activeId) ?? null,
   );
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
-  const [selectedId, setSelectedId] = useState(workspace?.default_config_agent_profile_id ?? "");
+  const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
@@ -385,7 +385,6 @@ function ConfigChatAgentSection() {
 
   const handleChange = async (value: string) => {
     const effectiveValue = value === "none" ? "" : value;
-    setSelectedId(effectiveValue);
     if (!workspace) return;
     setSaving(true);
     try {
@@ -422,7 +421,7 @@ function ConfigChatAgentSection() {
           workflows, agent profiles, and MCP configuration.
         </p>
       </div>
-      <Select value={selectedId || "none"} onValueChange={handleChange} disabled={saving}>
+      <Select value={currentProfileId || "none"} onValueChange={handleChange} disabled={saving}>
         <SelectTrigger className="w-full max-w-sm cursor-pointer">
           <SelectValue placeholder="Choose an agent profile..." />
         </SelectTrigger>

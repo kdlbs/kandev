@@ -52,9 +52,9 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
                   default_environment_id: message.payload.default_environment_id ?? null,
                   default_agent_profile_id: message.payload.default_agent_profile_id ?? null,
                   default_config_agent_profile_id:
-                    message.payload.default_config_agent_profile_id ??
-                    item.default_config_agent_profile_id ??
-                    null,
+                    "default_config_agent_profile_id" in message.payload
+                      ? (message.payload.default_config_agent_profile_id ?? null)
+                      : (item.default_config_agent_profile_id ?? null),
                   updated_at: message.payload.updated_at ?? item.updated_at,
                 }
               : item,

@@ -190,8 +190,12 @@ export type StepPayload = {
   position: number;
   state: string;
   color: string;
+  prompt?: string;
   events?: StepEvents;
   is_start_step?: boolean;
+  allow_manual_move?: boolean;
+  show_in_command_panel?: boolean;
+  auto_archive_after_hours?: number;
   created_at?: string;
   updated_at?: string;
 };

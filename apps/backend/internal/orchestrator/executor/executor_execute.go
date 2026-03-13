@@ -530,11 +530,12 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 	if effectiveMcpMode != "" {
 		if err := e.agentManager.SetMcpMode(ctx, session.AgentExecutionID, effectiveMcpMode); err != nil {
-			e.logger.Warn("failed to set MCP mode for existing workspace",
+			e.logger.Error("failed to set MCP mode for existing workspace",
 				zap.String("session_id", session.ID),
 				zap.String("agent_execution_id", session.AgentExecutionID),
 				zap.String("mcp_mode", effectiveMcpMode),
 				zap.Error(err))
+			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 		}
 	}
 

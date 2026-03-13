@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/events"
@@ -111,7 +112,7 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 	profile, err := h.agentSettingsCtrl.DeleteProfile(ctx, profileID)
 	if err != nil {
 		h.logger.Error("failed to delete agent profile", zap.Error(err))
-		if err == agentsettingscontroller.ErrAgentProfileInUse {
+		if errors.Is(err, agentsettingscontroller.ErrAgentProfileInUse) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Cannot delete: profile is used by an active agent session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent profile: "+err.Error(), nil)

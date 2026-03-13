@@ -225,6 +225,7 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 			"name":                     step.Name,
 			"position":                 step.Position,
 			"color":                    step.Color,
+			"prompt":                   step.Prompt,
 			"events":                   step.Events,
 			"show_in_command_panel":    step.ShowInCommandPanel,
 			"allow_manual_move":        step.AllowManualMove,

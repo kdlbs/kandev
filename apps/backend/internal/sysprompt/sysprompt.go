@@ -131,7 +131,7 @@ TASK TOOLS:
 - move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id.
 - delete_task_kandev: Delete a task. Required: task_id.
 - archive_task_kandev: Archive a task. Required: task_id.
-- update_task_state_kandev: Update task state. Required: task_id, state (open, in_progress, complete, blocked, cancelled).
+- update_task_state_kandev: Update task state. Required: task_id, state (TODO, CREATED, SCHEDULING, IN_PROGRESS, REVIEW, BLOCKED, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED).
 
 INTERACTION:
 - ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
