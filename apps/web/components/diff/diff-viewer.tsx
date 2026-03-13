@@ -153,6 +153,7 @@ export const DiffViewer = memo(function DiffViewer({
     handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
     handleCommentUpdate: state.handleCommentUpdate,
     handleCommentDelete: state.handleCommentDelete,
+    handleCommentRun: onCommentRun,
     setShowCommentForm: state.setShowCommentForm,
     setSelectedLines: state.setSelectedLines,
     setEditingComment: state.setEditingComment,

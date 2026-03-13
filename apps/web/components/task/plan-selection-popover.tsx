@@ -2,8 +2,20 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { IconPlus, IconTrash, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconPlus,
+  IconTrash,
+  IconGripHorizontal,
+  IconPlayerPlay,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -181,7 +193,36 @@ function PopoverActions({
           </Button>
         )}
       </div>
-      <div className="flex gap-1">
+      {onSubmitAndRun && !isEditing ? (
+        <div className="flex">
+          <Button
+            size="sm"
+            onClick={onSubmit}
+            disabled={isDisabled}
+            className="h-7 gap-1 rounded-r-none text-xs cursor-pointer"
+          >
+            <IconPlus className="h-3 w-3" />
+            Add
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                disabled={isDisabled}
+                className="h-7 cursor-pointer rounded-l-none border-l border-primary-foreground/20 px-1 text-xs"
+              >
+                <IconChevronDown className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[140px]">
+              <DropdownMenuItem onClick={onSubmitAndRun} className="cursor-pointer">
+                <IconPlayerPlay className="h-3 w-3" />
+                Add + Run
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : (
         <Button
           size="sm"
           onClick={onSubmit}
@@ -191,18 +232,7 @@ function PopoverActions({
           <IconPlus className="h-3 w-3" />
           {isEditing ? "Update" : "Add"}
         </Button>
-        {onSubmitAndRun && !isEditing && (
-          <Button
-            size="sm"
-            onClick={onSubmitAndRun}
-            disabled={isDisabled}
-            className="h-7 gap-1 text-xs cursor-pointer"
-          >
-            <IconPlayerPlay className="h-3 w-3" />
-            Add + Run
-          </Button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -225,8 +255,9 @@ export function PlanSelectionPopover({
     textareaRef.current?.focus();
   }, []);
   usePopoverDismiss(onClose, popoverRef);
+  const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
   const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, previewText } =
-    usePopoverComposer(comment, selectedText, onAdd, onClose, onAddAndRun);
+    usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
   const { left, top } = computePopoverPosition(position);
 
   const handleDelete = onDelete
@@ -267,7 +298,7 @@ export function PlanSelectionPopover({
           isEditing={!!editingComment}
           isDisabled={isDisabled}
           onSubmit={handleSubmit}
-          onSubmitAndRun={onAddAndRun ? handleSubmitAndRun : undefined}
+          onSubmitAndRun={effectiveOnAddAndRun ? handleSubmitAndRun : undefined}
           onDelete={handleDelete}
         />
       </div>

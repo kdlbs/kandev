@@ -265,6 +265,10 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   useEffect(() => {
     handleCommentUpdateRef.current = handleCommentUpdate;
   }, [handleCommentUpdate]);
+  const handleCommentRunRef = useRef(onCommentRun);
+  useEffect(() => {
+    handleCommentRunRef.current = onCommentRun;
+  }, [onCommentRun]);
 
   useViewZones({
     modifiedEditor,
@@ -278,6 +282,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     handleCommentSubmitAndRunRef,
     handleCommentDeleteRef,
     handleCommentUpdateRef,
+    handleCommentRunRef,
     clearModifiedGutter,
     clearOriginalGutter,
     setShowCommentForm,

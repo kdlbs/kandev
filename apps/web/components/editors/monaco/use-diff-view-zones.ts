@@ -22,6 +22,7 @@ interface UseViewZonesParams {
   handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
   handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
+  handleCommentRunRef?: React.RefObject<((comment: DiffComment) => void) | undefined>;
   clearModifiedGutter: () => void;
   clearOriginalGutter: () => void;
   setShowCommentForm: (v: boolean) => void;
@@ -80,11 +81,51 @@ type CreateZonesParams = {
   handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
   handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
+  handleCommentRunRef?: React.RefObject<((comment: DiffComment) => void) | undefined>;
   clearModifiedGutter: () => void;
   clearOriginalGutter: () => void;
   setShowCommentForm: (v: boolean) => void;
   setSelectedLineRange: (v: null) => void;
 };
+
+function createCommentNode(
+  comment: DiffComment,
+  params: Pick<
+    CreateZonesParams,
+    | "setEditingComment"
+    | "handleCommentUpdateRef"
+    | "handleCommentDeleteRef"
+    | "handleCommentRunRef"
+  >,
+  isEditing: boolean,
+) {
+  if (isEditing) {
+    return createElement(
+      "div",
+      { className: "px-2 py-0.5" },
+      createElement(CommentForm, {
+        initialContent: comment.text,
+        onSubmit: (c: string) => params.handleCommentUpdateRef.current?.(comment.id, c),
+        onCancel: () => params.setEditingComment(null),
+        isEditing: true,
+      }),
+    );
+  }
+  return createElement(
+    "div",
+    { className: "px-2 py-0.5" },
+    createElement(CommentDisplay, {
+      comment,
+      onDelete: () => params.handleCommentDeleteRef.current?.(comment.id),
+      onEdit: () => params.setEditingComment(comment.id),
+      onRun: params.handleCommentRunRef?.current
+        ? () => params.handleCommentRunRef!.current?.(comment)
+        : undefined,
+      showCode: false,
+      compact: true,
+    }),
+  );
+}
 
 function createZones(params: CreateZonesParams): ViewZoneEntry[] {
   const {
@@ -94,11 +135,8 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
     showCommentForm,
     selectedLineRange,
     editingCommentId,
-    setEditingComment,
     handleCommentSubmitRef,
     handleCommentSubmitAndRunRef,
-    handleCommentDeleteRef,
-    handleCommentUpdateRef,
     clearModifiedGutter,
     clearOriginalGutter,
     setShowCommentForm,
@@ -110,28 +148,7 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
     const side = comment.side === "deletions" ? "original" : "modified";
     const editor = side === "modified" ? modifiedEditor : originalEditor;
     const isEditing = editingCommentId === comment.id;
-    const node = isEditing
-      ? createElement(
-          "div",
-          { className: "px-2 py-0.5" },
-          createElement(CommentForm, {
-            initialContent: comment.text,
-            onSubmit: (c: string) => handleCommentUpdateRef.current?.(comment.id, c),
-            onCancel: () => setEditingComment(null),
-            isEditing: true,
-          }),
-        )
-      : createElement(
-          "div",
-          { className: "px-2 py-0.5" },
-          createElement(CommentDisplay, {
-            comment,
-            onDelete: () => handleCommentDeleteRef.current?.(comment.id),
-            onEdit: () => setEditingComment(comment.id),
-            showCode: false,
-            compact: true,
-          }),
-        );
+    const node = createCommentNode(comment, params, isEditing);
     addZone({
       targetEditor: editor,
       side,
@@ -187,6 +204,7 @@ export function useViewZones({
   handleCommentSubmitAndRunRef,
   handleCommentDeleteRef,
   handleCommentUpdateRef,
+  handleCommentRunRef,
   clearModifiedGutter,
   clearOriginalGutter,
   setShowCommentForm,
@@ -215,6 +233,7 @@ export function useViewZones({
       handleCommentSubmitAndRunRef,
       handleCommentDeleteRef,
       handleCommentUpdateRef,
+      handleCommentRunRef,
       clearModifiedGutter,
       clearOriginalGutter,
       setShowCommentForm,

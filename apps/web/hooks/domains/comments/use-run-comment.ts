@@ -69,29 +69,34 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
 
       const content = formatSingleComment(comment);
 
-      if (isAgentBusy) {
-        await appendToQueue({
-          session_id: sessionId,
-          task_id: taskId,
-          content,
-        });
-      } else {
-        const client = getWebSocketClient();
-        if (!client) return;
-
-        await client.request(
-          "message.add",
-          {
-            task_id: taskId,
+      try {
+        if (isAgentBusy) {
+          await appendToQueue({
             session_id: sessionId,
+            task_id: taskId,
             content,
-            has_review_comments: true,
-          },
-          10000,
-        );
-      }
+          });
+        } else {
+          const client = getWebSocketClient();
+          if (!client) return;
 
-      markCommentsSent([comment.id]);
+          await client.request(
+            "message.add",
+            {
+              task_id: taskId,
+              session_id: sessionId,
+              content,
+              has_review_comments: true,
+            },
+            10000,
+          );
+        }
+
+        markCommentsSent([comment.id]);
+      } catch (error) {
+        console.error("Failed to send comment to agent:", error);
+        throw error;
+      }
     },
     [sessionId, taskId, isAgentBusy, markCommentsSent],
   );

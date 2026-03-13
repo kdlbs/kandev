@@ -1,8 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlus, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -137,7 +143,36 @@ function PopoverBody({
         <span className="text-xs text-muted-foreground/70">
           {"\u2318"}+Enter to add{handleSubmitAndRun ? `, ${"\u2318"}+Shift+Enter to run` : ""}
         </span>
-        <div className="flex gap-1">
+        {handleSubmitAndRun ? (
+          <div className="flex">
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={isDisabled}
+              className="gap-1.5 rounded-r-none cursor-pointer"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              Add
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  disabled={isDisabled}
+                  className="rounded-l-none border-l border-primary-foreground/20 px-1 cursor-pointer"
+                >
+                  <IconChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[140px]">
+                <DropdownMenuItem onClick={handleSubmitAndRun} className="cursor-pointer">
+                  <IconPlayerPlay className="h-3 w-3" />
+                  Add + Run
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : (
           <Button
             size="sm"
             onClick={handleSubmit}
@@ -147,18 +182,7 @@ function PopoverBody({
             <IconPlus className="h-3.5 w-3.5" />
             Add
           </Button>
-          {handleSubmitAndRun && (
-            <Button
-              size="sm"
-              onClick={handleSubmitAndRun}
-              disabled={isDisabled}
-              className="gap-1.5 cursor-pointer"
-            >
-              <IconPlayerPlay className="h-3.5 w-3.5" />
-              Add + Run
-            </Button>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );

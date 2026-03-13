@@ -20,6 +20,7 @@ type UseAnnotationRendererOpts = {
   handleCommentSubmitAndRun?: (content: string) => void;
   handleCommentUpdate: (commentId: string, content: string) => void;
   handleCommentDelete: (commentId: string) => void;
+  handleCommentRun?: (comment: DiffComment) => void;
   setShowCommentForm: (show: boolean) => void;
   setSelectedLines: (lines: null) => void;
   setEditingComment: (id: string | null) => void;
@@ -36,6 +37,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     handleCommentSubmitAndRun,
     handleCommentUpdate,
     handleCommentDelete,
+    handleCommentRun,
     setShowCommentForm,
     setSelectedLines,
     setEditingComment,
@@ -92,6 +94,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
               comment={comment}
               onDelete={() => handleCommentDelete(comment.id)}
               onEdit={() => setEditingComment(comment.id)}
+              onRun={handleCommentRun ? () => handleCommentRun(comment) : undefined}
               showCode={false}
             />
           </div>
@@ -103,6 +106,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     [
       setEditingComment,
       handleCommentDelete,
+      handleCommentRun,
       handleCommentUpdate,
       handleCommentSubmit,
       handleCommentSubmitAndRun,
