@@ -214,8 +214,8 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 }
 
 // publishMessageEvent publishes message events to the event bus.
-// System-injected content (wrapped in <kandev-system> tags) is stripped from the content
-// so users don't see workflow step prompt modifications in the UI.
+// Only true system-injected content (wrapped in <kandev-system> tags) is stripped
+// from the visible message content delivered to clients.
 func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")

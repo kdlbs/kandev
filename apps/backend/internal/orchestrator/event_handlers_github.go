@@ -360,6 +360,7 @@ func (s *Service) backfillRepoProvider(store repoStore, repo *models.Repository)
 // ensureSessionPRWatch creates a PRWatch (pr_number=0) for a session's branch
 // so the poller will search for a PR on GitHub. Runs as a background goroutine.
 func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, branch string) {
+	branch = s.resolvePRWatchBranch(ctx, taskID, sessionID, branch)
 	if s.githubService == nil || branch == "" {
 		return
 	}
@@ -375,6 +376,33 @@ func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, b
 			zap.String("branch", branch),
 			zap.Error(err))
 	}
+}
+
+func (s *Service) resolvePRWatchBranch(ctx context.Context, taskID, sessionID, fallback string) string {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return fallback
+	}
+
+	taskRepo, err := store.GetPrimaryTaskRepository(ctx, taskID)
+	if err == nil && taskRepo != nil && strings.TrimSpace(taskRepo.CheckoutBranch) != "" {
+		return strings.TrimSpace(taskRepo.CheckoutBranch)
+	}
+
+	if fallback != "" {
+		return fallback
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeBranch != "" {
+			return wt.WorktreeBranch
+		}
+	}
+	return ""
 }
 
 // resolveTaskRepo looks up the GitHub owner and repo name for a task's primary repository.
@@ -449,18 +477,7 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Get the session's branch from the first worktree with a non-empty branch
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return false, nil
-	}
-	branch := ""
-	for _, wt := range session.Worktrees {
-		if wt.WorktreeBranch != "" {
-			branch = wt.WorktreeBranch
-			break
-		}
-	}
+	branch := s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
 	if branch == "" {
 		return false, nil
 	}

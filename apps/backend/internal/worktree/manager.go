@@ -250,9 +250,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 // createWorktree performs the actual git worktree creation.
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	worktreeDirName, branchName := m.buildWorktreeNames(req)
+	startPoint := baseRef
 
 	// If a checkout branch is specified (e.g. a PR's head branch), fetch it
-	// and checkout it directly in the worktree instead of creating a new branch.
+	// and use it as the starting point for a unique local worktree branch.
+	// This avoids binding multiple worktrees to the same shared branch name.
 	var fetchResult *FetchBranchResult
 	if req.CheckoutBranch != "" {
 		var err error
@@ -260,7 +262,7 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		if err != nil {
 			return nil, err
 		}
-		branchName = req.CheckoutBranch
+		startPoint = req.CheckoutBranch
 	}
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -268,14 +270,9 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		return nil, fmt.Errorf("failed to get worktree path: %w", err)
 	}
 
-	var worktreeID string
-	if req.CheckoutBranch != "" {
-		// Checkout the existing PR branch directly in the worktree.
-		worktreeID, err = m.gitAddWorktreeExisting(ctx, req.RepositoryPath, branchName, worktreePath)
-	} else {
-		// Create a new branch based on the base ref.
-		worktreeID, err = m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, baseRef)
-	}
+	// Always create a unique branch for the worktree, even when a PR checkout
+	// branch is provided. The checkout branch acts as the start point only.
+	worktreeID, err := m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, startPoint)
 	if err != nil {
 		return nil, err
 	}

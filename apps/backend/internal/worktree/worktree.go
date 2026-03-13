@@ -97,9 +97,9 @@ type CreateRequest struct {
 	// Typically "main" or "master".
 	BaseBranch string
 
-	// CheckoutBranch is a branch to fetch from origin and checkout after worktree creation.
-	// Used for PR reviews where the worktree is created from the default branch, then
-	// the PR's head branch is fetched and checked out. Empty means no post-creation checkout.
+	// CheckoutBranch is a branch to fetch from origin and use as the starting point
+	// for the worktree's unique local branch. Used for PR reviews so multiple
+	// sessions can open the same PR head branch without branch checkout conflicts.
 	CheckoutBranch string
 
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.

@@ -475,9 +475,11 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
 // If step.Prompt contains {{task_prompt}}, it is replaced with the base prompt.
-// Otherwise, step.Prompt is prepended to the base prompt.
-// System-injected content is wrapped in <kandev-system> tags so it can be stripped when displaying to users.
+// Otherwise, step.Prompt fully replaces the base prompt.
+// If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
+// Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
 func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
+	_ = sessionID
 	var parts []string
 
 	// Build the prompt from step.Prompt template and base prompt
@@ -488,9 +490,8 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.Workflow
 			combined := strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
 			parts = append(parts, combined)
 		} else {
-			// Prepend step prompt, then base prompt
-			parts = append(parts, sysprompt.Wrap(interpolatedPrompt))
-			parts = append(parts, basePrompt)
+			// A step prompt without {{task_prompt}} is treated as the full visible prompt.
+			parts = append(parts, interpolatedPrompt)
 		}
 	} else {
 		// No step prompt, just use base prompt

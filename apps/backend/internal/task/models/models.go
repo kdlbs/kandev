@@ -141,8 +141,8 @@ type Message struct {
 }
 
 // ToAPI converts internal Message to API type.
-// System-injected content (wrapped in <kandev-system> tags) is stripped from the content
-// so users don't see workflow step prompt modifications in the UI.
+// Only true system-injected content (wrapped in <kandev-system> tags) is stripped
+// from the visible content sent to the UI.
 func (m *Message) ToAPI() *v1.Message {
 	messageType := string(m.Type)
 	if messageType == "" {

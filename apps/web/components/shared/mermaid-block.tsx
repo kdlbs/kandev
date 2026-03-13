@@ -82,8 +82,11 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   };
 
   return (
-    <div className="mermaid-block group/mermaid relative my-3 rounded-md border border-border/50 bg-muted/20 inline-block">
-      <div className="overflow-auto p-3" style={{ display: showCode ? "none" : undefined }}>
+    <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
+      <div
+        className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
+        style={{ display: showCode ? "none" : undefined }}
+      >
         <div style={wrapperStyle}>
           <div ref={containerRef} style={containerStyle} />
         </div>
