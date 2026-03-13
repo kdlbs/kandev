@@ -91,6 +91,7 @@ export function useDiffComments({
         description: "Your comment will be sent with your next message.",
         duration: 2000,
       });
+      return comment;
     },
     [sessionId, filePath, diff, newContent, oldContent, storeAddComment],
   );

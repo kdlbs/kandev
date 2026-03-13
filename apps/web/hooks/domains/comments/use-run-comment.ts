@@ -86,7 +86,7 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
               task_id: taskId,
               session_id: sessionId,
               content,
-              has_review_comments: true,
+              ...(comment.source !== "plan" && { has_review_comments: true }),
             },
             10000,
           );

@@ -36,7 +36,6 @@ type TaskSwitcherItem = {
   updatedAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
-  prState?: "open" | "closed" | "merged" | null;
 };
 
 type TaskSwitcherProps = {
@@ -150,7 +149,6 @@ function TaskSwitcherSection({
             taskId={task.id}
             primarySessionId={task.primarySessionId ?? null}
             updatedAt={task.updatedAt}
-            prState={task.prState}
             onClick={() => onSelectTask(task.id)}
             onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
             onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}

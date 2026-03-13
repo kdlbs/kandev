@@ -120,9 +120,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
         <div className={cn("relative", isFlashing && "animate-changes-flash")}>
           <DockviewDefaultTab {...props} />
           {badgeCount > 0 && (
-            <span className="absolute -top-1.5 -right-1 min-w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] font-medium flex items-center justify-center px-1 pointer-events-none">
-              {badgeCount}
-            </span>
+            <span className="absolute top-0.5 left-0 size-2 rounded-full bg-primary pointer-events-none" />
           )}
         </div>
       </ContextMenuTrigger>

@@ -246,11 +246,8 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
           runAfter?.(comment);
         }
       } else if (sessionId) {
-        addComment(selectedLines, content);
-        if (runAfter) {
-          const comment = createCommentFromSelection(content);
-          if (comment) runAfter(comment);
-        }
+        const stored = addComment(selectedLines, content);
+        if (runAfter && stored) runAfter(stored);
       }
       setShowCommentForm(false);
       setSelectedLines(null);

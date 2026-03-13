@@ -128,13 +128,20 @@ function useSidebarData(workspaceId: string | null) {
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
-    const repositoryPathsById = new Map(
-      repositories.map((repo: Repository) => [repo.id, repo.local_path]),
+    const repositorySlugById = new Map(
+      repositories.map((repo: Repository) => [
+        repo.id,
+        repo.provider_owner && repo.provider_name
+          ? `${repo.provider_owner}/${repo.provider_name}`
+          : repo.local_path,
+      ]),
     );
     const items = allTasks.map((task: KanbanState["tasks"][number]) => {
       const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
       const resolvedSessionState =
         sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
+      const repoSlug = task.repositoryId ? repositorySlugById.get(task.repositoryId) : undefined;
+      const pr = taskPRsByTaskId[task.id];
       return {
         id: task.id,
         title: task.title,
@@ -142,7 +149,7 @@ function useSidebarData(workspaceId: string | null) {
         sessionState: resolvedSessionState,
         description: task.description,
         workflowStepId: task.workflowStepId as string | undefined,
-        repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
+        repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
         diffStats: sessionInfo.diffStats,
         isRemoteExecutor: task.isRemoteExecutor,
         remoteExecutorType: task.primaryExecutorType ?? undefined,
@@ -150,7 +157,6 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: task.primarySessionId ?? null,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
         isArchived: false as boolean,
-        prState: (taskPRsByTaskId[task.id]?.state as "open" | "closed" | "merged") ?? null,
       };
     });
     if (
@@ -173,9 +179,6 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
         isArchived: true,
-        prState:
-          (taskPRsByTaskId[archivedState.archivedTaskId]?.state as "open" | "closed" | "merged") ??
-          null,
       });
     }
     return items;
