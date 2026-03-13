@@ -25,7 +25,7 @@ interface UseDiffCommentsReturn {
   /** Annotations formatted for @pierre/diffs */
   annotations: CommentAnnotation[];
   /** Add a new comment */
-  addComment: (range: SelectedLineRange, text: string) => void;
+  addComment: (range: SelectedLineRange, text: string) => DiffComment;
   /** Remove a comment */
   removeComment: (commentId: string) => void;
   /** Update a comment */

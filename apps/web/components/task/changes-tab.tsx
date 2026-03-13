@@ -125,7 +125,9 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={handleCloseOthers}>Close Others</ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
+          Close Others
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
