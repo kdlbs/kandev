@@ -2,6 +2,19 @@
 
 All notable changes to Kandev.
 
+## 0.21 - 2026-03-13
+
+### Features
+
+- add "Add + Run" button to send comments directly to agent ([#430](https://github.com/kdlbs/kandev/pull/430))
+- agent-native config mode ([#396](https://github.com/kdlbs/kandev/pull/396))
+- add archive action to task card menu ([#429](https://github.com/kdlbs/kandev/pull/429))
+
+### Bug Fixes
+
+- server-side task ID injection for plan tools and UI polish ([#431](https://github.com/kdlbs/kandev/pull/431))
+- skip executor preparer for repo-less tasks like config chat ([#432](https://github.com/kdlbs/kandev/pull/432))
+
 ## 0.20 - 2026-03-12
 
 ### Features
