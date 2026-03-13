@@ -111,6 +111,7 @@ const (
 	ActionMessageQueueCancel        = "message.queue.cancel"
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions

@@ -80,6 +80,7 @@ function buildCommentZones(
           comment={comment}
           onDelete={() => state.handleCommentDeleteRef.current(comment.id)}
           onEdit={() => state.setEditingComment(comment.id)}
+          onRun={() => state.handleCommentRunRef.current(comment)}
           showCode={false}
           compact
         />
@@ -94,6 +95,7 @@ function buildCommentZones(
       <div className="px-2 py-1" data-comment-zone>
         <CommentForm
           onSubmit={(c) => state.handleCommentSubmitRef.current(c)}
+          onSubmitAndRun={(c) => state.handleCommentSubmitAndRunRef.current(c)}
           onCancel={() => {
             state.setFormZoneRange(null);
             state.clearGutterSelection();

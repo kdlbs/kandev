@@ -31,6 +31,7 @@ interface UseDiffViewerCommentsOpts {
   compact: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onModifiedContentChange?: (filePath: string, content: string) => void;
 }
@@ -43,6 +44,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     compact,
     onCommentAdd,
     onCommentDelete,
+    onCommentRun,
     externalComments,
     onModifiedContentChange,
   } = opts;
@@ -196,6 +198,48 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     ],
   );
 
+  const handleCommentSubmitAndRun = useCallback(
+    (content: string) => {
+      if (!selectedLineRange || !onCommentRun) return;
+      const comment = buildDiffComment({
+        filePath: data.filePath,
+        sessionId: sessionId || "",
+        startLine: selectedLineRange.start,
+        endLine: selectedLineRange.end,
+        side: (selectedLineRange.side || "additions") as DiffComment["side"],
+        text: content,
+      });
+      if (onCommentAdd && externalComments !== undefined) {
+        onCommentAdd(comment);
+      } else if (sessionId) {
+        addComment(
+          {
+            start: selectedLineRange.start,
+            end: selectedLineRange.end,
+            side: selectedLineRange.side as "additions" | "deletions",
+          },
+          content,
+        );
+      }
+      onCommentRun(comment);
+      setShowCommentForm(false);
+      setSelectedLineRange(null);
+      clearModifiedGutter();
+      clearOriginalGutter();
+    },
+    [
+      selectedLineRange,
+      sessionId,
+      data.filePath,
+      addComment,
+      onCommentAdd,
+      onCommentRun,
+      externalComments,
+      clearModifiedGutter,
+      clearOriginalGutter,
+    ],
+  );
+
   const { handleCommentDelete, handleCommentUpdate } = useCommentActions({
     removeComment,
     updateComment,
@@ -209,6 +253,10 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   useEffect(() => {
     handleCommentSubmitRef.current = handleCommentSubmit;
   }, [handleCommentSubmit]);
+  const handleCommentSubmitAndRunRef = useRef(onCommentRun ? handleCommentSubmitAndRun : undefined);
+  useEffect(() => {
+    handleCommentSubmitAndRunRef.current = onCommentRun ? handleCommentSubmitAndRun : undefined;
+  }, [handleCommentSubmitAndRun, onCommentRun]);
   const handleCommentDeleteRef = useRef(handleCommentDelete);
   useEffect(() => {
     handleCommentDeleteRef.current = handleCommentDelete;
@@ -217,6 +265,10 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   useEffect(() => {
     handleCommentUpdateRef.current = handleCommentUpdate;
   }, [handleCommentUpdate]);
+  const handleCommentRunRef = useRef(onCommentRun);
+  useEffect(() => {
+    handleCommentRunRef.current = onCommentRun;
+  }, [onCommentRun]);
 
   useViewZones({
     modifiedEditor,
@@ -227,8 +279,10 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     editingCommentId,
     setEditingComment,
     handleCommentSubmitRef,
+    handleCommentSubmitAndRunRef,
     handleCommentDeleteRef,
     handleCommentUpdateRef,
+    handleCommentRunRef,
     clearModifiedGutter,
     clearOriginalGutter,
     setShowCommentForm,

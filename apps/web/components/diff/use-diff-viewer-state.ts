@@ -129,6 +129,7 @@ type UseDiffViewerStateOpts = {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
   /** Enable diff expansion (requires fetching full file content) */
@@ -178,26 +179,13 @@ function useDiffViewerAnnotations({
   return annotations;
 }
 
-function useDiffViewerCommentHandlers({
-  selectedLines,
-  setSelectedLines,
-  setShowCommentForm,
-  enableComments,
-  onCommentAdd,
-  externalComments,
-  data,
-  sessionId,
-  addComment,
-  removeComment,
-  updateComment,
-  setEditingComment,
-  onCommentDelete,
-}: {
+type CommentHandlerOpts = {
   selectedLines: SelectedLineRange | null;
   setSelectedLines: React.Dispatch<React.SetStateAction<SelectedLineRange | null>>;
   setShowCommentForm: React.Dispatch<React.SetStateAction<boolean>>;
   enableComments: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   data: FileDiffData;
   sessionId?: string;
@@ -206,7 +194,25 @@ function useDiffViewerCommentHandlers({
   updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
   setEditingComment: (commentId: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
-}) {
+};
+
+function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
+  const {
+    selectedLines,
+    setSelectedLines,
+    setShowCommentForm,
+    enableComments,
+    onCommentAdd,
+    onCommentRun,
+    externalComments,
+    data,
+    sessionId,
+    addComment,
+    removeComment,
+    updateComment,
+    setEditingComment,
+    onCommentDelete,
+  } = opts;
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
       setSelectedLines(range);
@@ -215,22 +221,36 @@ function useDiffViewerCommentHandlers({
     [enableComments, setSelectedLines, setShowCommentForm],
   );
 
-  const handleCommentSubmit = useCallback(
-    (content: string) => {
+  const createCommentFromSelection = useCallback(
+    (content: string): DiffComment | null => {
+      if (!selectedLines) return null;
+      return buildDiffComment({
+        filePath: data.filePath,
+        sessionId: sessionId || "",
+        startLine: selectedLines.start,
+        endLine: selectedLines.end,
+        side: (selectedLines.side || "additions") as DiffComment["side"],
+        text: content,
+      });
+    },
+    [selectedLines, data.filePath, sessionId],
+  );
+
+  const submitComment = useCallback(
+    (content: string, runAfter?: (c: DiffComment) => void) => {
       if (!selectedLines) return;
       if (onCommentAdd && externalComments !== undefined) {
-        onCommentAdd(
-          buildDiffComment({
-            filePath: data.filePath,
-            sessionId: sessionId || "",
-            startLine: selectedLines.start,
-            endLine: selectedLines.end,
-            side: (selectedLines.side || "additions") as DiffComment["side"],
-            text: content,
-          }),
-        );
+        const comment = createCommentFromSelection(content);
+        if (comment) {
+          onCommentAdd(comment);
+          runAfter?.(comment);
+        }
       } else if (sessionId) {
         addComment(selectedLines, content);
+        if (runAfter) {
+          const comment = createCommentFromSelection(content);
+          if (comment) runAfter(comment);
+        }
       }
       setShowCommentForm(false);
       setSelectedLines(null);
@@ -239,12 +259,22 @@ function useDiffViewerCommentHandlers({
       selectedLines,
       onCommentAdd,
       externalComments,
-      data.filePath,
       sessionId,
       addComment,
+      createCommentFromSelection,
       setShowCommentForm,
       setSelectedLines,
     ],
+  );
+
+  const handleCommentSubmit = useCallback(
+    (content: string) => submitComment(content),
+    [submitComment],
+  );
+
+  const handleCommentSubmitAndRun = useCallback(
+    (content: string) => submitComment(content, onCommentRun),
+    [submitComment, onCommentRun],
   );
 
   const { handleCommentDelete, handleCommentUpdate } = useCommentActions({
@@ -255,7 +285,13 @@ function useDiffViewerCommentHandlers({
     externalComments,
   });
 
-  return { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate };
+  return {
+    handleLineSelectionEnd,
+    handleCommentSubmit,
+    handleCommentSubmitAndRun: onCommentRun ? handleCommentSubmitAndRun : undefined,
+    handleCommentDelete,
+    handleCommentUpdate,
+  };
 }
 
 function useRevertBlock(
@@ -282,6 +318,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentRun,
     externalComments,
     onRevertBlock,
     enableExpansion = false,
@@ -308,15 +345,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
 
   const comments = externalComments || internalComments;
   const baseDiffMetadata = useDiffMetadata(data);
-
-  const {
-    metadata: fileDiffMetadata,
-    isContentLoaded: isExpansionContentLoaded,
-    isLoading: isExpansionLoading,
-    error: expansionError,
-    loadContent: loadExpansionContent,
-    canExpand,
-  } = useExpandableDiff({
+  const expansion = useExpandableDiff({
     sessionId,
     filePath: data.filePath,
     baseRef,
@@ -334,31 +363,31 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     showCommentForm,
     selectedLines,
     enableAcceptReject,
-    fileDiffMetadata,
+    fileDiffMetadata: expansion.metadata,
     changeLineMapRef,
     revertInfoRef,
   });
 
-  const { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate } =
-    useDiffViewerCommentHandlers({
-      selectedLines,
-      setSelectedLines,
-      setShowCommentForm,
-      enableComments,
-      onCommentAdd,
-      externalComments,
-      data,
-      sessionId,
-      addComment,
-      removeComment,
-      updateComment,
-      setEditingComment,
-      onCommentDelete,
-    });
+  const commentHandlers = useDiffViewerCommentHandlers({
+    selectedLines,
+    setSelectedLines,
+    setShowCommentForm,
+    enableComments,
+    onCommentAdd,
+    onCommentRun,
+    externalComments,
+    data,
+    sessionId,
+    addComment,
+    removeComment,
+    updateComment,
+    setEditingComment,
+    onCommentDelete,
+  });
 
   return {
     comments,
-    fileDiffMetadata,
+    fileDiffMetadata: expansion.metadata,
     annotations,
     selectedLines,
     showCommentForm,
@@ -367,17 +396,13 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     editingCommentId,
     setEditingComment,
     handleRevertBlock,
-    handleLineSelectionEnd,
-    handleCommentSubmit,
-    handleCommentDelete,
-    handleCommentUpdate,
+    ...commentHandlers,
     changeLineMapRef,
     hideTimeoutRef,
-    // Expansion state
-    isExpansionContentLoaded,
-    isExpansionLoading,
-    expansionError,
-    loadExpansionContent,
-    canExpand,
+    isExpansionContentLoaded: expansion.isContentLoaded,
+    isExpansionLoading: expansion.isLoading,
+    expansionError: expansion.error,
+    loadExpansionContent: expansion.loadContent,
+    canExpand: expansion.canExpand,
   };
 }

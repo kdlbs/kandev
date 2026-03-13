@@ -24,6 +24,7 @@ interface DiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
@@ -105,12 +106,21 @@ function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): 
   return areCommentsEqual(prevProps.comments, nextProps.comments);
 }
 
+function NoDiffPlaceholder({ className }: { className?: string }) {
+  return (
+    <div className={cn("rounded-md bg-muted/20 p-4 text-muted-foreground text-xs", className)}>
+      No diff available
+    </div>
+  );
+}
+
 export const DiffViewer = memo(function DiffViewer({
   data,
   enableComments = false,
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentRun,
   comments: externalComments,
   className,
   compact = false,
@@ -142,6 +152,7 @@ export const DiffViewer = memo(function DiffViewer({
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentRun,
     externalComments,
     onRevertBlock,
     enableExpansion,
@@ -159,8 +170,10 @@ export const DiffViewer = memo(function DiffViewer({
     onButtonEnter,
     onButtonLeave,
     handleCommentSubmit: state.handleCommentSubmit,
+    handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
     handleCommentUpdate: state.handleCommentUpdate,
     handleCommentDelete: state.handleCommentDelete,
+    handleCommentRun: onCommentRun,
     setShowCommentForm: state.setShowCommentForm,
     setSelectedLines: state.setSelectedLines,
     setEditingComment: state.setEditingComment,
@@ -189,13 +202,7 @@ export const DiffViewer = memo(function DiffViewer({
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;
 
   if (!state.fileDiffMetadata) {
-    return (
-      <div
-        className={cn("rounded-md  bg-muted/20 p-4 text-muted-foreground", "text-xs", className)}
-      >
-        No diff available
-      </div>
-    );
+    return <NoDiffPlaceholder className={className} />;
   }
 
   return (

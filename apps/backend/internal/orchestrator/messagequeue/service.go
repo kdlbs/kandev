@@ -102,6 +102,26 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	}
 }
 
+// AppendContent appends content to an existing queued message.
+// Returns an error if no message is queued (caller should use QueueMessage instead).
+func (s *Service) AppendContent(ctx context.Context, sessionID, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	msg, exists := s.queued[sessionID]
+	if !exists {
+		return fmt.Errorf("no queued message for session %s", sessionID)
+	}
+
+	msg.Content = msg.Content + "\n\n---\n\n" + content
+	s.logger.Info("content appended to queued message",
+		zap.String("session_id", sessionID),
+		zap.Int("appended_length", len(content)),
+		zap.Int("total_length", len(msg.Content)))
+
+	return nil
+}
+
 // UpdateMessage updates an existing queued message (for arrow up editing)
 func (s *Service) UpdateMessage(ctx context.Context, sessionID, content string) error {
 	s.mu.Lock()

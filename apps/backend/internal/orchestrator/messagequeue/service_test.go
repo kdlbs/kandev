@@ -192,6 +192,60 @@ func TestGetStatus(t *testing.T) {
 	})
 }
 
+func TestAppendContent(t *testing.T) {
+	t.Run("appends content to existing queued message", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "original content", "model-1", "user-1", false, nil)
+		require.NoError(t, err)
+
+		err = svc.AppendContent(ctx, "session-1", "appended content")
+		require.NoError(t, err)
+
+		status := svc.GetStatus(ctx, "session-1")
+		assert.True(t, status.IsQueued)
+		assert.Equal(t, "original content\n\n---\n\nappended content", status.Message.Content)
+	})
+
+	t.Run("appends multiple times", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "first", "model-1", "user-1", false, nil)
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AppendContent(ctx, "session-1", "second"))
+		require.NoError(t, svc.AppendContent(ctx, "session-1", "third"))
+
+		status := svc.GetStatus(ctx, "session-1")
+		assert.Equal(t, "first\n\n---\n\nsecond\n\n---\n\nthird", status.Message.Content)
+	})
+
+	t.Run("returns error when no message queued", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		err := svc.AppendContent(ctx, "session-1", "content")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no queued message")
+	})
+
+	t.Run("preserves message ID after append", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "original", "model-1", "user-1", false, nil)
+		require.NoError(t, err)
+		originalID := msg.ID
+
+		require.NoError(t, svc.AppendContent(ctx, "session-1", "extra"))
+
+		status := svc.GetStatus(ctx, "session-1")
+		assert.Equal(t, originalID, status.Message.ID)
+	})
+}
+
 func TestUpdateMessage(t *testing.T) {
 	t.Run("updates existing queued message content", func(t *testing.T) {
 		svc := setupService(t)

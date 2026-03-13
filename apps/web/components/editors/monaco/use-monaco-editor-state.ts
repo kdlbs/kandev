@@ -3,11 +3,14 @@ import type { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor as monacoEditor, IDisposable } from "monaco-editor";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { useDiffFileComments } from "@/hooks/domains/comments/use-diff-comments";
+import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { buildDiffComment, useCommentedLines } from "@/lib/diff/comment-utils";
+import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
 import { consumePendingCursorPosition } from "@/hooks/use-file-editors";
+import type { DiffComment } from "@/lib/diff/types";
 
 export type FormZoneRange = {
   startLine: number;
@@ -331,20 +334,31 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     [currentSelection],
   );
 
-  const handleCommentSubmit = useCallback(
-    (annotation: string) => {
-      if (!formZoneRange || !sessionId) return;
-      addComment(
-        buildDiffComment({
-          filePath: path,
-          sessionId,
-          startLine: formZoneRange.startLine,
-          endLine: formZoneRange.endLine,
-          side: "additions",
-          text: annotation,
-          codeContent: formZoneRange.codeContent,
-        }),
-      );
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSession = useAppStore((state) => {
+    const sid = state.tasks.activeSessionId;
+    return sid ? (state.taskSessions.items[sid] ?? null) : null;
+  });
+  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
+  const { runComment } = useRunComment({
+    sessionId: sessionId ?? null,
+    taskId: activeTaskId ?? null,
+    isAgentBusy,
+  });
+
+  const createCommentFromForm = useCallback(
+    (annotation: string): DiffComment | null => {
+      if (!formZoneRange || !sessionId) return null;
+      const comment = buildDiffComment({
+        filePath: path,
+        sessionId,
+        startLine: formZoneRange.startLine,
+        endLine: formZoneRange.endLine,
+        side: "additions",
+        text: annotation,
+        codeContent: formZoneRange.codeContent,
+      });
+      addComment(comment);
       setFormZoneRange(null);
       clearGutterSelection();
       const editor = editorRef.current;
@@ -358,12 +372,63 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
             endColumn: pos.column,
           });
       }
-      toast({
-        title: "Comment added",
-        description: "Your comment will be sent with your next message.",
-      });
+      return comment;
     },
-    [formZoneRange, sessionId, path, addComment, clearGutterSelection, toast],
+    [formZoneRange, sessionId, path, addComment, clearGutterSelection],
+  );
+
+  const handleCommentSubmit = useCallback(
+    (annotation: string) => {
+      const comment = createCommentFromForm(annotation);
+      if (comment) {
+        toast({
+          title: "Comment added",
+          description: "Your comment will be sent with your next message.",
+        });
+      }
+    },
+    [createCommentFromForm, toast],
+  );
+
+  const handleCommentSubmitAndRun = useCallback(
+    async (annotation: string) => {
+      const comment = createCommentFromForm(annotation);
+      if (comment) {
+        try {
+          await runComment(comment);
+          toast({
+            title: "Comment sent",
+            description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+          });
+        } catch {
+          toast({
+            title: "Failed to send comment",
+            description: "Please try again.",
+            variant: "error",
+          });
+        }
+      }
+    },
+    [createCommentFromForm, runComment, isAgentBusy, toast],
+  );
+
+  const handleCommentRun = useCallback(
+    async (comment: DiffComment) => {
+      try {
+        await runComment(comment);
+        toast({
+          title: "Comment sent",
+          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+        });
+      } catch {
+        toast({
+          title: "Failed to send comment",
+          description: "Please try again.",
+          variant: "error",
+        });
+      }
+    },
+    [runComment, isAgentBusy, toast],
   );
 
   const handleDeleteComment = useCallback(
@@ -388,12 +453,20 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   useEffect(() => {
     handleCommentSubmitRef.current = handleCommentSubmit;
   }, [handleCommentSubmit]);
+  const handleCommentSubmitAndRunRef = useRef(handleCommentSubmitAndRun);
+  useEffect(() => {
+    handleCommentSubmitAndRunRef.current = handleCommentSubmitAndRun;
+  }, [handleCommentSubmitAndRun]);
   useEffect(() => {
     handleCommentDeleteRef.current = handleDeleteComment;
   }, [handleDeleteComment]);
   useEffect(() => {
     handleCommentUpdateRef.current = handleUpdateComment;
   }, [handleUpdateComment]);
+  const handleCommentRunRef = useRef(handleCommentRun);
+  useEffect(() => {
+    handleCommentRunRef.current = handleCommentRun;
+  }, [handleCommentRun]);
 
   return {
     wrapEnabled,
@@ -415,7 +488,9 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     handleChange,
     handleFloatingButtonClick,
     handleCommentSubmitRef,
+    handleCommentSubmitAndRunRef,
     handleCommentDeleteRef,
     handleCommentUpdateRef,
+    handleCommentRunRef,
   };
 }
