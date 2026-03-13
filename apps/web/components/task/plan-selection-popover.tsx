@@ -2,21 +2,10 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import {
-  IconChevronDown,
-  IconPlus,
-  IconTrash,
-  IconGripHorizontal,
-  IconPlayerPlay,
-} from "@tabler/icons-react";
+import { IconPlus, IconTrash, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { Textarea } from "@kandev/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type SelectionPosition = {
@@ -193,46 +182,45 @@ function PopoverActions({
           </Button>
         )}
       </div>
-      {onSubmitAndRun && !isEditing ? (
-        <div className="flex">
-          <Button
-            size="sm"
-            onClick={onSubmit}
-            disabled={isDisabled}
-            className="h-7 gap-1 rounded-r-none text-xs cursor-pointer"
-          >
-            <IconPlus className="h-3 w-3" />
-            Add
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+      <TooltipProvider delayDuration={400}>
+        <div className="inline-flex">
+          <Tooltip>
+            <TooltipTrigger asChild>
               <Button
                 size="sm"
+                variant={onSubmitAndRun && !isEditing ? "outline" : "default"}
+                onClick={onSubmit}
                 disabled={isDisabled}
-                className="h-7 cursor-pointer rounded-l-none border-l border-primary-foreground/20 px-1 text-xs"
+                className={`h-7 gap-1 text-xs cursor-pointer ${onSubmitAndRun && !isEditing ? "rounded-r-none border-r-0" : ""}`}
               >
-                <IconChevronDown className="h-3 w-3" />
+                <IconPlus className="h-3 w-3" />
+                {isEditing ? "Update" : "Add"}
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[140px]">
-              <DropdownMenuItem onClick={onSubmitAndRun} className="cursor-pointer">
-                <IconPlayerPlay className="h-3 w-3" />
-                Add + Run
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{isEditing ? "Update comment" : "Save comment for review"}</p>
+            </TooltipContent>
+          </Tooltip>
+          {onSubmitAndRun && !isEditing && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  onClick={onSubmitAndRun}
+                  disabled={isDisabled}
+                  className="h-7 gap-1 rounded-l-none text-xs cursor-pointer"
+                >
+                  <IconPlayerPlay className="h-3 w-3" />
+                  Run
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>Save and send to agent</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
-      ) : (
-        <Button
-          size="sm"
-          onClick={onSubmit}
-          disabled={isDisabled}
-          className="h-7 gap-1 text-xs cursor-pointer"
-        >
-          <IconPlus className="h-3 w-3" />
-          {isEditing ? "Update" : "Add"}
-        </Button>
-      )}
+      </TooltipProvider>
     </div>
   );
 }
