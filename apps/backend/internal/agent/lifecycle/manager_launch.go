@@ -294,6 +294,17 @@ func (m *Manager) runEnvironmentPreparer(
 		return nil
 	}
 
+	// Skip environment preparation for repo-less tasks (e.g. config chat).
+	// Preparers assume a repository is available; without one the session
+	// falls through to the quick-chat workspace path instead.
+	if req.RepositoryPath == "" {
+		m.logger.Debug("skipping environment preparer — no repository path",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.String("preparer", preparer.Name()))
+		return nil
+	}
+
 	prepReq := &EnvPrepareRequest{
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
