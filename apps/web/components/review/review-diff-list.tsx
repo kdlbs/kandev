@@ -383,7 +383,7 @@ async function revertBlock(sessionId: string, filePath: string, info: RevertBloc
 }
 
 function useScrollIntoViewOnSelect(
-  isSelected: boolean,
+  isSelected: boolean | undefined,
   sectionRef: React.RefObject<HTMLDivElement> | undefined,
   setCollapsed: React.Dispatch<React.SetStateAction<boolean>>,
 ) {
