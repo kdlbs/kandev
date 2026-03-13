@@ -125,6 +125,7 @@ export function GlobalCommands() {
   const openQuickChat = useAppStore((s) => s.openQuickChat);
   const startNewConfigChat = useAppStore((s) => s.startNewConfigChat);
   const openConfigChat = useAppStore((s) => s.openConfigChat);
+  const configChatSessions = useAppStore((s) => s.configChat.sessions);
   const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
   const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
 
@@ -145,14 +146,21 @@ export function GlobalCommands() {
 
   const handleOpenConfigChat = useCallback(() => {
     if (!activeWorkspaceId) return;
-    // Reuse existing session if one is active for this workspace (mirrors FAB behavior)
+    // Reuse existing session if one is active for this workspace
     if (configChatActiveSessionId && configChatWorkspaceId === activeWorkspaceId) {
       openConfigChat(configChatActiveSessionId, activeWorkspaceId);
+      return;
+    }
+    // Check for a persisted session for this workspace
+    const existingSession = configChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
+    if (existingSession) {
+      openConfigChat(existingSession.sessionId, activeWorkspaceId);
       return;
     }
     startNewConfigChat(activeWorkspaceId);
   }, [
     activeWorkspaceId,
+    configChatSessions,
     configChatActiveSessionId,
     configChatWorkspaceId,
     openConfigChat,
