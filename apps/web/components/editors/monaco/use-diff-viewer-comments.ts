@@ -253,9 +253,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   useEffect(() => {
     handleCommentSubmitRef.current = handleCommentSubmit;
   }, [handleCommentSubmit]);
-  const handleCommentSubmitAndRunRef = useRef(
-    onCommentRun ? handleCommentSubmitAndRun : undefined,
-  );
+  const handleCommentSubmitAndRunRef = useRef(onCommentRun ? handleCommentSubmitAndRun : undefined);
   useEffect(() => {
     handleCommentSubmitAndRunRef.current = onCommentRun ? handleCommentSubmitAndRun : undefined;
   }, [handleCommentSubmitAndRun, onCommentRun]);

@@ -63,9 +63,14 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
   const commentState = useDiffViewerComments({
-    data, sessionId, compact,
-    onCommentAdd, onCommentDelete, onCommentRun,
-    externalComments, onModifiedContentChange,
+    data,
+    sessionId,
+    compact,
+    onCommentAdd,
+    onCommentDelete,
+    onCommentRun,
+    externalComments,
+    onModifiedContentChange,
   });
 
   useCaptureKeydown(wrapperRef, { metaOrCtrl: true, key: "k" }, () => setCommandPanelOpen(true));
@@ -73,7 +78,11 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   useLayoutEffect(() => {
     const ref = commentState.diffEditorRef;
     return () => {
-      try { ref.current?.setModel(null); } catch { /* already disposed */ }
+      try {
+        ref.current?.setModel(null);
+      } catch {
+        /* already disposed */
+      }
     };
   }, [commentState.diffEditorRef]);
 
@@ -87,21 +96,39 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const editorHeight = useDiffEditorHeight({
     modifiedEditor: commentState.modifiedEditor,
     originalEditor: commentState.originalEditor,
-    compact, lineHeight,
-    originalContent: original, modifiedContent: modified,
+    compact,
+    lineHeight,
+    originalContent: original,
+    modifiedContent: modified,
   });
 
   return {
-    resolvedTheme, globalViewMode, setGlobalViewMode,
-    foldUnchanged, setFoldUnchanged, wordWrap, setWordWrap, wrapperRef,
+    resolvedTheme,
+    globalViewMode,
+    setGlobalViewMode,
+    foldUnchanged,
+    setFoldUnchanged,
+    wordWrap,
+    setWordWrap,
+    wrapperRef,
     ...commentState,
-    diff, filePath, language, original, modified, lineHeight, editorHeight,
+    diff,
+    filePath,
+    language,
+    original,
+    modified,
+    lineHeight,
+    editorHeight,
     hasDiff: !!(oldContent || newContent || diff),
     monacoTheme: getMonacoTheme(resolvedTheme),
     options: buildDiffEditorOptions({
-      compact, wordWrap,
+      compact,
+      wordWrap,
       modifiedReadOnly: compact || (!editable && !onRevert),
-      onRevert, globalViewMode, foldUnchanged, lineHeight,
+      onRevert,
+      globalViewMode,
+      foldUnchanged,
+      lineHeight,
     }),
   };
 }
