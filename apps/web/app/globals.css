@@ -424,6 +424,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-changes-flash,
   .chat-input-running,
   .chat-input-running-plan,
   .chat-input-starting {

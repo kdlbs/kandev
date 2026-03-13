@@ -197,6 +197,9 @@ function ToolbarIconBtn({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          type="button"
+          aria-label={tooltip}
+          aria-pressed={active}
           variant="ghost"
           size="sm"
           className={className ?? (active ? iconBtnActive : iconBtn)}
@@ -379,6 +382,23 @@ async function revertBlock(sessionId: string, filePath: string, info: RevertBloc
   }
 }
 
+function useScrollIntoViewOnSelect(
+  isSelected: boolean,
+  sectionRef: React.RefObject<HTMLDivElement> | undefined,
+  setCollapsed: React.Dispatch<React.SetStateAction<boolean>>,
+) {
+  useEffect(() => {
+    if (isSelected) {
+      setCollapsed(false);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          sectionRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    }
+  }, [isSelected, sectionRef, setCollapsed]);
+}
+
 function FileDiffSection({
   file,
   isReviewed,
@@ -396,27 +416,18 @@ function FileDiffSection({
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandUnchanged, setExpandUnchanged] = useState(false);
-  const [localWordWrap, setLocalWordWrap] = useState(false);
-  const effectiveWordWrap = wordWrap || localWordWrap;
+  const [localWordWrap, setLocalWordWrap] = useState<boolean | undefined>(undefined);
+  const effectiveWordWrap = localWordWrap ?? wordWrap;
   const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
   const handleToggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
-  const handleToggleWordWrap = useCallback(() => setLocalWordWrap((v) => !v), []);
+  const handleToggleWordWrap = useCallback(
+    () => setLocalWordWrap((v) => !(v ?? wordWrap)),
+    [wordWrap],
+  );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when: visible via intersection observer, or forceLoad is true (all files up to selected)
   const shouldRenderContent = isVisible || forceLoad;
-  useEffect(() => {
-    if (isSelected) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing collapsed state from parent selection prop
-      setCollapsed(false);
-      // Wait for all diffs above to fully render before scrolling
-      // Double rAF ensures layout is complete after React commit
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          sectionRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
-      });
-    }
-  }, [isSelected, sectionRef]);
+  useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
     isReviewed,

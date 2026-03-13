@@ -75,6 +75,10 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   // React to totalCount changes: auto-activate, flash, badge
   useEffect(() => {
+    if (api.isActive) {
+      seenCountRef.current = totalCount;
+    }
+
     const prev = prevTotalRef.current;
     prevTotalRef.current = totalCount;
 

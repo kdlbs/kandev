@@ -422,7 +422,7 @@ function PRHeader({
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
-  const showWarnings = !isMergeable && liveState === "open";
+  const showWarnings = !isDraft && !isMergeable && liveState === "open";
 
   return (
     <div className="p-3 space-y-2">
