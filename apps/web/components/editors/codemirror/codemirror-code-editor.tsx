@@ -323,6 +323,7 @@ export function CodeMirrorCodeEditor({
             lineRange={{ start: state.textSelection.startLine, end: state.textSelection.endLine }}
             position={state.textSelection.position}
             onSubmit={state.handleCommentSubmit}
+            onSubmitAndRun={state.handleCommentSubmitAndRun}
             onClose={state.handlePopoverClose}
           />
         )}

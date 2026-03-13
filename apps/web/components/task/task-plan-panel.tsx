@@ -9,6 +9,8 @@ import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
+import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import type { PlanComment } from "@/lib/state/slices/comments";
 import type {
   TextSelection,
   CommentForEditor,
@@ -191,6 +193,8 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
       <PlanSelectionPopoverWrapper
         textSelection={textSelection}
         activeSessionId={activeSessionId}
+        taskId={taskId}
+        isAgentBusy={isAgentBusy}
         commentState={commentState}
         editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
@@ -199,26 +203,44 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   );
 });
 
+function removeCommentMark(editor: Editor | null, commentId: string) {
+  if (!editor) return;
+  const markType = editor.state.schema.marks.commentMark;
+  if (!markType) return;
+  const { tr } = editor.state;
+  tr.removeMark(0, editor.state.doc.content.size, markType.create({ commentId }));
+  editor.view.dispatch(tr);
+}
+
 /** Conditional selection popover for adding/editing comments */
 function PlanSelectionPopoverWrapper({
   textSelection,
   activeSessionId,
+  taskId,
+  isAgentBusy,
   commentState,
   editorRef,
   onClose,
 }: {
   textSelection: TextSelection | null;
   activeSessionId: string | null | undefined;
+  taskId: string | null;
+  isAgentBusy: boolean;
   commentState: ReturnType<typeof usePlanComments>;
   editorRef: React.RefObject<Editor | null>;
   onClose: () => void;
 }) {
-  const handleAdd = useCallback(
+  const { runComment } = useRunComment({
+    sessionId: activeSessionId ?? null,
+    taskId,
+    isAgentBusy,
+  });
+
+  const addCommentAndApplyMark = useCallback(
     (comment: string, selectedText: string) => {
       const from = textSelection?.from;
       const to = textSelection?.to;
       const id = commentState.handleAddComment(comment, selectedText, from, to);
-      // Apply the mark to the editor at the selection position
       const editor = editorRef.current;
       if (id && editor && from != null && to != null) {
         editor
@@ -227,8 +249,36 @@ function PlanSelectionPopoverWrapper({
           .setMark("commentMark", { commentId: id })
           .run();
       }
+      return id;
     },
     [commentState, textSelection, editorRef],
+  );
+
+  const handleAdd = useCallback(
+    (comment: string, selectedText: string) => {
+      addCommentAndApplyMark(comment, selectedText);
+    },
+    [addCommentAndApplyMark],
+  );
+
+  const handleAddAndRun = useCallback(
+    (comment: string, selectedText: string) => {
+      const id = addCommentAndApplyMark(comment, selectedText);
+      if (!id || !activeSessionId) return;
+      const newComment: PlanComment = {
+        id,
+        sessionId: activeSessionId,
+        source: "plan",
+        text: comment,
+        selectedText,
+        from: textSelection?.from,
+        to: textSelection?.to,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+      };
+      runComment(newComment);
+    },
+    [addCommentAndApplyMark, activeSessionId, runComment, textSelection],
   );
 
   if (!textSelection || !activeSessionId) return null;
@@ -238,16 +288,7 @@ function PlanSelectionPopoverWrapper({
   const onDelete = commentState.editingCommentId
     ? () => {
         const id = commentState.editingCommentId!;
-        // Remove the mark from the editor
-        const editor = editorRef.current;
-        if (editor) {
-          const markType = editor.state.schema.marks.commentMark;
-          if (markType) {
-            const { tr } = editor.state;
-            tr.removeMark(0, editor.state.doc.content.size, markType.create({ commentId: id }));
-            editor.view.dispatch(tr);
-          }
-        }
+        removeCommentMark(editorRef.current, id);
         commentState.handleDeleteComment(id);
       }
     : undefined;
@@ -256,6 +297,7 @@ function PlanSelectionPopoverWrapper({
       selectedText={textSelection.text}
       position={textSelection.position}
       onAdd={handleAdd}
+      onAddAndRun={editingComment ? undefined : handleAddAndRun}
       onClose={onClose}
       editingComment={editingComment}
       onDelete={onDelete}

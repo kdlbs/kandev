@@ -28,6 +28,7 @@ interface MonacoDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
@@ -46,6 +47,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     compact = false,
     onCommentAdd,
     onCommentDelete,
+    onCommentRun,
     comments: externalComments,
     onModifiedContentChange,
     wordWrap: wordWrapProp,
@@ -60,36 +62,20 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
-  const {
-    diffEditorRef,
-    modifiedEditor,
-    originalEditor,
-    contextMenu,
-    setContextMenu,
-    copyAllChangedLines,
-    handleDiffEditorMount,
-  } = useDiffViewerComments({
-    data,
-    sessionId,
-    compact,
-    onCommentAdd,
-    onCommentDelete,
-    externalComments,
-    onModifiedContentChange,
+  const commentState = useDiffViewerComments({
+    data, sessionId, compact,
+    onCommentAdd, onCommentDelete, onCommentRun,
+    externalComments, onModifiedContentChange,
   });
 
   useCaptureKeydown(wrapperRef, { metaOrCtrl: true, key: "k" }, () => setCommandPanelOpen(true));
 
   useLayoutEffect(() => {
-    const ref = diffEditorRef;
+    const ref = commentState.diffEditorRef;
     return () => {
-      try {
-        ref.current?.setModel(null);
-      } catch {
-        /* already disposed */
-      }
+      try { ref.current?.setModel(null); } catch { /* already disposed */ }
     };
-  }, [diffEditorRef]);
+  }, [commentState.diffEditorRef]);
 
   const { oldContent, newContent, diff, filePath } = data;
   const language = getMonacoLanguage(filePath);
@@ -99,50 +85,24 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   );
   const lineHeight = compact ? 16 : 18;
   const editorHeight = useDiffEditorHeight({
-    modifiedEditor,
-    originalEditor,
-    compact,
-    lineHeight,
-    originalContent: original,
-    modifiedContent: modified,
-  });
-  const modifiedReadOnly = compact || (!editable && !onRevert);
-  const monacoTheme = getMonacoTheme(resolvedTheme);
-  const hasDiff = !!(oldContent || newContent || diff);
-
-  const options = buildDiffEditorOptions({
-    compact,
-    wordWrap,
-    modifiedReadOnly,
-    onRevert,
-    globalViewMode,
-    foldUnchanged,
-    lineHeight,
+    modifiedEditor: commentState.modifiedEditor,
+    originalEditor: commentState.originalEditor,
+    compact, lineHeight,
+    originalContent: original, modifiedContent: modified,
   });
 
   return {
-    resolvedTheme,
-    globalViewMode,
-    setGlobalViewMode,
-    foldUnchanged,
-    setFoldUnchanged,
-    wordWrap,
-    setWordWrap,
-    wrapperRef,
-    contextMenu,
-    setContextMenu,
-    copyAllChangedLines,
-    handleDiffEditorMount,
-    diff,
-    filePath,
-    language,
-    original,
-    modified,
-    lineHeight,
-    editorHeight,
-    hasDiff,
-    monacoTheme,
-    options,
+    resolvedTheme, globalViewMode, setGlobalViewMode,
+    foldUnchanged, setFoldUnchanged, wordWrap, setWordWrap, wrapperRef,
+    ...commentState,
+    diff, filePath, language, original, modified, lineHeight, editorHeight,
+    hasDiff: !!(oldContent || newContent || diff),
+    monacoTheme: getMonacoTheme(resolvedTheme),
+    options: buildDiffEditorOptions({
+      compact, wordWrap,
+      modifiedReadOnly: compact || (!editable && !onRevert),
+      onRevert, globalViewMode, foldUnchanged, lineHeight,
+    }),
   };
 }
 

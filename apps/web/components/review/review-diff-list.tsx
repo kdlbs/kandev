@@ -17,6 +17,9 @@ import { FileActionsDropdown } from "@/components/editors/file-actions-dropdown"
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
+import { useAppStore } from "@/components/state-provider";
+import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import type { DiffComment } from "@/lib/diff/types";
 import type { ReviewFile } from "./types";
 
 type ReviewDiffListProps = {
@@ -246,6 +249,21 @@ function FileDiffHeader({
   );
 }
 
+function useCommentRunHandler(sessionId: string) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSession = useAppStore((state) => {
+    const sid = state.tasks.activeSessionId;
+    return sid ? (state.taskSessions.items[sid] ?? null) : null;
+  });
+  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
+  const { runComment } = useRunComment({
+    sessionId,
+    taskId: activeTaskId ?? null,
+    isAgentBusy,
+  });
+  return useCallback((comment: DiffComment) => runComment(comment), [runComment]);
+}
+
 async function revertBlock(sessionId: string, filePath: string, info: RevertBlockInfo) {
   const client = getWebSocketClient();
   if (!client) return;
@@ -326,6 +344,8 @@ function FileDiffSection({
     [sessionId],
   );
 
+  const handleCommentRun = useCommentRunHandler(sessionId);
+
   return (
     <div ref={sectionRef} className="border-b border-border">
       <div ref={scrollSentinelRef} className="h-0" />
@@ -351,6 +371,7 @@ function FileDiffSection({
               enableComments
               enableAcceptReject
               onRevertBlock={handleRevertBlock}
+              onCommentRun={handleCommentRun}
               sessionId={sessionId}
               wordWrap={wordWrap}
               enableExpansion={true}

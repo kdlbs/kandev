@@ -6,6 +6,8 @@ import { Decoration, type DecorationSet } from "@codemirror/view";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { useDiffFileComments } from "@/hooks/domains/comments/use-diff-comments";
+import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import { useAppStore } from "@/components/state-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
@@ -426,9 +428,21 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     [currentSelection, floatingButtonPos],
   );
 
-  const handleCommentSubmit = useCallback(
-    (annotation: string) => {
-      if (!textSelection || !sessionId) return;
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSession = useAppStore((state) => {
+    const sid = state.tasks.activeSessionId;
+    return sid ? (state.taskSessions.items[sid] ?? null) : null;
+  });
+  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
+  const { runComment } = useRunComment({
+    sessionId: sessionId ?? null,
+    taskId: activeTaskId ?? null,
+    isAgentBusy,
+  });
+
+  const createCommentFromSelection = useCallback(
+    (annotation: string): DiffComment | null => {
+      if (!textSelection || !sessionId) return null;
       const comment: DiffComment = {
         id: `${path}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         source: "diff",
@@ -448,12 +462,36 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
       if (view) {
         view.dispatch({ selection: { anchor: view.state.selection.main.head } });
       }
-      toast({
-        title: "Comment added",
-        description: "Your comment will be sent with your next message.",
-      });
+      return comment;
     },
-    [textSelection, sessionId, path, addComment, toast, editorRef],
+    [textSelection, sessionId, path, addComment, editorRef],
+  );
+
+  const handleCommentSubmit = useCallback(
+    (annotation: string) => {
+      const comment = createCommentFromSelection(annotation);
+      if (comment) {
+        toast({
+          title: "Comment added",
+          description: "Your comment will be sent with your next message.",
+        });
+      }
+    },
+    [createCommentFromSelection, toast],
+  );
+
+  const handleCommentSubmitAndRun = useCallback(
+    (annotation: string) => {
+      const comment = createCommentFromSelection(annotation);
+      if (comment) {
+        runComment(comment);
+        toast({
+          title: "Comment sent",
+          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+        });
+      }
+    },
+    [createCommentFromSelection, runComment, isAgentBusy, toast],
   );
 
   const handlePopoverClose = useCallback(() => {
@@ -493,6 +531,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     handleChange,
     handleFloatingButtonClick,
     handleCommentSubmit,
+    handleCommentSubmitAndRun,
     handlePopoverClose,
     handleDeleteComment,
     handleCommentViewClose,

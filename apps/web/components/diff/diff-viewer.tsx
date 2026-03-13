@@ -24,6 +24,7 @@ interface DiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
@@ -105,6 +106,7 @@ export const DiffViewer = memo(function DiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentRun,
   comments: externalComments,
   className,
   compact = false,
@@ -130,6 +132,7 @@ export const DiffViewer = memo(function DiffViewer({
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentRun,
     externalComments,
     onRevertBlock,
     enableExpansion,
@@ -147,6 +150,7 @@ export const DiffViewer = memo(function DiffViewer({
     onButtonEnter,
     onButtonLeave,
     handleCommentSubmit: state.handleCommentSubmit,
+    handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
     handleCommentUpdate: state.handleCommentUpdate,
     handleCommentDelete: state.handleCommentDelete,
     setShowCommentForm: state.setShowCommentForm,

@@ -43,6 +43,22 @@ export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   return client.request<QueueStatus>("message.queue.get", { session_id: sessionId });
 }
 
+// Append content to an existing queued message, or create a new one if none exists
+export async function appendToQueue(params: {
+  session_id: string;
+  task_id: string;
+  content: string;
+  model?: string;
+  plan_mode?: boolean;
+}): Promise<QueueStatus> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+
+  return client.request<QueueStatus>("message.queue.append", params);
+}
+
 // Update queued message content (for arrow up editing)
 export async function updateQueuedMessage(
   sessionId: string,

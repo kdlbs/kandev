@@ -21,6 +21,7 @@ type mockQueueService struct {
 	cancelQueuedFunc  func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
 	getStatusFunc     func(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 	updateMessageFunc func(ctx context.Context, sessionID, content string) error
+	appendContentFunc func(ctx context.Context, sessionID, content string) error
 }
 
 func (m *mockQueueService) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
@@ -49,6 +50,13 @@ func (m *mockQueueService) UpdateMessage(ctx context.Context, sessionID, content
 		return m.updateMessageFunc(ctx, sessionID, content)
 	}
 	return nil
+}
+
+func (m *mockQueueService) AppendContent(ctx context.Context, sessionID, content string) error {
+	if m.appendContentFunc != nil {
+		return m.appendContentFunc(ctx, sessionID, content)
+	}
+	return errors.New("no queued message")
 }
 
 // mockEventBus is a simple mock event bus
@@ -450,6 +458,120 @@ func TestWsUpdateMessage(t *testing.T) {
 		})
 
 		response, err := handlers.wsUpdateMessage(ctx, msg)
+
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+	})
+}
+
+func TestWsAppendToQueue(t *testing.T) {
+	t.Run("appends to existing queued message", func(t *testing.T) {
+		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		mockQueue.appendContentFunc = func(ctx context.Context, sessionID, content string) error {
+			assert.Equal(t, "session-1", sessionID)
+			assert.Equal(t, "new comment", content)
+			return nil
+		}
+
+		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
+			return &messagequeue.QueueStatus{
+				IsQueued: true,
+				Message: &messagequeue.QueuedMessage{
+					ID:      "queue-1",
+					Content: "original\n\n---\n\nnew comment",
+				},
+			}
+		}
+
+		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
+			return nil
+		}
+
+		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+			"session_id": "session-1",
+			"task_id":    "task-1",
+			"content":    "new comment",
+		})
+
+		response, err := handlers.wsAppendToQueue(ctx, msg)
+
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	})
+
+	t.Run("creates new queued message when none exists", func(t *testing.T) {
+		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		// AppendContent returns error (no existing message)
+		mockQueue.appendContentFunc = func(ctx context.Context, sessionID, content string) error {
+			return errors.New("no queued message")
+		}
+
+		// Falls back to QueueMessage
+		mockQueue.queueMessageFunc = func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+			assert.Equal(t, "session-1", sessionID)
+			assert.Equal(t, "task-1", taskID)
+			assert.Equal(t, "new comment", content)
+			return &messagequeue.QueuedMessage{ID: "queue-1", Content: content}, nil
+		}
+
+		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
+			return &messagequeue.QueueStatus{
+				IsQueued: true,
+				Message:  &messagequeue.QueuedMessage{ID: "queue-1", Content: "new comment"},
+			}
+		}
+
+		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
+			return nil
+		}
+
+		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+			"session_id": "session-1",
+			"task_id":    "task-1",
+			"content":    "new comment",
+		})
+
+		response, err := handlers.wsAppendToQueue(ctx, msg)
+
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	})
+
+	t.Run("returns error when content is empty", func(t *testing.T) {
+		handlers, _, _ := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+			"session_id": "session-1",
+			"task_id":    "task-1",
+			"content":    "",
+		})
+
+		response, err := handlers.wsAppendToQueue(ctx, msg)
+
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+
+		var errorPayload ws.ErrorPayload
+		err = json.Unmarshal(response.Payload, &errorPayload)
+		require.NoError(t, err)
+		assert.Contains(t, errorPayload.Message, "content is required")
+	})
+
+	t.Run("returns error when session_id missing", func(t *testing.T) {
+		handlers, _, _ := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+			"task_id": "task-1",
+			"content": "test",
+		})
+
+		response, err := handlers.wsAppendToQueue(ctx, msg)
 
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlus, IconGripHorizontal } from "@tabler/icons-react";
+import { IconPlus, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ type EditorCommentPopoverProps = {
   lineRange: { start: number; end: number };
   position: { x: number; y: number };
   onSubmit: (comment: string) => void;
+  onSubmitAndRun?: (comment: string) => void;
   onClose: () => void;
 };
 
@@ -91,12 +92,14 @@ function PopoverBody({
   comment,
   setComment,
   handleSubmit,
+  handleSubmitAndRun,
   textareaRef,
 }: {
   selectedText: string;
   comment: string;
   setComment: (v: string) => void;
   handleSubmit: () => void;
+  handleSubmitAndRun?: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const previewText =
@@ -107,10 +110,14 @@ function PopoverBody({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleSubmit();
+        if (e.shiftKey && handleSubmitAndRun) {
+          handleSubmitAndRun();
+        } else {
+          handleSubmit();
+        }
       }
     },
-    [handleSubmit],
+    [handleSubmit, handleSubmitAndRun],
   );
 
   return (
@@ -127,16 +134,31 @@ function PopoverBody({
         className="min-h-[72px] resize-none text-sm border-border/50 focus:border-primary/50"
       />
       <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground/70">{"\u2318"}+Enter to add</span>
-        <Button
-          size="sm"
-          onClick={handleSubmit}
-          disabled={isDisabled}
-          className="gap-1.5 cursor-pointer"
-        >
-          <IconPlus className="h-3.5 w-3.5" />
-          Add comment
-        </Button>
+        <span className="text-xs text-muted-foreground/70">
+          {"\u2318"}+Enter to add{handleSubmitAndRun ? `, ${"\u2318"}+Shift+Enter to run` : ""}
+        </span>
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            onClick={handleSubmit}
+            disabled={isDisabled}
+            className="gap-1.5 cursor-pointer"
+          >
+            <IconPlus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+          {handleSubmitAndRun && (
+            <Button
+              size="sm"
+              onClick={handleSubmitAndRun}
+              disabled={isDisabled}
+              className="gap-1.5 cursor-pointer"
+            >
+              <IconPlayerPlay className="h-3.5 w-3.5" />
+              Add + Run
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -147,6 +169,7 @@ export function EditorCommentPopover({
   lineRange,
   position,
   onSubmit,
+  onSubmitAndRun,
   onClose,
 }: EditorCommentPopoverProps) {
   const [comment, setComment] = useState("");
@@ -163,6 +186,11 @@ export function EditorCommentPopover({
     if (!comment.trim()) return;
     onSubmit(comment.trim());
   }, [comment, onSubmit]);
+
+  const handleSubmitAndRun = useCallback(() => {
+    if (!comment.trim() || !onSubmitAndRun) return;
+    onSubmitAndRun(comment.trim());
+  }, [comment, onSubmitAndRun]);
 
   const lineRangeText =
     lineRange.start === lineRange.end
@@ -192,6 +220,7 @@ export function EditorCommentPopover({
         comment={comment}
         setComment={setComment}
         handleSubmit={handleSubmit}
+        handleSubmitAndRun={onSubmitAndRun ? handleSubmitAndRun : undefined}
         textareaRef={textareaRef}
       />
     </div>

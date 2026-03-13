@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { IconPlus, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
+import { IconPlus, IconTrash, IconGripHorizontal, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ type PlanSelectionPopoverProps = {
   selectedText: string;
   position: SelectionPosition;
   onAdd: (comment: string, selectedText: string) => void;
+  onAddAndRun?: (comment: string, selectedText: string) => void;
   onClose: () => void;
   editingComment?: string;
   onDelete?: () => void;
@@ -111,6 +112,7 @@ function usePopoverComposer(
   selectedText: string,
   onAdd: (comment: string, selectedText: string) => void,
   onClose: () => void,
+  onAddAndRun?: (comment: string, selectedText: string) => void,
 ) {
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
@@ -118,18 +120,29 @@ function usePopoverComposer(
     onClose();
   }, [comment, onAdd, selectedText, onClose]);
 
+  const handleSubmitAndRun = useCallback(() => {
+    if (!comment.trim() || !onAddAndRun) return;
+    onAddAndRun(comment.trim(), selectedText);
+    onClose();
+  }, [comment, onAddAndRun, selectedText, onClose]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleSubmit();
+        if (e.shiftKey && onAddAndRun) {
+          handleSubmitAndRun();
+        } else {
+          handleSubmit();
+        }
       }
     },
-    [handleSubmit],
+    [handleSubmit, handleSubmitAndRun, onAddAndRun],
   );
 
   return {
     handleSubmit,
+    handleSubmitAndRun,
     handleKeyDown,
     isDisabled: !comment.trim(),
     previewText:
@@ -137,10 +150,68 @@ function usePopoverComposer(
   };
 }
 
+function PopoverActions({
+  isEditing,
+  isDisabled,
+  onSubmit,
+  onSubmitAndRun,
+  onDelete,
+}: {
+  isEditing: boolean;
+  isDisabled: boolean;
+  onSubmit: () => void;
+  onSubmitAndRun?: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <div className="mt-2 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-muted-foreground/70">
+          ⌘+Enter to {isEditing ? "update" : "add"}
+          {onSubmitAndRun && !isEditing ? ", ⌘+Shift+Enter to run" : ""}
+        </span>
+        {isEditing && onDelete && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onDelete}
+            className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer"
+          >
+            <IconTrash className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+      <div className="flex gap-1">
+        <Button
+          size="sm"
+          onClick={onSubmit}
+          disabled={isDisabled}
+          className="h-7 gap-1 text-xs cursor-pointer"
+        >
+          <IconPlus className="h-3 w-3" />
+          {isEditing ? "Update" : "Add"}
+        </Button>
+        {onSubmitAndRun && !isEditing && (
+          <Button
+            size="sm"
+            onClick={onSubmitAndRun}
+            disabled={isDisabled}
+            className="h-7 gap-1 text-xs cursor-pointer"
+          >
+            <IconPlayerPlay className="h-3 w-3" />
+            Add + Run
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PlanSelectionPopover({
   selectedText,
   position,
   onAdd,
+  onAddAndRun,
   onClose,
   editingComment,
   onDelete,
@@ -154,15 +225,17 @@ export function PlanSelectionPopover({
     textareaRef.current?.focus();
   }, []);
   usePopoverDismiss(onClose, popoverRef);
-  const { handleSubmit, handleKeyDown, isDisabled, previewText } = usePopoverComposer(
-    comment,
-    selectedText,
-    onAdd,
-    onClose,
-  );
+  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, previewText } =
+    usePopoverComposer(comment, selectedText, onAdd, onClose, onAddAndRun);
   const { left, top } = computePopoverPosition(position);
 
-  // Portal to document.body to escape dockview's CSS transform containing block
+  const handleDelete = onDelete
+    ? () => {
+        onDelete();
+        onClose();
+      }
+    : undefined;
+
   return createPortal(
     <div
       ref={popoverRef}
@@ -170,27 +243,18 @@ export function PlanSelectionPopover({
         "fixed z-50 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
         "animate-in fade-in-0 zoom-in-95 duration-150",
       )}
-      style={{
-        width: POPOVER_WIDTH,
-        left: left + offset.dx,
-        top: top + offset.dy,
-      }}
+      style={{ width: POPOVER_WIDTH, left: left + offset.dx, top: top + offset.dy }}
     >
-      {/* Drag handle */}
       <div
         onMouseDown={onMouseDown}
         className="flex items-center justify-center py-1.5 cursor-grab active:cursor-grabbing border-b border-border/30"
       >
         <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/50" />
       </div>
-
       <div className="p-3">
-        {/* Text preview */}
         <p className="mb-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic">
           &ldquo;{previewText}&rdquo;
         </p>
-
-        {/* Comment input */}
         <Textarea
           ref={textareaRef}
           value={comment}
@@ -199,37 +263,13 @@ export function PlanSelectionPopover({
           placeholder="Add your comment or instruction..."
           className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
         />
-
-        {/* Actions */}
-        <div className="mt-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground/70">
-              ⌘+Enter to {editingComment ? "update" : "add"}
-            </span>
-            {editingComment && onDelete && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  onDelete();
-                  onClose();
-                }}
-                className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer"
-              >
-                <IconTrash className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={isDisabled}
-            className="h-7 gap-1 text-xs cursor-pointer"
-          >
-            <IconPlus className="h-3 w-3" />
-            {editingComment ? "Update" : "Add"}
-          </Button>
-        </div>
+        <PopoverActions
+          isEditing={!!editingComment}
+          isDisabled={isDisabled}
+          onSubmit={handleSubmit}
+          onSubmitAndRun={onAddAndRun ? handleSubmitAndRun : undefined}
+          onDelete={handleDelete}
+        />
       </div>
     </div>,
     document.body,

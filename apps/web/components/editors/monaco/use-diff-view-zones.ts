@@ -19,6 +19,7 @@ interface UseViewZonesParams {
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
   handleCommentSubmitRef: React.RefObject<(content: string) => void>;
+  handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
   handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
   clearModifiedGutter: () => void;
@@ -76,6 +77,7 @@ type CreateZonesParams = {
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
   handleCommentSubmitRef: React.RefObject<(content: string) => void>;
+  handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
   handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
   clearModifiedGutter: () => void;
@@ -94,6 +96,7 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
     editingCommentId,
     setEditingComment,
     handleCommentSubmitRef,
+    handleCommentSubmitAndRunRef,
     handleCommentDeleteRef,
     handleCommentUpdateRef,
     clearModifiedGutter,
@@ -147,6 +150,9 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
       { className: "px-2 py-1" },
       createElement(CommentForm, {
         onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
+        onSubmitAndRun: handleCommentSubmitAndRunRef?.current
+          ? (c: string) => handleCommentSubmitAndRunRef.current?.(c)
+          : undefined,
         onCancel: () => {
           setShowCommentForm(false);
           setSelectedLineRange(null);
@@ -178,6 +184,7 @@ export function useViewZones({
   editingCommentId,
   setEditingComment,
   handleCommentSubmitRef,
+  handleCommentSubmitAndRunRef,
   handleCommentDeleteRef,
   handleCommentUpdateRef,
   clearModifiedGutter,
@@ -205,6 +212,7 @@ export function useViewZones({
       editingCommentId,
       setEditingComment,
       handleCommentSubmitRef,
+      handleCommentSubmitAndRunRef,
       handleCommentDeleteRef,
       handleCommentUpdateRef,
       clearModifiedGutter,

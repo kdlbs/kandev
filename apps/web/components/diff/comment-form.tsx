@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
-import { IconSend, IconX } from "@tabler/icons-react";
+import { IconPlayerPlay, IconSend, IconX } from "@tabler/icons-react";
 
 interface CommentFormProps {
   /** Initial content for editing */
@@ -12,6 +12,8 @@ interface CommentFormProps {
   onSubmit: (content: string) => void;
   /** Callback when form is cancelled */
   onCancel: () => void;
+  /** Callback when comment is submitted and should run immediately */
+  onSubmitAndRun?: (content: string) => void;
   /** Whether the form is in editing mode */
   isEditing?: boolean;
   /** Auto focus the textarea */
@@ -22,6 +24,7 @@ export function CommentForm({
   initialContent = "",
   onSubmit,
   onCancel,
+  onSubmitAndRun,
   isEditing = false,
   autoFocus = true,
 }: CommentFormProps) {
@@ -42,10 +45,25 @@ export function CommentForm({
     }
   };
 
+  const handleSubmitAndRun = () => {
+    const trimmed = content.trim();
+    if (trimmed && onSubmitAndRun) {
+      onSubmitAndRun(trimmed);
+      setContent("");
+    }
+  };
+
+  const isMac = typeof navigator !== "undefined" && navigator.platform?.includes("Mac");
+  const modKey = isMac ? "⌘" : "Ctrl";
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleSubmit();
+      if (e.shiftKey && onSubmitAndRun) {
+        handleSubmitAndRun();
+      } else {
+        handleSubmit();
+      }
     } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
@@ -65,8 +83,7 @@ export function CommentForm({
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
-          {typeof navigator !== "undefined" && navigator.platform?.includes("Mac") ? "⌘" : "Ctrl"}
-          +Enter to submit
+          {modKey}+Enter to add{onSubmitAndRun ? `, ${modKey}+Shift+Enter to run` : ""}
         </span>
         <div className="flex gap-1">
           <Button
@@ -87,6 +104,17 @@ export function CommentForm({
             <IconSend className="mr-1 h-3 w-3" />
             {isEditing ? "Update" : "Add"}
           </Button>
+          {onSubmitAndRun && !isEditing && (
+            <Button
+              size="sm"
+              onClick={handleSubmitAndRun}
+              disabled={!content.trim()}
+              className="h-6 cursor-pointer px-2 text-xs"
+            >
+              <IconPlayerPlay className="mr-1 h-3 w-3" />
+              Add + Run
+            </Button>
+          )}
         </div>
       </div>
     </div>

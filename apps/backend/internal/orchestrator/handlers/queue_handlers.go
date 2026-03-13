@@ -17,6 +17,7 @@ type QueueService interface {
 	CancelQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 	UpdateMessage(ctx context.Context, sessionID, content string) error
+	AppendContent(ctx context.Context, sessionID, content string) error
 }
 
 // QueueHandlers handles message queue operations
@@ -41,6 +42,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueCancel, h.wsCancelQueue)
 	d.RegisterFunc(ws.ActionMessageQueueGet, h.wsGetQueueStatus)
 	d.RegisterFunc(ws.ActionMessageQueueUpdate, h.wsUpdateMessage)
+	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
 }
 
 // WebSocket Handlers
@@ -172,6 +174,61 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 
 	if err := h.queueService.UpdateMessage(ctx, req.SessionID, req.Content); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
+	status := h.queueService.GetStatus(ctx, req.SessionID)
+
+	// Publish queue status changed event
+	if h.eventBus != nil {
+		eventData := map[string]interface{}{
+			"session_id": req.SessionID,
+			"is_queued":  status.IsQueued,
+			"message":    status.Message,
+		}
+		_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
+			events.MessageQueueStatusChanged,
+			"queue-handlers",
+			eventData,
+		))
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, status)
+}
+
+type wsAppendToQueueRequest struct {
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	Content   string `json:"content"`
+	Model     string `json:"model,omitempty"`
+	PlanMode  bool   `json:"plan_mode,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+}
+
+func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsAppendToQueueRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.Content == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	}
+
+	// Try to append to existing queued message; if none exists, create a new one
+	if err := h.queueService.AppendContent(ctx, req.SessionID, req.Content); err != nil {
+		_, queueErr := h.queueService.QueueMessage(
+			ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, nil,
+		)
+		if queueErr != nil {
+			h.logger.Error("failed to queue message on append fallback", zap.Error(queueErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
+		}
 	}
 
 	status := h.queueService.GetStatus(ctx, req.SessionID)
