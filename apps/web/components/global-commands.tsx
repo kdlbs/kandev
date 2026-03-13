@@ -15,6 +15,7 @@ import {
   IconServer,
   IconFolder,
   IconMessageCircle,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -122,6 +123,11 @@ export function GlobalCommands() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
   const openQuickChat = useAppStore((s) => s.openQuickChat);
+  const startNewConfigChat = useAppStore((s) => s.startNewConfigChat);
+  const openConfigChat = useAppStore((s) => s.openConfigChat);
+  const configChatSessions = useAppStore((s) => s.configChat.sessions);
+  const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
+  const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
 
   const handleOpenQuickChat = useCallback(() => {
     if (!activeWorkspaceId) {
@@ -138,6 +144,29 @@ export function GlobalCommands() {
     }
   }, [activeWorkspaceId, quickChatSessions, openQuickChat]);
 
+  const handleOpenConfigChat = useCallback(() => {
+    if (!activeWorkspaceId) return;
+    // Reuse existing session if one is active for this workspace
+    if (configChatActiveSessionId && configChatWorkspaceId === activeWorkspaceId) {
+      openConfigChat(configChatActiveSessionId, activeWorkspaceId);
+      return;
+    }
+    // Check for a persisted session for this workspace
+    const existingSession = configChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
+    if (existingSession) {
+      openConfigChat(existingSession.sessionId, activeWorkspaceId);
+      return;
+    }
+    startNewConfigChat(activeWorkspaceId);
+  }, [
+    activeWorkspaceId,
+    configChatSessions,
+    configChatActiveSessionId,
+    configChatWorkspaceId,
+    openConfigChat,
+    startNewConfigChat,
+  ]);
+
   const quickChatCommand: CommandItem = useMemo(
     () => ({
       id: "quick-chat",
@@ -151,13 +180,26 @@ export function GlobalCommands() {
     [handleOpenQuickChat],
   );
 
+  const configChatCommand: CommandItem = useMemo(
+    () => ({
+      id: "config-chat",
+      label: "Configuration Chat",
+      group: "Actions",
+      icon: <IconSparkles className="size-3.5" />,
+      keywords: ["config", "configure", "settings", "chat", "ai"],
+      action: handleOpenConfigChat,
+    }),
+    [handleOpenConfigChat],
+  );
+
   const commands = useMemo<CommandItem[]>(
     () => [
       ...buildNavigationCommands(router.push),
       buildThemeCommand(resolvedTheme, setTheme),
       quickChatCommand,
+      configChatCommand,
     ],
-    [router.push, resolvedTheme, setTheme, quickChatCommand],
+    [router.push, resolvedTheme, setTheme, quickChatCommand, configChatCommand],
   );
 
   useRegisterCommands(commands);

@@ -4,8 +4,8 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { usePathname } from "next/navigation";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from "@kandev/ui/breadcrumb";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
-import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

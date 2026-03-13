@@ -127,6 +127,10 @@ func (s *SimulatedAgentManagerClient) SetExecutionDescription(ctx context.Contex
 	return nil
 }
 
+func (s *SimulatedAgentManagerClient) SetMcpMode(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 // StartAgentProcess simulates starting the agent subprocess
 func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	s.logger.Info("simulated: starting agent process",

@@ -136,6 +136,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
 	// Add base_commit_sha column to task_sessions for tracking session start commit (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
+	// Add default_config_agent_profile_id column to workspaces (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	return nil
 }
 
@@ -159,6 +161,7 @@ func (r *Repository) initInfraSchema() error {
 		default_executor_id TEXT DEFAULT '',
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
+		default_config_agent_profile_id TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

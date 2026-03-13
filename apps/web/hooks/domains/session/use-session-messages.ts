@@ -15,7 +15,7 @@ type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: s
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
 
-/** Fetch latest messages via WS and store them. Returns the fetched messages. */
+/** Fetch latest messages via WS and merge with any that arrived via live notifications. */
 async function fetchAndStoreMessages(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
@@ -29,11 +29,26 @@ async function fetchAndStoreMessages(
     10000,
   );
   const fetched = [...(response.messages ?? [])].reverse();
-  store.getState().setMessages(sessionId, fetched, {
+
+  // Merge: keep WS-delivered messages that aren't in the fetch response.
+  // This prevents a slow fetch (sent before messages existed) from wiping
+  // messages that arrived via real-time notifications while the fetch was
+  // in flight.
+  const existing = store.getState().messages.bySession[sessionId] ?? [];
+  const fetchedIds = new Set(fetched.map((m) => m.id));
+  const extras = existing.filter((m) => !fetchedIds.has(m.id));
+  const merged =
+    extras.length > 0
+      ? [...fetched, ...extras].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+      : fetched;
+
+  store.getState().setMessages(sessionId, merged, {
     hasMore: response.has_more ?? false,
-    oldestCursor: fetched[0]?.id ?? null,
+    oldestCursor: merged[0]?.id ?? null,
   });
-  return fetched;
+  return merged;
 }
 
 type FetchMessagesParams = {

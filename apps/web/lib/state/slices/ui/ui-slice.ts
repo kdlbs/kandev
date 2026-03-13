@@ -20,6 +20,7 @@ export const defaultUIState: UISliceState = {
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
+  configChat: { isOpen: false, sessions: [], activeSessionId: null, workspaceId: null },
   sessionFailureNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
 };
@@ -118,6 +119,58 @@ function buildBottomTerminalActions(set: ImmerSet) {
   };
 }
 
+function buildConfigChatActions(set: ImmerSet) {
+  return {
+    openConfigChat: (sessionId: string, workspaceId: string) =>
+      set((draft) => {
+        draft.configChat.isOpen = true;
+        draft.configChat.workspaceId = workspaceId;
+        const exists = draft.configChat.sessions.some((s) => s.sessionId === sessionId);
+        if (!exists) {
+          draft.configChat.sessions.push({ sessionId, workspaceId });
+        }
+        draft.configChat.activeSessionId = sessionId;
+      }),
+    startNewConfigChat: (workspaceId: string) =>
+      set((draft) => {
+        draft.configChat.isOpen = true;
+        draft.configChat.activeSessionId = null;
+        draft.configChat.workspaceId = workspaceId;
+      }),
+    closeConfigChat: () =>
+      set((draft) => {
+        draft.configChat.isOpen = false;
+      }),
+    closeConfigChatSession: (sessionId: string) =>
+      set((draft) => {
+        draft.configChat.sessions = draft.configChat.sessions.filter(
+          (s) => s.sessionId !== sessionId,
+        );
+        if (draft.configChat.activeSessionId === sessionId) {
+          if (draft.configChat.sessions.length > 0) {
+            const next = draft.configChat.sessions[0];
+            draft.configChat.activeSessionId = next.sessionId;
+            draft.configChat.workspaceId = next.workspaceId;
+          } else {
+            draft.configChat.activeSessionId = null;
+            draft.configChat.workspaceId = null;
+          }
+        }
+      }),
+    setActiveConfigChatSession: (sessionId: string) =>
+      set((draft) => {
+        draft.configChat.activeSessionId = sessionId;
+      }),
+    renameConfigChatSession: (sessionId: string, name: string) =>
+      set((draft) => {
+        const session = draft.configChat.sessions.find((s) => s.sessionId === sessionId);
+        if (session) {
+          session.name = name;
+        }
+      }),
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
 ) => ({
@@ -125,6 +178,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
+  ...buildConfigChatActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;

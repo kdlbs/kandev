@@ -9,6 +9,7 @@ export type WorkspaceState = {
     default_executor_id?: string | null;
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;
+    default_config_agent_profile_id?: string | null;
     created_at: string;
     updated_at: string;
   }>;

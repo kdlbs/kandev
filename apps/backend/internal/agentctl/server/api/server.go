@@ -153,6 +153,7 @@ func (s *Server) setupRoutes() {
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
+		api.PUT("/mcp/mode", s.handleSetMcpMode)
 	}
 }
 
@@ -167,6 +168,23 @@ func (s *Server) handleHealth(c *gin.Context) {
 		Status:    "ok",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// handleSetMcpMode changes the MCP tool mode for this instance.
+func (s *Server) handleSetMcpMode(c *gin.Context) {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Mode != "task" && req.Mode != "config" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task' or 'config'"})
+		return
+	}
+	s.mcpServer.SetMode(req.Mode)
+	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
 }
 
 // Status response

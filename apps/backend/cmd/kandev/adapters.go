@@ -82,6 +82,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		ExecutorType:        req.ExecutorType,
 		ExecutorConfig:      req.ExecutorConfig,
 		PreviousExecutionID: req.PreviousExecutionID,
+		McpMode:             req.McpMode,
 		SetupScript:         req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
@@ -127,6 +128,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
+// SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
+func (a *lifecycleAdapter) SetMcpMode(ctx context.Context, executionID string, mode string) error {
+	return a.mgr.SetMcpMode(ctx, executionID, mode)
 }
 
 // StartAgentProcess starts the agent subprocess for an instance.

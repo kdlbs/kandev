@@ -5,33 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
-)
-
-// MCP action constants for backend WS requests
-// These must match the actions registered in pkg/websocket/actions.go
-const (
-	ActionMCPListWorkspaces       = "mcp.list_workspaces"
-	ActionMCPListWorkflows        = "mcp.list_workflows"
-	ActionMCPListWorkflowSteps    = "mcp.list_workflow_steps"
-	ActionMCPListTasks            = "mcp.list_tasks"
-	ActionMCPCreateTask           = "mcp.create_task"
-	ActionMCPUpdateTask           = "mcp.update_task"
-	ActionMCPAskUserQuestion      = "mcp.ask_user_question"
-	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
-	ActionMCPCreateTaskPlan       = "mcp.create_task_plan"
-	ActionMCPGetTaskPlan          = "mcp.get_task_plan"
-	ActionMCPUpdateTaskPlan       = "mcp.update_task_plan"
-	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Backend returns {workspaces: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkspaces, nil, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkspaces, nil, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -48,7 +32,7 @@ func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workspace_id": workspaceID}
 		// Backend returns {workflows: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkflows, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflows, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -65,7 +49,7 @@ func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {workflow_steps: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkflowSteps, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflowSteps, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -82,7 +66,7 @@ func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {tasks: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPListTasks, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -118,7 +102,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"description":      description,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPCreateTask, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -143,7 +127,7 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 			payload["state"] = state
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPUpdateTask, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -179,7 +163,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		// Use the MCP request context from the agent. This ensures that if the agent's
 		// MCP client times out, we'll detect it and not update the session state.
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
 			if ctx.Err() != nil {
 				// Agent's MCP client disconnected/timed out. Notify backend to cancel
 				// pending clarifications so the user's answer goes through the event
@@ -281,7 +265,7 @@ func extractAnswerMap(answer interface{}) *mcp.CallToolResult {
 // the event fallback path (new turn) instead of the primary path (same turn).
 func (s *Server) notifyClarificationTimeout() {
 	payload := map[string]string{"session_id": s.sessionID}
-	if err := s.backend.RequestPayload(context.Background(), ActionMCPClarificationTimeout, payload, nil); err != nil {
+	if err := s.backend.RequestPayload(context.Background(), ws.ActionMCPClarificationTimeout, payload, nil); err != nil {
 		s.logger.Warn("failed to notify backend of clarification timeout",
 			zap.String("session_id", s.sessionID),
 			zap.Error(err))
@@ -307,7 +291,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 			"created_by": "agent",
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPCreateTaskPlan, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -324,7 +308,7 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPGetTaskPlan, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -365,7 +349,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		}
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPUpdateTaskPlan, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -382,7 +366,7 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPDeleteTaskPlan, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDeleteTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Plan deleted successfully."), nil

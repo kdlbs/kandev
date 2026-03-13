@@ -122,15 +122,16 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 
 	data := map[string]interface{}{
-		"id":                       workspace.ID,
-		"name":                     workspace.Name,
-		"description":              workspace.Description,
-		"owner_id":                 workspace.OwnerID,
-		"default_executor_id":      workspace.DefaultExecutorID,
-		"default_environment_id":   workspace.DefaultEnvironmentID,
-		"default_agent_profile_id": workspace.DefaultAgentProfileID,
-		"created_at":               workspace.CreatedAt.Format(time.RFC3339),
-		"updated_at":               workspace.UpdatedAt.Format(time.RFC3339),
+		"id":                              workspace.ID,
+		"name":                            workspace.Name,
+		"description":                     workspace.Description,
+		"owner_id":                        workspace.OwnerID,
+		"default_executor_id":             workspace.DefaultExecutorID,
+		"default_environment_id":          workspace.DefaultEnvironmentID,
+		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
+		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"created_at":                      workspace.CreatedAt.Format(time.RFC3339),
+		"updated_at":                      workspace.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "workspace", workspace.ID, data)

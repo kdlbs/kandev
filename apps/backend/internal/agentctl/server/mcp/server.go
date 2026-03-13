@@ -24,11 +24,28 @@ type BackendClient interface {
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
 
+// MCP mode constants control which tools are registered.
+const (
+	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
+	ModeTask = "task"
+	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
+	ModeConfig = "config"
+)
+
+// normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
+func normalizeMode(mode string) string {
+	if mode == ModeConfig {
+		return ModeConfig
+	}
+	return ModeTask
+}
+
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
 	backend            BackendClient
 	sessionID          string
 	disableAskQuestion bool
+	mode               string // "task" (default) or "config"
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -41,11 +58,13 @@ type Server struct {
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool) *Server {
+func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
+	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
 		sessionID:          sessionID,
 		disableAskQuestion: disableAskQuestion,
+		mode:               mcpMode,
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
 	}
 
@@ -187,18 +206,50 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 	}
 }
 
-// registerTools registers all MCP tools.
+// SetMode changes the MCP server mode and re-registers tools accordingly.
+// This allows reconfiguring the tool set after initial creation (e.g., when
+// a session transitions to plan/config mode on a pre-existing workspace).
+func (s *Server) SetMode(mode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.mode = normalizeMode(mode)
+	// Clear all existing tools and re-register for the new mode.
+	s.mcpServer.SetTools() // empty call clears all tools
+	s.registerTools()
+}
+
+// registerTools registers MCP tools based on the server mode.
 func (s *Server) registerTools() {
 	count := 0
-	s.registerKanbanTools()
-	count += 6
-	if !s.disableAskQuestion {
-		s.registerInteractionTools()
-		count++
+	switch s.mode {
+	case ModeConfig:
+		s.registerConfigWorkflowTools()
+		count += 10
+		s.registerConfigAgentTools()
+		count += 4
+		s.registerConfigMcpTools()
+		count += 4
+		s.registerConfigExecutorTools()
+		count += 5
+		s.registerConfigTaskTools()
+		count += 5
+		if !s.disableAskQuestion {
+			s.registerInteractionTools()
+			count++
+		}
+	default: // ModeTask
+		s.registerKanbanTools()
+		count += 6
+		if !s.disableAskQuestion {
+			s.registerInteractionTools()
+			count++
+		}
+		s.registerPlanTools()
+		count += 4
 	}
-	s.registerPlanTools()
-	count += 4
 	s.logger.Info("registered MCP tools",
+		zap.String("mode", s.mode),
 		zap.Int("count", count),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 }

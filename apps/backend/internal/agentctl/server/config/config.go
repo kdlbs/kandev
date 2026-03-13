@@ -158,6 +158,10 @@ type InstanceConfig struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
+
+	// McpMode controls which MCP tools are registered for this instance.
+	// "task" (default) registers kanban/plan tools; "config" registers config tools.
+	McpMode string
 }
 
 // Load loads the configuration from environment variables.
@@ -200,6 +204,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:              c.LogFormat,
 		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
 		VscodeCommand:          c.VscodeCommand,
+		McpMode:                "task",
 	}
 
 	applyOverrides(cfg, overrides)
@@ -261,6 +266,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
+	if overrides.McpMode != "" {
+		cfg.McpMode = overrides.McpMode
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -276,6 +284,7 @@ type InstanceOverrides struct {
 	SessionID          string
 	DisableAskQuestion bool
 	AssumeMcpSse       bool
+	McpMode            string
 }
 
 // ParseCommand splits a command string into arguments

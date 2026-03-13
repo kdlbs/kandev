@@ -175,6 +175,9 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ strin
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return fmt.Errorf("not supported")
 }
+func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
+	return nil
+}
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
 	return nil

@@ -30,6 +30,7 @@ import (
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 
@@ -440,6 +441,7 @@ func buildHTTPServer(
 		msgCreator:              msgCreator,
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,
+		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		webInternalURL:          cfg.Server.WebInternalURL,
 		log:                     log,
 	})

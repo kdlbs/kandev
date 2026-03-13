@@ -88,5 +88,28 @@ export async function listQuickChatSessions(workspaceId: string, options?: ApiRe
       workspace_id: string;
       primary_session_id?: string | null;
     }>;
-  }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true`, options);
+  }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true&exclude_config=true`, options);
+}
+
+// Config Chat operations
+export type StartConfigChatRequest = {
+  agent_profile_id?: string;
+  executor_id?: string;
+  prompt?: string;
+};
+
+export type StartConfigChatResponse = {
+  task_id: string;
+  session_id: string;
+};
+
+export async function startConfigChat(
+  workspaceId: string,
+  payload: StartConfigChatRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<StartConfigChatResponse>(`/api/v1/workspaces/${workspaceId}/config-chat`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
 }

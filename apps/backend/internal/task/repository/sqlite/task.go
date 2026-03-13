@@ -179,7 +179,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If includeArchived is false, archived tasks are excluded
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error) {
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -203,6 +203,10 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		filter += " AND archived_at IS NULL"
 	}
 
+	if excludeConfig {
+		filter += " AND (metadata IS NULL OR json_extract(metadata, '$.config_mode') IS NOT 1)"
+	}
+
 	var rows *sql.Rows
 	var total int
 	var err error
@@ -210,7 +214,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 	if query == "" {
 		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, pageSize, offset)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	}
 
 	if err != nil {
@@ -244,7 +248,7 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilt
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
@@ -257,6 +261,9 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 	}
 	if !includeArchived {
 		tFilter += " AND t.archived_at IS NULL"
+	}
+	if excludeConfig {
+		tFilter += " AND (t.metadata IS NULL OR json_extract(t.metadata, '$.config_mode') IS NOT 1)"
 	}
 
 	countQuery := fmt.Sprintf(`

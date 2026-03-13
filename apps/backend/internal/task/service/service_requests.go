@@ -62,21 +62,23 @@ type UpdateWorkflowRequest struct {
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
 type CreateWorkspaceRequest struct {
-	Name                  string  `json:"name"`
-	Description           string  `json:"description"`
-	OwnerID               string  `json:"owner_id"`
-	DefaultExecutorID     *string `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID  *string `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
+	Name                        string  `json:"name"`
+	Description                 string  `json:"description"`
+	OwnerID                     string  `json:"owner_id"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
 }
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	Name                  *string `json:"name,omitempty"`
-	Description           *string `json:"description,omitempty"`
-	DefaultExecutorID     *string `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID  *string `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
+	Name                        *string `json:"name,omitempty"`
+	Description                 *string `json:"description,omitempty"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
 }
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.

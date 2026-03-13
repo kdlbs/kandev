@@ -156,6 +156,9 @@ const (
 	ActionWorkflowCreated          = "workflow.created"
 	ActionWorkflowUpdated          = "workflow.updated"
 	ActionWorkflowDeleted          = "workflow.deleted"
+	ActionWorkflowStepCreated      = "workflow.step.created"
+	ActionWorkflowStepUpdated      = "workflow.step.updated"
+	ActionWorkflowStepDeleted      = "workflow.step.deleted"
 	ActionSessionMessageAdded      = "session.message.added"
 	ActionSessionMessageUpdated    = "session.message.updated"
 	ActionSessionStateChanged      = "session.state_changed"
@@ -299,6 +302,37 @@ const (
 	ActionMCPUpdateTaskPlan       = "mcp.update_task_plan"
 	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
 	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
+
+	// Config-mode MCP actions (agent-native configuration)
+	ActionMCPCreateWorkflow = "mcp.create_workflow"
+	ActionMCPUpdateWorkflow = "mcp.update_workflow"
+	ActionMCPDeleteWorkflow = "mcp.delete_workflow"
+
+	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
+	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"
+	ActionMCPDeleteWorkflowStep  = "mcp.delete_workflow_step"
+	ActionMCPReorderWorkflowStep = "mcp.reorder_workflow_steps"
+
+	ActionMCPListAgents  = "mcp.list_agents"
+	ActionMCPUpdateAgent = "mcp.update_agent"
+
+	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
+	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"
+	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
+	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
+	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
+	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
+
+	ActionMCPListExecutors         = "mcp.list_executors"
+	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"
+	ActionMCPCreateExecutorProfile = "mcp.create_executor_profile"
+	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"
+	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
+
+	ActionMCPMoveTask        = "mcp.move_task"
+	ActionMCPDeleteTask      = "mcp.delete_task"
+	ActionMCPArchiveTask     = "mcp.archive_task"
+	ActionMCPUpdateTaskState = "mcp.update_task_state"
 )
 
 // GitHub integration actions

@@ -19,9 +19,9 @@ export type BackendMessageType =
   | "workflow.created"
   | "workflow.updated"
   | "workflow.deleted"
-  | "step.created"
-  | "step.updated"
-  | "step.deleted"
+  | "workflow.step.created"
+  | "workflow.step.updated"
+  | "workflow.step.deleted"
   | "session.message.added"
   | "session.message.updated"
   | "session.state_changed"
@@ -169,6 +169,7 @@ export type WorkspacePayload = {
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
+  default_config_agent_profile_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -189,10 +190,18 @@ export type StepPayload = {
   position: number;
   state: string;
   color: string;
+  prompt?: string;
   events?: StepEvents;
   is_start_step?: boolean;
+  allow_manual_move?: boolean;
+  show_in_command_panel?: boolean;
+  auto_archive_after_hours?: number;
   created_at?: string;
   updated_at?: string;
+};
+
+export type WorkflowStepEventPayload = {
+  step: StepPayload;
 };
 
 export type MessageAddedPayload = {
@@ -494,9 +503,9 @@ export type BackendMessageMap = {
   "workflow.created": BackendMessage<"workflow.created", WorkflowPayload>;
   "workflow.updated": BackendMessage<"workflow.updated", WorkflowPayload>;
   "workflow.deleted": BackendMessage<"workflow.deleted", WorkflowPayload>;
-  "step.created": BackendMessage<"step.created", StepPayload>;
-  "step.updated": BackendMessage<"step.updated", StepPayload>;
-  "step.deleted": BackendMessage<"step.deleted", StepPayload>;
+  "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
+  "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
+  "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
   "session.state_changed": BackendMessage<"session.state_changed", TaskSessionStateChangedPayload>;

@@ -108,6 +108,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		SessionID:          req.SessionID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
+		McpMode:            req.McpMode,
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

@@ -14,6 +14,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// isConfigModeSession returns true if the session has config_mode: true in its metadata.
+// Config-mode sessions are dedicated settings-chat sessions that get config MCP tools.
+func isConfigModeSession(session *models.TaskSession) bool {
+	if session == nil || session.Metadata == nil {
+		return false
+	}
+	cm, ok := session.Metadata["config_mode"].(bool)
+	return ok && cm
+}
+
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
 // On error it marks both the session and task as FAILED.
 // On success it calls onSuccess with a non-cancellable context derived from ctx.
@@ -221,6 +231,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		AgentProfileSnapshot: agentProfileSnapshot,
 		IsPrimary:            true,
 		IsPassthrough:        isPassthrough,
+		Metadata:             metadata,
 	}
 	if workflowStepID != "" {
 		session.WorkflowStepID = &workflowStepID
@@ -311,7 +322,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
 	if session.AgentExecutionID != "" {
-		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent)
+		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
 	}
 
 	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
@@ -322,6 +333,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
+	if opts.McpMode != "" {
+		req.McpMode = opts.McpMode
 	}
 
 	e.logger.Info("launching agent for prepared session",
@@ -466,6 +482,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.RepositoryURL = cloneURL
 	}
 
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
+		req.McpMode = McpModeConfig
+	}
+
 	if len(metadata) > 0 {
 		req.Metadata = metadata
 	}
@@ -475,7 +496,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
 // whose workspace (agentctl) was already launched. It optionally starts just the agent subprocess.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
 	if !startAgent {
 		// Workspace already launched, nothing else to do
 		now := time.Now().UTC()
@@ -498,6 +519,23 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.String("agent_execution_id", session.AgentExecutionID),
 				zap.Error(err))
 			// Non-fatal: agent may start without description
+		}
+	}
+
+	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
+	// The workspace may have been prepared before config_mode was set on the session.
+	effectiveMcpMode := mcpMode
+	if effectiveMcpMode == "" && isConfigModeSession(session) {
+		effectiveMcpMode = McpModeConfig
+	}
+	if effectiveMcpMode != "" {
+		if err := e.agentManager.SetMcpMode(ctx, session.AgentExecutionID, effectiveMcpMode); err != nil {
+			e.logger.Error("failed to set MCP mode for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.String("mcp_mode", effectiveMcpMode),
+				zap.Error(err))
+			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 		}
 	}
 

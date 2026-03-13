@@ -34,6 +34,7 @@ export type ChatInputEditorAreaProps = {
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;
+  minimalToolbar?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -109,44 +110,16 @@ function FileInput({
   );
 }
 
-export function ChatInputEditorArea({
-  inputRef,
-  value,
-  handleChange,
-  handleSubmitWithReset,
-  inputPlaceholder,
-  isDisabled,
-  hasClarification,
-  planModeEnabled,
-  planModeAvailable,
-  mcpServers,
-  submitKey,
-  setIsInputFocused,
-  sessionId,
-  taskId,
-  onAddContextFile,
-  onToggleContextFile,
-  planContextEnabled,
-  handleAgentCommand,
-  addFiles,
-  fileInputRef,
-  showRequestChangesTooltip,
-  isAgentBusy,
-  onPlanModeChange,
-  taskTitle,
-  taskDescription,
-  isSending,
-  onCancel,
-  contextCount,
-  contextPopoverOpen,
-  setContextPopoverOpen,
-  contextFiles,
-  onImplementPlan,
-  onEnhancePrompt,
-  isEnhancingPrompt,
-  isUtilityConfigured,
-  hideSessionsDropdown,
-}: ChatInputEditorAreaProps) {
+export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
+  const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
+  const { isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers } = p;
+  const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
+  const { onAddContextFile, onToggleContextFile, handleAgentCommand, addFiles, fileInputRef } = p;
+  const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
+    p;
+  const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
+  const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
+  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar } = p;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
@@ -205,6 +178,7 @@ export function ChatInputEditorArea({
         isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
         hideSessionsDropdown={hideSessionsDropdown}
+        minimalToolbar={minimalToolbar}
       />
     </div>
   );

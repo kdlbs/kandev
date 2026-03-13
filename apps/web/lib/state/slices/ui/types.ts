@@ -63,6 +63,19 @@ export type QuickChatState = {
   activeSessionId: string | null;
 };
 
+export type ConfigChatSession = {
+  sessionId: string;
+  workspaceId: string;
+  name?: string;
+};
+
+export type ConfigChatState = {
+  isOpen: boolean;
+  sessions: ConfigChatSession[];
+  activeSessionId: string | null;
+  workspaceId: string | null;
+};
+
 export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
@@ -85,6 +98,7 @@ export type UISliceState = {
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
   quickChat: QuickChatState;
+  configChat: ConfigChatState;
   sessionFailureNotification: SessionFailureNotification | null;
   bottomTerminal: BottomTerminalState;
 };
@@ -113,6 +127,12 @@ export type UISliceActions = {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
+  openConfigChat: (sessionId: string, workspaceId: string) => void;
+  startNewConfigChat: (workspaceId: string) => void;
+  closeConfigChat: () => void;
+  closeConfigChatSession: (sessionId: string) => void;
+  setActiveConfigChatSession: (sessionId: string) => void;
+  renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;

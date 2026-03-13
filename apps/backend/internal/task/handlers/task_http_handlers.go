@@ -52,9 +52,10 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	includeArchived := c.Query("include_archived") == queryValueTrue
 	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
+	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
 	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral,
+		c.Request.Context(), c.Param("id"), query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -760,4 +761,151 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		TaskID:    task.ID,
 		SessionID: resp.SessionID,
 	})
+}
+
+// httpStartConfigChatRequest is the request body for starting a config chat session.
+type httpStartConfigChatRequest struct {
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	ExecutorID     string `json:"executor_id,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
+}
+
+// httpStartConfigChat creates an ephemeral task with config_mode and prepares a session.
+// The session will have config MCP tools (workflow, agent, MCP management) instead of
+// the normal kanban/plan tools used for task-solving agents.
+// resolveConfigChatDefaults resolves the agent profile ID, executor ID, and task
+// metadata for a config chat session. Profile priority: request → workspace config → workspace default.
+func resolveConfigChatDefaults(body httpStartConfigChatRequest, ws *models.Workspace) (agentProfileID, executorID string, metadata map[string]interface{}) {
+	agentProfileID = body.AgentProfileID
+	if agentProfileID == "" && ws.DefaultConfigAgentProfileID != nil {
+		agentProfileID = *ws.DefaultConfigAgentProfileID
+	}
+	if agentProfileID == "" && ws.DefaultAgentProfileID != nil {
+		agentProfileID = *ws.DefaultAgentProfileID
+	}
+	executorID = body.ExecutorID
+	if executorID == "" && ws.DefaultExecutorID != nil {
+		executorID = *ws.DefaultExecutorID
+	}
+	metadata = map[string]interface{}{
+		"config_mode":      true,
+		"agent_profile_id": agentProfileID,
+	}
+	if executorID != "" {
+		metadata["executor_id"] = executorID
+	}
+	return agentProfileID, executorID, metadata
+}
+
+func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
+	workspaceID := c.Param("id")
+	var body httpStartConfigChatRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not found")
+		return
+	}
+
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+	if err != nil {
+		h.logger.Error("failed to list workflows", zap.Error(err), zap.String("workspace_id", workspaceID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
+		return
+	}
+	if len(workflows) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
+		return
+	}
+
+	agentProfileID, executorID, metadata := resolveConfigChatDefaults(body, workspace)
+	if agentProfileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no agent profile configured — set a default agent profile in workspace settings"})
+		return
+	}
+
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaceID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Config Chat",
+		Description: body.Prompt,
+		IsEphemeral: true,
+		Metadata:    metadata,
+	})
+	if err != nil {
+		h.logger.Error("failed to create config chat task", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create config chat"})
+		return
+	}
+
+	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:         task.ID,
+		Intent:         orchestrator.IntentPrepare,
+		AgentProfileID: agentProfileID,
+		ExecutorID:     executorID,
+	})
+	if err != nil {
+		h.deleteTaskOnError(task.ID, "config chat", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare session"})
+		return
+	}
+
+	sessionID := resp.SessionID
+
+	// If a prompt was provided, launch the agent asynchronously so it starts
+	// processing immediately. The frontend receives WS updates when it starts.
+	if body.Prompt != "" {
+		go h.launchConfigChatAgent(task.ID, sessionID, agentProfileID, body.Prompt)
+	}
+
+	h.logger.Info("config chat session created",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", sessionID),
+		zap.String("workspace_id", workspaceID))
+
+	c.JSON(http.StatusOK, httpStartQuickChatResponse{
+		TaskID:    task.ID,
+		SessionID: sessionID,
+	})
+}
+
+func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
+	if deleteErr := h.service.DeleteTask(context.Background(), taskID); deleteErr != nil {
+		h.logger.Error("failed to rollback "+label+" task",
+			zap.String("task_id", taskID), zap.Error(deleteErr))
+	}
+	h.logger.Error("failed to prepare "+label+" session",
+		zap.Error(err), zap.String("task_id", taskID))
+}
+
+func (h *TaskHandlers) launchConfigChatAgent(
+	taskID, sessionID, agentProfileID, prompt string,
+) {
+	startCtx, cancel := context.WithTimeout(
+		context.Background(), constants.AgentLaunchTimeout,
+	)
+	defer cancel()
+	launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+		TaskID:         taskID,
+		Intent:         orchestrator.IntentStartCreated,
+		SessionID:      sessionID,
+		AgentProfileID: agentProfileID,
+		Prompt:         prompt,
+	})
+	if err != nil {
+		h.logger.Error("failed to start config chat agent",
+			zap.Error(err), zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
+	h.logger.Info("config chat agent started",
+		zap.String("task_id", taskID),
+		zap.String("session_id", launchResp.SessionID),
+		zap.String("execution_id", launchResp.AgentExecutionID))
 }

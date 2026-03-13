@@ -177,6 +177,7 @@ type ExecutorCreateRequest struct {
 	McpServers          []McpServerConfig
 	AgentConfig         agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
+	McpMode             string       // MCP tool mode: "task" (default) or "config"
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

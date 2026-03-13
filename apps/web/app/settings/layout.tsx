@@ -1,5 +1,5 @@
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { listAgents, listExecutors, listWorkspaces } from "@/lib/api";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
@@ -23,6 +23,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
           default_executor_id: workspace.default_executor_id ?? null,
           default_environment_id: workspace.default_environment_id ?? null,
           default_agent_profile_id: workspace.default_agent_profile_id ?? null,
+          default_config_agent_profile_id: workspace.default_config_agent_profile_id ?? null,
         })),
         activeId: workspaces.workspaces[0]?.id ?? null,
       },
@@ -47,8 +48,9 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <SettingsLayoutClient>{children}</SettingsLayoutClient>
-    </StateProvider>
+    </>
   );
 }

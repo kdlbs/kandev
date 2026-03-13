@@ -70,6 +70,8 @@ export type ChatInputToolbarProps = {
   onAttachFiles?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
   hideSessionsDropdown?: boolean;
+  /** When true, only render the submit/cancel button — no other controls */
+  minimalToolbar?: boolean;
 };
 
 type SubmitButtonProps = {
@@ -407,52 +409,78 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export const ChatInputToolbar = memo(function ChatInputToolbar({
-  planModeEnabled,
-  planModeAvailable = true,
-  mcpServers = [],
-  onPlanModeChange,
-  sessionId,
-  taskId,
-  taskTitle,
-  taskDescription,
+function MinimalToolbar({
   isAgentBusy,
   isDisabled,
   isSending,
   onCancel,
   onSubmit,
   submitKey = "cmd_enter",
-  contextCount = 0,
-  contextPopoverOpen = false,
-  onContextPopoverOpenChange,
-  planContextEnabled = false,
-  contextFiles = [],
-  onToggleFile,
-  onImplementPlan,
-  onEnhancePrompt,
-  isEnhancingPrompt = false,
-  isUtilityConfigured = false,
-  onAttachFiles,
-  hideSessionsDropdown,
-}: ChatInputToolbarProps) {
+}: Pick<
+  ChatInputToolbarProps,
+  "isAgentBusy" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
+>) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+  return (
+    <div className="flex items-center justify-end gap-1 px-1 pt-0 pb-0.5 border-t border-border">
+      <SubmitButton
+        isAgentBusy={isAgentBusy}
+        isDisabled={isDisabled}
+        isSending={isSending}
+        planModeEnabled={false}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+        submitShortcut={submitShortcut}
+      />
+    </div>
+  );
+}
+
+const toolbarDefaults = {
+  planModeAvailable: true,
+  mcpServers: [] as string[],
+  submitKey: "cmd_enter" as const,
+  contextCount: 0,
+  contextPopoverOpen: false,
+  planContextEnabled: false,
+  contextFiles: [] as ContextFile[],
+  isEnhancingPrompt: false,
+  isUtilityConfigured: false,
+};
+
+export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
+  const props = { ...toolbarDefaults, ...rawProps };
+  const submitShortcut = props.submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+
+  if (props.minimalToolbar) {
+    return (
+      <MinimalToolbar
+        isAgentBusy={props.isAgentBusy}
+        isDisabled={props.isDisabled}
+        isSending={props.isSending}
+        onCancel={props.onCancel}
+        onSubmit={props.onSubmit}
+        submitKey={props.submitKey}
+      />
+    );
+  }
 
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <div className="flex items-center gap-0.5">
         <PlanToggleButton
-          planModeEnabled={planModeEnabled}
-          planModeAvailable={planModeAvailable}
-          onPlanModeChange={onPlanModeChange}
+          planModeEnabled={props.planModeEnabled}
+          planModeAvailable={props.planModeAvailable}
+          onPlanModeChange={props.onPlanModeChange}
         />
 
-        <McpIndicator mcpServers={mcpServers} />
+        <McpIndicator mcpServers={props.mcpServers} />
 
-        {onAttachFiles && <AttachFilesButton onClick={onAttachFiles} />}
+        {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
 
         <ContextPopover
-          open={contextPopoverOpen}
-          onOpenChange={onContextPopoverOpenChange ?? (() => {})}
+          open={props.contextPopoverOpen}
+          onOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
           trigger={
             <Button
               type="button"
@@ -461,40 +489,39 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
               className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
             >
               <IconAt className="h-4 w-4" />
-              {contextCount > 0 && (
+              {props.contextCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
-                  {contextCount}
+                  {props.contextCount}
                 </span>
               )}
             </Button>
           }
-          sessionId={sessionId}
-          planContextEnabled={planContextEnabled}
-          contextFiles={contextFiles}
-          onToggleFile={onToggleFile ?? (() => {})}
+          sessionId={props.sessionId}
+          planContextEnabled={props.planContextEnabled}
+          contextFiles={props.contextFiles}
+          onToggleFile={props.onToggleFile ?? (() => {})}
         />
-        <ModeSelector sessionId={sessionId} />
+        <ModeSelector sessionId={props.sessionId} />
       </div>
 
       <div className="flex-1" />
-
       <ToolbarRightSection
-        taskId={taskId}
-        sessionId={sessionId}
-        taskTitle={taskTitle}
-        taskDescription={taskDescription}
-        planModeEnabled={planModeEnabled}
-        isAgentBusy={isAgentBusy}
-        isDisabled={isDisabled}
-        isSending={isSending}
-        onCancel={onCancel}
-        onSubmit={onSubmit}
+        taskId={props.taskId}
+        sessionId={props.sessionId}
+        taskTitle={props.taskTitle}
+        taskDescription={props.taskDescription}
+        planModeEnabled={props.planModeEnabled}
+        isAgentBusy={props.isAgentBusy}
+        isDisabled={props.isDisabled}
+        isSending={props.isSending}
+        onCancel={props.onCancel}
+        onSubmit={props.onSubmit}
         submitShortcut={submitShortcut}
-        onEnhancePrompt={onEnhancePrompt}
-        isEnhancingPrompt={isEnhancingPrompt}
-        isUtilityConfigured={isUtilityConfigured}
-        onImplementPlan={onImplementPlan}
-        hideSessionsDropdown={hideSessionsDropdown}
+        onEnhancePrompt={props.onEnhancePrompt}
+        isEnhancingPrompt={props.isEnhancingPrompt}
+        isUtilityConfigured={props.isUtilityConfigured}
+        onImplementPlan={props.onImplementPlan}
+        hideSessionsDropdown={props.hideSessionsDropdown}
       />
     </div>
   );

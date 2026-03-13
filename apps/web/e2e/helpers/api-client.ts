@@ -177,6 +177,7 @@ export class ApiClient {
       workflow_step_id?: string;
       repository_ids?: string[];
       executor_id?: string;
+      metadata?: Record<string, unknown>;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -191,6 +192,19 @@ export class ApiClient {
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
       ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
+      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+    });
+  }
+
+  /** Start a config chat session via the dedicated config-chat endpoint. */
+  async startConfigChat(
+    workspaceId: string,
+    agentProfileId: string,
+    prompt: string,
+  ): Promise<{ task_id: string; session_id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/config-chat`, {
+      agent_profile_id: agentProfileId,
+      prompt,
     });
   }
 
@@ -247,9 +261,34 @@ export class ApiClient {
 
   async updateWorkspace(
     workspaceId: string,
-    updates: { default_executor_id?: string },
+    updates: {
+      default_executor_id?: string;
+      default_agent_profile_id?: string;
+      default_config_agent_profile_id?: string;
+    },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);
+  }
+
+  async deleteExecutor(executorId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/executors/${executorId}`);
+  }
+
+  async createExecutorProfile(
+    executorId: string,
+    name: string,
+    opts?: { mcp_policy?: string; prepare_script?: string; cleanup_script?: string },
+  ): Promise<{ id: string; name: string }> {
+    return this.request("POST", `/api/v1/executors/${executorId}/profiles`, {
+      name,
+      ...(opts?.mcp_policy ? { mcp_policy: opts.mcp_policy } : {}),
+      ...(opts?.prepare_script ? { prepare_script: opts.prepare_script } : {}),
+      ...(opts?.cleanup_script ? { cleanup_script: opts.cleanup_script } : {}),
+    });
+  }
+
+  async deleteExecutorProfile(profileId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
   }
 
   async listExecutors(): Promise<{
@@ -312,6 +351,20 @@ export class ApiClient {
     templates: Array<{ id: string; name: string; default_steps?: Array<{ name: string }> }>;
   }> {
     return this.request("GET", "/api/v1/workflow/templates");
+  }
+
+  async deleteTask(taskId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  }
+
+  async archiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
+  }
+
+  async getAgentProfileMcpConfig(
+    profileId: string,
+  ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
+    return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
   }
 
   // --- E2E Test Reset ---
@@ -452,6 +505,12 @@ export class ApiClient {
   async listSessionMessages(
     sessionId: string,
   ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
-    return this.request("GET", `/api/v1/sessions/${sessionId}/messages`);
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
+  }
+
+  async listTasks(
+    workspaceId: string,
+  ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 }

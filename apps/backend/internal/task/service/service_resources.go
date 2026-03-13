@@ -21,13 +21,14 @@ const spritesTokenEnvKey = "SPRITES_API_TOKEN"
 // CreateWorkspace creates a new workspace
 func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceRequest) (*models.Workspace, error) {
 	workspace := &models.Workspace{
-		ID:                    uuid.New().String(),
-		Name:                  req.Name,
-		Description:           req.Description,
-		OwnerID:               req.OwnerID,
-		DefaultExecutorID:     normalizeOptionalID(req.DefaultExecutorID),
-		DefaultEnvironmentID:  normalizeOptionalID(req.DefaultEnvironmentID),
-		DefaultAgentProfileID: normalizeOptionalID(req.DefaultAgentProfileID),
+		ID:                          uuid.New().String(),
+		Name:                        req.Name,
+		Description:                 req.Description,
+		OwnerID:                     req.OwnerID,
+		DefaultExecutorID:           normalizeOptionalID(req.DefaultExecutorID),
+		DefaultEnvironmentID:        normalizeOptionalID(req.DefaultEnvironmentID),
+		DefaultAgentProfileID:       normalizeOptionalID(req.DefaultAgentProfileID),
+		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
 	}
 
 	if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
@@ -66,6 +67,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	if req.DefaultAgentProfileID != nil {
 		workspace.DefaultAgentProfileID = normalizeOptionalID(req.DefaultAgentProfileID)
+	}
+	if req.DefaultConfigAgentProfileID != nil {
+		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
 	}
 	workspace.UpdatedAt = time.Now().UTC()
 

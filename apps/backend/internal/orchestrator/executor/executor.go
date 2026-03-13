@@ -97,6 +97,10 @@ type AgentManagerClient interface {
 	// Used when starting an agent on a session whose workspace was already launched.
 	SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error
 
+	// SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
+	// Used when a session transitions to config mode after the workspace was prepared with default mode.
+	SetMcpMode(ctx context.Context, executionID string, mode string) error
+
 	// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session,
 	// clearing the agent's conversation context. The execution environment (container/agentctl) is preserved.
 	RestartAgentProcess(ctx context.Context, agentExecutionID string) error
@@ -213,6 +217,7 @@ type LaunchAgentRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
+	McpMode             string            // MCP tool mode: "config" activates config-mode tools
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
@@ -227,6 +232,10 @@ type LaunchAgentRequest struct {
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }
 
+// McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
+// config, tasks). Used when plan_mode is enabled on a session.
+const McpModeConfig = "config"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID string
@@ -234,6 +243,7 @@ type LaunchOptions struct {
 	Prompt         string
 	WorkflowStepID string
 	StartAgent     bool
+	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
 }
 
 // LaunchAgentResponse contains the result of launching an agent

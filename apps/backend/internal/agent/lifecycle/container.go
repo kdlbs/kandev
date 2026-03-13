@@ -30,6 +30,7 @@ type ContainerConfig struct {
 	InstanceID      string
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
+	McpMode         string
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -113,6 +114,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		SessionID:          config.SessionID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
+		McpMode:            config.McpMode,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)
