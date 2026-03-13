@@ -401,7 +401,11 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
             description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
           });
         } catch {
-          toast({ title: "Failed to send comment", description: "Please try again.", variant: "error" });
+          toast({
+            title: "Failed to send comment",
+            description: "Please try again.",
+            variant: "error",
+          });
         }
       }
     },
@@ -417,7 +421,11 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
           description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
         });
       } catch {
-        toast({ title: "Failed to send comment", description: "Please try again.", variant: "error" });
+        toast({
+          title: "Failed to send comment",
+          description: "Please try again.",
+          variant: "error",
+        });
       }
     },
     [runComment, isAgentBusy, toast],
