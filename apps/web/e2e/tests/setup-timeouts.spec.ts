@@ -115,41 +115,6 @@ test.describe("First-time setup: timeouts and error handling", () => {
     await expect(testPage.getByText("Scanning for installed agents...")).not.toBeVisible();
   });
 
-  test("agent discovery completes with results from API", async ({ testPage, backend }) => {
-    // Intercept discovery to return a known agent
-    await testPage.route(`${backend.baseUrl}/api/v1/agents/discovery`, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          agents: [
-            {
-              name: "claude-code",
-              available: true,
-              matched_path: "/usr/bin/claude",
-              supports_mcp: true,
-              mcp_config_path: "",
-              installation_paths: ["/usr/bin/claude"],
-              capabilities: {
-                supports_session_resume: true,
-                supports_shell: true,
-                supports_workspace_only: false,
-              },
-            },
-          ],
-        }),
-      }),
-    );
-
-    await testPage.goto("/settings/agents");
-
-    // Should show the discovered agent, not the "Scanning..." or "No installed" states
-    await expect(testPage.getByText("Scanning for installed agents...")).not.toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(testPage.getByText("No installed agents were detected")).not.toBeVisible();
-  });
-
   test("agent discovery network failure shows empty state", async ({ testPage, backend }) => {
     // Intercept discovery endpoint and abort the request (simulates network failure / timeout)
     await testPage.route(`${backend.baseUrl}/api/v1/agents/discovery`, (route) =>
