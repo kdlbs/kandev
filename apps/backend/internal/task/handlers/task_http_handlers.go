@@ -355,6 +355,19 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
+	// When not starting the agent immediately, persist profile IDs in task metadata
+	// so handleTaskMovedNoSession can retrieve them when the task is later dragged
+	// to a step with auto_start_agent.
+	if !body.StartAgent && !body.PrepareSession && body.AgentProfileID != "" {
+		if body.Metadata == nil {
+			body.Metadata = make(map[string]interface{})
+		}
+		body.Metadata["agent_profile_id"] = body.AgentProfileID
+		if body.ExecutorProfileID != "" {
+			body.Metadata["executor_profile_id"] = body.ExecutorProfileID
+		}
+	}
+
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
 

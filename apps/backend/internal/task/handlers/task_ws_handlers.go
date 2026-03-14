@@ -125,6 +125,19 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		})
 	}
 
+	// When not starting the agent immediately, persist profile IDs in task metadata
+	// so handleTaskMovedNoSession can retrieve them when the task is later dragged
+	// to a step with auto_start_agent.
+	if !req.StartAgent && req.AgentProfileID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["agent_profile_id"] = req.AgentProfileID
+		if req.ExecutorProfileID != "" {
+			req.Metadata["executor_profile_id"] = req.ExecutorProfileID
+		}
+	}
+
 	title := strings.TrimSpace(req.Title)
 	description := strings.TrimSpace(req.Description)
 
