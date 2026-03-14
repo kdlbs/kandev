@@ -2,7 +2,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -165,26 +164,16 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		return nil // No FK constraint, migration not needed
 	}
 
-	// Use a pinned connection to ensure PRAGMA setting persists through the transaction.
-	// SQLite's PRAGMA foreign_keys is per-connection, so we must run both the PRAGMA
-	// and transaction on the same connection. While the writer pool has MaxOpenConns(1),
-	// using Connx guarantees correctness even if pool config changes.
-	ctx := context.Background()
-	conn, err := r.db.Connx(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
 	// Disable FK enforcement to prevent cascade deletes during table recreation.
+	// The writer pool has MaxOpenConns(1), so PRAGMA and subsequent operations use the same connection.
 	// Note: PRAGMA statements cannot run inside a transaction in SQLite.
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 		return fmt.Errorf("disable foreign keys: %w", err)
 	}
-	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`) }()
+	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
 
 	// Wrap migration in a transaction to avoid partial state on failure
-	tx, err := conn.BeginTxx(ctx, nil)
+	tx, err := r.db.Beginx()
 	if err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
