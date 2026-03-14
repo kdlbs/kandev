@@ -218,11 +218,19 @@ function useProfileSave({
 }: ProfileEditorActionsOptions) {
   return async () => {
     if (!draft.name.trim()) {
-      toast({ title: "Profile name is required", description: "Please enter a profile name before saving.", variant: "error" });
+      toast({
+        title: "Profile name is required",
+        description: "Please enter a profile name before saving.",
+        variant: "error",
+      });
       return;
     }
     if (!draft.model.trim()) {
-      toast({ title: "Model is required", description: "Please select a model before saving.", variant: "error" });
+      toast({
+        title: "Model is required",
+        description: "Please select a model before saving.",
+        variant: "error",
+      });
       return;
     }
     setSaveStatus("loading");
@@ -239,14 +247,23 @@ function useProfileSave({
       setDraft(updated);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
-          ? { ...agentItem, profiles: agentItem.profiles.map((p: AgentProfile) => (p.id === updated.id ? updated : p)) }
+          ? {
+              ...agentItem,
+              profiles: agentItem.profiles.map((p: AgentProfile) =>
+                p.id === updated.id ? updated : p,
+              ),
+            }
           : agentItem,
       );
       syncAgentsToStore(nextAgents);
       setSaveStatus("success");
     } catch (error) {
       setSaveStatus("error");
-      toast({ title: "Failed to save profile", description: errorMessage(error), variant: "error" });
+      toast({
+        title: "Failed to save profile",
+        description: errorMessage(error),
+        variant: "error",
+      });
     }
   };
 }
@@ -263,7 +280,10 @@ function useProfileDelete(
   const removeProfileFromStore = () => {
     const nextAgents = settingsAgents.map((agentItem: Agent) =>
       agentItem.id === agent.id
-        ? { ...agentItem, profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id) }
+        ? {
+            ...agentItem,
+            profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id),
+          }
         : agentItem,
     );
     syncAgentsToStore(nextAgents);

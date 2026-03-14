@@ -19,7 +19,9 @@ test.describe("Agent profile deletion", () => {
 
     // Wait for the profile page to load — use the heading which includes the profile name
     // Wait for the delete card to load (the card title is "Delete profile")
-    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Click the delete button inside the delete card
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();
@@ -60,7 +62,9 @@ test.describe("Agent profile deletion", () => {
 
     // Wait for the profile page to load
     // Wait for the delete card to load (the card title is "Delete profile")
-    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Click the delete button
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();
@@ -96,24 +100,21 @@ test.describe("Agent profile deletion", () => {
     });
 
     // Create a task using this profile
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Task For Force Delete",
-      profile.id,
-      {
-        description: 'e2e:message("force delete test")',
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Task For Force Delete", profile.id, {
+      description: 'e2e:message("force delete test")',
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     // Navigate to profile settings page
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
     // Wait for the profile page to load
     // Wait for the delete card to load (the card title is "Delete profile")
-    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Click the delete button
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();

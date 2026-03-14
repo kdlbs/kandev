@@ -126,7 +126,10 @@ export async function deleteAgentProfileAction(
     if (response.status === 409 && body.active_sessions) {
       return { status: "conflict", activeSessions: body.active_sessions };
     }
-    return { status: "error", message: body?.error || `Request failed: ${response.status} ${response.statusText}` };
+    return {
+      status: "error",
+      message: body?.error || `Request failed: ${response.status} ${response.statusText}`,
+    };
   }
   return { status: "ok" };
 }

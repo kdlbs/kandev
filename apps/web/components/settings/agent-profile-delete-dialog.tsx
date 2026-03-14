@@ -33,9 +33,7 @@ export function AgentProfileDeleteDialog({
           <AlertDialogTitle>Delete agent profile?</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>
-                This profile is currently in use. Deleting it will affect the following:
-              </p>
+              <p>This profile is currently in use. Deleting it will affect the following:</p>
               {tasks.length > 0 && (
                 <div className="mt-2">
                   <p className="font-medium text-sm">Tasks:</p>
