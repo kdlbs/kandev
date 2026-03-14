@@ -116,7 +116,7 @@ function useModelSelectorState(sessionId: string | null) {
     [session?.agent_profile_id, settingsAgents],
   );
 
-  const usingAcpModels = !!(sessionModelsData?.models?.length);
+  const usingAcpModels = !!sessionModelsData?.models?.length;
   const availableModels = usingAcpModels
     ? sessionModelsToOptions(sessionModelsData.models)
     : resolveStaticModels(settingsAgents as Agent[], session?.agent_profile_id, availableAgents);
