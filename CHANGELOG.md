@@ -2,6 +2,22 @@
 
 All notable changes to Kandev.
 
+## 0.22 - 2026-03-14
+
+### Features
+
+- move utility agents to main agents page ([#436](https://github.com/kdlbs/kandev/pull/436))
+
+### Bug Fixes
+
+- add timeouts to agent discovery, health checks, and GitHub CLI ([#440](https://github.com/kdlbs/kandev/pull/440))
+- show confirmation dialog when deleting agent profile with active sessions ([#441](https://github.com/kdlbs/kandev/pull/441))
+- carry env and headers through MCP server config pipeline ([#439](https://github.com/kdlbs/kandev/pull/439))
+- improve claude acp tool messages and model selector flow ([#442](https://github.com/kdlbs/kandev/pull/442))
+- store profile IDs in task metadata for deferred auto-start ([#437](https://github.com/kdlbs/kandev/pull/437))
+- async workspace preparation and worktree branch fallback ([#433](https://github.com/kdlbs/kandev/pull/433))
+- suppress auggie indexing messages in inference mode ([#435](https://github.com/kdlbs/kandev/pull/435))
+
 ## 0.21 - 2026-03-13
 
 ### Features
