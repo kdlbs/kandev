@@ -1,6 +1,9 @@
 package health
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // GitHubStatusProvider abstracts the GitHub service status check.
 type GitHubStatusProvider interface {
@@ -60,13 +63,25 @@ func NewAgentChecker(provider AgentDiscoveryProvider) *AgentChecker {
 	return &AgentChecker{provider: provider}
 }
 
+const agentCheckTimeout = 10 * time.Second
+
 func (c *AgentChecker) Check(ctx context.Context) []Issue {
 	if c.provider == nil {
 		return nil
 	}
-	available, err := c.provider.HasAvailableAgents(ctx)
+	checkCtx, cancel := context.WithTimeout(ctx, agentCheckTimeout)
+	defer cancel()
+	available, err := c.provider.HasAvailableAgents(checkCtx)
 	if err != nil {
-		return nil
+		return []Issue{{
+			ID:       "agent_detection_failed",
+			Category: "agents",
+			Title:    "Agent detection timed out",
+			Message:  "Could not verify agent installations. Check Settings > Agents for details.",
+			Severity: SeverityWarning,
+			FixURL:   "/settings/agents",
+			FixLabel: "Check Agents",
+		}}
 	}
 	if !available {
 		return []Issue{{

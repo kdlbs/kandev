@@ -296,9 +296,13 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranchesLoading(true);
     setGitHubPrHeadBranch(null);
 
-    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+    const fetchOpts = { init: { signal: controller.signal } };
+
+    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo, fetchOpts);
     const prPromise = parsed.prNumber
-      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber).catch(() => null)
+      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, fetchOpts).catch(() => null)
       : Promise.resolve(null);
 
     Promise.all([branchesPromise, prPromise])
@@ -312,16 +316,24 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
           setGitHubPrHeadBranch(prInfo.head_branch);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        setGitHubUrlError("Repository not found or not accessible");
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        setGitHubUrlError(
+          isAbort
+            ? "Request timed out. Check your GitHub configuration in Settings."
+            : "Repository not found or not accessible",
+        );
         setGitHubBranches([]);
       })
       .finally(() => {
+        clearTimeout(timeoutId);
         if (!cancelled) setGitHubBranchesLoading(false);
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
+      controller.abort();
     };
   }, [
     open,

@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listAgentDiscovery } from "@/lib/api";
 
+const DISCOVERY_TIMEOUT_MS = 20_000;
+
 export function useAgentDiscovery(enabled = true) {
   const agentDiscovery = useAppStore((state) => state.agentDiscovery);
   const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
@@ -11,11 +13,20 @@ export function useAgentDiscovery(enabled = true) {
     if (!enabled) return;
     if (agentDiscovery.loaded || agentDiscovery.loading) return;
     setAgentDiscoveryLoading(true);
-    listAgentDiscovery({ cache: "no-store" })
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
+
+    listAgentDiscovery({ cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
         setAgentDiscovery(response.agents);
       })
       .catch(() => setAgentDiscovery([]));
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [
     agentDiscovery.loaded,
     agentDiscovery.loading,

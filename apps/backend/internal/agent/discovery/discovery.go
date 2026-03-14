@@ -177,8 +177,14 @@ func (r *Registry) getCached() []Availability {
 	return copied
 }
 
+const detectAllTimeout = 15 * time.Second
+
 // detectAll runs IsInstalled for all agents concurrently.
+// A timeout bounds the overall detection to prevent hanging when agent
+// binaries are missing or unresponsive (e.g. fresh K8s deploy).
 func (r *Registry) detectAll(ctx context.Context) []Availability {
+	ctx, cancel := context.WithTimeout(ctx, detectAllTimeout)
+	defer cancel()
 	type indexedResult struct {
 		index int
 		avail Availability
@@ -219,20 +225,27 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 	}
 
 	// Collect results preserving original order.
+	// If the context expires before all agents respond, return partial results.
 	slots := make([]Availability, len(r.agents))
 	valid := make([]bool, len(r.agents))
 	for range r.agents {
-		res := <-ch
-		if res.err != nil {
-			r.logger.Warn("discovery: detect failed for agent",
-				zap.String("agent", r.agents[res.index].ID()),
-				zap.Error(res.err),
-			)
-			continue
+		select {
+		case res := <-ch:
+			if res.err != nil {
+				r.logger.Warn("discovery: detect failed for agent",
+					zap.String("agent", r.agents[res.index].ID()),
+					zap.Error(res.err),
+				)
+				continue
+			}
+			slots[res.index] = res.avail
+			valid[res.index] = true
+		case <-ctx.Done():
+			r.logger.Warn("discovery: detectAll timed out, returning partial results")
+			goto collect
 		}
-		slots[res.index] = res.avail
-		valid[res.index] = true
 	}
+collect:
 
 	results := make([]Availability, 0, len(r.agents))
 	for i, v := range valid {

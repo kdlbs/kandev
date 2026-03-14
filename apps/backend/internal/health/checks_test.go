@@ -94,8 +94,14 @@ func TestAgentChecker_NotAvailable(t *testing.T) {
 func TestAgentChecker_Error(t *testing.T) {
 	checker := NewAgentChecker(&mockAgentProvider{err: fmt.Errorf("discovery failed")})
 	issues := checker.Check(context.Background())
-	if len(issues) != 0 {
-		t.Errorf("expected 0 issues on error, got %d", len(issues))
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue on error, got %d", len(issues))
+	}
+	if issues[0].ID != "agent_detection_failed" {
+		t.Errorf("issue ID = %q, want %q", issues[0].ID, "agent_detection_failed")
+	}
+	if issues[0].Severity != SeverityWarning {
+		t.Errorf("severity = %q, want %q", issues[0].Severity, SeverityWarning)
 	}
 }
 

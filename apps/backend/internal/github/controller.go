@@ -297,6 +297,13 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 	repo := ctx.Param("repo")
 	branches, err := c.service.ListRepoBranches(ctx.Request.Context(), owner, repo)
 	if err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
 		status := http.StatusInternalServerError
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {

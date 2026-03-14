@@ -411,9 +411,17 @@ func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]
 	return branches, nil
 }
 
+const ghCLITimeout = 30 * time.Second
+
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
+// A default 30s timeout is applied if the context has no deadline.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ghCLITimeout)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
