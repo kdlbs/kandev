@@ -116,7 +116,8 @@ function useModelSelectorState(sessionId: string | null) {
     [session?.agent_profile_id, settingsAgents],
   );
 
-  const availableModels = sessionModelsData?.models?.length
+  const usingAcpModels = !!(sessionModelsData?.models?.length);
+  const availableModels = usingAcpModels
     ? sessionModelsToOptions(sessionModelsData.models)
     : resolveStaticModels(settingsAgents as Agent[], session?.agent_profile_id, availableAgents);
 
@@ -129,6 +130,28 @@ function useModelSelectorState(sessionId: string | null) {
     profileModel,
   );
   const modelOptions = buildModelOptions(availableModels, currentModel);
+
+  if (sessionId) {
+    console.log("[model-selector] state resolved", {
+      sessionId,
+      usingAcpModels,
+      sessionModelsData: sessionModelsData
+        ? {
+            modelsCount: sessionModelsData.models?.length ?? 0,
+            models: sessionModelsData.models?.map((m) => m.modelId),
+            currentModelId: sessionModelsData.currentModelId,
+            configOptionsCount: sessionModelsData.configOptions?.length ?? 0,
+          }
+        : null,
+      activeModel,
+      acpCurrentModel,
+      snapshotModel,
+      profileModel,
+      resolvedCurrentModel: currentModel,
+      modelOptionsCount: modelOptions.length,
+      modelOptions: modelOptions.map((m) => ({ id: m.id, name: m.name })),
+    });
+  }
 
   const handleModelChange = useCallback(
     (sid: string, modelId: string) => {
