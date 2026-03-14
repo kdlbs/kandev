@@ -156,7 +156,7 @@ func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 func (a *Auggie) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("auggie", "--acp"),
+		Command:   NewCommand("auggie", "--acp", "--allow-indexing"),
 		ModelFlag: NewParam("--model", "{model}"),
 	}
 }
