@@ -15,15 +15,25 @@ export function useAgentDiscovery(enabled = true) {
     setAgentDiscoveryLoading(true);
 
     let cancelled = false;
+    let timedOut = false;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DISCOVERY_TIMEOUT_MS);
 
     listAgentDiscovery({ cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
         if (cancelled) return;
         setAgentDiscovery(response.agents);
       })
-      .catch(() => setAgentDiscovery([]))
+      .catch(() => {
+        // Only set empty state for real errors (timeout, network failure).
+        // Skip on cleanup abort to avoid poisoning the cache with empty data
+        // (React strict mode double-mounts would otherwise set loaded=true
+        // with no agents before the second mount can fetch).
+        if (!cancelled || timedOut) setAgentDiscovery([]);
+      })
       .finally(() => {
         clearTimeout(timeoutId);
       });
