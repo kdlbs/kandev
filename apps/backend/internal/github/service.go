@@ -15,6 +15,9 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+// AuthMethodNone is the auth method string when no GitHub client is configured.
+const AuthMethodNone = "none"
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu         sync.Mutex
@@ -49,8 +52,9 @@ func (s *Service) TestStore() *Store {
 }
 
 // IsAuthenticated returns whether the service has a working GitHub client.
+// Returns false when using the NoopClient fallback (authMethod == "none").
 func (s *Service) IsAuthenticated() bool {
-	return s.client != nil
+	return s.client != nil && s.authMethod != AuthMethodNone
 }
 
 // AuthMethod returns the authentication method ("gh_cli", "pat", or "none").

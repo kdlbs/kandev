@@ -55,7 +55,7 @@ func NewClient(ctx context.Context, secrets SecretProvider, log *logger.Logger) 
 		}
 	}
 
-	return &NoopClient{}, "none", nil
+	return &NoopClient{}, AuthMethodNone, nil
 }
 
 // findGitHubPAT looks for a secret named "GITHUB_TOKEN" or "github_token".
