@@ -235,6 +235,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 			Type:    srv.Type,
 			Command: srv.Command,
 			Args:    srv.Args,
+			Env:     srv.Env,
+			Headers: srv.Headers,
 		})
 	}
 

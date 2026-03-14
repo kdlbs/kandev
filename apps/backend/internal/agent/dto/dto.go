@@ -140,3 +140,10 @@ type AgentTypeData struct {
 	Image       string
 	Enabled     bool
 }
+
+// ActiveTaskInfo holds lightweight task info for sessions using a given agent profile.
+type ActiveTaskInfo struct {
+	TaskID      string `json:"task_id"`
+	TaskTitle   string `json:"task_title"`
+	IsEphemeral bool   `json:"is_ephemeral"`
+}

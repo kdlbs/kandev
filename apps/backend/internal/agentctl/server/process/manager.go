@@ -326,6 +326,8 @@ func (m *Manager) buildAdapterConfig() error {
 			Type:    mcp.Type,
 			Command: mcp.Command,
 			Args:    mcp.Args,
+			Env:     mcp.Env,
+			Headers: mcp.Headers,
 		}
 	}
 	m.adapterCfg = &adapter.Config{

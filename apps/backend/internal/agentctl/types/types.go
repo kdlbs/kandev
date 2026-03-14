@@ -146,11 +146,13 @@ type WorkspaceMessageType string
 // McpServer represents an MCP server configuration.
 // Supports both stdio (command+args) and SSE (url) transports.
 type McpServer struct {
-	Name    string   `json:"name"`
-	Command string   `json:"command,omitempty"` // For stdio transport
-	Args    []string `json:"args,omitempty"`    // For stdio transport
-	URL     string   `json:"url,omitempty"`     // For SSE transport
-	Type    string   `json:"type,omitempty"`    // "stdio" or "sse"
+	Name    string            `json:"name"`
+	Command string            `json:"command,omitempty"` // For stdio transport
+	Args    []string          `json:"args,omitempty"`    // For stdio transport
+	URL     string            `json:"url,omitempty"`     // For SSE/HTTP transport
+	Type    string            `json:"type,omitempty"`    // "stdio", "sse", "http", or "streamable_http"
+	Env     map[string]string `json:"env,omitempty"`     // Environment variables (stdio transport)
+	Headers map[string]string `json:"headers,omitempty"` // HTTP headers (SSE/HTTP transport)
 }
 
 const (

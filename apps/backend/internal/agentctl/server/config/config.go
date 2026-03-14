@@ -82,12 +82,16 @@ type McpServerConfig struct {
 	Name string `json:"name"`
 	// URL is the URL for HTTP/SSE transport
 	URL string `json:"url,omitempty"`
-	// Type is the transport type: "sse" or "http"
+	// Type is the transport type: "stdio", "sse", "http", or "streamable_http"
 	Type string `json:"type,omitempty"`
 	// Command is the command for stdio transport
 	Command string `json:"command,omitempty"`
 	// Args are the arguments for stdio transport
 	Args []string `json:"args,omitempty"`
+	// Env holds environment variables for stdio transport
+	Env map[string]string `json:"env,omitempty"`
+	// Headers holds HTTP headers for SSE/HTTP transport
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // InstanceConfig holds configuration for a single agent instance.
@@ -304,11 +308,13 @@ func ParseCommand(cmd string) []string {
 func CollectAgentEnv(additional map[string]string) []string {
 	envMap := make(map[string]string)
 
-	// Start with current environment, excluding AGENTCTL_* vars
+	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
+	// npm_config_* vars from the parent pnpm process cause "Unknown env config"
+	// warnings when the agent is launched via npx.
 	for _, e := range os.Environ() {
 		if idx := strings.Index(e, "="); idx > 0 {
 			key := e[:idx]
-			if !strings.HasPrefix(key, "AGENTCTL_") {
+			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
 				envMap[key] = e[idx+1:]
 			}
 		}
@@ -325,6 +331,16 @@ func CollectAgentEnv(additional map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+// isNpmEnvVar returns true if the key is an npm-related environment variable
+// that should be filtered out to prevent warnings in npx commands.
+func isNpmEnvVar(key string) bool {
+	return strings.HasPrefix(key, "npm_config_") ||
+		strings.HasPrefix(key, "npm_package_") ||
+		strings.HasPrefix(key, "npm_lifecycle_") ||
+		strings.HasPrefix(key, "npm_execpath") ||
+		strings.HasPrefix(key, "npm_node_execpath")
 }
 
 func getEnv(key, defaultValue string) string {

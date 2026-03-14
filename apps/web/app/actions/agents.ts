@@ -104,8 +104,34 @@ export async function updateAgentProfileAction(
   });
 }
 
-export async function deleteAgentProfileAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, { method: "DELETE" });
+import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
+
+export type DeleteProfileResult =
+  | { status: "ok" }
+  | { status: "conflict"; activeSessions: ActiveSessionInfo[] }
+  | { status: "error"; message: string };
+
+export async function deleteAgentProfileAction(
+  id: string,
+  force?: boolean,
+): Promise<DeleteProfileResult> {
+  const url = `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 409 && body.active_sessions) {
+      return { status: "conflict", activeSessions: body.active_sessions };
+    }
+    return {
+      status: "error",
+      message: body?.error || `Request failed: ${response.status} ${response.statusText}`,
+    };
+  }
+  return { status: "ok" };
 }
 
 export async function getAgentProfileMcpConfigAction(

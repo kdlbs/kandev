@@ -299,9 +299,9 @@ func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapab
 				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
 				continue
 			}
-		case "http":
+		case "http", "streamable_http":
 			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name))
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
 				continue
 			}
 		}
@@ -323,7 +323,16 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 					Name:    server.Name,
 					Url:     server.URL,
 					Type:    "sse",
-					Headers: []acp.HttpHeader{},
+					Headers: mapToHTTPHeaders(server.Headers),
+				},
+			})
+		case "http", "streamable_http":
+			out = append(out, acp.McpServer{
+				Http: &acp.McpServerHttpInline{
+					Name:    server.Name,
+					Url:     server.URL,
+					Type:    server.Type,
+					Headers: mapToHTTPHeaders(server.Headers),
 				},
 			})
 		default: // stdio
@@ -332,11 +341,38 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 					Name:    server.Name,
 					Command: server.Command,
 					Args:    append([]string{}, server.Args...),
+					Env:     mapToEnvVars(server.Env),
 				},
 			})
 		}
 	}
 	return out
+}
+
+// mapToEnvVars converts a string map to ACP EnvVariable slice.
+// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
+func mapToEnvVars(env map[string]string) []acp.EnvVariable {
+	if len(env) == 0 {
+		return []acp.EnvVariable{}
+	}
+	vars := make([]acp.EnvVariable, 0, len(env))
+	for k, v := range env {
+		vars = append(vars, acp.EnvVariable{Name: k, Value: v})
+	}
+	return vars
+}
+
+// mapToHTTPHeaders converts a string map to ACP HttpHeader slice.
+// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
+func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
+	if len(headers) == 0 {
+		return []acp.HttpHeader{}
+	}
+	hdrs := make([]acp.HttpHeader, 0, len(headers))
+	for k, v := range headers {
+		hdrs = append(hdrs, acp.HttpHeader{Name: k, Value: v})
+	}
+	return hdrs
 }
 
 // LoadSession resumes an existing session.
@@ -813,10 +849,18 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
 		if len(configOptions) > 0 {
+			// Include cached available models so this event doesn't overwrite
+			// the model list that was set during session initialization.
+			a.mu.RLock()
+			cachedModels := a.availableModels
+			a.mu.RUnlock()
+			currentModelID := resolveCurrentModelFromConfig(configOptions)
 			return &AgentEvent{
-				Type:          streams.EventTypeSessionModels,
-				SessionID:     sessionID,
-				ConfigOptions: configOptions,
+				Type:           streams.EventTypeSessionModels,
+				SessionID:      sessionID,
+				CurrentModelID: currentModelID,
+				SessionModels:  convertSessionModels(cachedModels),
+				ConfigOptions:  configOptions,
 			}
 		}
 	}
@@ -1273,6 +1317,21 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
 	}
 
+	// Enrich modify_file payload from tool_call_contents.
+	// Claude ACP sends path and content in tool_call_update, not in the initial tool_call.
+	if payload != nil && payload.Kind() == streams.ToolKindModifyFile {
+		if mf := payload.ModifyFile(); mf != nil {
+			enrichModifyFileFromContents(mf, tcu.Content)
+		}
+	}
+
+	// Enrich read_file payload path from title if still empty.
+	if payload != nil && payload.Kind() == streams.ToolKindReadFile {
+		if rf := payload.ReadFile(); rf != nil && rf.FilePath == "" && tcu.Title != nil {
+			rf.FilePath = extractPathFromTitle(*tcu.Title)
+		}
+	}
+
 	if isTerminal {
 		delete(a.activeToolCalls, toolCallID)
 	}
@@ -1307,6 +1366,48 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		NormalizedPayload: payload,
 		ToolCallContents:  a.convertToolCallContents(tcu.Content),
 	}
+}
+
+// enrichModifyFileFromContents updates a ModifyFilePayload with data from
+// tool_call_contents. Claude ACP sends file path and content in tool_call_update
+// events rather than in the initial tool_call rawInput.
+func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.ToolCallContent) {
+	for _, c := range contents {
+		if c.Diff == nil {
+			continue
+		}
+		if mf.FilePath == "" && c.Diff.Path != "" {
+			mf.FilePath = c.Diff.Path
+		}
+		if len(mf.Mutations) == 0 {
+			continue
+		}
+		mut := &mf.Mutations[0]
+		if mut.Diff != "" {
+			continue // Already has diff, don't overwrite
+		}
+		if c.Diff.OldText != nil {
+			diffPath := c.Diff.Path
+			if diffPath == "" {
+				diffPath = mf.FilePath
+			}
+			mut.Diff = shared.GenerateUnifiedDiff(*c.Diff.OldText, c.Diff.NewText, diffPath, mut.StartLine)
+		} else if c.Diff.NewText != "" {
+			mut.Type = streams.MutationCreate
+			mut.Content = c.Diff.NewText
+		}
+		break
+	}
+}
+
+// extractPathFromTitle extracts a file path from tool titles like "Read /path/to/file".
+func extractPathFromTitle(title string) string {
+	for _, prefix := range []string{"Read ", "Write ", "Edit "} {
+		if strings.HasPrefix(title, prefix) {
+			return strings.TrimPrefix(title, prefix)
+		}
+	}
+	return ""
 }
 
 // handlePermissionRequest handles permission requests from the agent.

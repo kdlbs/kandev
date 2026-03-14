@@ -134,8 +134,9 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents");
   }
 
-  async deleteAgentProfile(profileId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/agent-profiles/${profileId}`);
+  async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
+    const qs = force ? "?force=true" : "";
+    await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
   }
 
   /** Delete all agent profiles except the ones in keepIds. */

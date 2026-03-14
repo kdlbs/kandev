@@ -29,7 +29,7 @@ func (a *Adapter) PrepareCommandArgs() []string {
 	}
 
 	// Build MCP configuration in Claude Code format
-	// Format: { "server-name": { "command": "...", "args": [...] } }
+	// Format: { "server-name": { "command": "...", "args": [...], "env": {...} } }
 	mcpConfig := make(map[string]interface{})
 	for _, server := range a.cfg.McpServers {
 		serverDef := make(map[string]interface{})
@@ -41,11 +41,17 @@ func (a *Adapter) PrepareCommandArgs() []string {
 			if len(server.Args) > 0 {
 				serverDef["args"] = server.Args
 			}
+			if len(server.Env) > 0 {
+				serverDef["env"] = server.Env
+			}
 		} else if server.URL != "" {
 			// SSE/HTTP transport
 			serverDef["url"] = server.URL
 			if server.Type != "" {
 				serverDef["type"] = server.Type
+			}
+			if len(server.Headers) > 0 {
+				serverDef["headers"] = server.Headers
 			}
 		}
 
@@ -66,9 +72,13 @@ func (a *Adapter) PrepareCommandArgs() []string {
 		return nil
 	}
 
+	serverNames := make([]string, len(a.cfg.McpServers))
+	for i, s := range a.cfg.McpServers {
+		serverNames[i] = s.Name
+	}
 	a.logger.Info("prepared MCP configuration for Claude Code",
 		zap.Int("server_count", len(a.cfg.McpServers)),
-		zap.String("config", string(configJSON)))
+		zap.Strings("servers", serverNames))
 
 	// Return --mcp-config flag with JSON string
 	return []string{"--mcp-config", string(configJSON)}

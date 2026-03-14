@@ -12,6 +12,8 @@ import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
+import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
+import { AgentProfileDeleteDialog } from "@/components/settings/agent-profile-delete-dialog";
 import type {
   Agent,
   AgentProfile,
@@ -187,6 +189,12 @@ function useProfileEditorState(profile: AgentProfile) {
   return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
 }
 
+const FALLBACK_ERROR = "Request failed";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : FALLBACK_ERROR;
+}
+
 type ProfileEditorActionsOptions = {
   agent: Agent;
   draft: AgentProfile;
@@ -198,7 +206,7 @@ type ProfileEditorActionsOptions = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-function useProfileEditorActions({
+function useProfileSave({
   agent,
   draft,
   setSavedProfile,
@@ -208,7 +216,7 @@ function useProfileEditorActions({
   syncAgentsToStore,
   toast,
 }: ProfileEditorActionsOptions) {
-  const handleSave = async () => {
+  return async () => {
     if (!draft.name.trim()) {
       toast({
         title: "Profile name is required",
@@ -253,35 +261,57 @@ function useProfileEditorActions({
       setSaveStatus("error");
       toast({
         title: "Failed to save profile",
-        description: error instanceof Error ? error.message : "Request failed",
+        description: errorMessage(error),
         variant: "error",
       });
     }
+  };
+}
+
+function useProfileDelete(
+  agent: Agent,
+  draft: AgentProfile,
+  settingsAgents: Agent[],
+  syncAgentsToStore: (agents: Agent[]) => void,
+  toast: ReturnType<typeof useToast>["toast"],
+) {
+  const [conflictSessions, setConflictSessions] = useState<ActiveSessionInfo[] | null>(null);
+
+  const removeProfileFromStore = () => {
+    const nextAgents = settingsAgents.map((agentItem: Agent) =>
+      agentItem.id === agent.id
+        ? {
+            ...agentItem,
+            profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id),
+          }
+        : agentItem,
+    );
+    syncAgentsToStore(nextAgents);
+    window.location.assign("/settings/agents");
   };
 
   const handleDeleteProfile = async () => {
-    try {
-      await deleteAgentProfileAction(draft.id);
-      const nextAgents = settingsAgents.map((agentItem: Agent) =>
-        agentItem.id === agent.id
-          ? {
-              ...agentItem,
-              profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id),
-            }
-          : agentItem,
-      );
-      syncAgentsToStore(nextAgents);
-      window.location.assign("/settings/agents");
-    } catch (error) {
-      toast({
-        title: "Failed to delete profile",
-        description: error instanceof Error ? error.message : "Request failed",
-        variant: "error",
-      });
+    const result = await deleteAgentProfileAction(draft.id);
+    if (result.status === "ok") {
+      removeProfileFromStore();
+    } else if (result.status === "conflict") {
+      setConflictSessions(result.activeSessions);
+    } else {
+      toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
     }
   };
 
-  return { handleSave, handleDeleteProfile };
+  const handleForceDelete = async () => {
+    const result = await deleteAgentProfileAction(draft.id, true);
+    setConflictSessions(null);
+    if (result.status === "ok") {
+      removeProfileFromStore();
+    } else if (result.status === "error") {
+      toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
+    }
+  };
+
+  return { handleDeleteProfile, conflictSessions, setConflictSessions, handleForceDelete };
 }
 
 function ProfileEditor({
@@ -297,7 +327,7 @@ function ProfileEditor({
   const syncAgentsToStore = useSyncAgentsToStore();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
     useProfileEditorState(profile);
-  const { handleSave, handleDeleteProfile } = useProfileEditorActions({
+  const handleSave = useProfileSave({
     agent,
     draft,
     setSavedProfile,
@@ -307,6 +337,8 @@ function ProfileEditor({
     syncAgentsToStore,
     toast,
   });
+  const { handleDeleteProfile, conflictSessions, setConflictSessions, handleForceDelete } =
+    useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
   return (
     <div className="space-y-8">
@@ -349,13 +381,21 @@ function ProfileEditor({
         onToastError={(error) =>
           toast({
             title: "Failed to save MCP config",
-            description: error instanceof Error ? error.message : "Request failed",
+            description: errorMessage(error),
             variant: "error",
           })
         }
       />
 
       <DeleteProfileCard onDelete={handleDeleteProfile} />
+
+      <AgentProfileDeleteDialog
+        activeSessions={conflictSessions}
+        onOpenChange={(open) => {
+          if (!open) setConflictSessions(null);
+        }}
+        onConfirm={handleForceDelete}
+      />
     </div>
   );
 }

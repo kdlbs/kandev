@@ -251,6 +251,18 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 			shellExec.Description = desc
 		}
 	}
+
+	// Claude ACP sends file_path in incremental rawInput updates
+	if mf := payload.ModifyFile(); mf != nil {
+		if path := shared.GetString(inputMap, "file_path"); path != "" && mf.FilePath == "" {
+			mf.FilePath = path
+		}
+	}
+	if rf := payload.ReadFile(); rf != nil {
+		if path := shared.GetString(inputMap, "file_path"); path != "" && rf.FilePath == "" {
+			rf.FilePath = path
+		}
+	}
 }
 
 // normalizeEdit converts ACP edit tool data.

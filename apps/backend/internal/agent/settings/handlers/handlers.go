@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -386,14 +387,19 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"))
+	force := c.Query("force") == "true"
+	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if err == controller.ErrAgentProfileInUse {
-			c.JSON(http.StatusConflict, gin.H{"error": "agent profile is used by an active agent session"})
+		var inUseErr *controller.ErrProfileInUseDetail
+		if errors.As(err, &inUseErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":           "agent profile is used by active session(s)",
+				"active_sessions": inUseErr.ActiveSessions,
+			})
 			return
 		}
 		h.logger.Error("failed to delete profile", zap.Error(err))
