@@ -339,12 +339,12 @@ function TopBarRight({
             isAgentctlReady={isAgentctlReady}
           />
           <PRTopbarButton />
+          <QuickChatButton workspaceId={workspaceId} />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
           <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
-      <QuickChatButton workspaceId={workspaceId} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>
