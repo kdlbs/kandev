@@ -71,8 +71,7 @@ test.describe("First-time setup: timeouts and error handling", () => {
               id: "agent_detection_failed",
               category: "agents",
               title: "Agent detection timed out",
-              message:
-                "Could not verify agent installations. Check Settings > Agents for details.",
+              message: "Could not verify agent installations. Check Settings > Agents for details.",
               severity: "warning",
               fix_url: "/settings/agents",
               fix_label: "Check Agents",
@@ -188,10 +187,7 @@ test.describe("First-time setup: timeouts and error handling", () => {
     await expect(errorEl).toContainText("not found or not accessible");
   });
 
-  test("GitHub branch fetch shows not-configured error for 503", async ({
-    testPage,
-    backend,
-  }) => {
+  test("GitHub branch fetch shows not-configured error for 503", async ({ testPage, backend }) => {
     // Intercept branch fetch and return the new 503 "not configured" response
     await testPage.route(
       `${backend.baseUrl}/api/v1/github/repos/unconfigured-owner/unconfigured-repo/branches`,
