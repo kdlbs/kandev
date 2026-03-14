@@ -62,14 +62,36 @@ export function normalizeDiffString(diff: string, filePath: string): string {
  * The DiffViewer component handles diff generation from content using the library.
  */
 export function transformFileMutation(filePath: string, mutation: FileMutation): FileDiffData {
+  const resolvedPath = mutation.new_path || filePath;
   return {
-    filePath: mutation.new_path || filePath,
+    filePath: resolvedPath,
     oldContent: mutation.old_content || "",
     newContent: mutation.new_content || mutation.content || "",
-    diff: mutation.diff ? normalizeDiffString(mutation.diff, filePath) : undefined,
+    diff: mutation.diff
+      ? normalizeDiffString(mutation.diff, resolvedPath)
+      : mutation.type === "create" && mutation.content
+        ? generateCreateDiff(mutation.content, resolvedPath)
+        : undefined,
     additions: 0,
     deletions: 0,
   };
+}
+
+/**
+ * Generate an all-additions diff for new file creation.
+ * Shows the entire content as green (added) lines in the diff viewer.
+ */
+function generateCreateDiff(content: string, filePath: string): string {
+  const lines = content.split("\n");
+  const header = [
+    `diff --git a/${filePath} b/${filePath}`,
+    `new file mode 100644`,
+    `--- /dev/null`,
+    `+++ b/${filePath}`,
+    `@@ -0,0 +1,${lines.length} @@`,
+  ];
+  const addedLines = lines.map((l) => `+${l}`);
+  return [...header, ...addedLines].join("\n");
 }
 
 /**
