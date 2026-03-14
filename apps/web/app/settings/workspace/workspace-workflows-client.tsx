@@ -51,7 +51,6 @@ type WorkflowActionsArgs = {
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
   setSavedWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
-  router: ReturnType<typeof useRouter>;
 };
 
 function buildWorkflowSteps(workflow: Workflow, definitions: StepDefinition[]): WorkflowStep[] {
@@ -157,7 +156,6 @@ function useWorkflowActions({
   workflowTemplates,
   setWorkflowItems,
   setSavedWorkflowItems,
-  router,
 }: WorkflowActionsArgs) {
   const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState("");
@@ -445,7 +443,6 @@ function useWorkspaceWorkflowsPage(
     workflowTemplates,
     setWorkflowItems,
     setSavedWorkflowItems,
-    router,
   });
   const {
     isAddWorkflowDialogOpen,
