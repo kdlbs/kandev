@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -651,6 +652,200 @@ func TestUpdatePayloadInput(t *testing.T) {
 		})
 		// Should not panic
 		normalizer.UpdatePayloadInput(payload, "not a map")
+	})
+}
+
+// TestEnrichModifyFileFromContents tests enriching modify_file payloads from tool_call_contents.
+func TestEnrichModifyFileFromContents(t *testing.T) {
+	oldText := "old content"
+
+	t.Run("enriches file path from diff content", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch}},
+		}
+		contents := []acp.ToolCallContent{
+			{Diff: &acp.ToolCallContentDiff{Path: "/workspace/README.md", NewText: "new content"}},
+		}
+		enrichModifyFileFromContents(mf, contents)
+		if mf.FilePath != "/workspace/README.md" {
+			t.Errorf("expected FilePath '/workspace/README.md', got %q", mf.FilePath)
+		}
+	})
+
+	t.Run("generates unified diff when oldText is provided", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch}},
+		}
+		contents := []acp.ToolCallContent{
+			{Diff: &acp.ToolCallContentDiff{Path: "file.ts", OldText: &oldText, NewText: "new content"}},
+		}
+		enrichModifyFileFromContents(mf, contents)
+		if mf.Mutations[0].Diff == "" {
+			t.Error("expected Diff to be generated")
+		}
+		if mf.Mutations[0].Type != streams.MutationPatch {
+			t.Errorf("expected type to remain patch, got %q", mf.Mutations[0].Type)
+		}
+		if !strings.Contains(mf.Mutations[0].Diff, "-old content") {
+			t.Error("expected diff to contain removed old content")
+		}
+		if !strings.Contains(mf.Mutations[0].Diff, "+new content") {
+			t.Error("expected diff to contain added new content")
+		}
+	})
+
+	t.Run("sets create mutation when only newText", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch}},
+		}
+		contents := []acp.ToolCallContent{
+			{Diff: &acp.ToolCallContentDiff{Path: "file.ts", NewText: "new file content"}},
+		}
+		enrichModifyFileFromContents(mf, contents)
+		if mf.Mutations[0].Type != streams.MutationCreate {
+			t.Errorf("expected type 'create', got %q", mf.Mutations[0].Type)
+		}
+		if mf.Mutations[0].Content != "new file content" {
+			t.Errorf("expected content 'new file content', got %q", mf.Mutations[0].Content)
+		}
+	})
+
+	t.Run("does not overwrite existing file path", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "existing.ts",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch}},
+		}
+		contents := []acp.ToolCallContent{
+			{Diff: &acp.ToolCallContentDiff{Path: "other.ts", NewText: "content"}},
+		}
+		enrichModifyFileFromContents(mf, contents)
+		if mf.FilePath != "existing.ts" {
+			t.Errorf("expected FilePath to remain 'existing.ts', got %q", mf.FilePath)
+		}
+	})
+
+	t.Run("does not overwrite existing diff", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "file.ts",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch, Diff: "existing diff"}},
+		}
+		contents := []acp.ToolCallContent{
+			{Diff: &acp.ToolCallContentDiff{Path: "file.ts", OldText: &oldText, NewText: "new"}},
+		}
+		enrichModifyFileFromContents(mf, contents)
+		if mf.Mutations[0].Diff != "existing diff" {
+			t.Errorf("expected Diff to remain 'existing diff', got %q", mf.Mutations[0].Diff)
+		}
+	})
+
+	t.Run("handles empty content gracefully", func(t *testing.T) {
+		mf := &streams.ModifyFilePayload{
+			FilePath:  "",
+			Mutations: []streams.FileMutation{{Type: streams.MutationPatch}},
+		}
+		enrichModifyFileFromContents(mf, nil)
+		enrichModifyFileFromContents(mf, []acp.ToolCallContent{})
+		if mf.FilePath != "" {
+			t.Errorf("expected FilePath to remain empty, got %q", mf.FilePath)
+		}
+	})
+}
+
+// TestExtractPathFromTitle tests file path extraction from tool titles.
+func TestExtractPathFromTitle(t *testing.T) {
+	tests := []struct {
+		title string
+		want  string
+	}{
+		{"Read /path/to/file.ts", "/path/to/file.ts"},
+		{"Write /path/to/file.ts", "/path/to/file.ts"},
+		{"Edit /path/to/file.ts", "/path/to/file.ts"},
+		{"Unknown /path/to/file.ts", ""},
+		{"", ""},
+		{"Read", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.title, func(t *testing.T) {
+			got := extractPathFromTitle(tt.title)
+			if got != tt.want {
+				t.Errorf("extractPathFromTitle(%q) = %q, want %q", tt.title, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpdatePayloadInput_ModifyFile tests incremental rawInput updates for modify_file payloads.
+func TestUpdatePayloadInput_ModifyFile(t *testing.T) {
+	normalizer := NewNormalizer()
+
+	t.Run("updates empty file path from rawInput", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("edit", map[string]any{
+			"kind":      "edit",
+			"raw_input": map[string]any{},
+		})
+		if payload.ModifyFile().FilePath != "" {
+			t.Errorf("expected empty initial FilePath, got %q", payload.ModifyFile().FilePath)
+		}
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"file_path": "/workspace/file.ts",
+		})
+		if payload.ModifyFile().FilePath != "/workspace/file.ts" {
+			t.Errorf("expected FilePath '/workspace/file.ts', got %q", payload.ModifyFile().FilePath)
+		}
+	})
+
+	t.Run("does not overwrite existing file path", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("edit", map[string]any{
+			"kind": "edit",
+			"raw_input": map[string]any{
+				"path": "existing.ts",
+			},
+		})
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"file_path": "other.ts",
+		})
+		if payload.ModifyFile().FilePath != "existing.ts" {
+			t.Errorf("expected FilePath to remain 'existing.ts', got %q", payload.ModifyFile().FilePath)
+		}
+	})
+}
+
+// TestUpdatePayloadInput_ReadFile tests incremental rawInput updates for read_file payloads.
+func TestUpdatePayloadInput_ReadFile(t *testing.T) {
+	normalizer := NewNormalizer()
+
+	t.Run("updates empty file path from rawInput", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind":      "read",
+			"raw_input": map[string]any{},
+		})
+		if payload.ReadFile().FilePath != "" {
+			t.Errorf("expected empty initial FilePath, got %q", payload.ReadFile().FilePath)
+		}
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"file_path": "/workspace/README.md",
+		})
+		if payload.ReadFile().FilePath != "/workspace/README.md" {
+			t.Errorf("expected FilePath '/workspace/README.md', got %q", payload.ReadFile().FilePath)
+		}
+	})
+
+	t.Run("does not overwrite existing file path", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": "existing.md",
+			},
+		})
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"file_path": "other.md",
+		})
+		if payload.ReadFile().FilePath != "existing.md" {
+			t.Errorf("expected FilePath to remain 'existing.md', got %q", payload.ReadFile().FilePath)
+		}
 	})
 }
 
