@@ -63,7 +63,9 @@ export type GitStatusEntry = {
 };
 
 export type GitStatusState = {
-  bySessionId: Record<string, GitStatusEntry>;
+  /** Git status keyed by environment ID (shared across sessions in the same environment).
+   *  Falls back to session ID when no environment exists. */
+  byEnvironmentId: Record<string, GitStatusEntry>;
 };
 
 // Git Snapshot types for historical tracking
@@ -249,6 +251,8 @@ export type SessionRuntimeSliceState = {
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
+  /** Maps sessionId → environmentId for workspace state sharing. */
+  environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
   contextWindow: ContextWindowState;
   agents: AgentState;
@@ -276,6 +280,7 @@ export type SessionRuntimeSliceActions = {
   setActiveProcess: (sessionId: string, processId: string) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
+  registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   // Session commit actions
   setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;

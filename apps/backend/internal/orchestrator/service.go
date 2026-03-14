@@ -116,6 +116,9 @@ type repoStore interface {
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+	// Session history + plan (for context handover)
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
@@ -145,6 +148,12 @@ type sessionExecutorStore interface {
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
+	// Session delete
+	DeleteTaskSession(ctx context.Context, id string) error
+	// Task environment
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 }
 
 // Service is the main orchestrator service

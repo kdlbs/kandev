@@ -95,18 +95,19 @@ func validateExecutorConfig(config map[string]string) error {
 
 // Repos holds the repository sub-interfaces used by the task service.
 type Repos struct {
-	Workspaces   repository.WorkspaceRepository
-	Tasks        repository.TaskRepository
-	TaskRepos    repository.TaskRepoRepository
-	Workflows    repository.WorkflowRepository
-	Messages     repository.MessageRepository
-	Turns        repository.TurnRepository
-	Sessions     repository.SessionRepository
-	GitSnapshots repository.GitSnapshotRepository
-	RepoEntities repository.RepositoryEntityRepository
-	Executors    repository.ExecutorRepository
-	Environments repository.EnvironmentRepository
-	Reviews      repository.ReviewRepository
+	Workspaces       repository.WorkspaceRepository
+	Tasks            repository.TaskRepository
+	TaskRepos        repository.TaskRepoRepository
+	Workflows        repository.WorkflowRepository
+	Messages         repository.MessageRepository
+	Turns            repository.TurnRepository
+	Sessions         repository.SessionRepository
+	GitSnapshots     repository.GitSnapshotRepository
+	RepoEntities     repository.RepositoryEntityRepository
+	Executors        repository.ExecutorRepository
+	Environments     repository.EnvironmentRepository
+	TaskEnvironments repository.TaskEnvironmentRepository
+	Reviews          repository.ReviewRepository
 }
 
 // Service provides task business logic
@@ -122,6 +123,7 @@ type Service struct {
 	repoEntities        repository.RepositoryEntityRepository
 	executors           repository.ExecutorRepository
 	environments        repository.EnvironmentRepository
+	taskEnvironments    repository.TaskEnvironmentRepository
 	reviews             repository.ReviewRepository
 	eventBus            bus.EventBus
 	logger              *logger.Logger
@@ -138,21 +140,22 @@ type Service struct {
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:      repos.Workspaces,
-		tasks:           repos.Tasks,
-		taskRepos:       repos.TaskRepos,
-		workflows:       repos.Workflows,
-		messages:        repos.Messages,
-		turns:           repos.Turns,
-		sessions:        repos.Sessions,
-		gitSnapshots:    repos.GitSnapshots,
-		repoEntities:    repos.RepoEntities,
-		executors:       repos.Executors,
-		environments:    repos.Environments,
-		reviews:         repos.Reviews,
-		eventBus:        eventBus,
-		logger:          log,
-		discoveryConfig: discoveryConfig,
+		workspaces:       repos.Workspaces,
+		tasks:            repos.Tasks,
+		taskRepos:        repos.TaskRepos,
+		workflows:        repos.Workflows,
+		messages:         repos.Messages,
+		turns:            repos.Turns,
+		sessions:         repos.Sessions,
+		gitSnapshots:     repos.GitSnapshots,
+		repoEntities:     repos.RepoEntities,
+		executors:        repos.Executors,
+		environments:     repos.Environments,
+		taskEnvironments: repos.TaskEnvironments,
+		reviews:          repos.Reviews,
+		eventBus:         eventBus,
+		logger:           log,
+		discoveryConfig:  discoveryConfig,
 	}
 }
 

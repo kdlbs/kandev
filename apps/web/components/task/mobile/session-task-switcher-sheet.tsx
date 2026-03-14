@@ -80,7 +80,8 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusBySessionId = useAppStore((state) => state.gitStatus.bySessionId);
+  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const { tasks } = useTasks(workflowId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -98,7 +99,12 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
       repositories.map((repo: Repository) => [repo.id, repo.local_path]),
     );
     return tasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
+      const sessionInfo = getSessionInfoForTask(
+        task.id,
+        sessionsByTaskId,
+        gitStatusByEnvId,
+        envIdBySessionId,
+      );
       return {
         id: task.id,
         title: task.title,
@@ -116,7 +122,14 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         primarySessionId: task.primarySessionId ?? null,
       };
     });
-  }, [repositoriesByWorkspace, tasks, workspaceId, sessionsByTaskId, gitStatusBySessionId]);
+  }, [
+    repositoriesByWorkspace,
+    tasks,
+    workspaceId,
+    sessionsByTaskId,
+    gitStatusByEnvId,
+    envIdBySessionId,
+  ]);
 
   const dialogSteps = useMemo(
     () =>

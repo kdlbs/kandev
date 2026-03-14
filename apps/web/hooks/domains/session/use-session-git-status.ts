@@ -3,15 +3,32 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+/** Resolve the environment key for workspace state (git, files) given a sessionId. */
+function resolveEnvKey(
+  state: {
+    environmentIdBySessionId: Record<string, string>;
+    taskSessions: { items: Record<string, { task_environment_id?: string }> };
+  },
+  sessionId: string,
+): string {
+  return (
+    state.environmentIdBySessionId[sessionId] ??
+    state.taskSessions.items[sessionId]?.task_environment_id ??
+    sessionId
+  );
+}
+
 /**
  * Hook to get the current git status for a session.
- * Git status is populated via WebSocket from workspace stream updates.
- * The workspace stream sends current status immediately on subscription.
+ * Git status is keyed by environment ID so sessions sharing an environment share git state.
  */
 export function useSessionGitStatus(sessionId: string | null) {
-  // Use shallow comparison to prevent re-renders when object reference changes but values are the same
   const gitStatus = useAppStore(
-    useShallow((state) => (sessionId ? state.gitStatus.bySessionId[sessionId] : undefined)),
+    useShallow((state) => {
+      if (!sessionId) return undefined;
+      const envKey = resolveEnvKey(state, sessionId);
+      return state.gitStatus.byEnvironmentId[envKey];
+    }),
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
 
