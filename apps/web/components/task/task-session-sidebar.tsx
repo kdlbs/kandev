@@ -106,6 +106,45 @@ export const NewTaskButton = memo(function NewTaskButton({
   );
 });
 
+/** Map a kanban task to a sidebar item with session info and repository metadata. */
+function toSidebarItem(
+  task: KanbanState["tasks"][number],
+  ctx: {
+    sessionsByTaskId: Record<string, string[]>;
+    gitStatusByEnvId: Record<string, unknown>;
+    envIdBySessionId: Record<string, string>;
+    repositorySlugById: Map<string, string | undefined>;
+    taskPRsByTaskId: Record<string, { owner: string; repo: string } | undefined>;
+  },
+) {
+  const sessionInfo = getSessionInfoForTask(
+    task.id,
+    ctx.sessionsByTaskId,
+    ctx.gitStatusByEnvId,
+    ctx.envIdBySessionId,
+  );
+  const resolvedSessionState =
+    sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
+  const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
+  const pr = ctx.taskPRsByTaskId[task.id];
+  return {
+    id: task.id,
+    title: task.title,
+    state: task.state as TaskState | undefined,
+    sessionState: resolvedSessionState,
+    description: task.description,
+    workflowStepId: task.workflowStepId as string | undefined,
+    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
+    diffStats: sessionInfo.diffStats,
+    isRemoteExecutor: task.isRemoteExecutor,
+    remoteExecutorType: task.primaryExecutorType ?? undefined,
+    remoteExecutorName: task.primaryExecutorName ?? undefined,
+    primarySessionId: task.primarySessionId ?? null,
+    updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+    isArchived: false as boolean,
+  };
+}
+
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -158,34 +197,17 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
-    const items = allTasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(
-        task.id,
-        sessionsByTaskId,
-        gitStatusByEnvId,
-        envIdBySessionId,
-      );
-      const resolvedSessionState =
-        sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
-      const repoSlug = task.repositoryId ? repositorySlugById.get(task.repositoryId) : undefined;
-      const pr = taskPRsByTaskId[task.id];
-      return {
-        id: task.id,
-        title: task.title,
-        state: task.state as TaskState | undefined,
-        sessionState: resolvedSessionState,
-        description: task.description,
-        workflowStepId: task.workflowStepId as string | undefined,
-        repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
-        diffStats: sessionInfo.diffStats,
-        isRemoteExecutor: task.isRemoteExecutor,
-        remoteExecutorType: task.primaryExecutorType ?? undefined,
-        remoteExecutorName: task.primaryExecutorName ?? undefined,
-        primarySessionId: task.primarySessionId ?? null,
-        updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
-        isArchived: false as boolean,
-      };
-    });
+    const mapCtx = {
+      sessionsByTaskId,
+      gitStatusByEnvId: gitStatusByEnvId as Record<string, unknown>,
+      envIdBySessionId,
+      repositorySlugById,
+      taskPRsByTaskId: taskPRsByTaskId as Record<
+        string,
+        { owner: string; repo: string } | undefined
+      >,
+    };
+    const items = allTasks.map((task: KanbanState["tasks"][number]) => toSidebarItem(task, mapCtx));
     if (
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
