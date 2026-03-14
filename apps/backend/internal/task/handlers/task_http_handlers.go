@@ -638,7 +638,6 @@ type httpStartQuickChatResponse struct {
 
 // quickChatParams holds resolved parameters for creating a quick chat session.
 type quickChatParams struct {
-	workflowID     string
 	agentProfileID string
 	executorID     string
 	title          string
@@ -660,10 +659,8 @@ func (body *httpStartQuickChatRequest) buildRepositories() []service.TaskReposit
 	}}
 }
 
-// resolveQuickChatParams resolves agent/executor IDs and builds metadata.
-func (body *httpStartQuickChatRequest) resolveParams(
-	workspace *models.Workspace, workflowID string,
-) quickChatParams {
+// resolveParams resolves agent/executor IDs and builds metadata for quick chat.
+func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace) quickChatParams {
 	agentProfileID := body.AgentProfileID
 	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
 		agentProfileID = *workspace.DefaultAgentProfileID
@@ -687,7 +684,6 @@ func (body *httpStartQuickChatRequest) resolveParams(
 	}
 
 	return quickChatParams{
-		workflowID:     workflowID,
 		agentProfileID: agentProfileID,
 		executorID:     executorID,
 		title:          title,
@@ -713,18 +709,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		return
 	}
 
-	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
-	if err != nil {
-		h.logger.Error("failed to list workflows", zap.Error(err), zap.String("workspace_id", workspaceID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
-		return
-	}
-	if len(workflows) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
-		return
-	}
-
-	params := body.resolveParams(workspace, workflows[0].ID)
+	params := body.resolveParams(workspace)
 	if params.agentProfileID == "" {
 		h.logger.Error("no agent profile configured for quick chat", zap.String("workspace_id", workspaceID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no default agent profile configured"})
@@ -733,7 +718,6 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 
 	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:  workspaceID,
-		WorkflowID:   params.workflowID,
 		Title:        params.title,
 		Description:  body.Prompt,
 		Repositories: params.repos,
@@ -826,17 +810,6 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		return
 	}
 
-	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
-	if err != nil {
-		h.logger.Error("failed to list workflows", zap.Error(err), zap.String("workspace_id", workspaceID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
-		return
-	}
-	if len(workflows) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
-		return
-	}
-
 	agentProfileID, executorID, metadata := resolveConfigChatDefaults(body, workspace)
 	if agentProfileID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no agent profile configured — set a default agent profile in workspace settings"})
@@ -845,7 +818,6 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 
 	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaceID,
-		WorkflowID:  workflows[0].ID,
 		Title:       "Config Chat",
 		Description: body.Prompt,
 		IsEphemeral: true,

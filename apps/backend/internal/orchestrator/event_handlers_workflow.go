@@ -898,6 +898,12 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 		return false
 	}
 
+	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
+	if task.IsEphemeral {
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+
 	state := s.buildMachineState(ctx, task, session)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:         taskID,
@@ -1020,6 +1026,11 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 	if err != nil {
 		s.logger.Warn("failed to load task for engine on_turn_start",
 			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+
+	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
+	if task.IsEphemeral {
 		return false
 	}
 

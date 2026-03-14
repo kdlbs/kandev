@@ -552,9 +552,13 @@ func (r *Repository) loadWorktreesBatch(ctx context.Context, sessions []*models.
 
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
+	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT 1 FROM task_sessions
-		WHERE agent_profile_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		SELECT 1 FROM task_sessions ts
+		JOIN tasks t ON ts.task_id = t.id
+		WHERE ts.agent_profile_id = ?
+		  AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		  AND t.is_ephemeral = 0
 		LIMIT 1
 	`), agentProfileID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -612,6 +616,25 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)
+// that are using the specified agent profile. This is used during profile deletion
+// to clean up transient quick chat / config chat tasks.
+func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
+	// Delete tasks that are ephemeral and have sessions using this profile.
+	// CASCADE will handle session deletion.
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM tasks
+		WHERE is_ephemeral = 1
+		  AND id IN (
+			SELECT DISTINCT task_id FROM task_sessions WHERE agent_profile_id = ?
+		  )
+	`), agentProfileID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // scanTaskSessions is a helper to scan multiple agent session rows

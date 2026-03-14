@@ -35,6 +35,7 @@ export type ChatInputEditorAreaProps = {
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hidePlanMode?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -119,7 +120,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
     p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
-  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar } = p;
+  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
@@ -179,6 +180,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         onAttachFiles={handleAttachFiles}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
+        hidePlanMode={hidePlanMode}
       />
     </div>
   );

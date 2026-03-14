@@ -72,6 +72,8 @@ export type ChatInputToolbarProps = {
   hideSessionsDropdown?: boolean;
   /** When true, only render the submit/cancel button — no other controls */
   minimalToolbar?: boolean;
+  /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
+  hidePlanMode?: boolean;
 };
 
 type SubmitButtonProps = {
@@ -446,6 +448,7 @@ const toolbarDefaults = {
   contextFiles: [] as ContextFile[],
   isEnhancingPrompt: false,
   isUtilityConfigured: false,
+  hidePlanMode: false,
 };
 
 export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
@@ -468,11 +471,13 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <div className="flex items-center gap-0.5">
-        <PlanToggleButton
-          planModeEnabled={props.planModeEnabled}
-          planModeAvailable={props.planModeAvailable}
-          onPlanModeChange={props.onPlanModeChange}
-        />
+        {!props.hidePlanMode && (
+          <PlanToggleButton
+            planModeEnabled={props.planModeEnabled}
+            planModeAvailable={props.planModeAvailable}
+            onPlanModeChange={props.onPlanModeChange}
+          />
+        )}
 
         <McpIndicator mcpServers={props.mcpServers} />
 
