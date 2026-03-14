@@ -551,4 +551,9 @@ test.describe("Workflow automation", () => {
       timeout: 15_000,
     });
   });
+
+  // Note: "step prompt without {{task_prompt}} replaces task description" is tested
+  // by backend unit tests (TestBuildWorkflowPrompt_UsesStepPromptOnlyWithoutTaskPromptPlaceholder).
+  // The auto_start flow for new sessions uses a different prompt resolution path
+  // that can't be reliably tested e2e without an existing session.
 });

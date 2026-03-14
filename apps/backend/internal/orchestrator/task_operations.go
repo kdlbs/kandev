@@ -74,11 +74,10 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 }
 
 // PrepareTaskSession creates a session entry without launching the agent.
-// This allows the HTTP handler to return the session ID immediately while the agent setup
+// This allows the WS handler to return the session ID immediately while workspace setup
 // continues in the background. Use StartTaskWithSession to continue with agent launch.
-// When launchWorkspace is true, workspace infrastructure (agentctl) is launched synchronously
-// so file browsing works immediately. When false, the workspace launch is deferred to
-// StartTaskWithSession (useful for remote executors where provisioning takes 30-60s).
+// When launchWorkspace is true, workspace infrastructure (agentctl) is launched asynchronously;
+// the frontend receives preparation progress via executor.prepare.progress WS events.
 func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error) {
 	s.logger.Debug("preparing task session",
 		zap.String("task_id", taskID),
@@ -133,17 +132,23 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	}
 
 	if launchWorkspace {
-		// Launch workspace infrastructure (agentctl) without starting the agent subprocess.
-		// This enables file browsing, editing, etc. while the session is in CREATED state.
-		if prepExec, launchErr := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID}); launchErr != nil {
-			s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(launchErr))
-			// Non-fatal: session is still usable, workspace will be launched when agent starts
-		} else if prepExec != nil && prepExec.WorktreeBranch != "" {
-			go s.ensureSessionPRWatch(context.Background(), taskID, prepExec.SessionID, prepExec.WorktreeBranch)
-		}
+		// Launch workspace infrastructure (agentctl) in the background so the WS response
+		// returns the session ID immediately. The frontend navigates to the session page
+		// and shows preparation progress via executor.prepare.progress WS events.
+		go func() {
+			bgCtx := context.Background()
+			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
+			if launchErr != nil {
+				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(launchErr))
+				return
+			}
+			if prepExec != nil && prepExec.WorktreeBranch != "" {
+				s.ensureSessionPRWatch(bgCtx, taskID, prepExec.SessionID, prepExec.WorktreeBranch)
+			}
+		}()
 	}
 
 	s.logger.Info("task session prepared",

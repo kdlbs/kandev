@@ -54,18 +54,26 @@ func containsAuthFailure(lowerOutput string) bool {
 		strings.Contains(lowerOutput, "askpass")
 }
 
+// isBranchCheckedOutError checks if git output indicates a branch is already
+// checked out in another worktree. Different git versions use different messages:
+// "is already checked out at" or "is already used by worktree at".
+func isBranchCheckedOutError(output string) bool {
+	out := strings.ToLower(output)
+	return strings.Contains(out, "is already checked out at") ||
+		strings.Contains(out, "is already used by worktree at")
+}
+
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error
 // based on the command output.
 func ClassifyGitError(output string, _ error) error {
-	out := strings.ToLower(output)
 	trimmed := strings.TrimSpace(output)
 
 	switch {
-	case strings.Contains(out, "is already checked out at"):
+	case isBranchCheckedOutError(output):
 		return fmt.Errorf("%w: %s", ErrBranchCheckedOut, trimmed)
-	case containsAuthFailure(out):
+	case containsAuthFailure(strings.ToLower(output)):
 		return fmt.Errorf("%w: %s", ErrAuthFailed, trimmed)
-	case strings.Contains(out, "non-fast-forward"):
+	case strings.Contains(strings.ToLower(output), "non-fast-forward"):
 		return fmt.Errorf("%w: %s", ErrNonFastForward, trimmed)
 	default:
 		return fmt.Errorf("%w: %s", ErrGitCommandFailed, trimmed)

@@ -741,6 +741,159 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(warningBanner).not.toBeVisible();
   });
 
+  test("two tasks from the same PR URL create independent worktrees", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { execSync } = await import("child_process");
+    const fs = await import("fs");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+
+    // Create a repo with the PR branch locally.
+    const repoDir = `${backend.tmpDir}/repos/e2e-shared-pr`;
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git checkout -b feature/shared-pr", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "shared pr commit"', { cwd: repoDir, env: gitEnv });
+    execSync("git checkout main", { cwd: repoDir, env: gitEnv });
+
+    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "shared-owner/shared-repo",
+      provider: "github",
+      provider_owner: "shared-owner",
+      provider_name: "shared-repo",
+    });
+
+    await apiClient.mockGitHubAddBranches("shared-owner", "shared-repo", [
+      { name: "main" },
+      { name: "feature/shared-pr" },
+    ]);
+
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 50,
+        title: "Shared PR",
+        state: "open",
+        head_branch: "feature/shared-pr",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "shared-owner",
+        repo_name: "shared-repo",
+      },
+    ]);
+
+    // Look up the worktree executor profile
+    const { executors } = await apiClient.listExecutors();
+    const worktreeExec = executors.find((e) => e.type === "worktree");
+    const worktreeProfile = worktreeExec?.profiles?.[0];
+    if (!worktreeProfile) {
+      test.skip(true, "No worktree executor profile available");
+      return;
+    }
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // Helper: select worktree executor in the create dialog
+    const selectWorktreeExecutor = async () => {
+      const selector = testPage.getByTestId("executor-profile-selector");
+      // Only click if the selector doesn't already show "Worktree"
+      const selectorText = await selector.textContent();
+      if (!selectorText?.includes("Worktree")) {
+        await selector.click();
+        await testPage.getByRole("option", { name: /Worktree/i }).click();
+      }
+    };
+
+    // --- Task A: first task from PR URL ---
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("toggle-github-url").click();
+    await testPage
+      .getByTestId("github-url-input")
+      .fill("https://github.com/shared-owner/shared-repo/pull/50");
+    await expect(dialog.getByText("feature/shared-pr")).toBeVisible({ timeout: 10_000 });
+
+    await testPage.getByTestId("task-title-input").fill("Shared PR Task A");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await selectWorktreeExecutor();
+
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    await expect(kanban.taskCardByTitle("Shared PR Task A")).toBeVisible({ timeout: 10_000 });
+
+    // Wait for Task A agent to complete before creating Task B
+    await kanban.taskCardByTitle("Shared PR Task A").click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    const sessionA = new SessionPage(testPage);
+    await sessionA.waitForLoad();
+    await expect(sessionA.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(sessionA.idleInput()).toBeVisible({ timeout: 15_000 });
+
+    // Task A should have the direct PR branch
+    await expect(sessionA.terminal).toBeVisible({ timeout: 15_000 });
+    await sessionA.typeInTerminal("git branch --show-current");
+    await sessionA.expectTerminalHasText("feature/shared-pr");
+
+    // --- Task B: second task from the same PR URL ---
+    await testPage.goto("/");
+    await kanban.board.waitFor({ state: "visible" });
+
+    await kanban.createTaskButton.first().click();
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("toggle-github-url").click();
+    await testPage
+      .getByTestId("github-url-input")
+      .fill("https://github.com/shared-owner/shared-repo/pull/50");
+    await expect(dialog.getByText("feature/shared-pr")).toBeVisible({ timeout: 10_000 });
+
+    await testPage.getByTestId("task-title-input").fill("Shared PR Task B");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await selectWorktreeExecutor();
+
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Task B should also succeed (this would have failed before the fix)
+    await expect(kanban.taskCardByTitle("Shared PR Task B")).toBeVisible({ timeout: 10_000 });
+
+    await kanban.taskCardByTitle("Shared PR Task B").click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    const sessionB = new SessionPage(testPage);
+    await sessionB.waitForLoad();
+    await expect(sessionB.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Task B should have a suffixed branch (not the original PR branch)
+    await expect(sessionB.terminal).toBeVisible({ timeout: 15_000 });
+    await sessionB.typeInTerminal("git branch --show-current");
+    // Branch should start with the PR branch name but have a random suffix
+    await sessionB.expectTerminalHasText("feature/shared-pr-");
+  });
+
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
