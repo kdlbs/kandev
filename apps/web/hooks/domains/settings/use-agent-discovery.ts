@@ -11,21 +11,20 @@ export function useAgentDiscovery(enabled = true) {
   const fetchingRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled) return;
-    if (agentDiscovery.loaded) return;
-    if (fetchingRef.current) return;
+    if (!enabled || agentDiscovery.loaded || fetchingRef.current) return;
     fetchingRef.current = true;
     setAgentDiscoveryLoading(true);
 
+    let active = true;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
 
     listAgentDiscovery({ cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
-        setAgentDiscovery(response.agents);
+        if (active) setAgentDiscovery(response.agents);
       })
       .catch(() => {
-        setAgentDiscovery([]);
+        if (active) setAgentDiscovery([]);
       })
       .finally(() => {
         fetchingRef.current = false;
@@ -33,6 +32,8 @@ export function useAgentDiscovery(enabled = true) {
       });
 
     return () => {
+      active = false;
+      fetchingRef.current = false;
       clearTimeout(timeoutId);
       controller.abort();
     };
