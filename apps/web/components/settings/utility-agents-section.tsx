@@ -76,9 +76,16 @@ export function UtilityAgentsSection() {
   }, []);
 
   const handleDefaultChange = async (agentId: string, model: string) => {
+    const prevAgentId = defaultAgentId;
+    const prevModel = defaultModel;
     setDefaultAgentId(agentId);
     setDefaultModel(model);
-    await updateUserSettings({ default_utility_agent_id: agentId, default_utility_model: model });
+    try {
+      await updateUserSettings({ default_utility_agent_id: agentId, default_utility_model: model });
+    } catch {
+      setDefaultAgentId(prevAgentId);
+      setDefaultModel(prevModel);
+    }
   };
 
   const openEditDialog = (agent: UtilityAgent | null) => {
@@ -126,8 +133,12 @@ export function UtilityAgentsSection() {
           onAdd={() => openEditDialog(null)}
           onEdit={openEditDialog}
           onDelete={async (agent) => {
-            await deleteUtilityAgent(agent.id);
-            setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+            try {
+              await deleteUtilityAgent(agent.id);
+              setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+            } catch {
+              // Error already logged by API layer
+            }
           }}
         />
       </div>
