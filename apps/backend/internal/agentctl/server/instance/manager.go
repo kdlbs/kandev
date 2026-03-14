@@ -186,6 +186,8 @@ func buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfi
 			Type:    mcp.Type,
 			Command: mcp.Command,
 			Args:    mcp.Args,
+			Env:     mcp.Env,
+			Headers: mcp.Headers,
 		})
 	}
 	return result

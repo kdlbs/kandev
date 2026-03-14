@@ -299,9 +299,9 @@ func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapab
 				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
 				continue
 			}
-		case "http":
+		case "http", "streamable_http":
 			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name))
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
 				continue
 			}
 		}
@@ -323,7 +323,16 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 					Name:    server.Name,
 					Url:     server.URL,
 					Type:    "sse",
-					Headers: []acp.HttpHeader{},
+					Headers: mapToHTTPHeaders(server.Headers),
+				},
+			})
+		case "http", "streamable_http":
+			out = append(out, acp.McpServer{
+				Http: &acp.McpServerHttpInline{
+					Name:    server.Name,
+					Url:     server.URL,
+					Type:    server.Type,
+					Headers: mapToHTTPHeaders(server.Headers),
 				},
 			})
 		default: // stdio
@@ -332,11 +341,38 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 					Name:    server.Name,
 					Command: server.Command,
 					Args:    append([]string{}, server.Args...),
+					Env:     mapToEnvVars(server.Env),
 				},
 			})
 		}
 	}
 	return out
+}
+
+// mapToEnvVars converts a string map to ACP EnvVariable slice.
+// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
+func mapToEnvVars(env map[string]string) []acp.EnvVariable {
+	if len(env) == 0 {
+		return []acp.EnvVariable{}
+	}
+	vars := make([]acp.EnvVariable, 0, len(env))
+	for k, v := range env {
+		vars = append(vars, acp.EnvVariable{Name: k, Value: v})
+	}
+	return vars
+}
+
+// mapToHTTPHeaders converts a string map to ACP HttpHeader slice.
+// Returns an empty (non-nil) slice when the map is empty to satisfy the ACP SDK's non-omitempty field.
+func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
+	if len(headers) == 0 {
+		return []acp.HttpHeader{}
+	}
+	hdrs := make([]acp.HttpHeader, 0, len(headers))
+	for k, v := range headers {
+		hdrs = append(hdrs, acp.HttpHeader{Name: k, Value: v})
+	}
+	return hdrs
 }
 
 // LoadSession resumes an existing session.

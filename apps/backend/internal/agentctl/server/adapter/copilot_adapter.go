@@ -287,14 +287,23 @@ func mcpServersToCopilotConfig(servers []types.McpServer) map[string]copilot.MCP
 		case "sse":
 			cfg["type"] = "sse"
 			cfg["url"] = srv.URL
-		case mcpServerTypeHTTP:
-			cfg["type"] = mcpServerTypeHTTP
+			if len(srv.Headers) > 0 {
+				cfg["headers"] = srv.Headers
+			}
+		case mcpServerTypeHTTP, "streamable_http":
+			cfg["type"] = srv.Type
 			cfg["url"] = srv.URL
+			if len(srv.Headers) > 0 {
+				cfg["headers"] = srv.Headers
+			}
 		default: // stdio / local
 			cfg["type"] = "local"
 			cfg["command"] = srv.Command
 			if srv.Args != nil {
 				cfg["args"] = srv.Args
+			}
+			if len(srv.Env) > 0 {
+				cfg["env"] = srv.Env
 			}
 		}
 		result[srv.Name] = cfg

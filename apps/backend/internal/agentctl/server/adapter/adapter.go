@@ -205,12 +205,16 @@ type McpServerConfig struct {
 	Name string `json:"name"`
 	// URL is the URL for HTTP/SSE transport
 	URL string `json:"url,omitempty"`
-	// Type is the transport type: "sse" or "http"
+	// Type is the transport type: "stdio", "sse", "http", or "streamable_http"
 	Type string `json:"type,omitempty"`
 	// Command is the command for stdio transport
 	Command string `json:"command,omitempty"`
 	// Args are the arguments for stdio transport
 	Args []string `json:"args,omitempty"`
+	// Env holds environment variables for stdio transport
+	Env map[string]string `json:"env,omitempty"`
+	// Headers holds HTTP headers for SSE/HTTP transport
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Config holds configuration for creating adapters
@@ -264,6 +268,8 @@ func (c *Config) ToSharedConfig() *shared.Config {
 			Type:    srv.Type,
 			Command: srv.Command,
 			Args:    srv.Args,
+			Env:     srv.Env,
+			Headers: srv.Headers,
 		}
 	}
 	return &shared.Config{
