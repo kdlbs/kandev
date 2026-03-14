@@ -20,6 +20,12 @@ type ListMessagesOptions struct {
 	Sort   string
 }
 
+// Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
+const (
+	MetaKeyAgentProfileID    = "agent_profile_id"
+	MetaKeyExecutorProfileID = "executor_profile_id"
+)
+
 // Task represents a task in the database
 type Task struct {
 	ID             string                 `json:"id"`

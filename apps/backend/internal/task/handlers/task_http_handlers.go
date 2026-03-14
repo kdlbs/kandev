@@ -362,9 +362,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		if body.Metadata == nil {
 			body.Metadata = make(map[string]interface{})
 		}
-		body.Metadata["agent_profile_id"] = body.AgentProfileID
+		body.Metadata[models.MetaKeyAgentProfileID] = body.AgentProfileID
 		if body.ExecutorProfileID != "" {
-			body.Metadata["executor_profile_id"] = body.ExecutorProfileID
+			body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
 		}
 	}
 

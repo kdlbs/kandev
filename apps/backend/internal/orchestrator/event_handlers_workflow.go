@@ -323,8 +323,8 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		return
 	}
 
-	agentProfileID, _ := task.Metadata["agent_profile_id"].(string)
-	executorProfileID, _ := task.Metadata["executor_profile_id"].(string)
+	agentProfileID, _ := task.Metadata[models.MetaKeyAgentProfileID].(string)
+	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
 	s.logger.Info("task.moved: starting task (no session, auto-start step)",
