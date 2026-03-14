@@ -43,12 +43,22 @@ func NewClient(ctx context.Context, secrets SecretProvider, log *logger.Logger) 
 		log.Debug("gh CLI available but not authenticated", zap.Error(err))
 	}
 
+	// Fall back to PAT from environment variable
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		log.Info("using GITHUB_TOKEN from environment for GitHub integration")
+		return NewPATClient(token), AuthMethodPAT, nil
+	}
+	if token := os.Getenv("GH_TOKEN"); token != "" {
+		log.Info("using GH_TOKEN from environment for GitHub integration")
+		return NewPATClient(token), AuthMethodPAT, nil
+	}
+
 	// Fall back to PAT from secrets store
 	if secrets != nil {
 		token, err := findGitHubPAT(ctx, secrets)
 		if err == nil && token != "" {
 			log.Info("using PAT from secrets store for GitHub integration")
-			return NewPATClient(token), "pat", nil
+			return NewPATClient(token), AuthMethodPAT, nil
 		}
 		if err != nil {
 			log.Debug("failed to find GitHub PAT in secrets", zap.Error(err))
