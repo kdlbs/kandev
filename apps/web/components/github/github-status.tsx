@@ -45,18 +45,37 @@ export function GitHubStatusCard() {
 
   if (!status || !status.authenticated) {
     return (
-      <div>
+      <div className="space-y-3">
         <div className="flex items-center gap-2">
           <IconX className="h-4 w-4 text-red-500" />
-          <span className="text-sm">Not connected to GitHub</span>
-          <span className="text-xs text-muted-foreground">
-            Run <code className="bg-muted px-1 rounded">gh auth login</code> or add a GITHUB_TOKEN
-            secret
-          </span>
+          <span className="text-sm font-medium">Not connected to GitHub</span>
           <Button variant="ghost" size="sm" onClick={refresh} className="cursor-pointer h-6 px-2">
             <IconRefresh className="h-3.5 w-3.5" />
-            <span className="sr-only">Refresh GitHub status</span>
+            Refresh
           </Button>
+        </div>
+        <div className="text-xs text-muted-foreground space-y-1.5">
+          <p>Connect using one of these methods:</p>
+          <ol className="list-decimal list-inside space-y-1 pl-1">
+            <li>
+              <strong>Environment variable</strong> — set{" "}
+              <code className="bg-muted px-1 rounded">GITHUB_TOKEN</code> or{" "}
+              <code className="bg-muted px-1 rounded">GH_TOKEN</code> when starting Kandev
+            </li>
+            <li>
+              <strong>Kandev secret</strong> — add a secret named{" "}
+              <code className="bg-muted px-1 rounded">GITHUB_TOKEN</code> in{" "}
+              <a href="/settings/general/secrets" className="underline cursor-pointer">
+                Settings &gt; Secrets
+              </a>
+              , then click Refresh above
+            </li>
+            <li>
+              <strong>GitHub CLI</strong> — install{" "}
+              <code className="bg-muted px-1 rounded">gh</code> and run{" "}
+              <code className="bg-muted px-1 rounded">gh auth login</code>
+            </li>
+          </ol>
         </div>
         {status?.diagnostics && <DiagnosticsOutput diagnostics={status.diagnostics} />}
       </div>
