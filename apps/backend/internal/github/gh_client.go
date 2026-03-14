@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -34,10 +35,11 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	// Propagate context errors so callers can distinguish cancellation/timeout
-	// from a genuine "not authenticated" result.
-	if ctx.Err() != nil {
-		return false, ctx.Err()
+	// Propagate timeout/cancellation errors so callers can distinguish them
+	// from a genuine "not authenticated" result. Check the returned error
+	// (not ctx.Err()) because run() may apply its own child deadline.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false, err
 	}
 	return false, nil
 }

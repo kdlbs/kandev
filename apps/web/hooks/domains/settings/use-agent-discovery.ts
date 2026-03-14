@@ -32,6 +32,7 @@ export function useAgentDiscovery(enabled = true) {
 
     return () => {
       cancelled = true;
+      setAgentDiscoveryLoading(false);
       clearTimeout(timeoutId);
       controller.abort();
     };

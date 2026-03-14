@@ -40,8 +40,7 @@ test.describe("First-time setup: timeouts and error handling", () => {
               id: "agent_detection_failed",
               category: "agents",
               title: "Agent detection timed out",
-              message:
-                "Could not verify agent installations. Check Settings > Agents for details.",
+              message: "Could not verify agent installations. Check Settings > Agents for details.",
               severity: "warning",
               fix_url: "/settings/agents",
               fix_label: "Check Agents",
