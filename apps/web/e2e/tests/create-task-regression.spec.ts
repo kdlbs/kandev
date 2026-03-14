@@ -48,16 +48,12 @@ test.describe("Create task regression", () => {
     // Verify task has exactly one session
     // Extract task ID from the URL: /s/<sessionId> — we need the task to list sessions
     // Use the seed data workflow to find tasks
-    const { sessions } = await apiClient.listTaskSessions(
-      await getTaskIdFromPage(testPage),
-    );
+    const { sessions } = await apiClient.listTaskSessions(await getTaskIdFromPage(testPage));
     expect(sessions.length).toBe(1);
     expect(sessions[0].state).toBe("COMPLETED");
 
     // Verify task environment was created
-    const env = await apiClient.getTaskEnvironment(
-      await getTaskIdFromPage(testPage),
-    );
+    const env = await apiClient.getTaskEnvironment(await getTaskIdFromPage(testPage));
     expect(env).not.toBeNull();
     expect(env!.task_id).toBeTruthy();
     expect(env!.status).toBe("ready");

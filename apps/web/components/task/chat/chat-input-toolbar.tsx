@@ -355,11 +355,7 @@ function ToolbarRightSection({
     <div className="flex items-center gap-0.5 shrink-0">
       {showResetContext && <ResetContextButton sessionId={sessionId} />}
       {!hideSessionsDropdown && (
-        <SessionsDropdown
-          taskId={taskId}
-          activeSessionId={sessionId}
-          taskTitle={taskTitle}
-        />
+        <SessionsDropdown taskId={taskId} activeSessionId={sessionId} taskTitle={taskTitle} />
       )}
       <TokenUsageDisplay sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />

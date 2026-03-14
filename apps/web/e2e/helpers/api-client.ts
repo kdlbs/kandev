@@ -514,9 +514,7 @@ export class ApiClient {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 
-  async listTaskSessions(
-    taskId: string,
-  ): Promise<{
+  async listTaskSessions(taskId: string): Promise<{
     sessions: Array<{
       id: string;
       task_id: string;
@@ -528,9 +526,7 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
-  async getTaskEnvironment(
-    taskId: string,
-  ): Promise<{
+  async getTaskEnvironment(taskId: string): Promise<{
     id: string;
     task_id: string;
     worktree_id?: string;

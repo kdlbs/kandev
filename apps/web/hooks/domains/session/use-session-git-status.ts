@@ -5,12 +5,17 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 
 /** Resolve the environment key for workspace state (git, files) given a sessionId. */
 function resolveEnvKey(
-  state: { environmentIdBySessionId: Record<string, string>; taskSessions: { items: Record<string, { task_environment_id?: string }> } },
+  state: {
+    environmentIdBySessionId: Record<string, string>;
+    taskSessions: { items: Record<string, { task_environment_id?: string }> };
+  },
   sessionId: string,
 ): string {
-  return state.environmentIdBySessionId[sessionId]
-    ?? state.taskSessions.items[sessionId]?.task_environment_id
-    ?? sessionId;
+  return (
+    state.environmentIdBySessionId[sessionId] ??
+    state.taskSessions.items[sessionId]?.task_environment_id ??
+    sessionId
+  );
 }
 
 /**
