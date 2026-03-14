@@ -65,12 +65,15 @@ func (a *ClaudeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// ACP agents use npx which auto-installs the package, so we just need npx available
-	result, err := Detect(ctx, WithCommand("npx"))
+	// Use the same detection as claude-code: check for ~/.claude.json which is
+	// created after onboarding. Just having npx is not enough — the user needs
+	// Claude Code actually set up.
+	result, err := Detect(ctx, WithFileExists("~/.claude.json"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.InstallationPaths = []string{expandHomePath("~/.claude.json")}
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}
