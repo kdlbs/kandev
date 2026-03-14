@@ -813,10 +813,18 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
 		if len(configOptions) > 0 {
+			// Include cached available models so this event doesn't overwrite
+			// the model list that was set during session initialization.
+			a.mu.RLock()
+			cachedModels := a.availableModels
+			a.mu.RUnlock()
+			currentModelID := resolveCurrentModelFromConfig(configOptions)
 			return &AgentEvent{
-				Type:          streams.EventTypeSessionModels,
-				SessionID:     sessionID,
-				ConfigOptions: configOptions,
+				Type:           streams.EventTypeSessionModels,
+				SessionID:      sessionID,
+				CurrentModelID: currentModelID,
+				SessionModels:  convertSessionModels(cachedModels),
+				ConfigOptions:  configOptions,
 			}
 		}
 	}
@@ -1273,6 +1281,21 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
 	}
 
+	// Enrich modify_file payload from tool_call_contents.
+	// Claude ACP sends path and content in tool_call_update, not in the initial tool_call.
+	if payload != nil && payload.Kind() == streams.ToolKindModifyFile {
+		if mf := payload.ModifyFile(); mf != nil {
+			enrichModifyFileFromContents(mf, tcu.Content)
+		}
+	}
+
+	// Enrich read_file payload path from title if still empty.
+	if payload != nil && payload.Kind() == streams.ToolKindReadFile {
+		if rf := payload.ReadFile(); rf != nil && rf.FilePath == "" && tcu.Title != nil {
+			rf.FilePath = extractPathFromTitle(*tcu.Title)
+		}
+	}
+
 	if isTerminal {
 		delete(a.activeToolCalls, toolCallID)
 	}
@@ -1307,6 +1330,48 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		NormalizedPayload: payload,
 		ToolCallContents:  a.convertToolCallContents(tcu.Content),
 	}
+}
+
+// enrichModifyFileFromContents updates a ModifyFilePayload with data from
+// tool_call_contents. Claude ACP sends file path and content in tool_call_update
+// events rather than in the initial tool_call rawInput.
+func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.ToolCallContent) {
+	for _, c := range contents {
+		if c.Diff == nil {
+			continue
+		}
+		if mf.FilePath == "" && c.Diff.Path != "" {
+			mf.FilePath = c.Diff.Path
+		}
+		if len(mf.Mutations) == 0 {
+			continue
+		}
+		mut := &mf.Mutations[0]
+		if mut.Diff != "" {
+			continue // Already has diff, don't overwrite
+		}
+		if c.Diff.OldText != nil {
+			diffPath := c.Diff.Path
+			if diffPath == "" {
+				diffPath = mf.FilePath
+			}
+			mut.Diff = shared.GenerateUnifiedDiff(*c.Diff.OldText, c.Diff.NewText, diffPath, mut.StartLine)
+		} else if c.Diff.NewText != "" {
+			mut.Type = streams.MutationCreate
+			mut.Content = c.Diff.NewText
+		}
+		break
+	}
+}
+
+// extractPathFromTitle extracts a file path from tool titles like "Read /path/to/file".
+func extractPathFromTitle(title string) string {
+	for _, prefix := range []string{"Read ", "Write ", "Edit "} {
+		if strings.HasPrefix(title, prefix) {
+			return strings.TrimPrefix(title, prefix)
+		}
+	}
+	return ""
 }
 
 // handlePermissionRequest handles permission requests from the agent.

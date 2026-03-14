@@ -22,11 +22,19 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
           currentModelId = modelOpt.current_value;
         }
       }
-      console.debug("[session-models] received session.models_updated", {
+      console.log("[session-models] received session.models_updated", {
         sessionId: payload.session_id,
         rawCurrentModelId: payload.current_model_id,
         resolvedCurrentModelId: currentModelId,
-        models: acpModels.map((m) => m.model_id),
+        modelsCount: acpModels.length,
+        models: acpModels.map((m) => ({ id: m.model_id, name: m.name })),
+        configOptions: (payload.config_options ?? []).map((o) => ({
+          id: o.id,
+          category: o.category,
+          currentValue: o.current_value,
+          options: o.options?.map((opt: { value: string; name: string }) => opt.value),
+        })),
+        rawPayload: payload,
       });
       store.getState().setSessionModels(payload.session_id, {
         currentModelId,
@@ -53,7 +61,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         const state = store.getState();
         const currentActive = state.activeModel.bySessionId[payload.session_id];
         if (currentActive && !acpModels.some((m) => m.model_id === currentActive)) {
-          console.debug("[session-models] clearing stale activeModel", {
+          console.log("[session-models] clearing stale activeModel", {
             sessionId: payload.session_id,
             staleModel: currentActive,
           });
