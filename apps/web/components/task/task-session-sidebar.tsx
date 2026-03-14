@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
-import type { TaskState, TaskSessionState, Repository, Task } from "@/lib/types/http";
+import type { TaskState, TaskSession, TaskSessionState, Repository, Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { TaskSwitcher } from "./task-switcher";
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { Button } from "@kandev/ui/button";
@@ -89,8 +90,8 @@ export const NewTaskButton = memo(function NewTaskButton({
 function toSidebarItem(
   task: KanbanState["tasks"][number],
   ctx: {
-    sessionsByTaskId: Record<string, string[]>;
-    gitStatusByEnvId: Record<string, unknown>;
+    sessionsByTaskId: Record<string, TaskSession[]>;
+    gitStatusByEnvId: Record<string, GitStatusEntry>;
     envIdBySessionId: Record<string, string>;
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, { owner: string; repo: string } | undefined>;
@@ -178,7 +179,7 @@ function useSidebarData(workspaceId: string | null) {
     );
     const mapCtx = {
       sessionsByTaskId,
-      gitStatusByEnvId: gitStatusByEnvId as Record<string, unknown>,
+      gitStatusByEnvId,
       envIdBySessionId,
       repositorySlugById,
       taskPRsByTaskId: taskPRsByTaskId as Record<
