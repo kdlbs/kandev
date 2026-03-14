@@ -116,17 +116,8 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 		return nil, err
 	}
 	if c.sessionChecker != nil {
-		// Clean up ephemeral tasks (quick chat, config chat) using this profile
-		deleted, err := c.sessionChecker.DeleteEphemeralTasksByAgentProfile(ctx, id)
-		if err != nil {
-			c.logger.Warn("failed to delete ephemeral tasks for profile",
-				zap.String("profile_id", id), zap.Error(err))
-		} else if deleted > 0 {
-			c.logger.Info("deleted ephemeral tasks for profile deletion",
-				zap.String("profile_id", id), zap.Int64("count", deleted))
-		}
-
 		// Check for active non-ephemeral sessions (unless force is true)
+		// This allows the UI to show a confirmation dialog with affected tasks
 		if !force {
 			activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, id)
 			if err != nil {
@@ -135,6 +126,17 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 			if len(activeTasks) > 0 {
 				return nil, &ErrProfileInUseDetail{ActiveSessions: activeTasks}
 			}
+		}
+
+		// Clean up ephemeral tasks (quick chat, config chat) using this profile
+		// Done after the force check since these don't need user confirmation
+		deleted, err := c.sessionChecker.DeleteEphemeralTasksByAgentProfile(ctx, id)
+		if err != nil {
+			c.logger.Warn("failed to delete ephemeral tasks for profile",
+				zap.String("profile_id", id), zap.Error(err))
+		} else if deleted > 0 {
+			c.logger.Info("deleted ephemeral tasks for profile deletion",
+				zap.String("profile_id", id), zap.Int64("count", deleted))
 		}
 	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
