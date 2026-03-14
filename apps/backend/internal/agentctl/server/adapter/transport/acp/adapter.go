@@ -1351,7 +1351,11 @@ func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.
 			continue // Already has diff, don't overwrite
 		}
 		if c.Diff.OldText != nil {
-			mut.Diff = shared.GenerateUnifiedDiff(*c.Diff.OldText, c.Diff.NewText, c.Diff.Path, 0)
+			diffPath := c.Diff.Path
+			if diffPath == "" {
+				diffPath = mf.FilePath
+			}
+			mut.Diff = shared.GenerateUnifiedDiff(*c.Diff.OldText, c.Diff.NewText, diffPath, mut.StartLine)
 		} else if c.Diff.NewText != "" {
 			mut.Type = streams.MutationCreate
 			mut.Content = c.Diff.NewText
