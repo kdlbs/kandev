@@ -67,14 +67,18 @@ export function transformFileMutation(filePath: string, mutation: FileMutation):
     filePath: resolvedPath,
     oldContent: mutation.old_content || "",
     newContent: mutation.new_content || mutation.content || "",
-    diff: mutation.diff
-      ? normalizeDiffString(mutation.diff, resolvedPath)
-      : mutation.type === "create" && mutation.content
-        ? generateCreateDiff(mutation.content, resolvedPath)
-        : undefined,
+    diff: resolveMutationDiff(mutation, resolvedPath),
     additions: 0,
     deletions: 0,
   };
+}
+
+/** Resolve the diff string for a mutation: explicit diff > create diff > undefined. */
+function resolveMutationDiff(mutation: FileMutation, filePath: string): string | undefined {
+  if (mutation.diff) return normalizeDiffString(mutation.diff, filePath);
+  if (mutation.type === "create" && mutation.content)
+    return generateCreateDiff(mutation.content, filePath);
+  return undefined;
 }
 
 /**
