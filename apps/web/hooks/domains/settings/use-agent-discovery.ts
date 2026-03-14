@@ -23,16 +23,13 @@ export function useAgentDiscovery(enabled = true) {
         if (cancelled) return;
         setAgentDiscovery(response.agents);
       })
-      .catch(() => {
-        if (!cancelled) setAgentDiscovery([]);
-      })
+      .catch(() => setAgentDiscovery([]))
       .finally(() => {
         clearTimeout(timeoutId);
       });
 
     return () => {
       cancelled = true;
-      setAgentDiscoveryLoading(false);
       clearTimeout(timeoutId);
       controller.abort();
     };
