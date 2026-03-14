@@ -105,7 +105,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	return &result, nil
 }
 
-func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentProfileDTO, error) {
+func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (*dto.AgentProfileDTO, error) {
 	profile, err := c.repo.GetAgentProfile(ctx, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "agent profile not found") {
@@ -113,13 +113,13 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentPr
 		}
 		return nil, err
 	}
-	if c.sessionChecker != nil {
-		active, err := c.sessionChecker.HasActiveTaskSessionsByAgentProfile(ctx, id)
+	if !force && c.sessionChecker != nil {
+		activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		if active {
-			return nil, ErrAgentProfileInUse
+		if len(activeTasks) > 0 {
+			return nil, &ErrProfileInUseDetail{ActiveSessions: activeTasks}
 		}
 	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {

@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
+	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
@@ -32,7 +34,6 @@ var (
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrAgentAlreadyExists   = errors.New("agent already exists")
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
-	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
 	ErrModelRequired        = errors.New("model is required for agent profiles")
 	ErrLogoNotAvailable     = errors.New("logo not available for agent")
@@ -50,8 +51,18 @@ type Controller struct {
 	logger         *logger.Logger
 }
 
+// ErrProfileInUseDetail is returned when a profile cannot be deleted because active sessions exist.
+type ErrProfileInUseDetail struct {
+	ActiveSessions []agentdto.ActiveTaskInfo
+}
+
+func (e *ErrProfileInUseDetail) Error() string {
+	return fmt.Sprintf("agent profile is used by %d active session(s)", len(e.ActiveSessions))
+}
+
 type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,

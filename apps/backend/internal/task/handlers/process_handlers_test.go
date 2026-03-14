@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
+	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
@@ -205,6 +206,9 @@ func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, tas
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
+	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	return false, nil

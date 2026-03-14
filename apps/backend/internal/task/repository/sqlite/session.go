@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -560,6 +561,28 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT DISTINCT t.id, t.title, t.is_ephemeral
+		FROM task_sessions ts
+		JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+	`), agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var result []agentdto.ActiveTaskInfo
+	for rows.Next() {
+		var info agentdto.ActiveTaskInfo
+		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral); err != nil {
+			return nil, err
+		}
+		result = append(result, info)
+	}
+	return result, rows.Err()
 }
 
 func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
