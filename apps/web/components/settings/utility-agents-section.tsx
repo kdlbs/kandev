@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Separator } from "@kandev/ui/separator";
 import {
   listUtilityAgents,
@@ -43,7 +43,7 @@ async function handleBuiltinChange(
   );
 }
 
-export default function UtilityAgentsSettingsPage() {
+export function UtilityAgentsSection() {
   const [agents, setAgents] = useState<UtilityAgent[]>([]);
   const [inferenceAgents, setInferenceAgents] = useState<InferenceAgent[]>([]);
   const [defaultAgentId, setDefaultAgentId] = useState("");
@@ -75,10 +75,6 @@ export default function UtilityAgentsSettingsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
   const handleDefaultChange = async (agentId: string, model: string) => {
     setDefaultAgentId(agentId);
     setDefaultModel(model);
@@ -96,46 +92,52 @@ export default function UtilityAgentsSettingsPage() {
     fetchData();
   };
 
-  if (loading)
-    return <div className="py-8 text-center text-muted-foreground text-sm">Loading...</div>;
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  if (loading) return null;
 
   return (
-    <div className="space-y-8">
-      <header>
-        <h2 className="text-xl font-semibold">Utility Agents</h2>
-        <p className="text-sm text-muted-foreground">
-          One-shot AI helpers for commits, PRs, and prompts.
-        </p>
-      </header>
-      <Separator />
-      <DefaultModelSection
-        inferenceAgents={inferenceAgents}
-        defaultAgentId={defaultAgentId}
-        defaultModel={defaultModel}
-        onDefaultChange={handleDefaultChange}
-      />
-      <PerActionOverridesSection
-        builtins={builtins}
-        allModels={allModels}
-        defaultModel={defaultModel}
-        onModelChange={(agent, value) => handleBuiltinChange(agent, value, setAgents)}
-        onEdit={openEditDialog}
-      />
-      <CustomAgentsSection
-        agents={customAgents}
-        onAdd={() => openEditDialog(null)}
-        onEdit={openEditDialog}
-        onDelete={async (agent) => {
-          await deleteUtilityAgent(agent.id);
-          setAgents((prev) => prev.filter((a) => a.id !== agent.id));
-        }}
-      />
+    <>
+      <div className="space-y-4">
+        <Separator />
+        <div>
+          <h3 className="text-lg font-semibold">Utility Agents</h3>
+          <p className="text-sm text-muted-foreground">
+            One-shot AI helpers for commits, PRs, and prompts.
+          </p>
+        </div>
+        <DefaultModelSection
+          inferenceAgents={inferenceAgents}
+          defaultAgentId={defaultAgentId}
+          defaultModel={defaultModel}
+          onDefaultChange={handleDefaultChange}
+        />
+        <PerActionOverridesSection
+          builtins={builtins}
+          allModels={allModels}
+          defaultModel={defaultModel}
+          onModelChange={(agent, value) => handleBuiltinChange(agent, value, setAgents)}
+          onEdit={openEditDialog}
+        />
+        <CustomAgentsSection
+          agents={customAgents}
+          onAdd={() => openEditDialog(null)}
+          onEdit={openEditDialog}
+          onDelete={async (agent) => {
+            await deleteUtilityAgent(agent.id);
+            setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+          }}
+        />
+      </div>
       <UtilityAgentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         agent={editingAgent}
         onSuccess={closeDialog}
       />
-    </div>
+    </>
   );
 }
+
