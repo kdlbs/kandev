@@ -14,16 +14,24 @@ export function useAgentDiscovery(enabled = true) {
     if (agentDiscovery.loaded || agentDiscovery.loading) return;
     setAgentDiscoveryLoading(true);
 
+    let cancelled = false;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
 
     listAgentDiscovery({ cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
+        if (cancelled) return;
         setAgentDiscovery(response.agents);
       })
-      .catch(() => setAgentDiscovery([]));
+      .catch(() => {
+        if (!cancelled) setAgentDiscovery([]);
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+      });
 
     return () => {
+      cancelled = true;
       clearTimeout(timeoutId);
       controller.abort();
     };

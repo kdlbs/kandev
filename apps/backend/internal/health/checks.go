@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -73,10 +74,14 @@ func (c *AgentChecker) Check(ctx context.Context) []Issue {
 	defer cancel()
 	available, err := c.provider.HasAvailableAgents(checkCtx)
 	if err != nil {
+		title := "Agent detection failed"
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			title = "Agent detection timed out"
+		}
 		return []Issue{{
 			ID:       "agent_detection_failed",
 			Category: "agents",
-			Title:    "Agent detection timed out",
+			Title:    title,
 			Message:  "Could not verify agent installations. Check Settings > Agents for details.",
 			Severity: SeverityWarning,
 			FixURL:   "/settings/agents",

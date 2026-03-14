@@ -319,11 +319,14 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
       .catch((err) => {
         if (cancelled) return;
         const isAbort = err instanceof DOMException && err.name === "AbortError";
-        setGitHubUrlError(
-          isAbort
-            ? "Request timed out. Check your GitHub configuration in Settings."
-            : "Repository not found or not accessible",
-        );
+        const isNotConfigured = err instanceof Error && err.message.includes("not configured");
+        let errorMessage = "Repository not found or not accessible";
+        if (isAbort) {
+          errorMessage = "Request timed out. Check your GitHub configuration in Settings.";
+        } else if (isNotConfigured) {
+          errorMessage = "GitHub is not configured. Set up a token in Settings > GitHub.";
+        }
+        setGitHubUrlError(errorMessage);
         setGitHubBranches([]);
       })
       .finally(() => {

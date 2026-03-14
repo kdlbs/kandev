@@ -44,6 +44,8 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
+	ctx, cancel := withDefaultGHTimeout(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -413,15 +415,20 @@ func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]
 
 const ghCLITimeout = 30 * time.Second
 
+// withDefaultGHTimeout applies a 30s timeout if the context has no deadline.
+func withDefaultGHTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, ghCLITimeout)
+}
+
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
 // A default 30s timeout is applied if the context has no deadline.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, ghCLITimeout)
-		defer cancel()
-	}
+	ctx, cancel := withDefaultGHTimeout(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
