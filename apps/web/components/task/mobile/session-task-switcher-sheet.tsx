@@ -99,7 +99,12 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
       repositories.map((repo: Repository) => [repo.id, repo.local_path]),
     );
     return tasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusByEnvId, envIdBySessionId);
+      const sessionInfo = getSessionInfoForTask(
+        task.id,
+        sessionsByTaskId,
+        gitStatusByEnvId,
+        envIdBySessionId,
+      );
       return {
         id: task.id,
         title: task.title,
@@ -117,7 +122,14 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         primarySessionId: task.primarySessionId ?? null,
       };
     });
-  }, [repositoriesByWorkspace, tasks, workspaceId, sessionsByTaskId, gitStatusByEnvId, envIdBySessionId]);
+  }, [
+    repositoriesByWorkspace,
+    tasks,
+    workspaceId,
+    sessionsByTaskId,
+    gitStatusByEnvId,
+    envIdBySessionId,
+  ]);
 
   const dialogSteps = useMemo(
     () =>

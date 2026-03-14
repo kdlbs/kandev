@@ -28,9 +28,10 @@ export function getSessionInfoForTask(
   }
   const updatedAt = latestSession.updated_at;
   const sessionState = latestSession.state as TaskSessionState | undefined;
-  const envKey = environmentIdBySessionId?.[latestSession.id]
-    ?? latestSession.task_environment_id
-    ?? latestSession.id;
+  const envKey =
+    environmentIdBySessionId?.[latestSession.id] ??
+    latestSession.task_environment_id ??
+    latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
   if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
   let additions = 0;

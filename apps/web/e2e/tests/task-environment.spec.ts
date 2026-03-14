@@ -5,10 +5,7 @@ import { test, expect } from "../fixtures/test-base";
  * are created on first session launch and reused by subsequent sessions.
  */
 test.describe("Task environment", () => {
-  test("first session creates a task environment record", async ({
-    apiClient,
-    seedData,
-  }) => {
+  test("first session creates a task environment record", async ({ apiClient, seedData }) => {
     // Before creating a task, there should be no environment
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -80,14 +77,10 @@ test.describe("Task environment", () => {
     seedData,
   }) => {
     // Create a task without starting an agent
-    const task = await apiClient.createTask(
-      seedData.workspaceId,
-      "No Env Task",
-      {
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-      },
-    );
+    const task = await apiClient.createTask(seedData.workspaceId, "No Env Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
 
     // No environment should exist
     const env = await apiClient.getTaskEnvironment(task.id);

@@ -65,10 +65,7 @@ test.describe("Multi-session", () => {
     expect(sessionsAfterFirst[0].task_environment_id).toBe(env!.id);
   });
 
-  test("task environment persists after session completes", async ({
-    apiClient,
-    seedData,
-  }) => {
+  test("task environment persists after session completes", async ({ apiClient, seedData }) => {
     // Create task and start agent
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
