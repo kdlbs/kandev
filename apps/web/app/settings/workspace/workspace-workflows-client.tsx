@@ -209,7 +209,8 @@ function useWorkflowActions({
   const handleWorkflowCreated = (tempId: string, created: Workflow) => {
     setWorkflowItems((prev) => prev.map((item) => (item.id === tempId ? created : item)));
     setSavedWorkflowItems((prev) => [{ ...created }, ...prev]);
-    router.refresh();
+    // Note: No router.refresh() needed. Local state already has the correct workflow,
+    // and SSR will fetch fresh data on next navigation.
   };
 
   const handleSaveWorkflow = async (workflowId: string) => {

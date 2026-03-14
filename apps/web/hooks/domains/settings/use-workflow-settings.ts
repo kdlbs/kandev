@@ -55,8 +55,13 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
 
     const newFromStore = (prev: Workflow[]) => {
       const localIds = new Set(prev.map((w) => w.id));
+      // Don't add workflows from store for workspaces where we have temp (pending create) workflows.
+      // This prevents race conditions where WS event arrives before the create API callback.
+      const tempWorkspaceIds = new Set(
+        prev.filter((w) => w.id.startsWith("temp-")).map((w) => w.workspace_id),
+      );
       return storeWorkflows
-        .filter((sw) => !localIds.has(sw.id))
+        .filter((sw) => !localIds.has(sw.id) && !tempWorkspaceIds.has(sw.workspaceId))
         .map((sw) => storeItemToWorkflow(sw));
     };
 
