@@ -72,9 +72,13 @@ func (a *Adapter) PrepareCommandArgs() []string {
 		return nil
 	}
 
+	serverNames := make([]string, len(a.cfg.McpServers))
+	for i, s := range a.cfg.McpServers {
+		serverNames[i] = s.Name
+	}
 	a.logger.Info("prepared MCP configuration for Claude Code",
 		zap.Int("server_count", len(a.cfg.McpServers)),
-		zap.String("config", string(configJSON)))
+		zap.Strings("servers", serverNames))
 
 	// Return --mcp-config flag with JSON string
 	return []string{"--mcp-config", string(configJSON)}
