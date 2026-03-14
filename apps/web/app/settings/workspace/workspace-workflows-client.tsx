@@ -51,7 +51,6 @@ type WorkflowActionsArgs = {
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
   setSavedWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
-  router: ReturnType<typeof useRouter>;
 };
 
 function buildWorkflowSteps(workflow: Workflow, definitions: StepDefinition[]): WorkflowStep[] {
@@ -157,7 +156,6 @@ function useWorkflowActions({
   workflowTemplates,
   setWorkflowItems,
   setSavedWorkflowItems,
-  router,
 }: WorkflowActionsArgs) {
   const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState("");
@@ -209,7 +207,8 @@ function useWorkflowActions({
   const handleWorkflowCreated = (tempId: string, created: Workflow) => {
     setWorkflowItems((prev) => prev.map((item) => (item.id === tempId ? created : item)));
     setSavedWorkflowItems((prev) => [{ ...created }, ...prev]);
-    router.refresh();
+    // Note: No router.refresh() needed. Local state already has the correct workflow,
+    // and SSR will fetch fresh data on next navigation.
   };
 
   const handleSaveWorkflow = async (workflowId: string) => {
@@ -444,7 +443,6 @@ function useWorkspaceWorkflowsPage(
     workflowTemplates,
     setWorkflowItems,
     setSavedWorkflowItems,
-    router,
   });
   const {
     isAddWorkflowDialogOpen,
