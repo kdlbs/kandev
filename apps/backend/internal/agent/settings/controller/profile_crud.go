@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
@@ -114,6 +116,17 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentPr
 		return nil, err
 	}
 	if c.sessionChecker != nil {
+		// Clean up ephemeral tasks (quick chat, config chat) using this profile
+		deleted, err := c.sessionChecker.DeleteEphemeralTasksByAgentProfile(ctx, id)
+		if err != nil {
+			c.logger.Warn("failed to delete ephemeral tasks for profile",
+				zap.String("profile_id", id), zap.Error(err))
+		} else if deleted > 0 {
+			c.logger.Info("deleted ephemeral tasks for profile deletion",
+				zap.String("profile_id", id), zap.Int64("count", deleted))
+		}
+
+		// Check for active non-ephemeral sessions
 		active, err := c.sessionChecker.HasActiveTaskSessionsByAgentProfile(ctx, id)
 		if err != nil {
 			return nil, err

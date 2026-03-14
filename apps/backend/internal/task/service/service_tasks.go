@@ -25,8 +25,19 @@ type taskStopTarget struct {
 
 // Task operations
 
-// CreateTask creates a new task and publishes a task.created event
+// CreateTask creates a new task and publishes a task.created event.
+// WorkflowID is required for non-ephemeral tasks (kanban tasks).
+// Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	// Non-ephemeral tasks require a workflow for kanban board placement
+	if !req.IsEphemeral && req.WorkflowID == "" {
+		return nil, fmt.Errorf("workflow_id is required for non-ephemeral tasks")
+	}
+	// Ephemeral tasks must not have a workflow - they exist outside the kanban board
+	if req.IsEphemeral && req.WorkflowID != "" {
+		return nil, fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+
 	// Auto-resolve start step if not provided
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {

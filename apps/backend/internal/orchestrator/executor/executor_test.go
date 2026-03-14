@@ -418,6 +418,9 @@ func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context,
 func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	return false, nil
 }
+func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
+	return 0, nil
+}
 func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error { return nil }
 
 // Workflow-related session operations

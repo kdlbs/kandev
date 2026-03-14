@@ -97,6 +97,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
+	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
 	DeleteTaskSession(ctx context.Context, id string) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)

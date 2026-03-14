@@ -3,17 +3,20 @@
 import { IconMessageCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useAppStore } from "@/components/state-provider";
 
 /** Quick Chat button that opens the quick chat modal */
 export function QuickChatButton({ workspaceId }: { workspaceId?: string | null }) {
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
 
   if (!workspaceId) return null;
 
   return (
-    <KeyboardShortcutTooltip shortcut={SHORTCUTS.QUICK_CHAT} description="Quick Chat">
+    <KeyboardShortcutTooltip shortcut={quickChatShortcut} description="Quick Chat">
       <Button
         size="sm"
         variant="outline"

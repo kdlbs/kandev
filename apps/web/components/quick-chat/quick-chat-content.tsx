@@ -54,6 +54,15 @@ export const QuickChatContent = memo(function QuickChatContent({
   } = panelState;
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, cancelQueue, chatInputRef);
 
+  // Auto-focus the chat input when the component mounts
+  useEffect(() => {
+    // Small delay to ensure the input is rendered
+    const timer = setTimeout(() => {
+      chatInputRef.current?.focusInput();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Auto-send the initial prompt once the session is ready (has taskId).
   // This is used by config chat which creates the session first, then sends
   // the user's prompt through normal WS message flow.

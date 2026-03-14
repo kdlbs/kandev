@@ -52,6 +52,7 @@ type Controller struct {
 
 type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,

@@ -4,6 +4,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -138,6 +139,61 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	// Add default_config_agent_profile_id column to workspaces (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
+	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
+	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
+// to allow ephemeral tasks (quick chat) to have empty workflow_id.
+// SQLite requires recreating the table to remove FK constraints.
+func (r *Repository) migrateTasksRemoveWorkflowFK() error {
+	// Check if migration is needed by looking for the FK constraint
+	var tableSql string
+	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'`).Scan(&tableSql)
+	if err != nil {
+		return nil // Table doesn't exist yet, skip migration
+	}
+	if !strings.Contains(tableSql, "FOREIGN KEY (workflow_id)") {
+		return nil // No FK constraint, migration not needed
+	}
+
+	// Recreate tasks table without the workflow_id FK constraint
+	// SQLite requires executing statements one at a time
+	statements := []string{
+		`CREATE TABLE tasks_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			workflow_step_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			state TEXT DEFAULT 'TODO',
+			priority INTEGER DEFAULT 0,
+			position INTEGER DEFAULT 0,
+			metadata TEXT DEFAULT '{}',
+			is_ephemeral INTEGER NOT NULL DEFAULT 0,
+			archived_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)`,
+		`INSERT INTO tasks_new SELECT
+			id, workspace_id, workflow_id, workflow_step_id, title, description,
+			state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
+		FROM tasks`,
+		`DROP TABLE tasks`,
+		`ALTER TABLE tasks_new RENAME TO tasks`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at)`,
+	}
+	for _, stmt := range statements {
+		if _, err := r.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migration failed: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -249,7 +305,7 @@ func (r *Repository) initTaskSchema() error {
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
-		workflow_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
@@ -259,8 +315,7 @@ func (r *Repository) initTaskSchema() error {
 		metadata TEXT DEFAULT '{}',
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS task_repositories (
