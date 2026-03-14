@@ -57,6 +57,8 @@ func (s *Service) TestStore() *Store {
 // IsAuthenticated returns whether the service has a working GitHub client.
 // Returns false when using the NoopClient fallback (authMethod == "none").
 func (s *Service) IsAuthenticated() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.client != nil && s.authMethod != AuthMethodNone
 }
 
