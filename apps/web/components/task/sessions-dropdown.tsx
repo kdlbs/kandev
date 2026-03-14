@@ -131,7 +131,10 @@ function useSessionSelectionHandlers(taskId: string | null) {
   return { handleSelectSession };
 }
 
-function useSessionLifecycleActions(taskId: string | null, loadSessions: (force?: boolean) => void) {
+function useSessionLifecycleActions(
+  taskId: string | null,
+  loadSessions: (force?: boolean) => void,
+) {
   const handleStopSession = useCallback(
     async (sessionId: string) => {
       const client = getWebSocketClient();
