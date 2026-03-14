@@ -2,7 +2,9 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -153,12 +155,40 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 	// Check if migration is needed by looking for the FK constraint
 	var tableSql string
 	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'`).Scan(&tableSql)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil // Table doesn't exist yet, skip migration
+	}
+	if err != nil {
+		return fmt.Errorf("query tasks schema: %w", err)
 	}
 	if !strings.Contains(tableSql, "FOREIGN KEY (workflow_id)") {
 		return nil // No FK constraint, migration not needed
 	}
+
+	// Use a pinned connection to ensure PRAGMA setting persists through the transaction.
+	// SQLite's PRAGMA foreign_keys is per-connection, so we must run both the PRAGMA
+	// and transaction on the same connection. While the writer pool has MaxOpenConns(1),
+	// using Connx guarantees correctness even if pool config changes.
+	ctx := context.Background()
+	conn, err := r.db.Connx(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Disable FK enforcement to prevent cascade deletes during table recreation.
+	// Note: PRAGMA statements cannot run inside a transaction in SQLite.
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`) }()
+
+	// Wrap migration in a transaction to avoid partial state on failure
+	tx, err := conn.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	// Recreate tasks table without the workflow_id FK constraint
 	// SQLite requires executing statements one at a time
@@ -185,14 +215,18 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at)`,
+		// Use same index names as initCoreIndexes for consistency
+		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)`,
 	}
 	for _, stmt := range statements {
-		if _, err := r.db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration transaction: %w", err)
 	}
 	return nil
 }

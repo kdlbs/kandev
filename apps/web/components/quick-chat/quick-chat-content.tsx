@@ -113,6 +113,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         isSending={isSending}
         hideSessionsDropdown={true}
         minimalToolbar={minimalToolbar}
+        hidePlanMode={true}
         placeholderOverride={placeholderOverride}
       />
     </div>

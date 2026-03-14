@@ -194,7 +194,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		effectivePrompt = task.Description
 	}
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode)
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true})
 	if err != nil {
@@ -283,11 +283,12 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Apply workflow step prompt wrapping and plan mode injection.
 	// Called unconditionally so workflow-step prompt composition (prefix/suffix)
 	// applies even when plan mode is not requested.
+	// Ephemeral tasks skip workflow step processing since they have no workflow.
 	stepID := ""
 	if session.WorkflowStepID != nil {
 		stepID = *session.WorkflowStepID
 	}
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, stepID, planMode)
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, stepID, planMode, task.IsEphemeral)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
@@ -395,7 +396,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode)
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -440,11 +441,13 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool) (string, bool) {
+// For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
+func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool) (string, bool) {
 	effectivePrompt := prompt
 
 	stepHasPlanMode := false
-	if workflowStepID != "" && s.workflowStepGetter != nil {
+	// Skip workflow step prompt injection for ephemeral tasks - they don't have workflows
+	if !isEphemeral && workflowStepID != "" && s.workflowStepGetter != nil {
 		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for prompt building",

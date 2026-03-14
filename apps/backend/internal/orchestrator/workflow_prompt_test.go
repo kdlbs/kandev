@@ -57,6 +57,7 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 		"session-1",
 		"step-1",
 		false,
+		false, // isEphemeral
 	)
 
 	if !planModeActive {

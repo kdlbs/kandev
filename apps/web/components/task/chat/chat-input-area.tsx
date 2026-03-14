@@ -326,6 +326,8 @@ type ChatInputAreaProps = {
   isSending: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
+  hidePlanMode?: boolean;
   placeholderOverride?: string;
 };
 
@@ -341,6 +343,7 @@ export function ChatInputArea({
   isSending,
   hideSessionsDropdown,
   minimalToolbar,
+  hidePlanMode,
   placeholderOverride,
 }: ChatInputAreaProps) {
   const {
@@ -423,6 +426,7 @@ export function ChatInputArea({
         onImplementPlan={handleImplementPlan}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
+        hidePlanMode={hidePlanMode}
       />
     </div>
   );
