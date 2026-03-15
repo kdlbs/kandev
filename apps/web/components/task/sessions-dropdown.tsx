@@ -182,23 +182,44 @@ function useSessionLifecycleActions(
     [loadSessions],
   );
 
-  return { handleStopSession, handleResumeSession, handleDeleteSession };
+  const handleSetPrimary = useCallback(
+    async (sessionId: string) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request("session.set_primary", { session_id: sessionId }, 15000);
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to set primary session:", error);
+      }
+    },
+    [loadSessions],
+  );
+
+  return { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary };
 }
 
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
   taskTitle = "",
-  primarySessionId = null,
+  primarySessionId: primarySessionIdProp = null,
   onSetPrimary,
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const storePrimarySessionId = useAppStore((state) => {
+    const activeTaskId = state.tasks.activeTaskId;
+    if (!activeTaskId) return null;
+    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
+    return task?.primarySessionId ?? null;
+  });
+  const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
   const currentTime = useRunningSessionsClock(sessions);
-  const { handleStopSession, handleResumeSession, handleDeleteSession } =
+  const { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary } =
     useSessionLifecycleActions(taskId, loadSessions);
 
   const agentLabelsById = useMemo(() => {
@@ -257,7 +278,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           currentTime={currentTime}
           resolveAgentLabel={resolveAgentLabel}
           onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
-          onSetPrimary={onSetPrimary}
+          onSetPrimary={onSetPrimary ?? handleSetPrimary}
           onNewSession={() => setShowNewSessionDialog(true)}
           onStopSession={handleStopSession}
           onResumeSession={handleResumeSession}

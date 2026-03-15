@@ -56,6 +56,8 @@ type TaskChatPanelProps = {
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
   onOpenFileAtLine?: (filePath: string) => void;
+  /** Hide the sessions dropdown (session tabs in dockview replace it) */
+  hideSessionsDropdown?: boolean;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -65,6 +67,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
+  hideSessionsDropdown,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const lastAgentMessageCountRef = useRef(0);
@@ -157,6 +160,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           panelState={panelState}
           isSending={isSending}
+          hideSessionsDropdown={hideSessionsDropdown}
         />
       )}
     </PanelRoot>
