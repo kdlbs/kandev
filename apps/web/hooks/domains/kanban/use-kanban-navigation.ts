@@ -15,8 +15,7 @@ type NavigationOptions = {
   isMobile?: boolean;
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task, sessionId: string) => void;
-  setEditingTask: (task: Task) => void;
-  setIsDialogOpen: (open: boolean) => void;
+  onNoSession: (task: Task) => void;
   setTaskSessionAvailability: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
 
@@ -45,8 +44,7 @@ export function useKanbanNavigation({
   isMobile,
   onPreviewTask,
   onOpenTask,
-  setEditingTask,
-  setIsDialogOpen,
+  onNoSession,
   setTaskSessionAvailability,
 }: NavigationOptions) {
   const router = useRouter();
@@ -78,12 +76,11 @@ export function useKanbanNavigation({
           return;
         }
       } catch {
-        // Fall through to dialog as last resort
+        // Auto-prepare failed — let the caller handle it (e.g. show NewSessionDialog)
       }
-      setEditingTask(task);
-      setIsDialogOpen(true);
+      onNoSession(task);
     },
-    [taskPRs, router, onOpenTask, setEditingTask, setIsDialogOpen],
+    [taskPRs, router, onOpenTask, onNoSession],
   );
 
   const resolveSessionId = useCallback(
