@@ -246,12 +246,22 @@ function useSidebarData(workspaceId: string | null) {
   return { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories };
 }
 
+type StoreApi = ReturnType<typeof useAppStoreApi>;
 type SwitchFn = (
   taskId: string,
   sessionId: string,
   oldSessionId: string | null | undefined,
 ) => void;
-type StoreApi = ReturnType<typeof useAppStoreApi>;
+
+function buildSwitchToSession(
+  setActiveSession: (taskId: string, sessionId: string) => void,
+): SwitchFn {
+  return (taskId, sessionId, oldSessionId) => {
+    setActiveSession(taskId, sessionId);
+    performLayoutSwitch(oldSessionId ?? null, sessionId);
+    replaceSessionUrl(sessionId);
+  };
+}
 
 async function prepareAndSwitchTask(
   taskId: string,
@@ -292,14 +302,7 @@ function useSidebarActions(store: StoreApi) {
     useLayoutSwitch: true,
   });
 
-  const switchToSession = useCallback(
-    (taskId: string, sessionId: string, oldSessionId: string | null | undefined) => {
-      setActiveSession(taskId, sessionId);
-      performLayoutSwitch(oldSessionId ?? null, sessionId);
-      replaceSessionUrl(sessionId);
-    },
-    [setActiveSession],
-  );
+  const switchToSession = useMemo(() => buildSwitchToSession(setActiveSession), [setActiveSession]);
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -312,7 +315,8 @@ function useSidebarActions(store: StoreApi) {
       }
       loadTaskSessionsForTask(taskId).then(async (sessions) => {
         const currentOldSessionId = store.getState().tasks.activeSessionId;
-        const sessionId = sessions[0]?.id ?? null;
+        const primary = sessions.find((s: { is_primary?: boolean }) => s.is_primary);
+        const sessionId = primary?.id ?? sessions[0]?.id ?? null;
         if (sessionId) {
           switchToSession(taskId, sessionId, currentOldSessionId);
           return;

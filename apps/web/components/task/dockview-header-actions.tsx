@@ -108,14 +108,14 @@ function AddPanelMenuItems({
 
   return (
     <>
-      {state.isCenterGroup && state.taskId && (
+      {state.taskId && (
         <>
           <DropdownMenuItem onClick={onNewSession} className="cursor-pointer text-xs" data-testid="new-session-button">
             <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
             New Session
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <SessionReopenMenuItems taskId={state.taskId} />
+          <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
         </>
       )}
       <DropdownMenuItem onClick={onAddTerminal} className="cursor-pointer text-xs">
@@ -199,11 +199,12 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
           />
         </DropdownMenuContent>
       </DropdownMenu>
-      {state.isCenterGroup && state.taskId && (
+      {state.taskId && (
         <NewSessionDialog
           open={showNewSessionDialog}
           onOpenChange={setShowNewSessionDialog}
           taskId={state.taskId}
+          groupId={group.id}
         />
       )}
     </div>
