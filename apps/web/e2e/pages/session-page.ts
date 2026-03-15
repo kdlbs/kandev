@@ -453,4 +453,44 @@ export class SessionPage {
   sessionReopenItems(): Locator {
     return this.page.locator("[data-testid^='reopen-session-']");
   }
+
+  /** All session tabs in dockview (panels using the sessionTab tab component). */
+  sessionTabs(): Locator {
+    return this.page.locator(".dv-default-tab").filter({
+      has: this.page.locator("[data-testid^='reopen-session-'], .tabler-icon-star").first(),
+    });
+  }
+
+  /** Dockview session tab matched by partial text (e.g., "#1 Mock Agent"). */
+  sessionTabByText(text: string): Locator {
+    return this.page.locator(`.dv-default-tab:has-text('${text}')`);
+  }
+
+  /** Context menu on a dockview tab — right-click the tab to trigger it. */
+  async rightClickTab(text: string): Promise<void> {
+    const tab = this.page.locator(`.dv-default-tab:has-text('${text}')`);
+    await tab.click({ button: "right" });
+  }
+
+  /** Context menu item by visible label. */
+  contextMenuItem(label: string): Locator {
+    return this.page.getByRole("menuitem", { name: label });
+  }
+
+  /** Alert dialog (e.g., delete confirmation). */
+  alertDialog(): Locator {
+    return this.page.getByRole("alertdialog");
+  }
+
+  /** Primary star icon inside a dockview tab. */
+  primaryStarInTab(text: string): Locator {
+    const tab = this.page.locator(`.dv-default-tab:has-text('${text}')`);
+    return tab.locator(".tabler-icon-star").first();
+  }
+
+  /** Click a task in the sidebar by title. */
+  async clickTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator("[role='button']").filter({ hasText: title });
+    await taskRow.click();
+  }
 }

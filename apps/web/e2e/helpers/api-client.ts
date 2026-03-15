@@ -601,6 +601,14 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
+  async setPrimarySession(sessionId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+  }
+
   async getTaskEnvironment(taskId: string): Promise<{
     id: string;
     task_id: string;
