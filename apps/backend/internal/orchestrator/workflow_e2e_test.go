@@ -319,20 +319,20 @@ func setSessionState(t *testing.T, ctx context.Context, repo sessionExecutorStor
 	}
 }
 
-// assertStepByName verifies the session's current workflow step matches the expected step name.
+// assertStepByName verifies the task's current workflow step matches the expected step name.
 func assertStepByName(t *testing.T, ctx context.Context, repo sessionExecutorStore, sessionID, expectName string, nameToID map[string]string) {
 	t.Helper()
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("failed to load session: %v", err)
 	}
-	expectID := nameToID[expectName]
-	gotID := ""
-	if session.WorkflowStepID != nil {
-		gotID = *session.WorkflowStepID
+	task, err := repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		t.Fatalf("failed to load task: %v", err)
 	}
-	if gotID != expectID {
-		t.Errorf("session step = %q (want %q for %q)", gotID, expectID, expectName)
+	expectID := nameToID[expectName]
+	if task.WorkflowStepID != expectID {
+		t.Errorf("task step = %q (want %q for %q)", task.WorkflowStepID, expectID, expectName)
 	}
 }
 

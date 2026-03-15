@@ -18,20 +18,21 @@ import (
 
 // processOnTurnComplete processes the on_turn_complete events for the current step.
 // Returns true if a transition occurred (step change happened).
-func (s *Service) processOnTurnComplete(ctx context.Context, taskID string, session *models.TaskSession) bool {
+func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, session *models.TaskSession) bool {
 	if session.ID == "" || s.workflowStepGetter == nil {
 		return false
 	}
 
+	taskID := task.ID
 	sessionID := session.ID
 
-	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
-		s.logger.Debug("session has no workflow step, skipping transition",
+	if task.WorkflowStepID == "" {
+		s.logger.Debug("task has no workflow step, skipping transition",
 			zap.String("session_id", sessionID))
 		return false
 	}
 
-	workflowStepID := *session.WorkflowStepID
+	workflowStepID := task.WorkflowStepID
 
 	// Get the current workflow step
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
@@ -119,18 +120,19 @@ func (s *Service) resolveTransitionTargetStep(ctx context.Context, taskID, sessi
 
 // processOnTurnStart processes the on_turn_start events for the current step.
 // This is called when a user sends a message. Returns true if a transition occurred.
-func (s *Service) processOnTurnStart(ctx context.Context, taskID string, session *models.TaskSession) bool {
+func (s *Service) processOnTurnStart(ctx context.Context, task *models.Task, session *models.TaskSession) bool {
 	if session.ID == "" || s.workflowStepGetter == nil {
 		return false
 	}
 
+	taskID := task.ID
 	sessionID := session.ID
 
-	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
+	if task.WorkflowStepID == "" {
 		return false
 	}
 
-	workflowStepID := *session.WorkflowStepID
+	workflowStepID := task.WorkflowStepID
 
 	// Get the current workflow step
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
@@ -245,14 +247,6 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			"orchestrator",
 			buildTaskEventPayload(task),
 		))
-	}
-
-	// Update session's workflow step
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, toStepID); err != nil {
-		s.logger.Warn("failed to update session workflow step",
-			zap.String("session_id", sessionID),
-			zap.String("step_id", toStepID),
-			zap.Error(err))
 	}
 
 	s.logger.Info("workflow transition completed",
@@ -851,10 +845,7 @@ func (s *Service) buildMachineState(ctx context.Context, task *models.Task, sess
 // assembleMachineState creates an engine.MachineState from pre-loaded models.
 // Shared by Service.buildMachineState and workflowStore.LoadState to avoid duplication.
 func assembleMachineState(task *models.Task, session *models.TaskSession, isPassthrough bool) engine.MachineState {
-	currentStepID := ""
-	if session.WorkflowStepID != nil {
-		currentStepID = *session.WorkflowStepID
-	}
+	currentStepID := task.WorkflowStepID
 	var data map[string]any
 	if session.Metadata != nil {
 		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
@@ -877,23 +868,23 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 // actions and drive step transitions. Falls back to the legacy method when the engine
 // is not initialized. Returns true if a step transition occurred.
 func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to load task for on_turn_complete",
+			zap.String("task_id", taskID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+
 	if s.workflowEngine == nil {
-		return s.processOnTurnComplete(ctx, taskID, session)
+		return s.processOnTurnComplete(ctx, task, session)
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {
 		return false
 	}
 
-	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
-	}
-
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to load task for engine on_turn_complete",
-			zap.String("task_id", taskID), zap.Error(err))
+	if task.WorkflowStepID == "" {
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
@@ -985,10 +976,6 @@ func (s *Service) applyEngineTransition(
 		return false
 	}
 
-	// Update in-memory session so subsequent calls (e.g. setSessionWaitingForInput)
-	// include the new workflow_step_id in the session.state_changed WS event.
-	session.WorkflowStepID = &result.ToStepID
-
 	if len(result.DataPatch) > 0 {
 		if err := s.workflowStore.PersistData(ctx, session.ID, result.DataPatch); err != nil {
 			s.logger.Warn("failed to persist workflow data patch",
@@ -1010,22 +997,22 @@ func (s *Service) applyEngineTransition(
 // actions. Falls back to the legacy method when the engine is not initialized.
 // Returns true if a step transition occurred.
 func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to load task for on_turn_start",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+
 	if s.workflowEngine == nil {
-		return s.processOnTurnStart(ctx, taskID, session)
+		return s.processOnTurnStart(ctx, task, session)
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {
 		return false
 	}
 
-	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
-		return false
-	}
-
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to load task for engine on_turn_start",
-			zap.String("task_id", taskID), zap.Error(err))
+	if task.WorkflowStepID == "" {
 		return false
 	}
 

@@ -389,12 +389,9 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
 			"is_passthrough":         session.IsPassthrough,
 		}
-		// Include review_status and workflow_step_id if present to ensure frontend state consistency
+		// Include review_status if present to ensure frontend state consistency
 		if session.ReviewStatus != nil {
 			eventData["review_status"] = *session.ReviewStatus
-		}
-		if session.WorkflowStepID != nil {
-			eventData["workflow_step_id"] = *session.WorkflowStepID
 		}
 		// Include session metadata (e.g. plan_mode set by workflow events).
 		// Key is "session_metadata" to avoid conflict with message-level "metadata".

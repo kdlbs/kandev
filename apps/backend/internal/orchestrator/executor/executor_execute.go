@@ -236,9 +236,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
-	if workflowStepID != "" {
-		session.WorkflowStepID = &workflowStepID
-	}
+	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session
 	if executorProfileID != "" {

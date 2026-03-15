@@ -233,7 +233,6 @@ export type TaskSessionStateChangedPayload = {
   suppress_toast?: boolean;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
-  workflow_step_id?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
 };

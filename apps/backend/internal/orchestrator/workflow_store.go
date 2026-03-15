@@ -111,13 +111,6 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 		))
 	}
 
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, toStepID); err != nil {
-		s.logger.Warn("failed to update session workflow step",
-			zap.String("session_id", sessionID),
-			zap.String("step_id", toStepID),
-			zap.Error(err))
-	}
-
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 		s.logger.Warn("failed to clear session review status",
 			zap.String("session_id", sessionID),

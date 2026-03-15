@@ -610,7 +610,7 @@ func (r *Repository) initSessionWorktreeSchema() error {
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL,
 		is_primary INTEGER DEFAULT 0,
-		workflow_step_id TEXT DEFAULT '',
+		workflow_step_id TEXT DEFAULT '', -- deprecated: workflow step is now tracked on the task, not the session. Remove on next schema migration.
 		is_passthrough INTEGER DEFAULT 0,
 		review_status TEXT DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
