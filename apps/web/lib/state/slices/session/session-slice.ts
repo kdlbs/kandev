@@ -211,6 +211,16 @@ export const createSessionSlice: StateCreator<
         (draft as any).environmentIdBySessionId[session.id] = mergedSession.task_environment_id;
       }
     }),
+  removeTaskSession: (taskId, sessionId) =>
+    set((draft) => {
+      delete draft.taskSessions.items[sessionId];
+      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+      if (sessionsByTask) {
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
+          (s) => s.id !== sessionId,
+        );
+      }
+    }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {
       draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;

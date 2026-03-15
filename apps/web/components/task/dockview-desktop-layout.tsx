@@ -190,13 +190,17 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
     const taskId = state.tasks.activeTaskId;
     const sessions = taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null;
     if (!sessions) return null;
-    const idx = sessions.findIndex((s: { id: string }) => s.id === sessionId);
+    const sorted = [...sessions].sort(
+      (a: { started_at: string }, b: { started_at: string }) =>
+        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+    );
+    const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
     return idx >= 0 ? idx + 1 : null;
   });
   useEffect(() => {
     let label = "Agent";
     if (isSessionTab && agentLabel) {
-      label = sessionNumber ? `${agentLabel} #${sessionNumber}` : agentLabel;
+      label = sessionNumber ? `#${sessionNumber} ${agentLabel}` : agentLabel;
     }
     setPanelTitle(panelId, label);
   }, [panelId, isSessionTab, agentLabel, sessionNumber]);
@@ -478,11 +482,14 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
     [setApi, buildDefaultLayout, initialLayout, appStore],
   );
 
+  // Release session-scoped portals + trigger layout switch on session change.
+  // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
+  // saved before a new session tab is created — otherwise the new session's
+  // panel could leak into the old session's persisted layout.
+  useSessionSwitchCleanup(effectiveSessionId);
+
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
-
-  // Release session-scoped portals + trigger layout switch on session change
-  useSessionSwitchCleanup(effectiveSessionId);
 
   // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {
