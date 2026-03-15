@@ -1036,6 +1036,35 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// SetPrimarySession marks a session as the primary session for its task
+// and broadcasts a task.updated event so the frontend reflects the change.
+func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
+	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to set session as primary: %w", err)
+	}
+
+	// Broadcast task.updated so frontend updates the primary star indicator.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
+		return nil
+	}
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
+		return nil
+	}
+	if s.eventBus != nil {
+		payload := buildTaskEventPayload(task)
+		payload["primary_session_id"] = sessionID
+		payload["primary_session_state"] = string(session.State)
+		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
+			events.TaskUpdated, "orchestrator", payload,
+		))
+	}
+	return nil
+}
+
 // StopExecution stops agent execution for a specific execution ID.
 func (s *Service) StopExecution(ctx context.Context, executionID string, reason string, force bool) error {
 	s.logger.Info("stopping execution",

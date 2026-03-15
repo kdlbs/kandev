@@ -273,6 +273,10 @@ type LaunchRequest struct {
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+
+	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
+	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
+	RepoName    string // Repository name used as subdirectory inside the task directory
 }
 
 // CredentialsManager interface for credential retrieval

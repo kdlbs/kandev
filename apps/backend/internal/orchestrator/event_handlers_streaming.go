@@ -401,6 +401,9 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
+		if session.TaskEnvironmentID != "" {
+			eventData["task_environment_id"] = session.TaskEnvironmentID
+		}
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
 }

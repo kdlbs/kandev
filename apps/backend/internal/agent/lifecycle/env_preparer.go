@@ -39,6 +39,10 @@ type EnvPrepareRequest struct {
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 
+	// Task directory mode
+	TaskDirName string
+	RepoName    string
+
 	Env map[string]string
 }
 

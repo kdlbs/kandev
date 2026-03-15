@@ -44,6 +44,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
+	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 }
 
@@ -532,6 +533,18 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 	if err := h.service.DeleteSession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to delete session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	req, errResp := h.parseSessionAction(msg)
+	if errResp != nil {
+		return errResp, nil
+	}
+	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
+		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

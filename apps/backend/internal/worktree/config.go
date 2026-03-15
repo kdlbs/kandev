@@ -20,6 +20,12 @@ type Config struct {
 	// Default: ~/.kandev/worktrees
 	BasePath string `mapstructure:"base_path"`
 
+	// TasksBasePath is the base directory for per-task worktree storage.
+	// Each task gets a subdirectory containing one repo worktree (future: multiple).
+	// Supports ~ expansion for home directory.
+	// Default: ~/.kandev/tasks
+	TasksBasePath string `mapstructure:"tasks_base_path"`
+
 	// BranchPrefix is the prefix used for worktree branch names.
 	// Default: feature/
 	BranchPrefix string `mapstructure:"branch_prefix"`
@@ -51,6 +57,13 @@ func (c *Config) SetDataDirFallback(dataDir string) {
 	}
 }
 
+// SetTasksBasePathFallback sets the TasksBasePath from the data directory if not already configured.
+func (c *Config) SetTasksBasePathFallback(dataDir string) {
+	if c.TasksBasePath == "" && dataDir != "" {
+		c.TasksBasePath = filepath.Join(dataDir, "tasks")
+	}
+}
+
 // ExpandedBasePath returns the base path with ~ expanded to the user's home directory.
 func (c *Config) ExpandedBasePath() (string, error) {
 	path := c.BasePath
@@ -71,6 +84,29 @@ func (c *Config) WorktreePath(worktreeID string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(basePath, worktreeID), nil
+}
+
+// ExpandedTasksBasePath returns the tasks base path with ~ expanded to the user's home directory.
+func (c *Config) ExpandedTasksBasePath() (string, error) {
+	path := c.TasksBasePath
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	return path, nil
+}
+
+// TaskWorktreePath returns the full path for a worktree inside a task directory.
+// Format: {tasksBase}/{taskDirName}/{repoName}
+func (c *Config) TaskWorktreePath(taskDirName, repoName string) (string, error) {
+	basePath, err := c.ExpandedTasksBasePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(basePath, taskDirName, repoName), nil
 }
 
 // BranchName returns the branch name for a given task ID and suffix.

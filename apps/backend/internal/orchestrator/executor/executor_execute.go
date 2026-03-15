@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -481,6 +483,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		// Task directory mode: place worktree inside per-task directory
+		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
+			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+			req.RepoName = repoInfo.Repository.Name
+		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {
 				metadata = make(map[string]interface{})
@@ -706,6 +713,10 @@ func (e *Executor) persistTaskEnvironment(
 	workspacePath := resp.WorktreePath
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
+	}
+	// Task directory mode: WorkspacePath = task root, WorktreePath = repo subdir
+	if req.TaskDirName != "" && resp.WorktreePath != "" {
+		workspacePath = filepath.Dir(resp.WorktreePath)
 	}
 	env := &models.TaskEnvironment{
 		TaskID:            taskID,
