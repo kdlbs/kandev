@@ -325,6 +325,8 @@ func (m *Manager) runEnvironmentPreparer(
 		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
+		TaskDirName:          req.TaskDirName,
+		RepoName:             req.RepoName,
 		Env:                  req.Env,
 	}
 

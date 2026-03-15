@@ -405,6 +405,9 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
 			eventData["suppress_toast"] = true
 		}
+		if session.TaskEnvironmentID != "" {
+			eventData["task_environment_id"] = session.TaskEnvironmentID
+		}
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
 }
