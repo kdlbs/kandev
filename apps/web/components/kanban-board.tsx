@@ -14,6 +14,7 @@ import { MobileFab } from "./kanban/mobile-fab";
 import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
@@ -212,13 +213,13 @@ function useKanbanBoardSetup(
   useAllWorkflowSnapshots(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
+  const [newSessionTaskId, setNewSessionTaskId] = useState<string | null>(null);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
     enablePreviewOnClick: hooks.enablePreviewOnClick,
     isMobile,
     onPreviewTask,
     onOpenTask,
-    setEditingTask: hooks.setEditingTask,
-    setIsDialogOpen: hooks.setIsDialogOpen,
+    onNoSession: useCallback((task: Task) => setNewSessionTaskId(task.id), []),
     setTaskSessionAvailability: hooks.setTaskSessionAvailability,
   });
 
@@ -261,6 +262,8 @@ function useKanbanBoardSetup(
     handleCardClick: mobileCardClick,
     mobileSheetTask,
     setMobileSheetTask,
+    newSessionTaskId,
+    setNewSessionTaskId,
   };
 }
 
@@ -302,6 +305,13 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
       />
+      {s.newSessionTaskId && (
+        <NewSessionDialog
+          open={!!s.newSessionTaskId}
+          onOpenChange={(open) => { if (!open) s.setNewSessionTaskId(null); }}
+          taskId={s.newSessionTaskId}
+        />
+      )}
       <SwimlaneContainer
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
