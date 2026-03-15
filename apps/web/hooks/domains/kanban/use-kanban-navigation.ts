@@ -86,19 +86,28 @@ export function useKanbanNavigation({
     [taskPRs, router, onOpenTask, setEditingTask, setIsDialogOpen],
   );
 
+  const resolveSessionId = useCallback(
+    async (task: Task): Promise<string | null> => {
+      // Prefer the primary session when available
+      if (task.primarySessionId) return task.primarySessionId;
+      return fetchLatestSessionId(task.id);
+    },
+    [fetchLatestSessionId],
+  );
+
   const handleOpenTask = useCallback(
     async (task: Task) => {
-      const sessionId = await fetchLatestSessionId(task.id);
+      const sessionId = await resolveSessionId(task);
       if (!sessionId) return handleNoSession(task);
       navigateToSession(task, sessionId);
     },
-    [fetchLatestSessionId, handleNoSession, navigateToSession],
+    [resolveSessionId, handleNoSession, navigateToSession],
   );
 
   const handleCardClick = useCallback(
     async (task: Task) => {
       if (isMobile || !enablePreviewOnClick) {
-        const sessionId = await fetchLatestSessionId(task.id);
+        const sessionId = await resolveSessionId(task);
         if (!sessionId) return handleNoSession(task);
         navigateToSession(task, sessionId);
       } else if (onPreviewTask) {
@@ -109,7 +118,7 @@ export function useKanbanNavigation({
       isMobile,
       enablePreviewOnClick,
       onPreviewTask,
-      fetchLatestSessionId,
+      resolveSessionId,
       handleNoSession,
       navigateToSession,
     ],

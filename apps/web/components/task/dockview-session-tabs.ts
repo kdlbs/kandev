@@ -14,16 +14,18 @@ export function setupSessionTabSync(
 ) {
   api.onDidActivePanelChange((panel) => {
     if (!panel) return;
+    // Ignore panel activations during layout operations (e.g. drag-to-split,
+    // layout restore) to avoid cascading layout switches.
+    if (useDockviewStore.getState().isRestoringLayout) return;
     // Parse sessionId from panel ID (format: "session:{sessionId}")
     if (!panel.id.startsWith("session:")) return;
     const sid = panel.id.slice("session:".length);
     if (sid && sid !== appStore.getState().tasks.activeSessionId) {
       const taskId = appStore.getState().tasks.activeTaskId;
       if (taskId) {
-        // Pre-set currentLayoutSessionId so useSessionSwitchCleanup's
-        // performLayoutSwitch guard prevents a full layout teardown/rebuild.
-        // Clicking a tab just switches context — the layout stays intact.
-        useDockviewStore.setState({ currentLayoutSessionId: sid });
+        // Skip the next layout switch for this session — clicking a tab
+        // just switches context, the layout stays intact.
+        useDockviewStore.setState({ _skipLayoutSwitchForSession: sid });
         appStore.getState().setActiveSession(taskId, sid);
       }
     }
@@ -33,6 +35,9 @@ export function setupSessionTabSync(
 /**
  * Re-create a chat or session panel if the last one is removed.
  * Prevents the user from ending up with no chat panel at all.
+ *
+ * Uses a delayed check to avoid racing with dockview drag-to-split
+ * operations, which temporarily remove and re-add panels.
  */
 export function setupChatPanelSafetyNet(
   api: DockviewReadyEvent["api"],
@@ -42,17 +47,24 @@ export function setupChatPanelSafetyNet(
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isChatPanel = panel.id === "chat" || panel.id.startsWith("session:");
     if (!isChatPanel) return;
+    // Double rAF gives dockview time to finish internal operations like
+    // drag-to-split moves (remove from old group → add to new group).
     requestAnimationFrame(() => {
-      const hasChatPanel = api.panels.some(
-        (p) => p.id === "chat" || p.id.startsWith("session:"),
-      );
-      if (hasChatPanel) return;
-      const activeSessionId = appStore.getState().tasks.activeSessionId;
-      const sb = api.getPanel("sidebar");
-      const position = sb
-        ? { direction: "right" as const, referencePanel: "sidebar" }
-        : undefined;
-      if (activeSessionId) {
+      requestAnimationFrame(() => {
+        if (useDockviewStore.getState().isRestoringLayout) return;
+        const hasChatPanel = api.panels.some(
+          (p) => p.id === "chat" || p.id.startsWith("session:"),
+        );
+        if (hasChatPanel) return;
+        const activeSessionId = appStore.getState().tasks.activeSessionId;
+        const sb = api.getPanel("sidebar");
+        const position = sb
+          ? { direction: "right" as const, referencePanel: "sidebar" }
+          : undefined;
+        // Only recreate a panel if there's still an active session.
+        // If all sessions were deleted, leave the layout empty — the user
+        // can create a new session via the "+" menu.
+        if (!activeSessionId) return;
         api.addPanel({
           id: `session:${activeSessionId}`,
           component: "chat",
@@ -63,17 +75,7 @@ export function setupChatPanelSafetyNet(
         });
         const nc = api.getPanel(`session:${activeSessionId}`);
         if (nc) useDockviewStore.setState({ centerGroupId: nc.group.id });
-      } else {
-        api.addPanel({
-          id: "chat",
-          component: "chat",
-          tabComponent: "permanentTab",
-          title: "Agent",
-          position,
-        });
-        const nc = api.getPanel("chat");
-        if (nc) useDockviewStore.setState({ centerGroupId: nc.group.id });
-      }
+      });
     });
   });
 }

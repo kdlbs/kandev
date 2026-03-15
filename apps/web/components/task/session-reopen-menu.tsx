@@ -27,7 +27,7 @@ function resolveAgentLabel(session: TaskSession, labelsById: Record<string, stri
  * Each item shows session number, agent label, primary star, and state icon.
  * Clicking focuses an existing tab or re-opens a closed one.
  */
-export function SessionReopenMenuItems({ taskId }: { taskId: string }) {
+export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; groupId?: string }) {
   const { sessions } = useTaskSessions(taskId);
   const api = useDockviewStore((s) => s.api);
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
@@ -54,13 +54,11 @@ export function SessionReopenMenuItems({ taskId }: { taskId: string }) {
   );
 
   const handleClick = useCallback(
-    (sessionId: string, label: string) => {
+    (sessionId: string, label: string, groupId?: string) => {
       if (!api) return;
-      // Pre-set currentLayoutSessionId so switchSessionLayout's guard
-      // (currentLayoutSessionId === newSessionId) prevents a full layout rebuild.
-      // We only want to add/focus the tab, not tear down the entire layout.
-      useDockviewStore.setState({ currentLayoutSessionId: sessionId });
-      addSessionPanel(api, centerGroupId, sessionId, label);
+      // Skip the next layout switch for this session to prevent a full rebuild.
+      useDockviewStore.setState({ _skipLayoutSwitchForSession: sessionId });
+      addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],
   );
@@ -77,16 +75,18 @@ export function SessionReopenMenuItems({ taskId }: { taskId: string }) {
         return (
           <DropdownMenuItem
             key={session.id}
-            onClick={() => handleClick(session.id, label)}
+            onClick={() => handleClick(session.id, `#${index + 1} ${label}`, groupId)}
             className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
             data-testid={`reopen-session-${session.id}`}
           >
             <span className="w-5 shrink-0 text-muted-foreground text-right">#{index + 1}</span>
             <span className="flex-1 truncate">{label}</span>
             {isPrimary && (
-              <IconStar className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />
+              <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />
             )}
-            <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
+            {session.state !== "RUNNING" && session.state !== "STARTING" && session.state !== "WAITING_FOR_INPUT" && (
+              <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
+            )}
           </DropdownMenuItem>
         );
       })}
