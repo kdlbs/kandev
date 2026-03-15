@@ -304,9 +304,11 @@ export function ShellTerminal({
   useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
   const isSessionFailed = !isReadOnlyMode && isFailed;
-  const shellOutput = useAppStore((state) =>
-    sessionId && !isReadOnlyMode ? state.shell.outputs[sessionId] || "" : "",
-  );
+  const shellOutput = useAppStore((state) => {
+    if (!sessionId || isReadOnlyMode) return "";
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.shell.outputs[envKey] || "";
+  });
   const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
   useReadOnlyOutputSync({
     xtermRef,

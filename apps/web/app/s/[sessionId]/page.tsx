@@ -156,6 +156,9 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       },
     },
     ...buildWorktreeState(allSessions),
+    environmentIdBySessionId: Object.fromEntries(
+      allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
+    ),
     settingsAgents: { items: agents.agents },
     settingsData: {
       agentsLoaded: true,
