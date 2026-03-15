@@ -37,6 +37,7 @@ var builtinDefs = []builtinDef{
 	{"builtin-pr-title", "pr-title", "Generate a PR title based on commits and changes", "pr-title"},
 	{"builtin-pr-description", "pr-description", "Generate a PR description based on commits and changes", "pr-description"},
 	{"builtin-enhance-prompt", "enhance-prompt", "Enhance and expand a user prompt with context and clarity", "enhance-prompt"},
+	{"builtin-summarize-session", "summarize-session", "Summarize a session conversation for context handover", "summarize-session"},
 }
 
 // getBuiltinAgents returns the predefined built-in utility agents with prompts from embedded files.
