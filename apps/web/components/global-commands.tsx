@@ -20,7 +20,7 @@ import {
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
@@ -167,6 +167,9 @@ export function GlobalCommands() {
     startNewConfigChat,
   ]);
 
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
+
   const quickChatCommand: CommandItem = useMemo(
     () => ({
       id: "quick-chat",
@@ -174,10 +177,10 @@ export function GlobalCommands() {
       group: "Actions",
       icon: <IconMessageCircle className="size-3.5" />,
       keywords: ["quick", "chat", "ai", "agent"],
-      shortcut: SHORTCUTS.QUICK_CHAT,
+      shortcut: quickChatShortcut,
       action: handleOpenQuickChat,
     }),
-    [handleOpenQuickChat],
+    [handleOpenQuickChat, quickChatShortcut],
   );
 
   const configChatCommand: CommandItem = useMemo(
@@ -203,7 +206,7 @@ export function GlobalCommands() {
   );
 
   useRegisterCommands(commands);
-  useKeyboardShortcut(SHORTCUTS.QUICK_CHAT, handleOpenQuickChat);
+  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
 
   return null;
 }

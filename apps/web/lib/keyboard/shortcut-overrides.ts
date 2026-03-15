@@ -1,6 +1,6 @@
 import { SHORTCUTS, type KeyboardShortcut } from "./constants";
 
-export type ConfigurableShortcutId = "SEARCH" | "FILE_SEARCH";
+export type ConfigurableShortcutId = "SEARCH" | "FILE_SEARCH" | "QUICK_CHAT";
 
 export type StoredShortcutOverrides = Record<
   string,
@@ -13,6 +13,7 @@ export const CONFIGURABLE_SHORTCUTS: Record<
 > = {
   SEARCH: { label: "Command Panel", default: SHORTCUTS.SEARCH },
   FILE_SEARCH: { label: "File Search", default: SHORTCUTS.FILE_SEARCH },
+  QUICK_CHAT: { label: "Quick Chat", default: SHORTCUTS.QUICK_CHAT },
 };
 
 export function getShortcut(
@@ -30,5 +31,6 @@ export function resolveAllShortcuts(
   return {
     SEARCH: getShortcut("SEARCH", overrides),
     FILE_SEARCH: getShortcut("FILE_SEARCH", overrides),
+    QUICK_CHAT: getShortcut("QUICK_CHAT", overrides),
   };
 }

@@ -20,6 +20,7 @@ import type {
   Task,
   TaskSession,
   UserSettingsResponse,
+  WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
@@ -191,7 +192,10 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     terminalsResponse,
     messagesResponse,
   ] = await Promise.all([
-    fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" }),
+    // Ephemeral tasks (quick chat) have empty workflow_id - skip snapshot fetch
+    task.workflow_id
+      ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+      : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     listAgents({ cache: "no-store" }),
     listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     listTaskSessions(session.task_id, { cache: "no-store" }),

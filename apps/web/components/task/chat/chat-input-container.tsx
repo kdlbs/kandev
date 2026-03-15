@@ -75,6 +75,8 @@ type ChatInputContainerProps = {
   onImplementPlan?: () => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
+  hidePlanMode?: boolean;
 };
 
 function FailedSessionBanner({
@@ -186,6 +188,7 @@ function buildEditorAreaProps(
     isUtilityConfigured: extras.isUtilityConfigured,
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
+    hidePlanMode: p.hidePlanMode,
   };
 }
 

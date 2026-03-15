@@ -4,6 +4,18 @@ import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
 type KanbanTask = KanbanState["tasks"][number];
 
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
+  // Handle empty snapshot (ephemeral tasks have no workflow)
+  if (!snapshot.workflow) {
+    return {
+      kanban: {
+        workflowId: "",
+        isLoading: false,
+        steps: [],
+        tasks: [],
+      },
+    };
+  }
+
   const tasks = snapshot.tasks
     .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
     .map((task) => {
