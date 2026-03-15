@@ -61,3 +61,18 @@ export function panel(id: string): LayoutPanel {
   if (!config) throw new Error(`Unknown panel: ${id}`);
   return { id, ...config };
 }
+
+/** Generate panel config for a session tab. */
+export function sessionPanelConfig(
+  sessionId: string,
+  title: string,
+  isPrimary: boolean,
+): LayoutPanel & { tabComponent: string; params: Record<string, unknown> } {
+  return {
+    id: `session:${sessionId}`,
+    component: "chat",
+    title,
+    tabComponent: "sessionTab",
+    params: { sessionId, isPrimary },
+  };
+}

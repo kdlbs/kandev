@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
+  IconMessagePlus,
   IconDeviceDesktop,
   IconTerminal2,
   IconFileText,
@@ -25,6 +26,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
@@ -38,6 +40,8 @@ import { linkToSession } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { NewTaskButton } from "./task-session-sidebar";
+import { NewSessionDialog } from "./new-session-dialog";
+import { SessionReopenMenuItems } from "./session-reopen-menu";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
@@ -55,103 +59,153 @@ function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
   };
 }
 
-export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
-  const { group, containerApi } = props;
+function useLeftHeaderState(
+  groupId: string,
+  containerApi: IDockviewHeaderActionsProps["containerApi"],
+) {
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
-
+  const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const isPassthrough = useAppStore((state) => {
     if (!activeSessionId) return false;
     return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
   });
-
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
-  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
-  const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
-  const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
-  const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const pr = useActiveTaskPR();
-
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
   );
   const hasFiles = Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files"));
+  return {
+    isSidebarGroup: groupId === sidebarGroupId,
+    isCenterGroup: groupId === centerGroupId,
+    activeSessionId,
+    taskId,
+    isPassthrough,
+    pr,
+    hasChanges,
+    hasFiles,
+  };
+}
 
-  const isSidebarGroup = group.id === sidebarGroupId;
+function AddPanelMenuItems({
+  groupId,
+  state,
+  onNewSession,
+  onAddTerminal,
+}: {
+  groupId: string;
+  state: ReturnType<typeof useLeftHeaderState>;
+  onNewSession: () => void;
+  onAddTerminal: () => void;
+}) {
+  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
+  const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
+  const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
+  const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
+  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+
+  return (
+    <>
+      {state.isCenterGroup && state.taskId && (
+        <>
+          <DropdownMenuItem onClick={onNewSession} className="cursor-pointer text-xs" data-testid="new-session-button">
+            <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
+            New Session
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <SessionReopenMenuItems taskId={state.taskId} />
+        </>
+      )}
+      <DropdownMenuItem onClick={onAddTerminal} className="cursor-pointer text-xs">
+        <IconTerminal2 className="h-3.5 w-3.5 mr-1.5" />
+        Terminal
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => addBrowserPanel(undefined, groupId)}
+        className="cursor-pointer text-xs"
+      >
+        <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
+        Browser
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => addVscodePanel()} className="cursor-pointer text-xs">
+        <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
+        VS Code
+      </DropdownMenuItem>
+      {!state.isPassthrough && (
+        <DropdownMenuItem onClick={() => addPlanPanel(groupId)} className="cursor-pointer text-xs">
+          <IconFileText className="h-3.5 w-3.5 mr-1.5" />
+          Plan
+        </DropdownMenuItem>
+      )}
+      {!state.hasChanges && (
+        <DropdownMenuItem
+          onClick={() => addChangesPanel(groupId)}
+          className="cursor-pointer text-xs"
+        >
+          <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
+          Changes
+        </DropdownMenuItem>
+      )}
+      {!state.hasFiles && (
+        <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className="cursor-pointer text-xs">
+          <IconFolder className="h-3.5 w-3.5 mr-1.5" />
+          Files
+        </DropdownMenuItem>
+      )}
+      {state.pr && (
+        <DropdownMenuItem onClick={() => addPRPanel()} className="cursor-pointer text-xs">
+          <IconGitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+          {prPanelLabel(state.pr.pr_number)}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+}
+
+export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
+  const { group, containerApi } = props;
+  const state = useLeftHeaderState(group.id, containerApi);
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
 
   const handleAddTerminal = useCallback(async () => {
-    if (!activeSessionId) return;
+    if (!state.activeSessionId) return;
     try {
-      const result = await createUserShell(activeSessionId);
+      const result = await createUserShell(state.activeSessionId);
       addTerminalPanel(result.terminalId, group.id);
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [activeSessionId, addTerminalPanel, group.id]);
+  }, [state.activeSessionId, addTerminalPanel, group.id]);
 
-  if (isSidebarGroup) return null;
+  if (state.isSidebarGroup) return null;
 
   return (
     <div className="flex items-center gap-1 pl-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 cursor-pointer">
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 cursor-pointer" data-testid="dockview-add-panel-btn">
             <IconPlus className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-44">
-          <DropdownMenuItem onClick={handleAddTerminal} className="cursor-pointer text-xs">
-            <IconTerminal2 className="h-3.5 w-3.5 mr-1.5" />
-            Terminal
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => addBrowserPanel(undefined, group.id)}
-            className="cursor-pointer text-xs"
-          >
-            <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
-            Browser
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => addVscodePanel()} className="cursor-pointer text-xs">
-            <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
-            VS Code
-          </DropdownMenuItem>
-          {!isPassthrough && (
-            <DropdownMenuItem
-              onClick={() => addPlanPanel(group.id)}
-              className="cursor-pointer text-xs"
-            >
-              <IconFileText className="h-3.5 w-3.5 mr-1.5" />
-              Plan
-            </DropdownMenuItem>
-          )}
-          {!hasChanges && (
-            <DropdownMenuItem
-              onClick={() => addChangesPanel(group.id)}
-              className="cursor-pointer text-xs"
-            >
-              <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
-              Changes
-            </DropdownMenuItem>
-          )}
-          {!hasFiles && (
-            <DropdownMenuItem
-              onClick={() => addFilesPanel(group.id)}
-              className="cursor-pointer text-xs"
-            >
-              <IconFolder className="h-3.5 w-3.5 mr-1.5" />
-              Files
-            </DropdownMenuItem>
-          )}
-          {pr && (
-            <DropdownMenuItem onClick={() => addPRPanel()} className="cursor-pointer text-xs">
-              <IconGitPullRequest className="h-3.5 w-3.5 mr-1.5" />
-              {prPanelLabel(pr.pr_number)}
-            </DropdownMenuItem>
-          )}
+          <AddPanelMenuItems
+            groupId={group.id}
+            state={state}
+            onNewSession={() => setShowNewSessionDialog(true)}
+            onAddTerminal={handleAddTerminal}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
+      {state.isCenterGroup && state.taskId && (
+        <NewSessionDialog
+          open={showNewSessionDialog}
+          onOpenChange={setShowNewSessionDialog}
+          taskId={state.taskId}
+        />
+      )}
     </div>
   );
 }
