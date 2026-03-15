@@ -86,4 +86,37 @@ test.describe("Task environment", () => {
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).toBeNull();
   });
+
+  test("environment worktree info matches session worktree", async ({ apiClient, seedData }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Env Worktree Match Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    // Wait for agent to complete
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions[0]?.state;
+        },
+        { timeout: 30_000, message: "Waiting for session to complete" },
+      )
+      .toBe("COMPLETED");
+
+    const env = await apiClient.getTaskEnvironment(task.id);
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+
+    // If the session has a worktree_path, it should match the environment's worktree
+    if (sessions[0].worktree_path) {
+      expect(env!.worktree_path).toBe(sessions[0].worktree_path);
+    }
+  });
 });

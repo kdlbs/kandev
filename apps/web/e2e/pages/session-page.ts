@@ -354,4 +354,57 @@ export class SessionPage {
   vscodeIframe(): Locator {
     return this.page.locator('iframe[title="VS Code"]');
   }
+
+  // --- New Session Dialog ---
+
+  /** "+" button in the dockview header to open the add-panel dropdown. */
+  addPanelButton(): Locator {
+    return this.page.getByTestId("dockview-add-panel-btn").first();
+  }
+
+  /** "New Session" menu item in the dockview + dropdown. */
+  newSessionMenuButton(): Locator {
+    return this.page.getByTestId("new-session-button");
+  }
+
+  /** Open the new session dialog via the + menu. */
+  async openNewSessionDialog(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.newSessionMenuButton().click();
+  }
+
+  /** The new session dialog container. */
+  newSessionDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: "New session in" });
+  }
+
+  /** Prompt textarea inside the new session dialog. */
+  newSessionPromptInput(): Locator {
+    return this.newSessionDialog().locator("textarea");
+  }
+
+  /** Start Session button inside the new session dialog. */
+  newSessionStartButton(): Locator {
+    return this.newSessionDialog().getByRole("button", { name: "Start Session" });
+  }
+
+  /** Environment info badges inside the new session dialog. */
+  newSessionEnvironmentInfo(): Locator {
+    return this.newSessionDialog().getByText("Same environment as current session");
+  }
+
+  /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */
+  sessionTab(label: string): Locator {
+    return this.page.locator(`.dv-default-tab:has-text('${label}')`);
+  }
+
+  /** Session item in the + dropdown's reopen list by session ID. */
+  sessionReopenItem(sessionId: string): Locator {
+    return this.page.getByTestId(`reopen-session-${sessionId}`);
+  }
+
+  /** All session reopen items in the + dropdown. */
+  sessionReopenItems(): Locator {
+    return this.page.locator("[data-testid^='reopen-session-']");
+  }
 }
