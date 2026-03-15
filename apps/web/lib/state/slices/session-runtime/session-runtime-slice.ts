@@ -87,7 +87,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionModels: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
-  userShells: { bySessionId: {}, loading: {}, loaded: {} },
+  userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
 };
 
@@ -106,18 +106,21 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
       }),
     appendShellOutput: (sessionId: string, data: string) =>
       set((draft) => {
-        draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || "") + data;
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.shell.outputs[envKey] = (draft.shell.outputs[envKey] || "") + data;
       }),
     setShellStatus: (
       sessionId: string,
       status: { available: boolean; running?: boolean; shell?: string; cwd?: string },
     ) =>
       set((draft) => {
-        draft.shell.statuses[sessionId] = status;
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.shell.statuses[envKey] = status;
       }),
     clearShellOutput: (sessionId: string) =>
       set((draft) => {
-        draft.shell.outputs[sessionId] = "";
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.shell.outputs[envKey] = "";
       }),
     appendProcessOutput: (processId: string, data: string) =>
       set((draft) => {
@@ -153,25 +156,29 @@ function buildUserShellActions(set: ImmerSet) {
       shells: Parameters<SessionRuntimeSlice["setUserShells"]>[1],
     ) =>
       set((draft) => {
-        draft.userShells.bySessionId[sessionId] = shells;
-        draft.userShells.loaded[sessionId] = true;
-        draft.userShells.loading[sessionId] = false;
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.userShells.byEnvironmentId[envKey] = shells;
+        draft.userShells.loaded[envKey] = true;
+        draft.userShells.loading[envKey] = false;
       }),
     setUserShellsLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {
-        draft.userShells.loading[sessionId] = loading;
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.userShells.loading[envKey] = loading;
       }),
     addUserShell: (sessionId: string, shell: Parameters<SessionRuntimeSlice["addUserShell"]>[1]) =>
       set((draft) => {
-        const existing = draft.userShells.bySessionId[sessionId] || [];
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const existing = draft.userShells.byEnvironmentId[envKey] || [];
         if (!existing.some((s) => s.terminalId === shell.terminalId)) {
-          draft.userShells.bySessionId[sessionId] = [...existing, shell];
+          draft.userShells.byEnvironmentId[envKey] = [...existing, shell];
         }
       }),
     removeUserShell: (sessionId: string, terminalId: string) =>
       set((draft) => {
-        const existing = draft.userShells.bySessionId[sessionId] || [];
-        draft.userShells.bySessionId[sessionId] = existing.filter(
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const existing = draft.userShells.byEnvironmentId[envKey] || [];
+        draft.userShells.byEnvironmentId[envKey] = existing.filter(
           (s) => s.terminalId !== terminalId,
         );
       }),
@@ -188,18 +195,7 @@ export const createSessionRuntimeSlice: StateCreator<
   ...buildTerminalShellProcessActions(set),
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
-      // Resolve environment key: prefer cached mapping, fall back to cross-slice lookup
-      let envKey = draft.environmentIdBySessionId[sessionId];
-      if (!envKey) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const session = (draft as any).taskSessions?.items?.[sessionId];
-        if (session?.task_environment_id) {
-          envKey = session.task_environment_id;
-          draft.environmentIdBySessionId[sessionId] = envKey;
-        } else {
-          envKey = sessionId;
-        }
-      }
+      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       const existing = draft.gitStatus.byEnvironmentId[envKey];
       if (existing && !hasGitStatusChanged(existing, gitStatus)) return;
       draft.gitStatus.byEnvironmentId[envKey] = gitStatus;

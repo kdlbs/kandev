@@ -3,9 +3,11 @@ export type TerminalState = {
 };
 
 export type ShellState = {
-  // Map of sessionId to shell output buffer (raw bytes as string)
+  /** Shell output keyed by environmentId (shared across sessions in the same environment).
+   *  Falls back to sessionId when no environment mapping exists. */
   outputs: Record<string, string>;
-  // Map of sessionId to shell status
+  /** Shell status keyed by environmentId (shared across sessions in the same environment).
+   *  Falls back to sessionId when no environment mapping exists. */
   statuses: Record<
     string,
     {
@@ -210,7 +212,9 @@ export type UserShellInfo = {
 };
 
 export type UserShellsState = {
-  bySessionId: Record<string, UserShellInfo[]>;
+  /** User shells keyed by environmentId (shared across sessions in the same environment).
+   *  Falls back to sessionId when no environment mapping exists. */
+  byEnvironmentId: Record<string, UserShellInfo[]>;
   loading: Record<string, boolean>;
   loaded: Record<string, boolean>;
 };

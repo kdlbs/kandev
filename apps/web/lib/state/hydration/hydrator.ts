@@ -175,6 +175,9 @@ function hydrateSessionRuntime(
       forceMergeSessionId,
     );
   }
+  if (state.environmentIdBySessionId) {
+    Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
+  }
   if (state.agents) deepMerge(draft.agents, state.agents);
 }
 
