@@ -110,7 +110,9 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   }, []);
 
   const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter((p) => p.id !== api.id && p.id !== "chat");
+    const toClose = api.group.panels.filter(
+      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
+    );
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
 
