@@ -269,10 +269,9 @@ type TaskSession struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
 
 	// Workflow-related fields
-	IsPrimary      bool    `json:"is_primary"`                 // Whether this is the primary session for the task
-	IsPassthrough  bool    `json:"is_passthrough"`             // Whether this session uses passthrough (PTY) mode
-	WorkflowStepID *string `json:"workflow_step_id,omitempty"` // Current workflow step ID
-	ReviewStatus   *string `json:"review_status,omitempty"`    // pending, approved
+	IsPrimary     bool    `json:"is_primary"`              // Whether this is the primary session for the task
+	IsPassthrough bool    `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
+	ReviewStatus  *string `json:"review_status,omitempty"` // pending, approved
 }
 
 // ToAPI converts internal TaskSession to API type

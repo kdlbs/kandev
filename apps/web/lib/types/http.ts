@@ -302,7 +302,6 @@ export type TaskSession = {
   // Workflow fields
   is_primary?: boolean;
   is_passthrough?: boolean;
-  workflow_step_id?: string;
   review_status?: WorkflowReviewStatus;
 };
 

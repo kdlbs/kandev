@@ -51,18 +51,6 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	return nil
 }
 
-// MoveSessionToStep moves a session to a different workflow step.
-func (s *Service) MoveSessionToStep(ctx context.Context, sessionID string, stepID string) error {
-	if err := s.sessions.UpdateSessionWorkflowStep(ctx, sessionID, stepID); err != nil {
-		s.logger.Error("failed to move session to step",
-			zap.String("session_id", sessionID),
-			zap.String("step_id", stepID),
-			zap.Error(err))
-		return err
-	}
-	return nil
-}
-
 // UpdateSessionReviewStatus updates the review status of a session.
 func (s *Service) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
 	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, status); err != nil {

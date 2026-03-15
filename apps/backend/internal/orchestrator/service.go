@@ -116,7 +116,6 @@ type repoStore interface {
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Session history + plan (for context handover)
-	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
@@ -128,7 +127,6 @@ type sessionExecutorStore interface {
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	ClearSessionExecutionID(ctx context.Context, id string) error
-	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	// Executor running state
@@ -147,7 +145,8 @@ type sessionExecutorStore interface {
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
-	// Session primary/delete
+	// Session listing + primary/delete
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	DeleteTaskSession(ctx context.Context, id string) error
 	// Task environment
