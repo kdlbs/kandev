@@ -5,6 +5,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
@@ -157,7 +158,9 @@ function getBaseBranchDisplay(baseBranch: string | undefined): string {
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  // Use environment-stable sessionId so git hooks (commits, cumulative diff)
+  // don't re-fetch when switching between sessions in the same environment.
+  const activeSessionId = useEnvironmentSessionId();
   const taskTitle = useAppStore((state) => {
     if (!state.tasks.activeTaskId) return undefined;
     return state.kanban.tasks.find((t: { id: string }) => t.id === state.tasks.activeTaskId)?.title;
