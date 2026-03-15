@@ -45,6 +45,7 @@ func (r *sqliteRepository) getBuiltinAgents() []*models.UtilityAgent {
 		r.builtinBranchName(now),
 		r.builtinPRDescription(now),
 		r.builtinEnhancePrompt(now),
+		r.builtinSummarizeSession(now),
 	}
 }
 
@@ -178,5 +179,34 @@ Description: {{TaskDescription}}
 ## Output Format:
 Return ONLY the enhanced prompt text, ready to be sent to the coding assistant.
 Do not include explanations or meta-commentary around the prompt.`,
+	}
+}
+
+func (r *sqliteRepository) builtinSummarizeSession(now time.Time) *models.UtilityAgent {
+	return &models.UtilityAgent{
+		ID:          "builtin-summarize-session",
+		Name:        "summarize-session",
+		Description: "Summarize a session conversation for context handover",
+		AgentID:     "", // User must configure
+		Model:       "", // User must configure
+		Builtin:     true,
+		Enabled:     false, // Disabled until user configures
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Prompt: `Summarize the following conversation between a user and a coding assistant.
+Focus on what was accomplished, key decisions made, and any remaining work.
+
+## Conversation:
+{{ConversationHistory}}
+
+## Instructions:
+1. Start with a one-sentence overview of the session's goal
+2. List key accomplishments (files changed, features added, bugs fixed)
+3. Note any important decisions or trade-offs discussed
+4. Mention any remaining work or known issues
+5. Keep the summary concise but comprehensive (2-4 paragraphs)
+
+## Output Format:
+Return ONLY the summary text, no explanations or markdown headers.`,
 	}
 }
