@@ -50,7 +50,7 @@ const MERMAID_KEYWORDS = [
   "zenuml",
 ];
 
-const MERMAID_RE = new RegExp(`^\\s*(?:${MERMAID_KEYWORDS.join("|")})(?:\\s|$)`, "m");
+const MERMAID_RE = new RegExp(`^\\s*(?:${MERMAID_KEYWORDS.join("|")})(?:\\s|$)`);
 
 /** Detect mermaid content by language tag OR by first-line keyword. */
 export function isMermaidContent(language: string | null | undefined, text: string): boolean {
