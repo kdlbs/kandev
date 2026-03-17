@@ -36,6 +36,7 @@ type TaskSwitcherItem = {
   updatedAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
+  parentTaskTitle?: string;
 };
 
 type TaskSwitcherProps = {
@@ -149,6 +150,7 @@ function TaskSwitcherSection({
             taskId={task.id}
             primarySessionId={task.primarySessionId ?? null}
             updatedAt={task.updatedAt}
+            parentTaskTitle={task.parentTaskTitle}
             onClick={() => onSelectTask(task.id)}
             onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
             onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}

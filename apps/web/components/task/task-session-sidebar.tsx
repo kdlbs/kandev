@@ -116,6 +116,7 @@ function toSidebarItem(
     envIdBySessionId: Record<string, string>;
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, { owner: string; repo: string } | undefined>;
+    titleById: Map<string, string>;
   },
 ) {
   const sessionInfo = getSessionInfoForTask(
@@ -143,6 +144,7 @@ function toSidebarItem(
     primarySessionId: task.primarySessionId ?? null,
     updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
     isArchived: false as boolean,
+    parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
   };
 }
 
@@ -198,6 +200,9 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
+    const titleById = new Map(
+      allTasks.map((t: KanbanState["tasks"][number]) => [t.id, t.title]),
+    );
     const mapCtx = {
       sessionsByTaskId,
       gitStatusByEnvId,
@@ -207,6 +212,7 @@ function useSidebarData(workspaceId: string | null) {
         string,
         { owner: string; repo: string } | undefined
       >,
+      titleById,
     };
     const items = allTasks.map((task: KanbanState["tasks"][number]) => toSidebarItem(task, mapCtx));
     if (
@@ -229,6 +235,7 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
         isArchived: true,
+        parentTaskTitle: undefined,
       });
     }
     return items;

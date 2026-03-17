@@ -34,10 +34,6 @@ type NewSubtaskDialogProps = {
   parentTaskTitle: string;
 };
 
-function generateSuffix() {
-  return Math.random().toString(16).slice(2, 6);
-}
-
 function useSubtaskDialogState() {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
@@ -174,6 +170,7 @@ function NewSubtaskForm({
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
   const [title, setTitle] = useState(defaultTitle);
+  const [hasPrompt, setHasPrompt] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
   const [executorProfileId, setExecutorProfileId] = useState("");
@@ -191,12 +188,17 @@ function NewSubtaskForm({
       setContextValue(value);
       if (value === "copy_prompt" && initialPrompt && promptRef.current) {
         promptRef.current.value = initialPrompt;
+        setHasPrompt(true);
       } else if (value === "blank" && promptRef.current) {
         promptRef.current.value = "";
+        setHasPrompt(false);
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
         const result = await summarize(sessionId);
-        if (result && promptRef.current) promptRef.current.value = result;
+        if (result && promptRef.current) {
+          promptRef.current.value = result;
+          setHasPrompt(true);
+        }
       }
     },
     [initialPrompt, summarize],
@@ -339,6 +341,7 @@ function NewSubtaskForm({
           autoFocus
           disabled={isCreating || isSummarizing}
           data-testid="subtask-prompt-input"
+          onInput={(e) => setHasPrompt((e.target as HTMLTextAreaElement).value.trim().length > 0)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -365,7 +368,7 @@ function NewSubtaskForm({
         >
           Cancel
         </Button>
-        <Button type="submit" disabled={isCreating || isSummarizing} className="cursor-pointer">
+        <Button type="submit" disabled={isCreating || isSummarizing || !hasPrompt} className="cursor-pointer">
           {isCreating ? "Creating..." : "Create Subtask"}
         </Button>
       </DialogFooter>
@@ -392,7 +395,14 @@ export function NewSubtaskDialog({
   // Ensure executor/agent data is loaded when dialog opens
   useSettingsData(open);
 
-  const defaultTitle = useMemo(() => `${parentTaskTitle} #${generateSuffix()}`, [parentTaskTitle]);
+  const siblingCount = useAppStore((s) =>
+    s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
+  );
+
+  const defaultTitle = useMemo(
+    () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,
+    [parentTaskTitle, siblingCount],
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
