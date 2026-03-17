@@ -154,8 +154,10 @@ type AgentManagerClient interface {
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
 	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error)
 
-	// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.
-	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
+	// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to the
+	// working tree (including uncommitted/unstaged changes). Used for archive snapshot capture.
+	// Note: archive snapshots will capture uncommitted working-tree state.
+	// Returns nil, nil if no execution exists.
 	GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
 
 	// GetGitStatus retrieves the current git status for a session.

@@ -37,7 +37,11 @@ func emitPredefinedScenario(e *emitter, name string) {
 	if fn, ok := scenarioRegistry[name]; ok {
 		fn(e)
 	} else {
-		e.text("Unknown e2e scenario: " + name + ". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, untracked-file-setup, untracked-file-modify, clarification, clarification-timeout")
+		names := make([]string, 0, len(scenarioRegistry))
+		for k := range scenarioRegistry {
+			names = append(names, k)
+		}
+		e.text("Unknown e2e scenario: " + name + ". Available: " + strings.Join(names, ", "))
 	}
 }
 

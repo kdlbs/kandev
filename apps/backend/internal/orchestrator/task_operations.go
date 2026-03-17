@@ -1095,7 +1095,8 @@ func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseComm
 	return true
 }
 
-// captureArchiveDiff fetches and saves the cumulative diff from baseCommit to HEAD.
+// captureArchiveDiff fetches and saves the cumulative diff from baseCommit to the working tree
+// (including uncommitted/unstaged changes).
 func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit string) {
 	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, baseCommit)
 	if err != nil {

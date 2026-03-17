@@ -117,7 +117,8 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 	return result, nil
 }
 
-// GetCumulativeDiff returns the cumulative diff from baseCommit to HEAD.
+// GetCumulativeDiff returns the cumulative diff from baseCommit to the working tree
+// (including uncommitted/unstaged changes).
 func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) (*CumulativeDiffResult, error) {
 	result := &CumulativeDiffResult{
 		Files: make(map[string]interface{}),

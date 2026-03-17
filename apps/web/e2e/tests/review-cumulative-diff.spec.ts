@@ -61,9 +61,7 @@ test.describe("Review dialog cumulative diff", () => {
 
     // Wait for git status to populate (file should appear in the changes panel)
     await expect(
-      testPage.locator("button, [role='button'], [class*='file']").filter({
-        hasText: "review_cumulative_test.txt",
-      }),
+      testPage.getByTestId("file-row-review_cumulative_test.txt"),
     ).toBeVisible({ timeout: 15_000 });
 
     // Open the review dialog
