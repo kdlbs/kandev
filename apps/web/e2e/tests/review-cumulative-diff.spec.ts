@@ -60,9 +60,9 @@ test.describe("Review dialog cumulative diff", () => {
     await changesTab.click();
 
     // Wait for git status to populate (file should appear in the changes panel)
-    await expect(
-      testPage.getByTestId("file-row-review_cumulative_test.txt"),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("file-row-review_cumulative_test.txt")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Open the review dialog
     await openReviewDialog(testPage);
