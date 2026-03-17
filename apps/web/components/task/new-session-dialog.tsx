@@ -1,26 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { Badge } from "@kandev/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
-import { IconGitBranch, IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -34,6 +17,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -50,7 +34,7 @@ function useNewSessionDialogState(taskId: string) {
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const currentSession = useAppStore((state) => {
-    return activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null;
+    return activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null;
   });
   const worktreeBranch = useAppStore((state) => {
     if (!activeSessionId) return null;
@@ -66,7 +50,7 @@ function useNewSessionDialogState(taskId: string) {
     const msgs = state.messages.bySession[activeSessionId];
     if (!msgs?.length) return null;
     const first = msgs.find((m: { author_type?: string }) => m.author_type === "user");
-    return first ? (first as { content?: string }).content ?? null : null;
+    return first ? ((first as { content?: string }).content ?? null) : null;
   });
   const executorLabel = useAppStore((state) => {
     if (!currentSession?.executor_id) return null;
@@ -77,76 +61,6 @@ function useNewSessionDialogState(taskId: string) {
   });
 
   return { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel };
-}
-
-function EnvironmentBadges({ executorLabel, worktreeBranch }: { executorLabel: string | null; worktreeBranch: string | null }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      {executorLabel && <Badge variant="secondary" className="text-xs font-normal">{executorLabel}</Badge>}
-      {worktreeBranch && (
-        <Badge variant="outline" className="text-xs font-normal gap-1">
-          <IconGitBranch className="h-3 w-3" />
-          {worktreeBranch}
-        </Badge>
-      )}
-      <span>Same environment as current session</span>
-    </div>
-  );
-}
-
-type SessionOption = { id: string; label: string };
-
-/** Unified context selector: Blank, Copy prompt, and per-session summarize options. */
-function ContextSelect({ value, onValueChange, hasInitialPrompt, sessionOptions, isSummarizing }: {
-  value: string;
-  onValueChange: (v: string) => void;
-  hasInitialPrompt: boolean;
-  sessionOptions: SessionOption[];
-  isSummarizing: boolean;
-}) {
-  const displayLabel = useMemo(() => {
-    if (value === "blank") return "Blank";
-    if (value === "copy_prompt") return "Copy initial prompt";
-    if (value.startsWith("summarize:")) {
-      const sid = value.slice("summarize:".length);
-      const opt = sessionOptions.find((o) => o.id === sid);
-      return opt ? `Summarize ${opt.label}` : "Summarize";
-    }
-    return "Blank";
-  }, [value, sessionOptions]);
-
-  return (
-    <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground">Context</label>
-      <div className="flex items-center gap-2">
-        <Select value={value} onValueChange={onValueChange} disabled={isSummarizing}>
-          <SelectTrigger className="w-full text-xs">
-            <SelectValue>{isSummarizing ? "Summarizing..." : displayLabel}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="blank" className="text-xs cursor-pointer">Blank</SelectItem>
-            <SelectItem value="copy_prompt" disabled={!hasInitialPrompt} className="text-xs cursor-pointer">
-              Copy initial prompt
-            </SelectItem>
-            {sessionOptions.length > 0 && (
-              <>
-                <SelectSeparator />
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] text-muted-foreground/70">Summarize session</SelectLabel>
-                  {sessionOptions.map((opt) => (
-                    <SelectItem key={opt.id} value={`summarize:${opt.id}`} className="text-xs cursor-pointer">
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </>
-            )}
-          </SelectContent>
-        </Select>
-        {isSummarizing && <IconLoader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
-      </div>
-    </div>
-  );
 }
 
 function activateNewSession(
@@ -166,8 +80,10 @@ function activateNewSession(
 function useSessionOptions(taskId: string) {
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadSessions(true); }, []);
+  useEffect(() => {
+    loadSessions(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return useMemo(() => {
     const sorted = [...sessions].sort(
       (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
@@ -179,9 +95,27 @@ function useSessionOptions(taskId: string) {
   }, [sessions, agentProfiles]);
 }
 
-function NewSessionForm({ taskId, defaultProfileId, executorId, executorLabel, worktreeBranch, initialPrompt, agentProfiles, groupId, onClose }: {
-  taskId: string; defaultProfileId: string; executorId: string; executorLabel: string | null;
-  worktreeBranch: string | null; initialPrompt: string | null; agentProfiles: AgentProfileOption[]; groupId?: string; onClose: () => void;
+// eslint-disable-next-line max-lines-per-function
+function NewSessionForm({
+  taskId,
+  defaultProfileId,
+  executorId,
+  executorLabel,
+  worktreeBranch,
+  initialPrompt,
+  agentProfiles,
+  groupId,
+  onClose,
+}: {
+  taskId: string;
+  defaultProfileId: string;
+  executorId: string;
+  executorLabel: string | null;
+  worktreeBranch: string | null;
+  initialPrompt: string | null;
+  agentProfiles: AgentProfileOption[];
+  groupId?: string;
+  onClose: () => void;
 }) {
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -194,40 +128,74 @@ function NewSessionForm({ taskId, defaultProfileId, executorId, executorLabel, w
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
 
-  const handleContextChange = useCallback(async (value: string) => {
-    if (!value) return;
-    setContextValue(value);
-    if (value === "copy_prompt" && initialPrompt && promptRef.current) {
-      promptRef.current.value = initialPrompt;
-    } else if (value === "blank" && promptRef.current) {
-      promptRef.current.value = "";
-    } else if (value.startsWith("summarize:")) {
-      const sessionId = value.slice("summarize:".length);
-      const result = await summarize(sessionId);
-      if (result && promptRef.current) promptRef.current.value = result;
-    }
-  }, [initialPrompt, summarize]);
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const typed = promptRef.current?.value?.trim() ?? "";
-    const prompt = contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
-    if (!prompt) return;
-    setIsCreating(true);
-    try {
-      const { request } = buildStartRequest(taskId, selectedProfileId || defaultProfileId, { executorId, prompt });
-      const response = await launchSession(request);
-      if (response.session_id) {
-        const profile = agentProfiles.find((p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId));
-        activateNewSession(response.session_id, taskId, profile?.label ?? "Agent", groupId, setActiveSession);
+  const handleContextChange = useCallback(
+    async (value: string) => {
+      if (!value) return;
+      setContextValue(value);
+      if (value === "copy_prompt" && initialPrompt && promptRef.current) {
+        promptRef.current.value = initialPrompt;
+      } else if (value === "blank" && promptRef.current) {
+        promptRef.current.value = "";
+      } else if (value.startsWith("summarize:")) {
+        const sessionId = value.slice("summarize:".length);
+        const result = await summarize(sessionId);
+        if (result && promptRef.current) promptRef.current.value = result;
       }
-      onClose();
-    } catch (error) {
-      toast({ title: "Failed to create session", description: error instanceof Error ? error.message : "Unknown error", variant: "error" });
-    } finally {
-      setIsCreating(false);
-    }
-  }, [taskId, selectedProfileId, defaultProfileId, executorId, contextValue, initialPrompt, agentProfiles, groupId, onClose, toast, setActiveSession]);
+    },
+    [initialPrompt, summarize],
+  );
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const typed = promptRef.current?.value?.trim() ?? "";
+      const prompt =
+        contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
+      if (!prompt) return;
+      setIsCreating(true);
+      try {
+        const { request } = buildStartRequest(taskId, selectedProfileId || defaultProfileId, {
+          executorId,
+          prompt,
+        });
+        const response = await launchSession(request);
+        if (response.session_id) {
+          const profile = agentProfiles.find(
+            (p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId),
+          );
+          activateNewSession(
+            response.session_id,
+            taskId,
+            profile?.label ?? "Agent",
+            groupId,
+            setActiveSession,
+          );
+        }
+        onClose();
+      } catch (error) {
+        toast({
+          title: "Failed to create session",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "error",
+        });
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [
+      taskId,
+      selectedProfileId,
+      defaultProfileId,
+      executorId,
+      contextValue,
+      initialPrompt,
+      agentProfiles,
+      groupId,
+      onClose,
+      toast,
+      setActiveSession,
+    ],
+  );
 
   const showSessions = isUtilityConfigured ? sessionOptions : [];
 
@@ -237,7 +205,13 @@ function NewSessionForm({ taskId, defaultProfileId, executorId, executorLabel, w
       {profileOptions.length > 1 && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent</label>
-          <AgentSelector options={profileOptions} value={selectedProfileId || defaultProfileId} onValueChange={setSelectedProfileId} disabled={isCreating} placeholder="Select agent profile" />
+          <AgentSelector
+            options={profileOptions}
+            value={selectedProfileId || defaultProfileId}
+            onValueChange={setSelectedProfileId}
+            disabled={isCreating}
+            placeholder="Select agent profile"
+          />
         </div>
       )}
       <ContextSelect
@@ -254,7 +228,12 @@ function NewSessionForm({ taskId, defaultProfileId, executorId, executorLabel, w
           className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none disabled:opacity-60"
           autoFocus
           disabled={isCreating || isSummarizing}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSubmit(e); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSubmit(e);
+            }
+          }}
         />
         {isSummarizing && (
           <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
@@ -266,8 +245,18 @@ function NewSessionForm({ taskId, defaultProfileId, executorId, executorLabel, w
         )}
       </div>
       <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onClose} disabled={isCreating} className="cursor-pointer">Cancel</Button>
-        <Button type="submit" disabled={isCreating || isSummarizing} className="cursor-pointer">{isCreating ? "Creating..." : "Start Session"}</Button>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onClose}
+          disabled={isCreating}
+          className="cursor-pointer"
+        >
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isCreating || isSummarizing} className="cursor-pointer">
+          {isCreating ? "Creating..." : "Start Session"}
+        </Button>
       </DialogFooter>
     </form>
   );
