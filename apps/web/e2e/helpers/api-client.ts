@@ -99,6 +99,7 @@ function buildCreateTaskBody(
     opts?.repositories ?? opts?.repository_ids?.map((id) => ({ repository_id: id })),
   );
   if (opts?.plan_mode) body.plan_mode = true;
+  setIf(body, "parent_id", opts?.parent_id);
   return body;
 }
 
@@ -167,6 +168,8 @@ export class ApiClient {
       plan_mode?: boolean;
       /** Extra metadata to store on the task. */
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -221,6 +224,8 @@ export class ApiClient {
       repository_ids?: string[];
       executor_id?: string;
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -236,6 +241,7 @@ export class ApiClient {
         : {}),
       ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
       ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
     });
   }
 
