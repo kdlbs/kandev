@@ -45,6 +45,7 @@ export function useTaskSubmitHandlers({
   onCreateSession,
   onOpenChange,
   taskId,
+  parentTaskId,
   descriptionInputRef,
   setIsCreatingSession,
   setIsCreatingTask,
@@ -256,6 +257,7 @@ export function useTaskSubmitHandlers({
           withAgent: true,
           planMode,
           attachments,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -281,6 +283,7 @@ export function useTaskSubmitHandlers({
       executorId,
       executorProfileId,
       isPassthroughProfile,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       clearDraft,
@@ -305,6 +308,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: false,
           planMode: true,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -327,6 +331,7 @@ export function useTaskSubmitHandlers({
       agentProfileId,
       executorId,
       executorProfileId,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       clearDraft,
