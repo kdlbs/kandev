@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { IconLoader2 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -17,6 +16,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { IconLoader2 } from "@tabler/icons-react";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 
 type NewSessionDialogProps = {
@@ -225,7 +225,7 @@ function NewSessionForm({
         <textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none disabled:opacity-60"
+          className="w-full min-h-[100px] max-h-[240px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y overflow-auto disabled:opacity-60"
           autoFocus
           disabled={isCreating || isSummarizing}
           onKeyDown={(e) => {

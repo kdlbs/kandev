@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { IconGitBranch, IconLoader2 } from "@tabler/icons-react";
+import { IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
@@ -24,6 +24,7 @@ import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { ExecutorProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { IconLoader2 } from "@tabler/icons-react";
 import { ContextSelect } from "./session-dialog-shared";
 
 type NewSubtaskDialogProps = {
@@ -334,7 +335,7 @@ function NewSubtaskForm({
         <textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none disabled:opacity-60"
+          className="w-full min-h-[100px] max-h-[240px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y overflow-auto disabled:opacity-60"
           autoFocus
           disabled={isCreating || isSummarizing}
           data-testid="subtask-prompt-input"
