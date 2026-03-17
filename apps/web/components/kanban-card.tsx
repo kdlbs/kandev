@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { IconDots, IconArrowsMaximize, IconLoader, IconAlertCircle, IconGitBranch } from "@tabler/icons-react";
+import { IconDots, IconArrowsMaximize, IconLoader, IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -120,6 +120,11 @@ function KanbanCardBody({
 }
 
 function KanbanCardBadges({ task }: { task: Task }) {
+  const parentTitle = useAppStore((s) => {
+    if (!task.parentTaskId) return null;
+    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
+  });
+
   const showRow =
     (task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
@@ -131,9 +136,9 @@ function KanbanCardBadges({ task }: { task: Task }) {
   return (
     <div className="flex items-center justify-end gap-2 mt-1">
       {task.parentTaskId && (
-        <Badge variant="outline" className="text-xs h-5 gap-1">
-          <IconGitBranch className="h-3 w-3" />
-          Subtask
+        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px]">
+          <IconSubtask className="h-3 w-3 shrink-0" />
+          <span className="truncate">{parentTitle ?? "Subtask"}</span>
         </Badge>
       )}
       {task.sessionCount && task.sessionCount > 1 && (

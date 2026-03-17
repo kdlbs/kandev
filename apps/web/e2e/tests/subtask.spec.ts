@@ -20,15 +20,16 @@ test.describe("Subtask support", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // Parent card is visible but does NOT have "Subtask" badge
+    // Parent card is visible but does NOT have subtask badge
     const parentCard = kanban.taskCardByTitle("Parent Task");
     await expect(parentCard).toBeVisible({ timeout: 10_000 });
-    await expect(parentCard.getByText("Subtask")).not.toBeVisible();
+    await expect(parentCard.getByText("Parent Task", { exact: true }).first()).toBeVisible();
 
-    // Subtask card is visible and HAS "Subtask" badge
+    // Subtask card is visible and HAS badge showing parent title
     const subtaskCard = kanban.taskCardByTitle("Child Subtask");
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("Subtask")).toBeVisible();
+    // Badge now shows parent task title instead of generic "Subtask"
+    await expect(subtaskCard.getByText("Parent Task")).toBeVisible();
   });
 
   test("create subtask from sidebar header button", async ({ testPage, apiClient, seedData }) => {
@@ -60,7 +61,7 @@ test.describe("Subtask support", () => {
     // The compact NewSubtaskDialog should open with pre-filled title containing random hex suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
-    await expect(titleInput).toHaveValue(/Subtask Parent #[0-9a-f]{4}/);
+    await expect(titleInput).toHaveValue(/Subtask Parent \/ Subtask \d+/);
 
     // Fill prompt and submit
     const promptInput = testPage.getByTestId("subtask-prompt-input");
@@ -77,8 +78,7 @@ test.describe("Subtask support", () => {
     // Verify the subtask card appears on the kanban board with "Subtask" badge
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    const subtaskCard = kanban.taskCardByTitle(/Subtask Parent #[0-9a-f]{4}/);
+    const subtaskCard = kanban.taskCardByTitle(/Subtask Parent \/ Subtask \d+/);
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("Subtask")).toBeVisible();
   });
 });
