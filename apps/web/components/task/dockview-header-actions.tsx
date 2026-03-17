@@ -19,6 +19,7 @@ import {
   IconBrandVscode,
   IconArrowsMaximize,
   IconArrowsMinimize,
+  IconSubtask,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -41,6 +42,7 @@ import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { NewTaskButton } from "./task-session-sidebar";
 import { NewSessionDialog } from "./new-session-dialog";
+import { NewSubtaskDialog } from "./new-subtask-dialog";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
@@ -110,7 +112,11 @@ function AddPanelMenuItems({
     <>
       {state.taskId && (
         <>
-          <DropdownMenuItem onClick={onNewSession} className="cursor-pointer text-xs" data-testid="new-session-button">
+          <DropdownMenuItem
+            onClick={onNewSession}
+            className="cursor-pointer text-xs"
+            data-testid="new-session-button"
+          >
             <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
             New Session
           </DropdownMenuItem>
@@ -186,7 +192,12 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
     <div className="flex items-center gap-1 pl-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 cursor-pointer" data-testid="dockview-add-panel-btn">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0 cursor-pointer"
+            data-testid="dockview-add-panel-btn"
+          >
             <IconPlus className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
@@ -339,9 +350,16 @@ function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const workflowId = useAppStore((state) => state.workflows.activeId);
   const kanban = useAppStore((state) => state.kanban);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeTaskTitle = useAppStore((state) => {
+    const id = state.tasks.activeTaskId;
+    if (!id) return "";
+    return state.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
+  });
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
+  const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
   const steps = (kanban?.steps ?? []).map(
     (s: {
       id: string;
@@ -380,6 +398,26 @@ function SidebarRightActions() {
         steps={steps}
         onSuccess={handleTaskCreated}
       />
+      {activeTaskId && (
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 gap-1 cursor-pointer"
+            onClick={() => setShowSubtaskDialog(true)}
+            data-testid="new-subtask-button"
+          >
+            <IconSubtask className="h-3.5 w-3.5" />
+            Subtask
+          </Button>
+          <NewSubtaskDialog
+            open={showSubtaskDialog}
+            onOpenChange={setShowSubtaskDialog}
+            parentTaskId={activeTaskId}
+            parentTaskTitle={activeTaskTitle}
+          />
+        </>
+      )}
     </div>
   );
 }
