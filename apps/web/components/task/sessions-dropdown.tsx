@@ -58,20 +58,13 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number): str
   return `${seconds}s`;
 }
 
-function getStatusLabel(status: SessionStatus) {
-  switch (status) {
-    case "running":
-      return "Running";
-    case "complete":
-      return "Complete";
-    case "waiting_input":
-      return "Waiting for input";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-  }
-}
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  running: "Running",
+  complete: "Complete",
+  waiting_input: "Waiting for input",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
   switch (state) {
@@ -199,6 +192,29 @@ function useSessionLifecycleActions(
   return { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary };
 }
 
+function useSessionsDropdownState(taskId: string | null) {
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { sessions, loadSessions } = useTaskSessions(taskId);
+  const currentTime = useRunningSessionsClock(sessions);
+
+  const agentLabelsById = useMemo(
+    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p.label])),
+    [agentProfiles],
+  );
+  const sortedSessions = useMemo(() => {
+    const visible = taskId ? sessions : [];
+    return [...visible].sort((a: TaskSession, b: TaskSession) => {
+      const d = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
+      return d !== 0 ? d : new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    });
+  }, [sessions, taskId]);
+  const resolveAgentLabel = useCallback(
+    (s: TaskSession) => (s.agent_profile_id && agentLabelsById[s.agent_profile_id]) || "Unknown agent",
+    [agentLabelsById],
+  );
+  return { sortedSessions, currentTime, loadSessions, resolveAgentLabel };
+}
+
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
@@ -208,7 +224,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const storePrimarySessionId = useAppStore((state) => {
     const activeTaskId = state.tasks.activeTaskId;
     if (!activeTaskId) return null;
@@ -216,17 +231,11 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     return task?.primarySessionId ?? null;
   });
   const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
-  const { sessions, loadSessions } = useTaskSessions(taskId);
+  const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
+    useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
-  const currentTime = useRunningSessionsClock(sessions);
   const { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary } =
     useSessionLifecycleActions(taskId, loadSessions);
-
-  const agentLabelsById = useMemo(() => {
-    return Object.fromEntries(
-      agentProfiles.map((profile: AgentProfileOption) => [profile.id, profile.label]),
-    );
-  }, [agentProfiles]);
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
@@ -235,25 +244,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
       loadSessions(true);
     },
     [loadSessions, taskId],
-  );
-
-  const sortedSessions = useMemo(() => {
-    const visibleSessions = taskId ? sessions : [];
-    return [...visibleSessions].sort((a: TaskSession, b: TaskSession) => {
-      const orderDelta = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
-      if (orderDelta !== 0) return orderDelta;
-      return new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
-    });
-  }, [sessions, taskId]);
-
-  const resolveAgentLabel = useCallback(
-    (session: TaskSession) => {
-      if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
-        return agentLabelsById[session.agent_profile_id];
-      }
-      return "Unknown agent";
-    },
-    [agentLabelsById],
   );
 
   return (
@@ -285,11 +275,16 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           onDeleteSession={handleDeleteSession}
         />
       </DropdownMenu>
-      <NewSessionDialog
+      <TaskCreateDialog
         open={showNewSessionDialog}
         onOpenChange={setShowNewSessionDialog}
+        mode="session"
+        workspaceId={null}
+        workflowId={null}
+        defaultStepId={null}
+        steps={[]}
         taskId={taskId}
-        taskTitle={taskTitle}
+        initialValues={{ title: taskTitle, description: "" }}
       />
     </>
   );
@@ -351,33 +346,6 @@ function SessionDropdownContent({
         onDeleteSession={onDeleteSession}
       />
     </DropdownMenuContent>
-  );
-}
-
-/** New session dialog wrapper — prompt is intentionally empty (not pre-filled with the original task prompt) */
-function NewSessionDialog({
-  open,
-  onOpenChange,
-  taskId,
-  taskTitle,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  taskId: string | null;
-  taskTitle: string;
-}) {
-  return (
-    <TaskCreateDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      mode="session"
-      workspaceId={null}
-      workflowId={null}
-      defaultStepId={null}
-      steps={[]}
-      taskId={taskId}
-      initialValues={{ title: taskTitle, description: "" }}
-    />
   );
 }
 
@@ -501,7 +469,7 @@ function SessionRow({
           <TooltipTrigger asChild>
             <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
           </TooltipTrigger>
-          <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
+          <TooltipContent side="left">{STATUS_LABELS[status]}</TooltipContent>
         </Tooltip>
       </div>
     </div>
