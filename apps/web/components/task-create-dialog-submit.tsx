@@ -52,6 +52,7 @@ export type SubmitHandlersDeps = {
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
+  parentTaskId?: string;
   descriptionInputRef: React.RefObject<{ getValue: () => string } | null>;
   setIsCreatingSession: (v: boolean) => void;
   setIsCreatingTask: (v: boolean) => void;
@@ -90,6 +91,7 @@ export function useTaskSubmitHandlers({
   onCreateSession,
   onOpenChange,
   taskId,
+  parentTaskId,
   descriptionInputRef,
   setIsCreatingSession,
   setIsCreatingTask,
@@ -310,6 +312,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: true,
           planMode,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -334,6 +337,7 @@ export function useTaskSubmitHandlers({
       executorId,
       executorProfileId,
       isPassthroughProfile,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       setActiveDocument,
@@ -357,6 +361,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: false,
           planMode: true,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -378,6 +383,7 @@ export function useTaskSubmitHandlers({
       agentProfileId,
       executorId,
       executorProfileId,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       setActiveDocument,
