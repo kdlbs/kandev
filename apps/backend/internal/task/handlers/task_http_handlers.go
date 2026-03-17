@@ -329,6 +329,7 @@ type httpCreateTaskRequest struct {
 	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
 	PlanMode          bool                      `json:"plan_mode,omitempty"`
 	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID          string                    `json:"parent_id,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -427,6 +428,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:       body.Position,
 		Metadata:       body.Metadata,
 		PlanMode:       body.PlanMode && !body.StartAgent,
+		ParentID:       body.ParentID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
