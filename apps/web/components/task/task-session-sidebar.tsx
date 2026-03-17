@@ -10,6 +10,9 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { IconPlus } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useRegisterCommands } from "@/hooks/use-register-commands";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import type { CommandItem } from "@/lib/commands/types";
 import { replaceSessionUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions } from "@/hooks/use-task-actions";
@@ -60,6 +63,24 @@ export const NewTaskButton = memo(function NewTaskButton({
   onSuccess,
 }: NewTaskButtonProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  const commands = useMemo<CommandItem[]>(
+    () => [
+      {
+        id: "task-create",
+        label: "Create New Task",
+        group: "Tasks",
+        icon: <IconPlus className="size-3.5" />,
+        shortcut: SHORTCUTS.NEW_TASK,
+        keywords: ["new", "create", "task", "add"],
+        action: () => setDialogOpen(true),
+        priority: 0,
+      },
+    ],
+    [],
+  );
+  useRegisterCommands(commands);
+
   return (
     <>
       <Button
