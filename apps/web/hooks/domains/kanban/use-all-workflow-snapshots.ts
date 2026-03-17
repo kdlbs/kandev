@@ -27,6 +27,7 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
     primaryExecutorType: task.primary_executor_type ?? undefined,
     primaryExecutorName: task.primary_executor_name ?? undefined,
     isRemoteExecutor: task.is_remote_executor ?? false,
+    parentTaskId: task.parent_id ?? undefined,
     updatedAt: task.updated_at,
   } as KanbanTask;
 }

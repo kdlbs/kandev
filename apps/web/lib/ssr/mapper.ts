@@ -33,6 +33,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primarySessionState: task.primary_session_state ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
+        parentTaskId: task.parent_id ?? undefined,
         updatedAt: task.updated_at,
       } as KanbanTask;
     })

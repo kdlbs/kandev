@@ -36,6 +36,7 @@ export type KanbanState = {
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
     isRemoteExecutor?: boolean;
+    parentTaskId?: string | null;
     updatedAt?: string;
   }>;
   isLoading?: boolean;
