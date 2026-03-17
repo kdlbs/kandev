@@ -114,6 +114,8 @@ export class ApiClient {
       repository_ids?: string[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -127,6 +129,7 @@ export class ApiClient {
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
       ...(opts?.plan_mode ? { plan_mode: true } : {}),
+      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
     });
   }
 
@@ -179,6 +182,8 @@ export class ApiClient {
       repository_ids?: string[];
       executor_id?: string;
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -194,6 +199,7 @@ export class ApiClient {
         : {}),
       ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
       ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
     });
   }
 
