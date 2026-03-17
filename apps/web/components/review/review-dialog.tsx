@@ -16,11 +16,35 @@ import { ReviewDiffList } from "./review-diff-list";
 import type { ReviewFile } from "./types";
 import { hashDiff, normalizeDiffContent } from "./types";
 
+function addCumulativeDiffFiles(
+  fileMap: Map<string, ReviewFile>,
+  files: CumulativeDiff["files"],
+  gitStatusFiles: Record<string, FileInfo> | null,
+) {
+  for (const [path, file] of Object.entries(files)) {
+    if (fileMap.has(path)) continue;
+    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
+    if (diff) {
+      const hasUncommitted = gitStatusFiles != null && path in gitStatusFiles;
+      fileMap.set(path, {
+        path,
+        diff,
+        status: file.status || "modified",
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        staged: gitStatusFiles?.[path]?.staged ?? false,
+        source: hasUncommitted ? "uncommitted" : "committed",
+      });
+    }
+  }
+}
+
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
 ) {
   for (const [path, file] of Object.entries(gitStatusFiles)) {
+    if (fileMap.has(path)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     if (diff)
       fileMap.set(path, {
@@ -31,23 +55,6 @@ function addUncommittedFiles(
         deletions: file.deletions ?? 0,
         staged: file.staged,
         source: "uncommitted",
-      });
-  }
-}
-
-function addCommittedFiles(fileMap: Map<string, ReviewFile>, files: CumulativeDiff["files"]) {
-  for (const [path, file] of Object.entries(files)) {
-    if (fileMap.has(path)) continue;
-    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff)
-      fileMap.set(path, {
-        path,
-        diff,
-        status: file.status || "modified",
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: false,
-        source: "committed",
       });
   }
 }
@@ -82,8 +89,8 @@ function buildAllFiles(
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
+  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
-  if (cumulativeDiff?.files) addCommittedFiles(fileMap, cumulativeDiff.files);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
 }
 

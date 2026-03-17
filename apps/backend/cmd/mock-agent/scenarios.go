@@ -15,20 +15,21 @@ import (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":        scenarioSimpleMessage,
-	"read-and-edit":         scenarioReadAndEdit,
-	"permission-flow":       scenarioPermissionFlow,
-	"error":                 scenarioError,
-	"subagent":              scenarioSubagent,
-	"all-tools":             scenarioAllTools,
-	"multi-turn":            scenarioMultiTurn,
-	"diff-expansion-setup":  scenarioDiffExpansionSetup,
-	"diff-update-setup":     scenarioDiffUpdateSetup,
-	"diff-update-modify":    scenarioDiffUpdateModify,
-	"untracked-file-setup":  scenarioUntrackedFileSetup,
-	"untracked-file-modify": scenarioUntrackedFileModify,
-	"clarification":         scenarioClarification,
-	"clarification-timeout": scenarioClarificationTimeout,
+	"simple-message":          scenarioSimpleMessage,
+	"read-and-edit":           scenarioReadAndEdit,
+	"permission-flow":         scenarioPermissionFlow,
+	"error":                   scenarioError,
+	"subagent":                scenarioSubagent,
+	"all-tools":               scenarioAllTools,
+	"multi-turn":              scenarioMultiTurn,
+	"diff-expansion-setup":    scenarioDiffExpansionSetup,
+	"diff-update-setup":       scenarioDiffUpdateSetup,
+	"diff-update-modify":      scenarioDiffUpdateModify,
+	"untracked-file-setup":    scenarioUntrackedFileSetup,
+	"untracked-file-modify":   scenarioUntrackedFileModify,
+	"clarification":           scenarioClarification,
+	"clarification-timeout":   scenarioClarificationTimeout,
+	"review-cumulative-setup": scenarioReviewCumulativeSetup,
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -433,6 +434,67 @@ func scenarioClarificationTimeout(e *emitter) {
 
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioReviewCumulativeSetup creates a file, commits it, then modifies and
+// commits again, then makes a final uncommitted modification.  This produces a
+// file with both committed and uncommitted changes relative to the session's
+// base commit, exercising the cumulative diff (base → working tree).
+func scenarioReviewCumulativeSetup(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("review-cumulative-setup: getwd failed: " + err.Error())
+		return
+	}
+
+	filePath := "review_cumulative_test.txt"
+	baseContent := "line 1: BASE_CONTENT\nline 2: unchanged\nline 3: BASE_CONTENT\n"
+
+	// Clean up any leftover file from a previous run.
+	runGitCmd := makeGitRunner(wd)
+	_ = runGitCmd("rm", "--force", filePath)
+	_ = runGitCmd("commit", "-m", "cleanup "+filePath)
+
+	// Write original content and commit.
+	if err := os.WriteFile(filePath, []byte(baseContent), 0o644); err != nil {
+		e.text("review-cumulative-setup: write base failed: " + err.Error())
+		return
+	}
+	if err := runGitCmd("add", filePath); err != nil {
+		e.text("review-cumulative-setup: git add base failed")
+		return
+	}
+	if err := runGitCmd("commit", "-m", "add "+filePath+" with base content"); err != nil {
+		e.text("review-cumulative-setup: git commit base failed")
+		return
+	}
+
+	// Second commit: modify the file.
+	committedContent := "line 1: COMMITTED_CHANGE\nline 2: unchanged\nline 3: BASE_CONTENT\n"
+	if err := os.WriteFile(filePath, []byte(committedContent), 0o644); err != nil {
+		e.text("review-cumulative-setup: write committed failed: " + err.Error())
+		return
+	}
+	if err := runGitCmd("add", filePath); err != nil {
+		e.text("review-cumulative-setup: git add committed failed")
+		return
+	}
+	if err := runGitCmd("commit", "-m", "modify "+filePath+" with committed change"); err != nil {
+		e.text("review-cumulative-setup: git commit committed failed")
+		return
+	}
+
+	// Leave an uncommitted modification on top.
+	uncommittedContent := "line 1: COMMITTED_CHANGE\nline 2: unchanged\nline 3: UNCOMMITTED_CHANGE\n"
+	if err := os.WriteFile(filePath, []byte(uncommittedContent), 0o644); err != nil {
+		e.text("review-cumulative-setup: write uncommitted failed: " + err.Error())
+		return
+	}
+
+	fixedDelay(100)
+	e.text("review-cumulative-setup complete: " + filePath + " has COMMITTED_CHANGE and UNCOMMITTED_CHANGE")
 }
 
 // makeGitRunner returns a function that runs git commands in the given directory.

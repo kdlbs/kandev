@@ -144,8 +144,8 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 		_, _ = fmt.Sscanf(strings.TrimSpace(countOutput), "%d", &result.TotalCommits)
 	}
 
-	// Get the cumulative diff
-	diffOutput, err := g.runGitCommand(ctx, "diff", baseCommit+"..HEAD")
+	// Get the cumulative diff (base → working tree, includes uncommitted changes)
+	diffOutput, err := g.runGitCommand(ctx, "diff", baseCommit)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to get diff: %s", err.Error())
 		return result, nil
