@@ -45,6 +45,7 @@ export async function createTask(
     executor_id?: string;
     executor_profile_id?: string;
     plan_mode?: boolean;
+    parent_id?: string;
   },
   options?: ApiRequestOptions,
 ) {

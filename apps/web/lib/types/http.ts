@@ -240,6 +240,7 @@ export type Task = {
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  parent_id?: string;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
