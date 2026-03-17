@@ -128,6 +128,7 @@ type TaskDTO struct {
 	PrimaryWorkingDirectory *string                `json:"primary_working_directory,omitempty"`
 	PrimarySessionState     *string                `json:"primary_session_state,omitempty"`
 	IsRemoteExecutor        bool                   `json:"is_remote_executor,omitempty"`
+	ParentID                string                 `json:"parent_id,omitempty"`
 	ArchivedAt              *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt               time.Time              `json:"created_at"`
 	UpdatedAt               time.Time              `json:"updated_at"`
@@ -508,6 +509,7 @@ func FromTaskWithSessionInfo(
 		PrimaryWorkingDirectory: primaryWorkingDirectory,
 		PrimarySessionState:     primarySessionState,
 		IsRemoteExecutor:        primaryExecutorType != nil && models.IsRemoteExecutorType(models.ExecutorType(*primaryExecutorType)),
+		ParentID:                task.ParentID,
 		ArchivedAt:              task.ArchivedAt,
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.UpdatedAt,

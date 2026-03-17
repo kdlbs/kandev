@@ -73,6 +73,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 		IsEphemeral:    req.IsEphemeral,
+		ParentID:       req.ParentID,
 	}
 
 	if err := s.tasks.CreateTask(ctx, task); err != nil {
