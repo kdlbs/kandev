@@ -291,10 +291,11 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task",
-			mcp.WithDescription("Create a new task in a workflow."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("The workflow step ID")),
+			mcp.WithDescription("Create a new task or subtask. To create a subtask, pass parent_id (use 'self' for your current task) — workspace/workflow/step are inherited from the parent. To create a top-level task, provide workspace_id, workflow_id, and optionally workflow_step_id."),
+			mcp.WithString("parent_id", mcp.Description("Parent task ID for subtasks. Use 'self' to create a subtask of your current task. Omit to create a top-level task.")),
+			mcp.WithString("workspace_id", mcp.Description("The workspace ID (required for top-level tasks, inherited from parent for subtasks)")),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID (required for top-level tasks, inherited from parent for subtasks)")),
+			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The task description")),
 		),

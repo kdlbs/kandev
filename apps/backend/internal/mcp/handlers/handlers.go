@@ -279,6 +279,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
+		ParentID       string `json:"parent_id"`
 		WorkspaceID    string `json:"workspace_id"`
 		WorkflowID     string `json:"workflow_id"`
 		WorkflowStepID string `json:"workflow_step_id"`
@@ -288,20 +289,36 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.Title == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+
+	// Inherit workspace/workflow/step from parent when not explicitly provided
+	if req.ParentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid parent_id: "+err.Error(), nil)
+		}
+		if req.WorkspaceID == "" {
+			req.WorkspaceID = parent.WorkspaceID
+		}
+		if req.WorkflowID == "" {
+			req.WorkflowID = parent.WorkflowID
+		}
+		if req.WorkflowStepID == "" {
+			req.WorkflowStepID = parent.WorkflowStepID
+		}
+	}
+
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	if req.WorkflowStepID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
-	}
-	if req.Title == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
-	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+		ParentID:       req.ParentID,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
