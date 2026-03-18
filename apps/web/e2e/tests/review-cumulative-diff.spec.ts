@@ -71,13 +71,16 @@ test.describe("Review dialog cumulative diff", () => {
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible({ timeout: 10_000 });
 
+    // Click on the file in the tree to ensure its diff is scrolled into view
+    await dialog.getByText("review_cumulative_test.txt").first().click();
+
     // The diff should show COMMITTED_CHANGE — this is the key assertion.
     // With the old bug (git diff base..HEAD + uncommitted-first priority),
     // only the HEAD→working-tree diff would appear, so COMMITTED_CHANGE
     // (which was committed, not in the uncommitted diff) would be missing.
-    await expect(dialog.getByText("COMMITTED_CHANGE")).toBeVisible({ timeout: 30_000 });
+    await expect(dialog).toContainText("COMMITTED_CHANGE", { timeout: 30_000 });
 
     // The diff should also show UNCOMMITTED_CHANGE (current working tree state)
-    await expect(dialog.getByText("UNCOMMITTED_CHANGE")).toBeVisible({ timeout: 15_000 });
+    await expect(dialog).toContainText("UNCOMMITTED_CHANGE", { timeout: 15_000 });
   });
 });
