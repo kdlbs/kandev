@@ -8,7 +8,6 @@ import {
   SelectGroup,
   SelectItem,
   SelectLabel,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
@@ -88,9 +87,7 @@ export function ContextSelect({
               Copy initial prompt
             </SelectItem>
             {sessionOptions.length > 0 && (
-              <>
-                <SelectSeparator />
-                <SelectGroup>
+              <SelectGroup>
                   <SelectLabel className="text-[11px] text-muted-foreground/70">
                     Summarize session
                   </SelectLabel>
@@ -103,8 +100,7 @@ export function ContextSelect({
                       {opt.label}
                     </SelectItem>
                   ))}
-                </SelectGroup>
-              </>
+              </SelectGroup>
             )}
           </SelectContent>
         </Select>
