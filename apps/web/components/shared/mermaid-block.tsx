@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
-import { DEFAULT_SCALE, SCALE_STEP, MIN_SCALE, MAX_SCALE, getSvgDimensions } from "./mermaid-utils";
+import {
+  DEFAULT_SCALE,
+  SCALE_STEP,
+  MIN_SCALE,
+  MAX_SCALE,
+  getSvgDimensions,
+  sanitizeMermaidCode,
+} from "./mermaid-utils";
 
 type MermaidAPI = typeof import("mermaid").default;
 
@@ -36,10 +43,12 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     const theme = resolvedTheme === "dark" ? "dark" : "default";
     const id = `mermaid-md-${++mermaidIdCounter}`;
 
+    const sanitizedCode = sanitizeMermaidCode(code);
+
     getMermaid()
       .then((mermaid) => {
         mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
-        return mermaid.render(id, code);
+        return mermaid.render(id, sanitizedCode);
       })
       .then(({ svg }) => {
         if (!cancelled && containerRef.current) {

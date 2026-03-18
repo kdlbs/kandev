@@ -14,6 +14,7 @@ import {
   MIN_SCALE,
   MAX_SCALE,
   getSvgDimensions,
+  sanitizeMermaidCode,
 } from "@/components/shared/mermaid-utils";
 
 /**
@@ -239,8 +240,9 @@ class MermaidNodeView implements NodeView {
     if (!mermaidInitialized) initMermaid();
     if (!code.trim()) return;
     const id = `mermaid-${++mermaidIdCounter}`;
+    const sanitizedCode = sanitizeMermaidCode(code);
     mermaid
-      .render(id, code)
+      .render(id, sanitizedCode)
       .then(({ svg }) => {
         this.svgContainer.innerHTML = svg;
         this.updateSizeWrapper();
