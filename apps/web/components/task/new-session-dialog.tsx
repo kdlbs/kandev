@@ -204,7 +204,7 @@ function NewSessionForm({
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
       {profileOptions.length > 1 && (
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent</label>
+          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
             options={profileOptions}
             value={selectedProfileId || defaultProfileId}
@@ -255,7 +255,7 @@ function NewSessionForm({
           Cancel
         </Button>
         <Button type="submit" disabled={isCreating || isSummarizing} className="cursor-pointer">
-          {isCreating ? "Creating..." : "Start Session"}
+          {isCreating ? "Creating..." : "Start Agent"}
         </Button>
       </DialogFooter>
     </form>
@@ -271,7 +271,7 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="text-sm font-medium">
-            New session in <span className="text-foreground">{taskTitle}</span>
+            New agent in <span className="text-foreground">{taskTitle}</span>
           </DialogTitle>
         </DialogHeader>
         <NewSessionForm

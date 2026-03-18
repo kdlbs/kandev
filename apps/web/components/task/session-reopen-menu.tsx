@@ -38,10 +38,7 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
   });
 
   const agentLabelsById = useMemo(
-    () =>
-      Object.fromEntries(
-        agentProfiles.map((p: AgentProfileOption) => [p.id, p.label]),
-      ),
+    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p.label])),
     [agentProfiles],
   );
 
@@ -67,7 +64,7 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
 
   return (
     <>
-      <DropdownMenuLabel className="text-xs text-muted-foreground">Sessions</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">Agents</DropdownMenuLabel>
       {sortedSessions.map((session, index) => {
         const label = resolveAgentLabel(session, agentLabelsById);
         const isPrimary = session.id === primarySessionId;
@@ -81,12 +78,12 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
           >
             <span className="w-5 shrink-0 text-muted-foreground text-right">#{index + 1}</span>
             <span className="flex-1 truncate">{label}</span>
-            {isPrimary && (
-              <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />
-            )}
-            {session.state !== "RUNNING" && session.state !== "STARTING" && session.state !== "WAITING_FOR_INPUT" && (
-              <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
-            )}
+            {isPrimary && <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />}
+            {session.state !== "RUNNING" &&
+              session.state !== "STARTING" &&
+              session.state !== "WAITING_FOR_INPUT" && (
+                <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
+              )}
           </DropdownMenuItem>
         );
       })}

@@ -52,7 +52,7 @@ function buildSessionCommands(
     items.push({
       id: "session-cancel",
       label: "Cancel Turn",
-      group: "Session",
+      group: "Agent",
       icon: <IconPlayerStop className="size-3.5" />,
       keywords: ["cancel", "stop", "turn"],
       action: cancelTurn,
@@ -61,7 +61,7 @@ function buildSessionCommands(
     items.push({
       id: "session-plan-mode",
       label: "Toggle Plan Mode",
-      group: "Session",
+      group: "Agent",
       icon: <IconFileTextSpark className="size-3.5" />,
       keywords: ["plan", "mode", "toggle"],
       action: () => panels.addPlan(),

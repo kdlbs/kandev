@@ -316,7 +316,7 @@ function NewSubtaskForm({
       </div>
       {profileOptions.length > 1 && (
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent</label>
+          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
             options={profileOptions}
             value={selectedProfileId || defaultProfileId}
@@ -368,7 +368,11 @@ function NewSubtaskForm({
         >
           Cancel
         </Button>
-        <Button type="submit" disabled={isCreating || isSummarizing || !hasPrompt} className="cursor-pointer">
+        <Button
+          type="submit"
+          disabled={isCreating || isSummarizing || !hasPrompt}
+          className="cursor-pointer"
+        >
           {isCreating ? "Creating..." : "Create Subtask"}
         </Button>
       </DialogFooter>
@@ -395,8 +399,8 @@ export function NewSubtaskDialog({
   // Ensure executor/agent data is loaded when dialog opens
   useSettingsData(open);
 
-  const siblingCount = useAppStore((s) =>
-    s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
+  const siblingCount = useAppStore(
+    (s) => s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
   );
 
   const defaultTitle = useMemo(
