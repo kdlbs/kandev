@@ -209,7 +209,8 @@ function useSessionsDropdownState(taskId: string | null) {
     });
   }, [sessions, taskId]);
   const resolveAgentLabel = useCallback(
-    (s: TaskSession) => (s.agent_profile_id && agentLabelsById[s.agent_profile_id]) || "Unknown agent",
+    (s: TaskSession) =>
+      (s.agent_profile_id && agentLabelsById[s.agent_profile_id]) || "Unknown agent",
     [agentLabelsById],
   );
   return { sortedSessions, currentTime, loadSessions, resolveAgentLabel };
@@ -322,7 +323,7 @@ function SessionDropdownContent({
   return (
     <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
       <div className="flex items-center justify-between px-2 py-0">
-        <span className="text-xs font-medium text-muted-foreground">Sessions</span>
+        <span className="text-xs font-medium text-muted-foreground">Agents</span>
         <button
           type="button"
           onClick={onNewSession}

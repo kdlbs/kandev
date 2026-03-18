@@ -94,7 +94,7 @@ function FailedSessionBanner({
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-            <span>This session has ended. Start a new session to continue.</span>
+            <span>This agent has finished. Start a new agent to continue.</span>
           </div>
           <Button
             variant="outline"
@@ -103,13 +103,11 @@ function FailedSessionBanner({
             onClick={() => onShowDialog(true)}
           >
             <IconPlus className="h-3.5 w-3.5" />
-            New Session
+            New Agent
           </Button>
         </div>
       </div>
-      {taskId && (
-        <NewSessionDialog open={showDialog} onOpenChange={onShowDialog} taskId={taskId} />
-      )}
+      {taskId && <NewSessionDialog open={showDialog} onOpenChange={onShowDialog} taskId={taskId} />}
     </>
   );
 }

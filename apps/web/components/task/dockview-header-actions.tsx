@@ -118,7 +118,7 @@ function AddPanelMenuItems({
             data-testid="new-session-button"
           >
             <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
-            New Session
+            New Agent
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
