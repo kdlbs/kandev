@@ -203,19 +203,19 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete session?</AlertDialogTitle>
+            <AlertDialogTitle>Delete agent?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div>
                 <p>
-                  This will permanently delete this session, including all conversation history.
+                  This will permanently delete the conversation history with this agent.
                 </p>
                 {isPrimary && sessionCount > 1 && (
                   <p className="mt-2 font-medium">
-                    This is the primary session. Another session will be promoted.
+                    This is the primary agent. Another agent will be set as primary.
                   </p>
                 )}
                 {sessionCount === 1 && (
-                  <p className="mt-2 font-medium">This is the only session for this task.</p>
+                  <p className="mt-2 font-medium">This is the only agent for this task.</p>
                 )}
               </div>
             </AlertDialogDescription>

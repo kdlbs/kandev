@@ -374,7 +374,7 @@ function SessionDropdownList({
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
-        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No sessions yet</div>
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No agents yet</div>
       </div>
     );
   }
@@ -537,7 +537,7 @@ function SessionRowActions({
               <IconPlayerStopFilled className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Stop session</TooltipContent>
+          <TooltipContent side="left">Stop agent</TooltipContent>
         </Tooltip>
       )}
       {isSessionResumable(session.state) && (
@@ -551,7 +551,7 @@ function SessionRowActions({
               <IconPlayerPlayFilled className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Resume session</TooltipContent>
+          <TooltipContent side="left">Resume agent</TooltipContent>
         </Tooltip>
       )}
       {isSessionDeletable(session.state) && (
@@ -565,7 +565,7 @@ function SessionRowActions({
               <IconTrash className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Delete session</TooltipContent>
+          <TooltipContent side="left">Delete agent</TooltipContent>
         </Tooltip>
       )}
     </div>
