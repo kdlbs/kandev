@@ -200,9 +200,7 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
-    const titleById = new Map(
-      allTasks.map((t: KanbanState["tasks"][number]) => [t.id, t.title]),
-    );
+    const titleById = new Map(allTasks.map((t: KanbanState["tasks"][number]) => [t.id, t.title]));
     const mapCtx = {
       sessionsByTaskId,
       gitStatusByEnvId,

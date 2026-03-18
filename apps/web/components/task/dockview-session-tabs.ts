@@ -8,10 +8,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
  * Sync `activeSessionId` in the store when the user clicks a session tab.
  * This ensures global panels (changes, files, plan) switch context.
  */
-export function setupSessionTabSync(
-  api: DockviewReadyEvent["api"],
-  appStore: StoreApi<AppState>,
-) {
+export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
   api.onDidActivePanelChange((panel) => {
     if (!panel) return;
     // Ignore panel activations during layout operations (e.g. drag-to-split,
@@ -52,9 +49,7 @@ export function setupChatPanelSafetyNet(
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (useDockviewStore.getState().isRestoringLayout) return;
-        const hasChatPanel = api.panels.some(
-          (p) => p.id === "chat" || p.id.startsWith("session:"),
-        );
+        const hasChatPanel = api.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
         if (hasChatPanel) return;
         const activeSessionId = appStore.getState().tasks.activeSessionId;
         const sb = api.getPanel("sidebar");

@@ -181,9 +181,10 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
     if (!session?.agent_profile_id) return null;
-    return state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    )?.label ?? null;
+    return (
+      state.agentProfiles.items.find((p: { id: string }) => p.id === session.agent_profile_id)
+        ?.label ?? null
+    );
   });
   const sessionNumber = useAppStore((state) => {
     if (!sessionId || !isSessionTab) return null;

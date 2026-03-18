@@ -51,11 +51,7 @@ async function createTaskAndNavigate(
 }
 
 test.describe("Multi-session UX", () => {
-  test("session tab shows numbered label", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("session tab shows numbered label", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     const { task, session } = await createTaskAndNavigate(
@@ -209,11 +205,7 @@ test.describe("Multi-session UX", () => {
     expect(sessions).toHaveLength(2);
   });
 
-  test("delete session removes it from backend", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("delete session removes it from backend", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     const { task, session } = await createTaskAndNavigate(
@@ -287,7 +279,10 @@ test.describe("Multi-session UX", () => {
     await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
 
     // Verify default context mode is "Blank"
-    const contextTrigger = session.newSessionDialog().locator("button").filter({ hasText: "Blank" });
+    const contextTrigger = session
+      .newSessionDialog()
+      .locator("button")
+      .filter({ hasText: "Blank" });
     await expect(contextTrigger).toBeVisible();
 
     // Open context mode dropdown and check "Copy initial prompt" option exists

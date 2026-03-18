@@ -195,7 +195,12 @@ export const TaskItem = memo(function TaskItem({
       />
 
       {/* Content */}
-      <TaskItemTitle title={title} description={description} taskId={taskId} parentTaskTitle={parentTaskTitle} />
+      <TaskItemTitle
+        title={title}
+        description={description}
+        taskId={taskId}
+        parentTaskTitle={parentTaskTitle}
+      />
 
       {/* Right side: step name + meta, or action buttons on hover */}
       <div className="relative flex items-center shrink-0">
