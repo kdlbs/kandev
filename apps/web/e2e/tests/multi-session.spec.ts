@@ -97,10 +97,7 @@ test.describe("Multi-session", () => {
     expect(env!.task_id).toBe(task.id);
   });
 
-  test("second session reuses same worktree as first session", async ({
-    apiClient,
-    seedData,
-  }) => {
+  test("second session reuses same worktree as first session", async ({ apiClient, seedData }) => {
     test.setTimeout(90_000);
 
     // 1. Create task with first session

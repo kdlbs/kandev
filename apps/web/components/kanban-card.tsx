@@ -3,7 +3,13 @@
 import { useMemo, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { IconDots, IconArrowsMaximize, IconLoader, IconAlertCircle, IconSubtask } from "@tabler/icons-react";
+import {
+  IconDots,
+  IconArrowsMaximize,
+  IconLoader,
+  IconAlertCircle,
+  IconSubtask,
+} from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import {

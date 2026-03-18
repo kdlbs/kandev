@@ -359,7 +359,14 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     return client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
       if (!changes || changes.length === 0) return;
-      applyFileChanges({ client, sessionId: sessionIdRef.current, expandedPaths, changes, setTree, setLoadState });
+      applyFileChanges({
+        client,
+        sessionId: sessionIdRef.current,
+        expandedPaths,
+        changes,
+        setTree,
+        setLoadState,
+      });
     });
   }, [expandedPaths]);
 

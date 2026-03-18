@@ -66,11 +66,7 @@ test.describe("New session dialog", () => {
     await expect(session.newSessionStartButton()).toBeVisible();
   });
 
-  test("creates second session and new tab appears", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("creates second session and new tab appears", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     // 1. Create task with first session via API
@@ -144,11 +140,7 @@ test.describe("New session dialog", () => {
     expect(allSessions).toHaveLength(2);
   });
 
-  test("second session reuses same task environment", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("second session reuses same task environment", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     // 1. Create task with first session via API
@@ -224,11 +216,7 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("dialog cancel does not create a session", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("dialog cancel does not create a session", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
     // 1. Create task with first session via API

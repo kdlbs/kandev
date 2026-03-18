@@ -363,7 +363,14 @@ function DialogFormBody({
 
 function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { open, onOpenChange, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const { editingTask, onSuccess, onCreateSession, initialValues, taskId = null, parentTaskId } = props;
+  const {
+    editingTask,
+    onSuccess,
+    onCreateSession,
+    initialValues,
+    taskId = null,
+    parentTaskId,
+  } = props;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isCreateMode = mode === "create";

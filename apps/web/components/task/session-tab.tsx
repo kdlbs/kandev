@@ -146,7 +146,8 @@ function useSessionTabActions(
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const { isPrimary, sessionState, taskId, agentLabel, sessionNumber, sessionCount } = useSessionTabState(sessionId);
+  const { isPrimary, sessionState, taskId, agentLabel, sessionNumber, sessionCount } =
+    useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -167,18 +168,29 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleSetPrimary} disabled={isPrimary}>
+          <ContextMenuItem
+            className="cursor-pointer"
+            onSelect={actions.handleSetPrimary}
+            disabled={isPrimary}
+          >
             Set as Primary
           </ContextMenuItem>
           <ContextMenuSeparator />
           {sessionState && isStoppable(sessionState) && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>Stop</ContextMenuItem>
+            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
+              Stop
+            </ContextMenuItem>
           )}
           {sessionState && isResumable(sessionState) && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>Resume</ContextMenuItem>
+            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
+              Resume
+            </ContextMenuItem>
           )}
           {sessionState && isDeletable(sessionState) && (
-            <ContextMenuItem className="cursor-pointer text-destructive" onSelect={() => setConfirmDelete(true)}>
+            <ContextMenuItem
+              className="cursor-pointer text-destructive"
+              onSelect={() => setConfirmDelete(true)}
+            >
               Delete
             </ContextMenuItem>
           )}
@@ -194,9 +206,13 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             <AlertDialogTitle>Delete session?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div>
-                <p>This will permanently delete this session, including all conversation history.</p>
+                <p>
+                  This will permanently delete this session, including all conversation history.
+                </p>
                 {isPrimary && sessionCount > 1 && (
-                  <p className="mt-2 font-medium">This is the primary session. Another session will be promoted.</p>
+                  <p className="mt-2 font-medium">
+                    This is the primary session. Another session will be promoted.
+                  </p>
                 )}
                 {sessionCount === 1 && (
                   <p className="mt-2 font-medium">This is the only session for this task.</p>
@@ -207,7 +223,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           <AlertDialogFooter>
             <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { setConfirmDelete(false); actions.handleDelete(); }}
+              onClick={() => {
+                setConfirmDelete(false);
+                actions.handleDelete();
+              }}
               className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

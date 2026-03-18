@@ -51,10 +51,7 @@ export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
   };
 }
 
-function applyFixupsWithMaximize(
-  api: DockviewReadyEvent["api"],
-  sessionId: string | null,
-): void {
+function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], sessionId: string | null): void {
   const savedMax = sessionId ? getSessionMaximizeState(sessionId) : null;
   if (savedMax) {
     api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
@@ -71,10 +68,7 @@ function applyFixupsWithMaximize(
   }
 }
 
-function tryRestoreMaximizeOnly(
-  api: DockviewReadyEvent["api"],
-  sessionId: string,
-): boolean {
+function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], sessionId: string): boolean {
   const savedMax = getSessionMaximizeState(sessionId);
   if (!savedMax) return false;
   try {

@@ -308,7 +308,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
       {s.newSessionTaskId && (
         <NewSessionDialog
           open={!!s.newSessionTaskId}
-          onOpenChange={(open) => { if (!open) s.setNewSessionTaskId(null); }}
+          onOpenChange={(open) => {
+            if (!open) s.setNewSessionTaskId(null);
+          }}
           taskId={s.newSessionTaskId}
         />
       )}

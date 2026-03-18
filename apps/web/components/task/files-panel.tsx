@@ -20,9 +20,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   const activeSessionId = useEnvironmentSessionId();
   const environmentId = useAppStore((state) => {
     if (!activeSessionId) return null;
-    return state.environmentIdBySessionId[activeSessionId]
-      ?? state.taskSessions.items[activeSessionId]?.task_environment_id
-      ?? null;
+    return (
+      state.environmentIdBySessionId[activeSessionId] ??
+      state.taskSessions.items[activeSessionId]?.task_environment_id ??
+      null
+    );
   });
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const isArchived = useIsTaskArchived();
