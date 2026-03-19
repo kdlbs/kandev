@@ -21,7 +21,6 @@ export const log = (...args: unknown[]) => {
 export const MIN_WIDTH = 100;
 export const MIN_HEIGHT = 100;
 
-
 export type TerminalInitOptions = {
   terminalRef: React.RefObject<HTMLDivElement | null>;
   xtermRef: React.MutableRefObject<Terminal | null>;
@@ -209,7 +208,11 @@ export function useTerminalInit({
       const rect = container.getBoundingClientRect();
       log("Init check: dimensions", rect.width, "x", rect.height);
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
-        initTerminalInstance(container, refs, fitAndResize, { linkHandler, onToggleBottomTerminal, sendInput });
+        initTerminalInstance(container, refs, fitAndResize, {
+          linkHandler,
+          onToggleBottomTerminal,
+          sendInput,
+        });
         onReady();
         return true;
       }
