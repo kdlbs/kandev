@@ -18,7 +18,7 @@ func setupMCPTestServer(t *testing.T) (*TestServer, string, string, string, stri
 	ts := NewTestServer(t)
 
 	// Register MCP handlers on the gateway dispatcher
-	mcpH := mcphandlers.NewHandlers(ts.TaskSvc, nil, nil, nil, nil, nil, nil, nil, ts.Logger)
+	mcpH := mcphandlers.NewHandlers(ts.TaskSvc, nil, nil, nil, nil, nil, nil, nil, nil, ts.Logger)
 	mcpH.RegisterHandlers(ts.Gateway.Dispatcher)
 
 	client := NewWSClient(t, ts.Server.URL)
