@@ -304,7 +304,10 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	// Inherit workspace/workflow/step from parent when not explicitly provided
+	// Inherit workspace/workflow from parent when not explicitly provided.
+	// WorkflowStepID is intentionally NOT inherited — the service layer resolves
+	// the start step so subtasks always begin at the first workflow step, not the
+	// parent's current (potentially advanced) step.
 	if req.ParentID != "" {
 		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
 		if err != nil {
@@ -315,9 +318,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if req.WorkflowID == "" {
 			req.WorkflowID = parent.WorkflowID
-		}
-		if req.WorkflowStepID == "" {
-			req.WorkflowStepID = parent.WorkflowStepID
 		}
 	}
 
@@ -348,21 +348,22 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 }
 
 // autoStartTask launches an agent session for a newly created task in the background.
-// It resolves the agent profile from the request, the workspace default, or skips if none is available.
+// It resolves the agent profile: explicit > parent's session > workspace default.
 func (h *Handlers) autoStartTask(task *models.Task, agentProfileID string) {
 	if h.sessionLauncher == nil {
 		return
 	}
 
-	// Resolve agent profile: explicit > workspace default
+	// Resolve agent profile: explicit > parent's primary session > workspace default
+	if agentProfileID == "" && task.ParentID != "" {
+		parentSession, err := h.taskSvc.GetPrimarySession(context.Background(), task.ParentID)
+		if err == nil && parentSession != nil && parentSession.AgentProfileID != "" {
+			agentProfileID = parentSession.AgentProfileID
+		}
+	}
 	if agentProfileID == "" {
 		workspace, err := h.taskSvc.GetWorkspace(context.Background(), task.WorkspaceID)
-		if err != nil {
-			h.logger.Warn("failed to look up workspace for auto-start",
-				zap.String("task_id", task.ID), zap.Error(err))
-			return
-		}
-		if workspace.DefaultAgentProfileID != nil {
+		if err == nil && workspace.DefaultAgentProfileID != nil {
 			agentProfileID = *workspace.DefaultAgentProfileID
 		}
 	}
