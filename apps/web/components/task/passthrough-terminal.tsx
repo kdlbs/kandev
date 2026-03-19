@@ -13,12 +13,12 @@ import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl
 import { getBackendConfig } from "@/lib/config";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import {
-  log,
   MIN_WIDTH,
   MIN_HEIGHT,
   useTerminalInit,
   useWebSocketConnection,
   useSendResize,
+  useSendInput,
   useFitAndResize,
 } from "./use-passthrough-terminal";
 
@@ -73,15 +73,10 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   }, []);
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
-  const onTerminalReady = useCallback(() => {
-    log("Terminal ready — will trigger WebSocket connection");
-    setIsTerminalReady(true);
-  }, []);
+  const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
 
-  // Track which session has an active WebSocket connection.  The loading
-  // overlay is shown whenever the current sessionId doesn't match the
-  // connected one — this naturally resets on session switches without
-  // needing a separate effect that calls setState.
+  // Track which session has an active WebSocket connection. The loading overlay
+  // resets on session switches without needing a separate setState effect.
   const [connectedSessionId, setConnectedSessionId] = useState<string | null>(null);
   const isConnected = sessionId != null && connectedSessionId === sessionId;
   const onConnected = useCallback(() => {
@@ -99,6 +94,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     sendResize,
   });
 
+  const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   useTerminalInit({
     terminalRef,
@@ -112,6 +108,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     onReady: onTerminalReady,
     linkHandler,
     onToggleBottomTerminal: toggleBottomTerminal,
+    sendInput,
   });
 
   useWebSocketConnection({

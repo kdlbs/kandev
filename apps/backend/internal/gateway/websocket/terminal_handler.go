@@ -104,6 +104,13 @@ func checkWebSocketOrigin(r *http.Request) bool {
 // First byte 0x01 indicates resize, followed by JSON {cols, rows}.
 const resizeCommandByte = 0x01
 
+// isResizeCommand checks whether a binary frame is a resize command.
+// Resize messages use 0x01 as a prefix followed by a JSON object (starts with '{').
+// A bare 0x01 or 0x01 followed by non-JSON data is regular PTY input (e.g. Ctrl+A).
+func isResizeCommand(data []byte) bool {
+	return len(data) >= 2 && data[0] == resizeCommandByte && data[1] == '{'
+}
+
 const (
 	passthroughReadyTimeout = 30 * time.Second
 	shellExecutionTimeout   = 15 * time.Second
@@ -535,7 +542,7 @@ func (h *TerminalHandler) runTerminalBridge(
 			continue
 		}
 
-		if data[0] == resizeCommandByte {
+		if isResizeCommand(data) {
 			newID, newDirect := h.handleResizeCommand(data[1:], sessionID, processID, interactiveRunner, wsw, directOutputSet, &ptyWriter)
 			processID = newID
 			directOutputSet = newDirect
@@ -1032,7 +1039,7 @@ func (h *TerminalHandler) runUserShellBridge(
 			continue
 		}
 
-		if data[0] == resizeCommandByte {
+		if isResizeCommand(data) {
 			directOutputSet = h.handleUserShellResizeCommand(
 				data[1:], sessionID, terminalID, processID,
 				interactiveRunner, wsw, directOutputSet, &ptyWriter,

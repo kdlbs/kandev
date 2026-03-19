@@ -9,6 +9,7 @@ import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { startReconnectLoop } from "./ws-reconnect";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { matchesShortcut } from "@/lib/keyboard/utils";
+import { exposeBufferReader, clearBufferReader } from "./terminal-buffer-reader";
 
 // Debug flag - set to true to see detailed logs
 const DEBUG = false;
@@ -20,19 +21,6 @@ export const log = (...args: unknown[]) => {
 export const MIN_WIDTH = 100;
 export const MIN_HEIGHT = 100;
 
-type TerminalContainerWithBuffer = HTMLDivElement & { __xtermReadBuffer?: () => string };
-
-/** Expose buffer reader on the container for e2e tests (xterm renders to canvas). */
-function exposeBufferReader(container: HTMLDivElement, terminal: Terminal) {
-  (container as TerminalContainerWithBuffer).__xtermReadBuffer = () => {
-    const buf = terminal.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  };
-}
 
 export type TerminalInitOptions = {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -46,6 +34,40 @@ export type TerminalInitOptions = {
   onReady: () => void;
 };
 
+type TerminalKeyHandlerOptions = {
+  onToggleBottomTerminal?: () => void;
+  sendInput?: (data: string) => void;
+};
+
+/** Handles app-level shortcuts and Cmd+Arrow→Home/End mapping for macOS. */
+function createKeyEventHandler(options: TerminalKeyHandlerOptions) {
+  return (event: KeyboardEvent): boolean => {
+    if (matchesShortcut(event, SHORTCUTS.BOTTOM_TERMINAL)) {
+      event.preventDefault();
+      if (event.type === "keydown" && options.onToggleBottomTerminal) {
+        options.onToggleBottomTerminal();
+      }
+      return false;
+    }
+    // Cmd+Arrow → beginning/end of line on macOS (same as iTerm2)
+    if (
+      event.type === "keydown" &&
+      event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight")
+    ) {
+      event.preventDefault();
+      // Ctrl+A (0x01) = beginning-of-line, Ctrl+E (0x05) = end-of-line
+      // Works universally in bash/zsh emacs mode (the default)
+      const seq = event.key === "ArrowLeft" ? "\x01" : "\x05";
+      options.sendInput?.(seq);
+      return false;
+    }
+    return true;
+  };
+}
+
 function initTerminalInstance(
   termContainer: HTMLDivElement,
   refs: Pick<
@@ -58,8 +80,7 @@ function initTerminalInstance(
     | "resizeTimeoutRef"
   >,
   fitAndResize: (force?: boolean) => void,
-  linkHandler?: (event: MouseEvent, uri: string) => void,
-  onToggleBottomTerminal?: () => void,
+  options: { linkHandler?: (event: MouseEvent, uri: string) => void } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
@@ -73,6 +94,7 @@ function initTerminalInstance(
     scrollback: 5000,
     fontSize: 13,
     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    macOptionIsMeta: true,
     theme: getTerminalTheme(termContainer),
   });
   const fitAddon = new FitAddon();
@@ -80,18 +102,10 @@ function initTerminalInstance(
   const unicode11Addon = new Unicode11Addon();
   terminal.loadAddon(unicode11Addon);
   terminal.unicode.activeVersion = "11";
-  const webLinksAddon = new WebLinksAddon(linkHandler);
+  const webLinksAddon = new WebLinksAddon(options.linkHandler);
   terminal.loadAddon(webLinksAddon);
   terminal.open(termContainer);
-  // Intercept bottom terminal shortcut to toggle panel
-  terminal.attachCustomKeyEventHandler((event) => {
-    if (matchesShortcut(event, SHORTCUTS.BOTTOM_TERMINAL)) {
-      event.preventDefault();
-      if (event.type === "keydown" && onToggleBottomTerminal) onToggleBottomTerminal();
-      return false;
-    }
-    return true;
-  });
+  terminal.attachCustomKeyEventHandler(createKeyEventHandler(options));
   try {
     fitAddon.fit();
     refs.lastDimensionsRef.current = { cols: terminal.cols, rows: terminal.rows };
@@ -143,7 +157,7 @@ function initTerminalInstance(
       refs.webglAddonRef.current = null;
     }
     terminal.dispose();
-    (termContainer as TerminalContainerWithBuffer).__xtermReadBuffer = undefined;
+    clearBufferReader(termContainer);
     refs.xtermRef.current = null;
     refs.fitAddonRef.current = null;
     refs.isInitializedRef.current = false;
@@ -151,10 +165,10 @@ function initTerminalInstance(
   };
 }
 
-type TerminalInitHookOptions = TerminalInitOptions & {
-  linkHandler?: (event: MouseEvent, uri: string) => void;
-  onToggleBottomTerminal?: () => void;
-};
+type TerminalInitHookOptions = TerminalInitOptions &
+  TerminalKeyHandlerOptions & {
+    linkHandler?: (event: MouseEvent, uri: string) => void;
+  };
 
 export function useTerminalInit({
   terminalRef,
@@ -168,6 +182,7 @@ export function useTerminalInit({
   onReady,
   linkHandler,
   onToggleBottomTerminal,
+  sendInput,
 }: TerminalInitHookOptions) {
   const refs = {
     xtermRef,
@@ -194,7 +209,7 @@ export function useTerminalInit({
       const rect = container.getBoundingClientRect();
       log("Init check: dimensions", rect.width, "x", rect.height);
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
-        initTerminalInstance(container, refs, fitAndResize, linkHandler, onToggleBottomTerminal);
+        initTerminalInstance(container, refs, fitAndResize, { linkHandler, onToggleBottomTerminal, sendInput });
         onReady();
         return true;
       }
@@ -489,6 +504,19 @@ export function useSendResize(wsRef: React.MutableRefObject<WebSocket | null>) {
       }
       log("sendResize:", cols, "x", rows);
       ws.send(buildResizeBuffer(cols, rows));
+    },
+    [wsRef],
+  );
+}
+
+/** Returns a stable ref whose `.current` sends raw string data to the PTY via WebSocket. */
+export function useSendInput(wsRef: React.MutableRefObject<WebSocket | null>) {
+  return useCallback(
+    (data: string) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(new TextEncoder().encode(data));
+      }
     },
     [wsRef],
   );

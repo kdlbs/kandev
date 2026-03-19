@@ -643,6 +643,12 @@ func mergeEnv(env map[string]string) []string {
 		}
 	}
 
+	// Set terminal type for xterm.js PTY connections. The parent process's TERM
+	// reflects its own terminal (e.g. "screen" in tmux), not the xterm.js frontend,
+	// so we always override it. Custom env vars (below) can still override if needed.
+	base["TERM"] = "xterm-256color"
+	base["COLORTERM"] = "truecolor"
+
 	// Override with custom variables
 	for k, v := range env {
 		base[k] = v
