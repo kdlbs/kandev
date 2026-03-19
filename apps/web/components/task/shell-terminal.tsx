@@ -248,24 +248,35 @@ function useCmdArrowHandler(
   sessionId: string | null | undefined,
   send: (action: string, payload: Record<string, unknown>) => void,
 ) {
+  // Use a ref so the handler (attached once) always reads the latest values
+  // without needing cleanup (attachCustomKeyEventHandler has no dispose).
+  const stateRef = useRef({ sessionId, send });
   useEffect(() => {
-    if (!xtermRef.current || isReadOnlyMode || !sessionId) return;
+    stateRef.current = { sessionId, send };
+  });
+
+  const attachedRef = useRef(false);
+  useEffect(() => {
+    if (!xtermRef.current || isReadOnlyMode || !sessionId || attachedRef.current) return;
+    attachedRef.current = true;
     xtermRef.current.attachCustomKeyEventHandler((event) => {
+      const { sessionId: sid, send: sendFn } = stateRef.current;
       if (
         event.type === "keydown" &&
         event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
+        sid &&
         (event.key === "ArrowLeft" || event.key === "ArrowRight")
       ) {
         event.preventDefault();
         const seq = event.key === "ArrowLeft" ? "\x01" : "\x05";
-        send("shell.input", { session_id: sessionId, data: seq });
+        sendFn("shell.input", { session_id: sid, data: seq });
         return false;
       }
       return true;
     });
-  }, [xtermRef, sessionId, send, isReadOnlyMode]);
+  }, [xtermRef, sessionId, send, isReadOnlyMode, stateRef]);
 }
 
 export function ShellTerminal({

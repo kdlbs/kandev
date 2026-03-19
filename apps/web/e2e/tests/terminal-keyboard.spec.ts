@@ -101,8 +101,13 @@ test.describe("Terminal keyboard navigation", () => {
     // (zsh without .zshrc doesn't bind Ctrl+Arrow by default)
     await testPage.keyboard.type("bash --norc --noprofile");
     await testPage.keyboard.press("Enter");
-    // Wait for bash prompt
-    await testPage.waitForTimeout(500);
+    // Wait for bash prompt (bash --norc uses "bash-X.Y$ " pattern)
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).includes("bash"), {
+        timeout: 5_000,
+        message: "Waiting for bash prompt",
+      })
+      .toBe(true);
 
     // Type a multi-word echo command (don't press Enter yet)
     await testPage.keyboard.type("echo aaa bbb ccc");
@@ -130,7 +135,12 @@ test.describe("Terminal keyboard navigation", () => {
     // Start bash for a clean prompt
     await testPage.keyboard.type("bash --norc --noprofile");
     await testPage.keyboard.press("Enter");
-    await testPage.waitForTimeout(500);
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).includes("bash"), {
+        timeout: 5_000,
+        message: "Waiting for bash prompt",
+      })
+      .toBe(true);
 
     // Type text without "echo " prefix (just raw text, not a valid command)
     await testPage.keyboard.type("aaa bbb ccc");
