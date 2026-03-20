@@ -15,7 +15,7 @@ type Request struct {
 type Response struct {
 	JSONRPC string          `json:"jsonrpc"` // Always "2.0"
 	ID      interface{}     `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`sdfsdf
 	Error   *Error          `json:"error,omitempty"`
 }
 
