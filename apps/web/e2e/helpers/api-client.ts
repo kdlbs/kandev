@@ -114,6 +114,8 @@ export class ApiClient {
       repository_ids?: string[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -127,6 +129,7 @@ export class ApiClient {
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
       ...(opts?.plan_mode ? { plan_mode: true } : {}),
+      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
     });
   }
 
@@ -179,6 +182,8 @@ export class ApiClient {
       repository_ids?: string[];
       executor_id?: string;
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -194,6 +199,7 @@ export class ApiClient {
         : {}),
       ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
       ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
     });
   }
 
@@ -513,5 +519,42 @@ export class ApiClient {
     workspaceId: string,
   ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
+  }
+
+  async listTaskSessions(taskId: string): Promise<{
+    sessions: Array<{
+      id: string;
+      task_id: string;
+      state: string;
+      task_environment_id?: string;
+      worktree_path?: string;
+      worktree_branch?: string;
+    }>;
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async setPrimarySession(sessionId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+  }
+
+  async getTaskEnvironment(taskId: string): Promise<{
+    id: string;
+    task_id: string;
+    worktree_id?: string;
+    worktree_path?: string;
+    status: string;
+  } | null> {
+    const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`getTaskEnvironment failed (${res.status}): ${await res.text()}`);
+    }
+    return res.json();
   }
 }

@@ -212,7 +212,6 @@ type TreeLoaderContext = {
 
 function useTreeLoader(ctx: TreeLoaderContext) {
   const {
-    sessionId,
     clearRetryTimer,
     retryAttemptRef,
     retryTimerRef,
@@ -221,6 +220,10 @@ function useTreeLoader(ctx: TreeLoaderContext) {
     setLoadState,
     setLoadError,
   } = ctx;
+  // Use ref for sessionId so loadTree stays stable across session switches.
+  // This prevents the tree-clearing effect from re-firing when only sessionId changes.
+  const sessionIdRef = useRef(ctx.sessionId);
+  sessionIdRef.current = ctx.sessionId;
   const loadInFlightRef = useRef(false);
   const loadTree = useCallback(
     async (options?: { resetRetry?: boolean }) => {
@@ -236,7 +239,7 @@ function useTreeLoader(ctx: TreeLoaderContext) {
       try {
         const client = getWebSocketClient();
         if (!client) throw new Error("WebSocket client not available");
-        const response = await requestFileTree(client, sessionId, "", 1);
+        const response = await requestFileTree(client, sessionIdRef.current, "", 1);
         setTree(response.root ?? null);
         setLoadState("loaded");
         retryAttemptRef.current = 0;
@@ -265,7 +268,6 @@ function useTreeLoader(ctx: TreeLoaderContext) {
       clearRetryTimer,
       retryAttemptRef,
       retryTimerRef,
-      sessionId,
       setIsLoadingTree,
       setLoadError,
       setLoadState,
@@ -275,8 +277,15 @@ function useTreeLoader(ctx: TreeLoaderContext) {
   return loadTree;
 }
 
-/** Hook for tree loading with retry logic, file-change subscription, and expanded state. */
-export function useFileBrowserTree(sessionId: string) {
+/**
+ * Hook for tree loading with retry logic, file-change subscription, and expanded state.
+ * @param sessionId - Session ID for API calls (agentctl routing).
+ * @param resetKey - Optional stable key (e.g. environmentId) that controls when the tree
+ *   does a full reset. When sessions share the same environment, this prevents the tree
+ *   from flashing on tab switch.
+ */
+export function useFileBrowserTree(sessionId: string, resetKey?: string) {
+  const effectiveResetKey = resetKey ?? sessionId;
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(true);
@@ -285,6 +294,8 @@ export function useFileBrowserTree(sessionId: string) {
   const hasInitializedExpandedRef = useRef<string | null>(null);
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const agentctlStatus = useSessionAgentctl(sessionId);
   const { visibleLoadingPaths, showLoading, hideLoading } = useLoadingTimers();
 
@@ -306,6 +317,7 @@ export function useFileBrowserTree(sessionId: string) {
     setLoadError,
   });
 
+  // Full reset: clear tree + loading state. Only fires when the environment changes.
   useEffect(() => {
     setTree(null);
     setIsLoadingTree(true);
@@ -314,14 +326,14 @@ export function useFileBrowserTree(sessionId: string) {
     retryAttemptRef.current = 0;
     clearRetryTimer();
     hasInitializedExpandedRef.current = null;
-    const savedPaths = getFilesPanelExpandedPaths(sessionId);
+    const savedPaths = getFilesPanelExpandedPaths(effectiveResetKey);
     setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
-    if (savedPaths.length > 0) hasInitializedExpandedRef.current = sessionId;
+    if (savedPaths.length > 0) hasInitializedExpandedRef.current = effectiveResetKey;
     void loadTree({ resetRetry: true });
     return () => {
       clearRetryTimer();
     };
-  }, [clearRetryTimer, loadTree, sessionId]);
+  }, [clearRetryTimer, loadTree, effectiveResetKey]);
 
   useEffect(() => {
     if (!agentctlStatus.isReady || loadState === "loaded") return;
@@ -329,17 +341,17 @@ export function useFileBrowserTree(sessionId: string) {
   }, [agentctlStatus.isReady, loadState, loadTree]);
 
   useEffect(() => {
-    if (!tree || isLoadingTree || hasInitializedExpandedRef.current === sessionId) return;
-    hasInitializedExpandedRef.current = sessionId;
+    if (!tree || isLoadingTree || hasInitializedExpandedRef.current === effectiveResetKey) return;
+    hasInitializedExpandedRef.current = effectiveResetKey;
     setExpandedPaths(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tree?.children?.length, isLoadingTree, sessionId]);
+  }, [tree?.children?.length, isLoadingTree, effectiveResetKey]);
 
   useEffect(() => {
-    if (expandedPaths.size > 0 || hasInitializedExpandedRef.current === sessionId) {
-      setFilesPanelExpandedPaths(sessionId, Array.from(expandedPaths));
+    if (expandedPaths.size > 0 || hasInitializedExpandedRef.current === effectiveResetKey) {
+      setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
     }
-  }, [expandedPaths, sessionId]);
+  }, [expandedPaths, effectiveResetKey]);
 
   useEffect(() => {
     const client = getWebSocketClient();
@@ -347,9 +359,16 @@ export function useFileBrowserTree(sessionId: string) {
     return client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
       if (!changes || changes.length === 0) return;
-      applyFileChanges({ client, sessionId, expandedPaths, changes, setTree, setLoadState });
+      applyFileChanges({
+        client,
+        sessionId: sessionIdRef.current,
+        expandedPaths,
+        changes,
+        setTree,
+        setLoadState,
+      });
     });
-  }, [sessionId, expandedPaths]);
+  }, [expandedPaths]);
 
   const collapseAll = useCallback(() => {
     setExpandedPaths(new Set());

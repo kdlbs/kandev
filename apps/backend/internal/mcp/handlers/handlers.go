@@ -12,9 +12,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -53,6 +55,11 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
+// SessionLauncher provides session launch capability for auto-starting tasks.
+type SessionLauncher interface {
+	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	taskSvc          *service.Service
@@ -63,6 +70,7 @@ type Handlers struct {
 	taskRepo         TaskRepository
 	eventBus         EventBus
 	planService      *service.PlanService
+	sessionLauncher  SessionLauncher
 	logger           *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
@@ -81,6 +89,7 @@ func NewHandlers(
 	taskRepo TaskRepository,
 	eventBus EventBus,
 	planService *service.PlanService,
+	sessionLauncher SessionLauncher,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
@@ -92,6 +101,7 @@ func NewHandlers(
 		taskRepo:         taskRepo,
 		eventBus:         eventBus,
 		planService:      planService,
+		sessionLauncher:  sessionLauncher,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }
@@ -275,33 +285,51 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		})
 }
 
-// handleCreateTask creates a new task.
+// handleCreateTask creates a new task and auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
+		ParentID       string `json:"parent_id"`
 		WorkspaceID    string `json:"workspace_id"`
 		WorkflowID     string `json:"workflow_id"`
 		WorkflowStepID string `json:"workflow_step_id"`
 		Title          string `json:"title"`
 		Description    string `json:"description"`
+		AgentProfileID string `json:"agent_profile_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.Title == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+
+	// Inherit workspace/workflow from parent when not explicitly provided.
+	// WorkflowStepID is intentionally NOT inherited — the service layer resolves
+	// the start step so subtasks always begin at the first workflow step, not the
+	// parent's current (potentially advanced) step.
+	if req.ParentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid parent_id: "+err.Error(), nil)
+		}
+		if req.WorkspaceID == "" {
+			req.WorkspaceID = parent.WorkspaceID
+		}
+		if req.WorkflowID == "" {
+			req.WorkflowID = parent.WorkflowID
+		}
+	}
+
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	if req.WorkflowStepID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
-	}
-	if req.Title == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
-	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+		ParentID:       req.ParentID,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -313,7 +341,58 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	// Auto-start agent session asynchronously
+	h.autoStartTask(task, req.AgentProfileID)
+
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+// autoStartTask launches an agent session for a newly created task in the background.
+// It resolves the agent profile: explicit > parent's session > workspace default.
+func (h *Handlers) autoStartTask(task *models.Task, agentProfileID string) {
+	if h.sessionLauncher == nil {
+		return
+	}
+
+	// Resolve agent profile: explicit > parent's primary session > workspace default
+	if agentProfileID == "" && task.ParentID != "" {
+		parentSession, err := h.taskSvc.GetPrimarySession(context.Background(), task.ParentID)
+		if err == nil && parentSession != nil && parentSession.AgentProfileID != "" {
+			agentProfileID = parentSession.AgentProfileID
+		}
+	}
+	if agentProfileID == "" {
+		workspace, err := h.taskSvc.GetWorkspace(context.Background(), task.WorkspaceID)
+		if err == nil && workspace.DefaultAgentProfileID != nil {
+			agentProfileID = *workspace.DefaultAgentProfileID
+		}
+	}
+
+	if agentProfileID == "" {
+		h.logger.Warn("no agent profile available, skipping auto-start",
+			zap.String("task_id", task.ID))
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		defer cancel()
+
+		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+			TaskID:         task.ID,
+			Intent:         orchestrator.IntentStart,
+			AgentProfileID: agentProfileID,
+			Prompt:         task.Description,
+		})
+		if err != nil {
+			h.logger.Error("failed to auto-start task",
+				zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
+		h.logger.Info("auto-started agent for MCP-created task",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", resp.SessionID))
+	}()
 }
 
 // handleUpdateTask updates an existing task.

@@ -8,9 +8,9 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
+
 import { listTasksByWorkspace } from "@/lib/api";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
@@ -316,7 +316,6 @@ function useCommandPanelHandlers(
 ) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
   const router = useRouter();
-  const { toast } = useToast();
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItemType[]>();
@@ -362,10 +361,9 @@ function useCommandPanelHandlers(
   const handleTaskSelect = useCallback(
     (task: Task) => {
       setOpen(false);
-      if (task.primary_session_id) router.push(linkToSession(task.primary_session_id));
-      else toast({ title: "This task has no active session", variant: "default" });
+      router.push(linkToTask(task.id));
     },
-    [setOpen, router, toast],
+    [setOpen, router],
   );
 
   const handleFileSelect = useCallback(

@@ -121,11 +121,16 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
       ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true
       : false,
   );
-  const sessionWorkflowStepId = useAppStore((state) =>
-    effectiveSessionId
-      ? (state.taskSessions.items[effectiveSessionId]?.workflow_step_id ?? null)
-      : null,
-  );
+  // Use the task-level workflow step for the top-bar stepper. Individual sessions
+  // may lag behind (e.g. a completed session stays at its old step), but the
+  // task's step reflects the current workflow position and stays stable across
+  // tab switches within the same task.
+  const sessionWorkflowStepId = useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return null;
+    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
+    return (task?.workflowStepId as string) ?? null;
+  });
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
   );

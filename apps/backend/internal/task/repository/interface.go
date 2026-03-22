@@ -106,7 +106,6 @@ type SessionRepository interface {
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
 	GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
-	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 }
@@ -176,6 +175,16 @@ type EnvironmentRepository interface {
 	UpdateEnvironment(ctx context.Context, environment *models.Environment) error
 	DeleteEnvironment(ctx context.Context, id string) error
 	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
+}
+
+// TaskEnvironmentRepository handles per-task execution environment instances.
+type TaskEnvironmentRepository interface {
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	DeleteTaskEnvironment(ctx context.Context, id string) error
+	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error
 }
 
 // ReviewRepository handles session file review records.

@@ -63,6 +63,7 @@ export type ExecutePromptRequest = {
   task_title?: string;
   task_description?: string;
   user_prompt?: string;
+  conversation_history?: string;
 };
 
 export type ExecutePromptResponse = {

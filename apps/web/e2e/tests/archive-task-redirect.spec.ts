@@ -52,7 +52,7 @@ test.describe("Archive task redirect", () => {
 
     // Click task A to open its session detail page
     await cardA.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -85,14 +85,14 @@ test.describe("Archive task redirect", () => {
       timeout: 15_000,
     });
 
-    // The URL should have changed to Task B's session (still a /s/ route, but different ID)
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 10_000 });
+    // The URL should have changed to Task B's session (still a /t/ route, but different ID)
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 10_000 });
     expect(testPage.url()).not.toBe(urlBeforeArchive);
 
     // --- Archive the last remaining task (B) — should redirect home ---
     await session.archiveTaskInSidebar("Archive Task B");
 
     // Should redirect to the home page
-    await expect(testPage).not.toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).not.toHaveURL(/\/t\//, { timeout: 15_000 });
   });
 });

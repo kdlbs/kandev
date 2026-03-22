@@ -24,16 +24,22 @@ const EMPTY_SHELLS: UserShellInfo[] = [];
 export function useUserShells(sessionId: string | null): UseUserShellsReturn {
   const store = useAppStoreApi();
 
-  // Read from store
-  const shells = useAppStore((state) =>
-    sessionId ? (state.userShells.bySessionId[sessionId] ?? EMPTY_SHELLS) : EMPTY_SHELLS,
-  );
-  const isLoading = useAppStore((state) =>
-    sessionId ? (state.userShells.loading[sessionId] ?? false) : false,
-  );
-  const isLoaded = useAppStore((state) =>
-    sessionId ? (state.userShells.loaded[sessionId] ?? false) : false,
-  );
+  // Read from store — resolve environmentId for shared workspace state
+  const shells = useAppStore((state) => {
+    if (!sessionId) return EMPTY_SHELLS;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.userShells.byEnvironmentId[envKey] ?? EMPTY_SHELLS;
+  });
+  const isLoading = useAppStore((state) => {
+    if (!sessionId) return false;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.userShells.loading[envKey] ?? false;
+  });
+  const isLoaded = useAppStore((state) => {
+    if (!sessionId) return false;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.userShells.loaded[envKey] ?? false;
+  });
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Guard refs to prevent duplicate fetches

@@ -142,7 +142,6 @@ export const Combobox = memo(function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        portal={false}
         className={cn(
           "w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0 max-h-[var(--radix-popover-content-available-height)]",
           className,

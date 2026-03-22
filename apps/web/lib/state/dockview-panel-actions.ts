@@ -118,6 +118,29 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+/** Add a session tab to the center group. */
+export function addSessionPanel(
+  api: DockviewApi,
+  centerGroupId: string,
+  sessionId: string,
+  title: string,
+): void {
+  focusOrAddPanel(api, {
+    id: `session:${sessionId}`,
+    component: "chat",
+    tabComponent: "sessionTab",
+    title,
+    params: { sessionId },
+    position: { referenceGroup: centerGroupId },
+  });
+}
+
+/** Remove a session tab panel if it exists. */
+export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
+  const panel = api.getPanel(`session:${sessionId}`);
+  if (panel) api.removePanel(panel);
+}
+
 export function buildExtraPanelActions(get: StoreGet) {
   return {
     addVscodePanel: () => {

@@ -3,7 +3,13 @@
 import { useMemo, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { IconDots, IconArrowsMaximize, IconLoader, IconAlertCircle } from "@tabler/icons-react";
+import {
+  IconDots,
+  IconArrowsMaximize,
+  IconLoader,
+  IconAlertCircle,
+  IconSubtask,
+} from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -52,6 +58,7 @@ export interface Task {
   primaryExecutorType?: string | null;
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
+  parentTaskId?: string | null;
   updatedAt?: string;
 }
 
@@ -113,32 +120,53 @@ function KanbanCardBody({
           {task.description}
         </p>
       )}
-      {((task.sessionCount && task.sessionCount > 1) ||
-        task.reviewStatus === "changes_requested" ||
-        task.reviewStatus === "pending") && (
-        <div className="flex items-center justify-end gap-2 mt-1">
-          {task.sessionCount && task.sessionCount > 1 && (
-            <Badge variant="secondary" className="text-xs h-5">
-              {task.sessionCount} sessions
-            </Badge>
-          )}
-          {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
-            <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
-              <IconAlertCircle className="h-3.5 w-3.5" />
-              <span className="text-[10px] font-medium">Approval Required</span>
-            </div>
-          )}
-          {task.reviewStatus === "changes_requested" && (
-            <Badge
-              variant="outline"
-              className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
-            >
-              Changes Requested
-            </Badge>
-          )}
+      <KanbanCardBadges task={task} />
+    </>
+  );
+}
+
+function KanbanCardBadges({ task }: { task: Task }) {
+  const parentTitle = useAppStore((s) => {
+    if (!task.parentTaskId) return null;
+    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
+  });
+
+  const showRow =
+    (task.sessionCount && task.sessionCount > 1) ||
+    task.reviewStatus === "changes_requested" ||
+    task.reviewStatus === "pending" ||
+    task.parentTaskId;
+
+  if (!showRow) return null;
+
+  return (
+    <div className="flex items-center justify-end gap-2 mt-1">
+      {task.parentTaskId && (
+        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px]">
+          <IconSubtask className="h-3 w-3 shrink-0" />
+          <span className="truncate">{parentTitle ?? "Subtask"}</span>
+        </Badge>
+      )}
+      {task.sessionCount && task.sessionCount > 1 && (
+        <Badge variant="secondary" className="text-xs h-5">
+          {task.sessionCount} sessions
+        </Badge>
+      )}
+      {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
+        <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
+          <IconAlertCircle className="h-3.5 w-3.5" />
+          <span className="text-[10px] font-medium">Approval Required</span>
         </div>
       )}
-    </>
+      {task.reviewStatus === "changes_requested" && (
+        <Badge
+          variant="outline"
+          className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
+        >
+          Changes Requested
+        </Badge>
+      )}
+    </div>
   );
 }
 

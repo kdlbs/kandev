@@ -128,6 +128,7 @@ type TaskDTO struct {
 	PrimaryWorkingDirectory *string                `json:"primary_working_directory,omitempty"`
 	PrimarySessionState     *string                `json:"primary_session_state,omitempty"`
 	IsRemoteExecutor        bool                   `json:"is_remote_executor,omitempty"`
+	ParentID                string                 `json:"parent_id,omitempty"`
 	ArchivedAt              *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt               time.Time              `json:"created_at"`
 	UpdatedAt               time.Time              `json:"updated_at"`
@@ -170,10 +171,9 @@ type TaskSessionDTO struct {
 	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time               `json:"updated_at"`
 	// Workflow fields
-	IsPrimary      bool    `json:"is_primary"`
-	IsPassthrough  bool    `json:"is_passthrough"`
-	WorkflowStepID *string `json:"workflow_step_id,omitempty"`
-	ReviewStatus   *string `json:"review_status,omitempty"`
+	IsPrimary     bool    `json:"is_primary"`
+	IsPassthrough bool    `json:"is_passthrough"`
+	ReviewStatus  *string `json:"review_status,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -200,7 +200,6 @@ type TaskSessionSummaryDTO struct {
 	UpdatedAt        time.Time               `json:"updated_at"`
 	IsPrimary        bool                    `json:"is_primary"`
 	IsPassthrough    bool                    `json:"is_passthrough"`
-	WorkflowStepID   *string                 `json:"workflow_step_id,omitempty"`
 	ReviewStatus     *string                 `json:"review_status,omitempty"`
 }
 
@@ -510,6 +509,7 @@ func FromTaskWithSessionInfo(
 		PrimaryWorkingDirectory: primaryWorkingDirectory,
 		PrimarySessionState:     primarySessionState,
 		IsRemoteExecutor:        primaryExecutorType != nil && models.IsRemoteExecutorType(models.ExecutorType(*primaryExecutorType)),
+		ParentID:                task.ParentID,
 		ArchivedAt:              task.ArchivedAt,
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.UpdatedAt,
@@ -538,7 +538,6 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		UpdatedAt:        session.UpdatedAt,
 		IsPrimary:        session.IsPrimary,
 		IsPassthrough:    session.IsPassthrough,
-		WorkflowStepID:   session.WorkflowStepID,
 		ReviewStatus:     session.ReviewStatus,
 	}
 	if len(session.Worktrees) > 0 {
@@ -572,10 +571,9 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:      session.IsPrimary,
-		IsPassthrough:  session.IsPassthrough,
-		WorkflowStepID: session.WorkflowStepID,
-		ReviewStatus:   session.ReviewStatus,
+		IsPrimary:     session.IsPrimary,
+		IsPassthrough: session.IsPassthrough,
+		ReviewStatus:  session.ReviewStatus,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

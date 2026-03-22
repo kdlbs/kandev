@@ -7,7 +7,7 @@ import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
 import { createTask } from "@/lib/api";
 
@@ -78,7 +78,7 @@ export function activatePlanMode({
   setActiveDocument(sessionId, { type: "plan", taskId });
   setPlanMode(sessionId, true);
   useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
-  router.push(linkToSession(sessionId, INTENT_PLAN));
+  router.push(linkToTask(taskId, INTENT_PLAN));
 }
 
 export type BuildCreatePayloadArgs = {
@@ -92,6 +92,7 @@ export type BuildCreatePayloadArgs = {
   executorProfileId: string;
   withAgent: boolean;
   planMode?: boolean;
+  parentId?: string;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -108,6 +109,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     executor_id: args.executorId || undefined,
     executor_profile_id: args.executorProfileId || undefined,
     plan_mode: args.planMode || undefined,
+    parent_id: args.parentId || undefined,
   };
 }
 

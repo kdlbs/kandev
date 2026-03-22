@@ -14,7 +14,8 @@ type GitStatusMap = Record<
 export function getSessionInfoForTask(
   taskId: string,
   sessionsByTaskId: Record<string, TaskSession[]>,
-  gitStatusBySessionId: GitStatusMap,
+  gitStatusByEnvId: GitStatusMap,
+  environmentIdBySessionId?: Record<string, string>,
 ): SessionInfo {
   const sessions = sessionsByTaskId[taskId] ?? [];
   if (sessions.length === 0) {
@@ -27,7 +28,8 @@ export function getSessionInfoForTask(
   }
   const updatedAt = latestSession.updated_at;
   const sessionState = latestSession.state as TaskSessionState | undefined;
-  const gitStatus = gitStatusBySessionId[latestSession.id];
+  const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
+  const gitStatus = gitStatusByEnvId[envKey];
   if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
   let additions = 0;
   let deletions = 0;

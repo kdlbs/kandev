@@ -28,7 +28,7 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		_ = repo.CreateTaskSession(ctx, session)
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if got {
 			t.Error("expected false when session has no workflow step")
 		}
@@ -46,8 +46,9 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if got {
 			t.Error("expected false when step has no on_turn_complete actions")
 		}
@@ -73,16 +74,17 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if !got {
 			t.Error("expected true when move_to_next transitions")
 		}
 
-		// Verify the session was updated to step2
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", updated.WorkflowStepID)
+		// Verify the task was updated to step2
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step2" {
+			t.Errorf("expected task workflow step to be 'step2', got %q", updatedTask.WorkflowStepID)
 		}
 	})
 
@@ -106,15 +108,16 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if !got {
 			t.Error("expected true when move_to_step transitions")
 		}
 
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step3" {
-			t.Errorf("expected session workflow step to be 'step3', got %v", updated.WorkflowStepID)
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step3" {
+			t.Errorf("expected task workflow step to be 'step3', got %q", updatedTask.WorkflowStepID)
 		}
 	})
 
@@ -134,8 +137,9 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if got {
 			t.Error("expected false when at last step with move_to_next (no next step)")
 		}
@@ -163,16 +167,17 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if got {
 			t.Error("expected false when only action requires_approval")
 		}
 
-		// Verify session step was NOT changed
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-			t.Error("expected session to stay on step1")
+		// Verify task step was NOT changed
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step1" {
+			t.Error("expected task to stay on step1")
 		}
 	})
 
@@ -202,8 +207,9 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnComplete(ctx, "t1", session)
+		got := svc.processOnTurnComplete(ctx, task, session)
 		if !got {
 			t.Error("expected true when transition occurs alongside disable_plan_mode")
 		}
@@ -228,8 +234,9 @@ func TestProcessOnTurnStart(t *testing.T) {
 		// Step getter returns (nil, nil) for unknown steps — must not panic.
 		stepGetter := newMockStepGetter()
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnStart(ctx, "t1", session)
+		got := svc.processOnTurnStart(ctx, task, session)
 		if got {
 			t.Error("expected false when step is nil")
 		}
@@ -246,8 +253,9 @@ func TestProcessOnTurnStart(t *testing.T) {
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnStart(ctx, "t1", session)
+		got := svc.processOnTurnStart(ctx, task, session)
 		if got {
 			t.Error("expected false when step has no on_turn_start actions")
 		}
@@ -273,15 +281,16 @@ func TestProcessOnTurnStart(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
+		task, _ := repo.GetTask(ctx, "t1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		got := svc.processOnTurnStart(ctx, "t1", session)
+		got := svc.processOnTurnStart(ctx, task, session)
 		if !got {
 			t.Error("expected true when move_to_next transitions")
 		}
 
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", updated.WorkflowStepID)
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step2" {
+			t.Errorf("expected task workflow step to be 'step2', got %q", updatedTask.WorkflowStepID)
 		}
 	})
 }

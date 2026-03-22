@@ -14,10 +14,11 @@ import { MobileFab } from "./kanban/mobile-fab";
 import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -99,8 +100,8 @@ function useMoveErrorState(router: ReturnType<typeof useRouter>) {
   }, []);
 
   const handleGoToTask = useCallback(() => {
-    if (moveError?.sessionId) {
-      router.push(linkToSession(moveError.sessionId));
+    if (moveError?.taskId) {
+      router.push(linkToTask(moveError.taskId));
     }
     setMoveError(null);
   }, [moveError, router]);
@@ -134,7 +135,7 @@ function useKanbanBoardStore() {
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
-  onOpenTask?: (task: Task, sessionId: string) => void;
+  onOpenTask?: (task: Task) => void;
 }
 
 function useKanbanBoardHooks(
@@ -212,13 +213,13 @@ function useKanbanBoardSetup(
   useAllWorkflowSnapshots(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
+  const [newSessionTaskId, setNewSessionTaskId] = useState<string | null>(null);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
     enablePreviewOnClick: hooks.enablePreviewOnClick,
     isMobile,
     onPreviewTask,
     onOpenTask,
-    setEditingTask: hooks.setEditingTask,
-    setIsDialogOpen: hooks.setIsDialogOpen,
+    onNoSession: useCallback((task: Task) => setNewSessionTaskId(task.id), []),
     setTaskSessionAvailability: hooks.setTaskSessionAvailability,
   });
 
@@ -261,6 +262,8 @@ function useKanbanBoardSetup(
     handleCardClick: mobileCardClick,
     mobileSheetTask,
     setMobileSheetTask,
+    newSessionTaskId,
+    setNewSessionTaskId,
   };
 }
 
@@ -302,6 +305,15 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
       />
+      {s.newSessionTaskId && (
+        <NewSessionDialog
+          open={!!s.newSessionTaskId}
+          onOpenChange={(open) => {
+            if (!open) s.setNewSessionTaskId(null);
+          }}
+          taskId={s.newSessionTaskId}
+        />
+      )}
       <SwimlaneContainer
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
@@ -434,7 +446,7 @@ function ApprovalWarningDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Dismiss</AlertDialogCancel>
-          {moveError?.sessionId && (
+          {moveError?.taskId && (
             <AlertDialogAction onClick={handleGoToTask}>Go to Task</AlertDialogAction>
           )}
         </AlertDialogFooter>

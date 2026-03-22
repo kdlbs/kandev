@@ -29,7 +29,7 @@ async function seedTaskWithSession(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -112,7 +112,7 @@ test.describe("Session details UX", () => {
       },
     );
     if (!taskB.session_id) throw new Error("Task B creation did not return session_id");
-    await testPage.goto(`/s/${taskB.session_id}`);
+    await testPage.goto(`/t/${taskB.id}`);
 
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();

@@ -127,16 +127,11 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 		t.Errorf("expected task WorkflowStepID %q, got %q", "step2", task.WorkflowStepID)
 	}
 
-	// Verify session's workflow step is updated
+	// Verify review status is cleared on session
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("failed to get session: %v", err)
 	}
-	if session.WorkflowStepID == nil || *session.WorkflowStepID != "step2" {
-		t.Errorf("expected session WorkflowStepID %q, got %v", "step2", session.WorkflowStepID)
-	}
-
-	// Verify review status is cleared
 	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
 		t.Errorf("expected review status to be cleared, got %q", *session.ReviewStatus)
 	}

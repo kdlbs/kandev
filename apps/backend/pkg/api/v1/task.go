@@ -74,7 +74,8 @@ type Task struct {
 	StartedAt    *time.Time             `json:"started_at,omitempty"`
 	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral  bool                   `json:"is_ephemeral"` // Ephemeral tasks are not shown in kanban, used for quick chat
+	IsEphemeral  bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID     string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
 }
 
 // TaskRepositoryInput for creating/updating task repositories

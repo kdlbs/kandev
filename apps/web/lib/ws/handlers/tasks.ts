@@ -29,6 +29,7 @@ function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
     primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),
     primaryExecutorName: withFallback(payload.primary_executor_name, existing?.primaryExecutorName),
     isRemoteExecutor: payload.is_remote_executor ?? existing?.isRemoteExecutor ?? false,
+    parentTaskId: withFallback(payload.parent_id, existing?.parentTaskId),
     updatedAt: withFallback(payload.updated_at, existing?.updatedAt),
   };
 }

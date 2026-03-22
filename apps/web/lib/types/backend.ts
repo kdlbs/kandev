@@ -231,7 +231,8 @@ export type TaskSessionStateChangedPayload = {
   error_message?: string;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
-  workflow_step_id?: string;
+  // Task environment (for session→environment mapping)
+  task_environment_id?: string;
 };
 
 export type TaskSessionWaitingForInputPayload = {

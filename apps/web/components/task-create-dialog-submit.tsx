@@ -8,7 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import {
   activatePlanMode,
   buildCreateTaskPayload,
@@ -52,6 +52,7 @@ export type SubmitHandlersDeps = {
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
+  parentTaskId?: string;
   descriptionInputRef: React.RefObject<{ getValue: () => string } | null>;
   setIsCreatingSession: (v: boolean) => void;
   setIsCreatingTask: (v: boolean) => void;
@@ -90,6 +91,7 @@ export function useTaskSubmitHandlers({
   onCreateSession,
   onOpenChange,
   taskId,
+  parentTaskId,
   descriptionInputRef,
   setIsCreatingSession,
   setIsCreatingTask,
@@ -180,13 +182,10 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
       });
-      const response = await launchSession(request);
+      await launchSession(request);
 
-      const newSessionId = response?.session_id;
       onOpenChange(false);
-      if (newSessionId) {
-        router.push(linkToSession(newSessionId));
-      }
+      router.push(linkToTask(taskId));
     } catch (error) {
       toast({
         title: "Failed to create session",
@@ -310,6 +309,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: true,
           planMode,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -323,8 +323,8 @@ export function useTaskSubmitHandlers({
           setPlanMode,
           router,
         });
-      } else if (isPassthroughProfile && newSessionId) {
-        router.push(linkToSession(newSessionId));
+      } else if (isPassthroughProfile) {
+        router.push(linkToTask(taskResponse.id));
       }
     },
     [
@@ -334,6 +334,7 @@ export function useTaskSubmitHandlers({
       executorId,
       executorProfileId,
       isPassthroughProfile,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       setActiveDocument,
@@ -357,6 +358,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: false,
           planMode: true,
+          parentId: parentTaskId,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -378,6 +380,7 @@ export function useTaskSubmitHandlers({
       agentProfileId,
       executorId,
       executorProfileId,
+      parentTaskId,
       onSuccess,
       onOpenChange,
       setActiveDocument,

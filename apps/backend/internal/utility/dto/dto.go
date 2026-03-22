@@ -120,15 +120,16 @@ type ExecutePromptRequest struct {
 	SessionID string `json:"session_id"`
 
 	// Context variables for template resolution.
-	GitDiff         string `json:"git_diff,omitempty"`
-	CommitLog       string `json:"commit_log,omitempty"`
-	ChangedFiles    string `json:"changed_files,omitempty"`
-	DiffSummary     string `json:"diff_summary,omitempty"`
-	BranchName      string `json:"branch_name,omitempty"`
-	BaseBranch      string `json:"base_branch,omitempty"`
-	TaskTitle       string `json:"task_title,omitempty"`
-	TaskDescription string `json:"task_description,omitempty"`
-	UserPrompt      string `json:"user_prompt,omitempty"`
+	GitDiff             string `json:"git_diff,omitempty"`
+	CommitLog           string `json:"commit_log,omitempty"`
+	ChangedFiles        string `json:"changed_files,omitempty"`
+	DiffSummary         string `json:"diff_summary,omitempty"`
+	BranchName          string `json:"branch_name,omitempty"`
+	BaseBranch          string `json:"base_branch,omitempty"`
+	TaskTitle           string `json:"task_title,omitempty"`
+	TaskDescription     string `json:"task_description,omitempty"`
+	UserPrompt          string `json:"user_prompt,omitempty"`
+	ConversationHistory string `json:"conversation_history,omitempty"`
 }
 
 // ExecutePromptResponse is the response from executing a utility prompt.

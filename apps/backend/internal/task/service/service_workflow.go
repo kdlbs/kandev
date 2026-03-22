@@ -39,12 +39,18 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 	}
 	result.Session = session
 
+	// Get the task to find its current workflow step
+	task, err := s.tasks.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
 	// Get the current workflow step to check for transition targets
-	if session.WorkflowStepID != nil && s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, *session.WorkflowStepID)
+	if task.WorkflowStepID != "" && s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for approval transition",
-				zap.String("workflow_step_id", *session.WorkflowStepID),
+				zap.String("workflow_step_id", task.WorkflowStepID),
 				zap.Error(err))
 		} else {
 			s.applyApprovalStepTransition(ctx, sessionID, step, result)
@@ -66,15 +72,7 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 		return
 	}
 
-	if err := s.sessions.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
-		s.logger.Error("failed to move session to next step after approval",
-			zap.String("session_id", sessionID),
-			zap.String("step_id", newStepID),
-			zap.Error(err))
-		return
-	}
-
-	// Also move the task to the new step
+	// Move the task to the new step
 	if task, err := s.tasks.GetTask(ctx, result.Session.TaskID); err != nil {
 		s.logger.Error("failed to get task for approval transition",
 			zap.String("task_id", result.Session.TaskID),
@@ -243,7 +241,11 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 		return nil, err
 	}
 
-	sessionID := s.syncActiveSessionWorkflowStep(ctx, id, task.WorkflowStepID)
+	// Resolve active session for the task.moved event (needed for on_exit/on_enter).
+	sessionID := ""
+	if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+		sessionID = activeSession.ID
+	}
 
 	// Publish state_changed event if state changed, otherwise just updated
 	if oldState != task.State {
@@ -297,33 +299,25 @@ func (s *Service) checkMoveTaskApproval(ctx context.Context, taskID, currentStep
 	return nil
 }
 
-// syncActiveSessionWorkflowStep updates the active session's workflow_step_id to match the
-// task's new step when they differ. Failures are logged but do not abort the move.
-// Returns the active session ID (empty if none exists).
-func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, workflowStepID string) string {
-	if workflowStepID == "" {
-		return ""
+// resolvePrimaryOrActiveSession returns the primary session if it is in an active
+// state, otherwise falls back to the most recently started active session.
+func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID string) *models.TaskSession {
+	primary, _ := s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
+	if primary != nil && isSessionActive(primary.State) {
+		return primary
 	}
-	activeSession, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil || activeSession == nil {
-		return ""
+	active, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err != nil || active == nil {
+		return nil
 	}
-	if activeSession.WorkflowStepID != nil && *activeSession.WorkflowStepID == workflowStepID {
-		return activeSession.ID
-	}
-	if err := s.sessions.UpdateSessionWorkflowStep(ctx, activeSession.ID, workflowStepID); err != nil {
-		s.logger.Warn("failed to update session workflow step after task move",
-			zap.String("task_id", taskID),
-			zap.String("session_id", activeSession.ID),
-			zap.String("workflow_step_id", workflowStepID),
-			zap.Error(err))
-		return activeSession.ID
-	}
-	s.logger.Info("updated session workflow step to match moved task",
-		zap.String("task_id", taskID),
-		zap.String("session_id", activeSession.ID),
-		zap.String("workflow_step_id", workflowStepID))
-	return activeSession.ID
+	return active
+}
+
+func isSessionActive(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCreated ||
+		state == models.TaskSessionStateStarting ||
+		state == models.TaskSessionStateRunning ||
+		state == models.TaskSessionStateWaitingForInput
 }
 
 // CountTasksByWorkflow returns the number of tasks in a workflow
@@ -372,19 +366,6 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 				zap.String("task_id", task.ID),
 				zap.Error(err))
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
-		}
-
-		// Update active session's workflow_step_id
-		activeSession, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, task.ID)
-		if err == nil && activeSession != nil {
-			if activeSession.WorkflowStepID == nil || *activeSession.WorkflowStepID != targetStepID {
-				if err := s.sessions.UpdateSessionWorkflowStep(ctx, activeSession.ID, targetStepID); err != nil {
-					s.logger.Warn("failed to update session workflow step during bulk move",
-						zap.String("task_id", task.ID),
-						zap.String("session_id", activeSession.ID),
-						zap.Error(err))
-				}
-			}
 		}
 
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)

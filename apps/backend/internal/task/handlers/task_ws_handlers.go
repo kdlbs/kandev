@@ -90,6 +90,7 @@ type wsCreateTaskRequest struct {
 	ExecutorID        string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
 	PlanMode          bool                      `json:"plan_mode,omitempty"`
+	ParentID          string                    `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -154,6 +155,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 		PlanMode:       req.PlanMode && !req.StartAgent,
+		ParentID:       req.ParentID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

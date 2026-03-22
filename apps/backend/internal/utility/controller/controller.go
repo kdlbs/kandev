@@ -95,16 +95,17 @@ func (c *Controller) GetTemplateVariables(ctx context.Context) *dto.TemplateVari
 // If defaults is provided and the utility agent has empty agent_id/model, the defaults are used.
 func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePromptRequest, defaults *service.DefaultUtilitySettings) (*service.PromptRequest, error) {
 	tmplCtx := &template.Context{
-		GitDiff:         req.GitDiff,
-		CommitLog:       req.CommitLog,
-		ChangedFiles:    req.ChangedFiles,
-		DiffSummary:     req.DiffSummary,
-		BranchName:      req.BranchName,
-		BaseBranch:      req.BaseBranch,
-		TaskTitle:       req.TaskTitle,
-		TaskDescription: req.TaskDescription,
-		SessionID:       req.SessionID,
-		UserPrompt:      req.UserPrompt,
+		GitDiff:             req.GitDiff,
+		CommitLog:           req.CommitLog,
+		ChangedFiles:        req.ChangedFiles,
+		DiffSummary:         req.DiffSummary,
+		BranchName:          req.BranchName,
+		BaseBranch:          req.BaseBranch,
+		TaskTitle:           req.TaskTitle,
+		TaskDescription:     req.TaskDescription,
+		SessionID:           req.SessionID,
+		UserPrompt:          req.UserPrompt,
+		ConversationHistory: req.ConversationHistory,
 	}
 	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults)
 }

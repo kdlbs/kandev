@@ -1,12 +1,12 @@
-export function linkToSession(sessionId: string, layout?: string): string {
-  const base = `/s/${sessionId}`;
+export function linkToTask(taskId: string, layout?: string): string {
+  const base = `/t/${taskId}`;
   return layout ? `${base}?layout=${encodeURIComponent(layout)}` : base;
 }
 
-/** Replace the browser URL to reflect the active session (no navigation). */
-export function replaceSessionUrl(sessionId: string): void {
+/** Replace the browser URL to reflect the active task (no navigation). */
+export function replaceTaskUrl(taskId: string): void {
   if (typeof window === "undefined") return;
-  window.history.replaceState({}, "", linkToSession(sessionId));
+  window.history.replaceState({}, "", linkToTask(taskId));
 }
 
 export function linkToTasks(workspaceId?: string): string {

@@ -113,6 +113,15 @@ type CreateRequest struct {
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string
 
+	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
+	// When set together with RepoName, the worktree is placed at
+	// ~/.kandev/tasks/{TaskDirName}/{RepoName}/ instead of ~/.kandev/worktrees/.
+	TaskDirName string
+
+	// RepoName is the repository name used as subdirectory inside the task directory.
+	// Only used when TaskDirName is also set.
+	RepoName string
+
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
 }

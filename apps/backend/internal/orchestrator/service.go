@@ -108,7 +108,6 @@ type repoStore interface {
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
-	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
@@ -116,6 +115,8 @@ type repoStore interface {
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+	// Session history + plan (for context handover)
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
@@ -126,7 +127,6 @@ type sessionExecutorStore interface {
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	ClearSessionExecutionID(ctx context.Context, id string) error
-	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	// Executor running state
@@ -145,6 +145,14 @@ type sessionExecutorStore interface {
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
+	// Session listing + primary/delete
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	SetSessionPrimary(ctx context.Context, sessionID string) error
+	DeleteTaskSession(ctx context.Context, id string) error
+	// Task environment
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 }
 
 // Service is the main orchestrator service

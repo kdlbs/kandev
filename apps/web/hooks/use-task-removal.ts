@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { KanbanState } from "@/lib/state/slices";
-import { linkToSession } from "@/lib/links";
+import { replaceTaskUrl } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 
@@ -91,7 +91,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       if (nextTask.primarySessionId) {
         setActiveSession(nextTask.id, nextTask.primarySessionId);
         if (useLayoutSwitch) performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
-        window.history.replaceState({}, "", linkToSession(nextTask.primarySessionId));
+        replaceTaskUrl(nextTask.id);
         return;
       }
 
@@ -100,10 +100,10 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       if (sessionId) {
         setActiveSession(nextTask.id, sessionId);
         if (useLayoutSwitch) performLayoutSwitch(oldSessionId, sessionId);
-        window.history.replaceState({}, "", linkToSession(sessionId));
       } else {
         setActiveTask(nextTask.id);
       }
+      replaceTaskUrl(nextTask.id);
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );

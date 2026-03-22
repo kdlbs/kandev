@@ -88,3 +88,4 @@ normalized-*.jsonl
 
 # Serena MCP
 .serena/*
+.gitnexus

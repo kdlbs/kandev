@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -105,6 +106,9 @@ func (r *Repository) initSchema() error {
 	if err := r.runMigrations(); err != nil {
 		return err
 	}
+	if err := r.backfillTaskEnvironments(); err != nil {
+		return err
+	}
 	if err := r.ensureWorkspaceIndexes(); err != nil {
 		return err
 	}
@@ -140,6 +144,10 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	// Add default_config_agent_profile_id column to workspaces (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
+	// Add task_environment_id column to task_sessions for shared environment reference (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	// Add parent_id column to tasks for subtask support (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -194,13 +202,14 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			position INTEGER DEFAULT 0,
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
+			parent_id TEXT DEFAULT '',
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		`INSERT INTO tasks_new SELECT
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
+			state, priority, position, metadata, is_ephemeral, parent_id, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
@@ -216,6 +225,116 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration transaction: %w", err)
+	}
+	return nil
+}
+
+type backfillRow struct {
+	taskID, executorID, executorProfileID string
+	repositoryID, containerID             string
+	startedAt                             string
+}
+
+// backfillTaskEnvironments creates TaskEnvironment records for historical tasks
+// that have sessions but no environment, and links orphaned sessions.
+// Idempotent: tasks with existing environments are skipped.
+func (r *Repository) backfillTaskEnvironments() error {
+	orphaned, err := r.findOrphanedTasks()
+	if err != nil {
+		return err
+	}
+	if len(orphaned) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("backfill: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, row := range orphaned {
+		if err := r.backfillSingleTask(tx, row); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// findOrphanedTasks returns tasks that have sessions but no task_environments row.
+func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
+	rows, err := r.db.Query(`
+		SELECT ts.task_id,
+		       COALESCE(ts.executor_id, ''),
+		       COALESCE(ts.executor_profile_id, ''),
+		       COALESCE(ts.repository_id, ''),
+		       COALESCE(ts.container_id, ''),
+		       ts.started_at
+		FROM task_sessions ts
+		LEFT JOIN task_environments te ON te.task_id = ts.task_id
+		WHERE te.id IS NULL
+		GROUP BY ts.task_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("backfill: query orphaned tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orphaned []backfillRow
+	for rows.Next() {
+		var row backfillRow
+		if err := rows.Scan(&row.taskID, &row.executorID, &row.executorProfileID,
+			&row.repositoryID, &row.containerID, &row.startedAt); err != nil {
+			return nil, fmt.Errorf("backfill: scan: %w", err)
+		}
+		orphaned = append(orphaned, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backfill: rows: %w", err)
+	}
+	return orphaned, nil
+}
+
+// backfillSingleTask creates a task_environment and links sessions for one orphaned task.
+func (r *Repository) backfillSingleTask(tx *sql.Tx, row backfillRow) error {
+	envID := uuid.New().String()
+
+	// Look up executor type from executors table, default to "local_pc"
+	var executorType string
+	if err := tx.QueryRow(`SELECT type FROM executors WHERE id = ?`, row.executorID).Scan(&executorType); err != nil {
+		executorType = "local_pc"
+	}
+
+	// Look up worktree info from task_session_worktrees (best effort)
+	var wtID, wtPath, wtBranch string
+	_ = tx.QueryRow(`
+		SELECT w.worktree_id, w.worktree_path, w.worktree_branch
+		FROM task_session_worktrees w
+		JOIN task_sessions ts ON ts.id = w.session_id
+		WHERE ts.task_id = ?
+		LIMIT 1
+	`, row.taskID).Scan(&wtID, &wtPath, &wtBranch)
+
+	// Insert task_environment with status "stopped" (historical, agentctl not running)
+	if _, err := tx.Exec(`
+		INSERT INTO task_environments (
+			id, task_id, repository_id, executor_type, executor_id,
+			executor_profile_id, agent_execution_id, control_port, status,
+			worktree_id, worktree_path, worktree_branch, workspace_path,
+			container_id, sandbox_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, '', 0, 'stopped', ?, ?, ?, '', ?, '', ?, datetime('now'))
+	`, envID, row.taskID, row.repositoryID, executorType, row.executorID,
+		row.executorProfileID, wtID, wtPath, wtBranch, row.containerID, row.startedAt); err != nil {
+		return fmt.Errorf("backfill: insert env for task %s: %w", row.taskID, err)
+	}
+
+	// Link all sessions for this task that lack task_environment_id
+	if _, err := tx.Exec(`
+		UPDATE task_sessions
+		SET task_environment_id = ?
+		WHERE task_id = ? AND (task_environment_id = '' OR task_environment_id IS NULL)
+	`, envID, row.taskID); err != nil {
+		return fmt.Errorf("backfill: link sessions for task %s: %w", row.taskID, err)
 	}
 	return nil
 }
@@ -494,7 +613,7 @@ func (r *Repository) initSessionWorktreeSchema() error {
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL,
 		is_primary INTEGER DEFAULT 0,
-		workflow_step_id TEXT DEFAULT '',
+		workflow_step_id TEXT DEFAULT '', -- deprecated: workflow step is now tracked on the task, not the session. Remove on next schema migration.
 		is_passthrough INTEGER DEFAULT 0,
 		review_status TEXT DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -503,6 +622,30 @@ func (r *Repository) initSessionWorktreeSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state);
+
+	CREATE TABLE IF NOT EXISTS task_environments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT DEFAULT '',
+		executor_type TEXT NOT NULL DEFAULT '',
+		executor_id TEXT DEFAULT '',
+		executor_profile_id TEXT DEFAULT '',
+		agent_execution_id TEXT DEFAULT '',
+		control_port INTEGER DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'creating',
+		worktree_id TEXT DEFAULT '',
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
+		workspace_path TEXT DEFAULT '',
+		container_id TEXT DEFAULT '',
+		sandbox_id TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status);
 
 	CREATE TABLE IF NOT EXISTS task_session_worktrees (
 		id TEXT PRIMARY KEY,
