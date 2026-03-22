@@ -9,7 +9,7 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
-import { replaceSessionUrl } from "@/lib/links";
+
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
@@ -74,7 +74,6 @@ function activateNewSession(
   setActiveSession(taskId, sessionId);
   const { api, centerGroupId } = useDockviewStore.getState();
   if (api) addSessionPanel(api, groupId ?? centerGroupId, sessionId, tabLabel);
-  replaceSessionUrl(sessionId);
 }
 
 function useSessionOptions(taskId: string) {

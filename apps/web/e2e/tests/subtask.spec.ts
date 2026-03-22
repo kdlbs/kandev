@@ -46,7 +46,7 @@ test.describe("Subtask support", () => {
     );
 
     // Navigate to the session page
-    testPage.goto(`/s/${task.session_id}`);
+    testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -73,7 +73,7 @@ test.describe("Subtask support", () => {
     await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
 
     // After creation, we navigate to the new subtask's session
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Verify the subtask card appears on the kanban board with "Subtask" badge
     const kanban = new KanbanPage(testPage);

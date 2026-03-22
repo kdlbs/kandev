@@ -18,7 +18,7 @@ import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -100,8 +100,8 @@ function useMoveErrorState(router: ReturnType<typeof useRouter>) {
   }, []);
 
   const handleGoToTask = useCallback(() => {
-    if (moveError?.sessionId) {
-      router.push(linkToSession(moveError.sessionId));
+    if (moveError?.taskId) {
+      router.push(linkToTask(moveError.taskId));
     }
     setMoveError(null);
   }, [moveError, router]);
@@ -135,7 +135,7 @@ function useKanbanBoardStore() {
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
-  onOpenTask?: (task: Task, sessionId: string) => void;
+  onOpenTask?: (task: Task) => void;
 }
 
 function useKanbanBoardHooks(
@@ -446,7 +446,7 @@ function ApprovalWarningDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Dismiss</AlertDialogCancel>
-          {moveError?.sessionId && (
+          {moveError?.taskId && (
             <AlertDialogAction onClick={handleGoToTask}>Go to Task</AlertDialogAction>
           )}
         </AlertDialogFooter>

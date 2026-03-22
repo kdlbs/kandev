@@ -7,7 +7,7 @@ import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
 import { createTask } from "@/lib/api";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -97,7 +97,7 @@ export function activatePlanMode({
   setActiveDocument(sessionId, { type: "plan", taskId });
   setPlanMode(sessionId, true);
   useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
-  router.push(linkToSession(sessionId, INTENT_PLAN));
+  router.push(linkToTask(taskId, INTENT_PLAN));
 }
 
 export type BuildCreatePayloadArgs = {

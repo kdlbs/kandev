@@ -119,9 +119,9 @@ test.describe("Task creation", () => {
     const card = kanban.taskCardByTitle("Start Agent Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
 
-    // Clicking the card fetches the session and navigates to /s/<sessionId>
+    // Clicking the card fetches the session and navigates to /t/<taskId>
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -188,7 +188,7 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("submit-plan-mode").click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    await expect(testPage).toHaveURL(/\/s\/.*layout=plan/, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\/.*layout=plan/, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -254,8 +254,8 @@ test.describe("Task creation", () => {
     await planModeBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // activatePlanMode navigates to /s/<id>?layout=plan which applies the plan preset
-    await expect(testPage).toHaveURL(/\/s\/.*layout=plan/, { timeout: 15_000 });
+    // activatePlanMode navigates to /t/<id>?layout=plan which applies the plan preset
+    await expect(testPage).toHaveURL(/\/t\/.*layout=plan/, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
