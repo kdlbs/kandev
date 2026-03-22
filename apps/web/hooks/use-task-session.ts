@@ -21,7 +21,9 @@ export function useTaskSession(taskId: string | null) {
 
   // Derive the session ID from store first, fall back to fetched value
   const sessionIdFromStore = useMemo(() => {
-    return sessionsFromStore?.[0]?.id ?? null;
+    if (!sessionsFromStore || sessionsFromStore.length === 0) return null;
+    const primary = sessionsFromStore.find((s) => s.is_primary);
+    return (primary ?? sessionsFromStore[0])?.id ?? null;
   }, [sessionsFromStore]);
 
   const finalSessionId = sessionIdFromStore ?? fetchedSessionId;

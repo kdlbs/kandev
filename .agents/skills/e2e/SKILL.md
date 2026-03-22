@@ -1,82 +1,141 @@
 ---
 name: e2e
-description: Write and run web E2E tests (Playwright) using TDD — locations, patterns, commands, and debugging.
+description: Write Playwright E2E tests following project patterns and best practices
 ---
 
-# E2E Tests
+# Writing Playwright E2E Tests
 
-Write E2E tests using `/tdd` (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
+## Golden Rule
 
-**Location:** `apps/web/e2e/`
+**Every test step must follow the exact flow a real user would.** Never use `apiClient` or direct API calls for actions that a user performs through the UI. The test should click, type, and navigate — not call endpoints.
+
+## When API is Acceptable
+
+- **Fixture setup** in `test-base.ts` (workspace, workflow, seed data) — this is infrastructure, not user behavior
+- **`e2eReset`** between tests — cleanup, not user action
+- Never for creating tasks, subtasks, or any entity the user would create through a dialog or button
+- Never for verifying results — assert via visible UI elements instead
+
+## Project Structure
 
 ```
 apps/web/e2e/
-├── fixtures/
-│   ├── backend.ts           # Worker-scoped backend + frontend process
-│   └── test-base.ts         # Extended fixture (apiClient, seedData, testPage)
-├── helpers/
-│   └── api-client.ts        # HTTP client for seeding data (read for available methods)
-├── pages/                   # Page objects (read for available pages and methods)
-└── tests/                   # Spec files (*.spec.ts)
+├── fixtures/test-base.ts    # Test fixtures: testPage, apiClient, seedData
+├── pages/
+│   ├── kanban-page.ts       # KanbanPage: board, createTaskButton, taskCardByTitle()
+│   └── session-page.ts      # SessionPage: chat, sidebar, idleInput(), sendMessage(), etc.
+└── tests/*.spec.ts          # Test files
 ```
 
-Each worker gets an isolated backend, frontend, database, and mock agent — no Docker, no API keys needed.
+## Steps
 
-## Run commands
+1. **Read the fixtures and page objects first** — understand `SeedData`, `KanbanPage`, `SessionPage` before writing anything.
+2. **Identify the user flow** — write down exactly what a user would click, type, and see. Every step maps to a locator interaction.
+3. **Use page objects** — never write raw `page.locator(...)` when a page object method exists.
+4. **Use `data-testid` locators** — prefer `getByTestId()` over CSS selectors or text matchers.
+5. **Use `taskCardByTitle()` for kanban cards** — pass a unique title or regex; if ambiguity is possible, filter further.
+6. **Wait for UI state, not time** — use `toBeVisible({ timeout })`, `toBeEnabled({ timeout })`, never `page.waitForTimeout()`.
+7. **Verify through the UI** — navigate to the page where the result should be visible and assert on DOM elements.
 
-```bash
-make test-e2e                                                      # all tests, headless
-make test-e2e-headed                                               # with visible browser
-make test-e2e-ui                                                   # Playwright UI mode
-cd apps && pnpm --filter @kandev/web e2e -- tests/my-test.spec.ts  # single file
-cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
-```
-
-Prerequisites: `make build-backend build-web` (Make targets do this automatically).
-
-## Writing a test
-
-1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
-2. Import fixtures from `../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow)
-3. Use `data-testid` attributes for selectors — add them to components as needed
-4. Use page objects for common interactions; create new ones for new pages
-5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
-
-Example:
+## Fixtures and Seed Data
 
 ```typescript
 import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
+import { SessionPage } from "../pages/session-page";
 
-test.describe("my feature", () => {
-  test("does something", async ({ testPage, seedData, apiClient }) => {
-    const task = await apiClient.createTask(seedData.workspaceId, "Test Task", "Description");
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto(seedData.workspaceId);
-    await expect(kanban.taskCardByTitle("Test Task")).toBeVisible();
-  });
+test("example", async ({ testPage, seedData }) => {
+  // testPage: a fresh Page with localStorage pre-seeded
+  // seedData: { workspaceId, workflowId, startStepId, repositoryId, agentProfileId, steps }
 });
 ```
 
-## Debugging failures
+## Common Patterns
 
-```bash
-E2E_DEBUG=1 make test-e2e          # see backend/frontend stderr
-make test-e2e-ui                   # step through interactively
-make test-e2e-report               # open HTML report from last run
+### Create a task via UI dialog
+
+```typescript
+const kanban = new KanbanPage(testPage);
+await kanban.goto();
+await kanban.createTaskButton.first().click();
+
+const dialog = testPage.getByTestId("create-task-dialog");
+await expect(dialog).toBeVisible();
+await testPage.getByTestId("task-title-input").fill("My Task");
+await testPage.getByTestId("task-description-input").fill("description or /e2e:simple-message");
+
+const startBtn = testPage.getByTestId("submit-start-agent");
+await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+await startBtn.click();
+await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 ```
 
-- **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
-- **"Cannot find module"** — run `cd apps && pnpm install`
-- **Port conflicts** — backends use 18080+, frontends use 13000+ (per worker)
-- **Flaky timeouts** — health checks 30s, tests 60s. Check `fixtures/backend.ts` or `playwright.config.ts`
-- Screenshots on failure, video on first retry (CI)
+### Wait for agent to complete
 
-## TDD workflow
+```typescript
+const parentCard = kanban.taskCardByTitle("My Task");
+await expect(parentCard).toBeVisible({ timeout: 10_000 });
+await parentCard.click();
+await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
 
-Follow `/tdd` when writing E2E tests:
+const session = new SessionPage(testPage);
+await session.waitForLoad();
+await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+```
 
-1. **RED** — Write the spec, run it, watch it fail (missing `data-testid`, feature not implemented, etc.)
-2. **GREEN** — Implement the feature/fix, add `data-testid` attributes, run the test until green
-3. **REFACTOR** — Extract page objects, clean up selectors, keep tests green
-4. Run `/verify` when done
+### Create subtask via UI button
+
+```typescript
+await testPage.getByTestId("new-subtask-button").click();
+await expect(testPage.getByTestId("subtask-title-input")).toBeVisible();
+await testPage.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+
+await testPage.getByRole("button", { name: "Create Subtask" }).click();
+// Navigates to the new subtask session
+await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+```
+
+### Agent creates subtask via MCP tool
+
+Use the mock agent's e2e script with `e2e:mcp:kandev:create_task`:
+
+```typescript
+const script = [
+  'e2e:thinking("Planning...")',
+  'e2e:mcp:kandev:create_task({"parent_id":"self","title":"My Subtask"})',
+  'e2e:message("Done.")',
+].join("\n");
+
+// Pass this as the task description in the create task dialog
+```
+
+`"self"` resolves to the agent's current task ID. You can also use `{task_id}` placeholder.
+
+### Verify a card on the kanban board
+
+```typescript
+await kanban.goto();
+const card = kanban.taskCardByTitle("Expected Title");
+await expect(card).toBeVisible({ timeout: 10_000 });
+// Check parent badge on subtask cards
+await expect(card.getByText("Parent Title")).toBeVisible();
+```
+
+## Rules
+
+- **No `apiClient` in test body** — only in fixtures/setup
+- **No `page.waitForTimeout()`** — use condition-based waits
+- **Unique titles** — use descriptive, unique task/subtask titles to avoid locator ambiguity
+- **One flow per test** — each test exercises one specific user journey
+- **Assert visible state** — always verify the end state through the UI (kanban cards, session page, badges)
+- **Clean up is automatic** — `e2eReset` in fixtures handles cleanup between tests
+
+## Mock Agent Script Commands
+
+| Command | Description |
+|---------|-------------|
+| `e2e:message("text")` | Agent sends a text message |
+| `e2e:thinking("text")` | Agent sends a thinking block |
+| `e2e:delay(ms)` | Wait for N milliseconds |
+| `e2e:mcp:kandev:<tool>({json})` | Call an MCP tool (e.g., `create_task`, `create_task_plan`) |
+| `/e2e:simple-message` | Shorthand: agent sends `"simple mock response"` and completes |
