@@ -53,7 +53,8 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID  string            `json:"session_id"`
+	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -385,7 +386,29 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		s.logger.Debug("reset MCP backend client for loaded session")
 	}
 
-	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
+	// If MCP server is enabled, prepend the local kandev MCP server to the list.
+	// This mirrors handleWSNewSession to ensure MCP tools are available after resume.
+	mcpServers := req.McpServers
+	if s.mcpServer != nil {
+		localKandevMcp := types.McpServer{
+			Name: "kandev",
+			Type: "sse",
+			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
+		}
+		filtered := make([]types.McpServer, 0, len(mcpServers)+1)
+		filtered = append(filtered, localKandevMcp)
+		for _, srv := range mcpServers {
+			if srv.Name != "kandev" {
+				filtered = append(filtered, srv)
+			}
+		}
+		mcpServers = filtered
+		s.logger.Debug("injected local kandev MCP server for loaded session",
+			zap.String("url", localKandevMcp.URL),
+			zap.Int("total_servers", len(mcpServers)))
+	}
+
+	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.logger.Error("load session failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp

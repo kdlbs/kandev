@@ -417,7 +417,7 @@ func TestLoadSession_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456")
+	err := c.LoadSession(ctx, "sess-456", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestLoadSession_Error(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456")
+	err := c.LoadSession(ctx, "sess-456", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

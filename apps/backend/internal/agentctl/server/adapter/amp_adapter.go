@@ -207,7 +207,7 @@ func (a *AmpAdapter) NewSession(ctx context.Context, _ []types.McpServer) (strin
 
 // LoadSession resumes an existing Amp session (thread).
 // For one-shot mode, the session ID is used to build the "threads continue" command.
-func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.hasAmpThreadID = sessionID != "" // LoadSession always receives a real Amp thread ID

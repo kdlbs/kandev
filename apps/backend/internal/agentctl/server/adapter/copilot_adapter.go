@@ -349,7 +349,7 @@ func (a *CopilotAdapter) NewSession(ctx context.Context, mcpServers []types.McpS
 }
 
 // LoadSession resumes an existing Copilot session via the SDK.
-func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
 	if a.client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}

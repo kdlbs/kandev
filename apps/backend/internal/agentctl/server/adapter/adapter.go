@@ -163,7 +163,10 @@ type AgentAdapter interface {
 	NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 
 	// LoadSession resumes an existing session by ID.
-	LoadSession(ctx context.Context, sessionID string) error
+	// mcpServers contains the MCP servers to configure for the resumed session.
+	// Agents that receive MCP configs via the protocol (e.g. ACP with AssumeMcpSse)
+	// need these to reconnect to MCP servers on a new agentctl instance.
+	LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error
 
 	// Prompt sends a prompt to the agent.
 	// The agent's responses are streamed via the Updates channel.

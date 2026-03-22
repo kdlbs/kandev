@@ -271,7 +271,7 @@ func TestMockAgent_LoadSession(t *testing.T) {
 	}
 
 	// Load the same session (simulates resume after process restart)
-	if err := setup.adpt.LoadSession(ctx, sessionID); err != nil {
+	if err := setup.adpt.LoadSession(ctx, sessionID, nil); err != nil {
 		t.Fatalf("LoadSession failed: %v", err)
 	}
 

@@ -71,7 +71,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 // LoadSession resumes an existing Codex thread.
 // It passes the same approval policy and sandbox settings as NewSession to ensure
 // permission requirements are preserved across resume (see openai/codex#5322).
-func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock
 	a.mu.RLock()

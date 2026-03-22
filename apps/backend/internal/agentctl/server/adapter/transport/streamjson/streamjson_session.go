@@ -52,7 +52,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 
 // LoadSession resumes an existing stream-json session.
 // The session ID will be passed to the agent via --resume flag (handled by process manager).
-func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
 	pendingCommands := a.takePendingCommands()

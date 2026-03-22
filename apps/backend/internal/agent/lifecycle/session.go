@@ -130,7 +130,7 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
+		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
 		if err != nil {
 			// If session/load fails because the agent doesn't support it, fall back to session/new.
 			// Check for: JSON-RPC -32601 (Method not found) or our own capability check string.
@@ -199,12 +199,13 @@ func (sm *SessionManager) loadSession(
 	client *agentctl.Client,
 	agentConfig agents.Agent,
 	sessionID string,
+	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/load request",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
-	if err := client.LoadSession(ctx, sessionID); err != nil {
+	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
 		sm.logger.Error("ACP session/load failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.String("session_id", sessionID),

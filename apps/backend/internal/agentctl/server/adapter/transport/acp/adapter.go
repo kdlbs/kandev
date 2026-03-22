@@ -377,7 +377,9 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 
 // LoadSession resumes an existing session.
 // Returns an error if the agent does not support session loading (LoadSession capability).
-func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
+// mcpServers are passed to the agent so it can reconnect to MCP servers on the new
+// agentctl instance (critical for agents that receive MCP configs via the protocol).
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
 	a.mu.Lock()
 	conn := a.acpConn
 	supportsLoad := a.capabilities.LoadSession
@@ -397,6 +399,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
 	defer span.End()
 
+	// Filter MCP servers by agent capabilities (same logic as NewSession).
+	caps := a.capabilities.McpCapabilities
+	if a.cfg.AssumeMcpSse {
+		caps.Sse = true
+	}
+	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
+
 	// Suppress history replay notifications during load.
 	// ACP session/load replays the entire conversation history asynchronously.
 	// We set a flag to suppress these notifications to avoid duplicating messages in the database.
@@ -408,7 +417,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
-		McpServers: []acp.McpServer{}, // MCPs configured via CLI args; empty satisfies the required field
+		McpServers: toACPMcpServers(filteredServers),
 	})
 
 	if err != nil {

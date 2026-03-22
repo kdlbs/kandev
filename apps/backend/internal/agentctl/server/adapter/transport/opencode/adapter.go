@@ -367,7 +367,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 }
 
 // LoadSession resumes an existing OpenCode session by forking it.
-func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
 	// Clear any stale state from previous sessions
 	a.clearSessionState()
 

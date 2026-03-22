@@ -35,7 +35,7 @@ func (s *stubAdapter) GetAgentInfo() *adapter.AgentInfo { return nil }
 func (s *stubAdapter) NewSession(_ context.Context, _ []types.McpServer) (string, error) {
 	return "", nil
 }
-func (s *stubAdapter) LoadSession(context.Context, string) error                    { return nil }
+func (s *stubAdapter) LoadSession(context.Context, string, []types.McpServer) error { return nil }
 func (s *stubAdapter) Prompt(context.Context, string, []v1.MessageAttachment) error { return nil }
 func (s *stubAdapter) Cancel(context.Context) error                                 { return nil }
 func (s *stubAdapter) Updates() <-chan adapter.AgentEvent                           { return s.updatesCh }
