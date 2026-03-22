@@ -349,12 +349,13 @@ func (a *CopilotAdapter) NewSession(ctx context.Context, mcpServers []types.McpS
 }
 
 // LoadSession resumes an existing Copilot session via the SDK.
-func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string, _ []types.McpServer) error {
+func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
 	if a.client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	if err := a.client.ResumeSession(ctx, sessionID, nil); err != nil {
+	mcpConfig := mcpServersToCopilotConfig(mcpServers)
+	if err := a.client.ResumeSession(ctx, sessionID, mcpConfig); err != nil {
 		a.logger.Warn("failed to resume SDK session, continuing anyway",
 			zap.Error(err),
 			zap.String("session_id", sessionID))
