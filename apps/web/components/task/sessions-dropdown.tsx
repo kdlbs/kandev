@@ -20,7 +20,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceSessionUrl } from "@/lib/links";
+
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
@@ -116,7 +116,6 @@ function useSessionSelectionHandlers(taskId: string | null) {
       const oldSessionId = appStore.getState().tasks.activeSessionId;
       setActiveSession(taskId, sessionId);
       performLayoutSwitch(oldSessionId, sessionId);
-      replaceSessionUrl(sessionId);
       close();
     },
     [appStore, setActiveSession, taskId],

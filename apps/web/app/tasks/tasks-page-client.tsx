@@ -301,7 +301,6 @@ function useTasksPageComputed({
   handleDelete,
   deletingTaskId,
   router,
-  toast,
   activeWorkflowId,
 }: {
   total: number;
@@ -313,7 +312,6 @@ function useTasksPageComputed({
   handleDelete: (taskId: string) => Promise<void>;
   deletingTaskId: string | null;
   router: ReturnType<typeof useRouter>;
-  toast: ReturnType<typeof useToast>["toast"];
   activeWorkflowId: string | null;
 }) {
   const pageCount = useMemo(
@@ -334,16 +332,9 @@ function useTasksPageComputed({
   );
   const handleRowClick = useCallback(
     (task: Task) => {
-      if (task.primary_session_id) {
-        router.push(`/s/${task.primary_session_id}`);
-      } else {
-        toast({
-          title: "No session available",
-          description: "This task has no associated session yet.",
-        });
-      }
+      router.push(`/t/${task.id}`);
     },
-    [router, toast],
+    [router],
   );
   const defaultWorkflow = activeWorkflowId
     ? workflows.find((w) => w.id === activeWorkflowId)
@@ -360,7 +351,6 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     activeWorkflowId,
     repositories: storeRepositories,
   } = useKanbanDisplaySettings();
-  const { toast } = useToast();
   const viewState = useTasksPageViewState({
     initialWorkflows: props.initialWorkflows,
     initialSteps: props.initialSteps,
@@ -396,7 +386,6 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     handleDelete: ops.handleDelete,
     deletingTaskId: ops.deletingTaskId,
     router,
-    toast,
     activeWorkflowId,
   });
   return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };

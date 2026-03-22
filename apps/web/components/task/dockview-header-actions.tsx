@@ -37,7 +37,7 @@ import { prPanelLabel } from "@/components/github/pr-utils";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
-import { linkToSession } from "@/lib/links";
+import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { NewTaskButton } from "./task-session-sidebar";
@@ -384,8 +384,8 @@ function SidebarRightActions() {
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
         performLayoutSwitch(oldSessionId, meta.taskSessionId);
-        window.history.replaceState({}, "", linkToSession(meta.taskSessionId));
       }
+      replaceTaskUrl(task.id);
     },
     [setActiveTask, setActiveSession, appStore],
   );

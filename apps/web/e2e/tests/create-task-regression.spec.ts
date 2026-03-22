@@ -34,7 +34,7 @@ test.describe("Create task regression", () => {
     const card = kanban.taskCardByTitle("Regression Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -46,8 +46,7 @@ test.describe("Create task regression", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
     // Verify task has exactly one session
-    // Extract task ID from the URL: /s/<sessionId> — we need the task to list sessions
-    // Use the seed data workflow to find tasks
+    // Extract task ID from the URL: /t/<taskId>
     const { sessions } = await apiClient.listTaskSessions(await getTaskIdFromPage(testPage));
     expect(sessions.length).toBe(1);
     expect(sessions[0].state).toBe("COMPLETED");
@@ -98,20 +97,10 @@ test.describe("Create task regression", () => {
   });
 });
 
-/** Extract task ID from the current page URL by looking up the session's task. */
+/** Extract task ID from the current page URL (/t/<taskId>). */
 async function getTaskIdFromPage(page: import("@playwright/test").Page): Promise<string> {
   const url = page.url();
-  const match = url.match(/\/s\/([^/?]+)/);
-  if (!match) throw new Error(`Cannot extract session ID from URL: ${url}`);
-  const sessionId = match[1];
-  // Fetch session to get task_id — use the backend API port from window global
-  const taskId = await page.evaluate(async (sid: string) => {
-    const port = (window as unknown as { __KANDEV_API_PORT?: string }).__KANDEV_API_PORT;
-    const base = port ? `http://localhost:${port}` : "";
-    const res = await fetch(`${base}/api/v1/sessions/${sid}`);
-    const data = await res.json();
-    return data.session?.task_id ?? data.task_id ?? "";
-  }, sessionId);
-  if (!taskId) throw new Error(`Could not resolve task ID for session ${sessionId}`);
-  return taskId;
+  const match = url.match(/\/t\/([^/?]+)/);
+  if (!match) throw new Error(`Cannot extract task ID from URL: ${url}`);
+  return match[1];
 }

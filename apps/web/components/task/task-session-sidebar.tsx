@@ -14,7 +14,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { CommandItem } from "@/lib/commands/types";
-import { replaceSessionUrl } from "@/lib/links";
+import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
@@ -264,7 +264,6 @@ function buildSwitchToSession(
   return (taskId, sessionId, oldSessionId) => {
     setActiveSession(taskId, sessionId);
     performLayoutSwitch(oldSessionId ?? null, sessionId);
-    replaceSessionUrl(sessionId);
   };
 }
 
@@ -316,6 +315,7 @@ function useSidebarActions(store: StoreApi) {
       if (task?.primarySessionId) {
         switchToSession(taskId, task.primarySessionId, oldSessionId);
         loadTaskSessionsForTask(taskId);
+        replaceTaskUrl(taskId);
         return;
       }
       loadTaskSessionsForTask(taskId).then(async (sessions) => {
@@ -324,6 +324,7 @@ function useSidebarActions(store: StoreApi) {
         const sessionId = primary?.id ?? sessions[0]?.id ?? null;
         if (sessionId) {
           switchToSession(taskId, sessionId, currentOldSessionId);
+          replaceTaskUrl(taskId);
           return;
         }
         // No session — prepare workspace and switch to it
@@ -334,6 +335,7 @@ function useSidebarActions(store: StoreApi) {
           setPreparingTaskId,
         );
         if (!switched) setActiveTask(taskId);
+        replaceTaskUrl(taskId);
       });
     },
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],

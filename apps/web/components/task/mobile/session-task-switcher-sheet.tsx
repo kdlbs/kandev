@@ -8,7 +8,7 @@ import { TaskSwitcher } from "../task-switcher";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceSessionUrl } from "@/lib/links";
+import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
@@ -200,10 +200,10 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {
         setActiveSession(mostRecentTask.id, mostRecentSession.id);
-        replaceSessionUrl(mostRecentSession.id);
       } else {
         setActiveTask(mostRecentTask.id);
       }
+      replaceTaskUrl(mostRecentTask.id);
     }
     onOpenChange(false);
   } catch (error) {
@@ -258,8 +258,8 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
-        replaceSessionUrl(meta.taskSessionId);
       }
+      replaceTaskUrl(task.id);
       onOpenChange(false);
     },
     [store, setActiveTask, setActiveSession, onOpenChange],
@@ -282,8 +282,8 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
       const task = kanbanTasks.find((t) => t.id === taskId);
       if (task?.primarySessionId) {
         setActiveSession(taskId, task.primarySessionId);
-        replaceSessionUrl(task.primarySessionId);
         loadTaskSessionsForTask(taskId);
+        replaceTaskUrl(taskId);
         onOpenChange(false);
         return;
       }
@@ -291,7 +291,7 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
         const sessionId = sessions[0]?.id ?? null;
         if (sessionId) {
           setActiveSession(taskId, sessionId);
-          replaceSessionUrl(sessionId);
+          replaceTaskUrl(taskId);
           onOpenChange(false);
           return;
         }
@@ -301,14 +301,12 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
           const resp = await launchSession(request);
           if (resp.session_id) {
             setActiveSession(taskId, resp.session_id);
-            replaceSessionUrl(resp.session_id);
-            onOpenChange(false);
-            return;
           }
         } catch {
           // Fall through to default behavior
         }
         setActiveTask(taskId);
+        replaceTaskUrl(taskId);
         onOpenChange(false);
       });
     },
