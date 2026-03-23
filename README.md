@@ -4,7 +4,24 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 
 [Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md)
 
-<!-- TODO: add screenshot -->
+| | |
+|:---:|:---:|
+| **Kanban** | **Task Session** |
+| ![Kanban](docs/screenshots/kanban.png) | ![Task Session](docs/screenshots/task%20session.png) |
+| **Pipeline** | **Plan Mode** |
+| ![Pipeline](docs/screenshots/pipeline.png) | ![Plan Mode](docs/screenshots/plan%20mode.png) |
+| **Workflows** | **Plan Comments** |
+| ![Workflows](docs/screenshots/workflows.png) | ![Plan Comments](docs/screenshots/plan%20comments.png) |
+| **CLI Agent** | **Quick Chats** |
+| ![CLI Agent](docs/screenshots/cli%20agent.png) | ![Quick Chats](docs/screenshots/quick%20chats.png) |
+| **File Editor** | **Git Operations** |
+| ![File Editor](docs/screenshots/file%20editor.png) | ![Git Operations](docs/screenshots/git%20operations.png) |
+| **Embedded VS Code** | **Review PRs** |
+| ![Embedded VS Code](docs/screenshots/embedded%20vscode.png) | ![Review PRs](docs/screenshots/review%20PRs.png) |
+| **Review Dialog** | **Stats** |
+| ![Review Dialog](docs/screenshots/review%20dialog.png) | ![Stats](docs/screenshots/stats.png) |
+| **Add Task** | |
+| ![Add Task](docs/screenshots/add%20task.png) | |
 
 ## What
 
@@ -47,15 +64,15 @@ While agents can already plan, implement, test, and deploy autonomously with the
 
 | Agent | Default Model | Other Models | Protocol |
 |:-------:|:--------------:|--------------|:----------:|
-| **Claude Code** | Sonnet 4.5 | Opus 4.6, Opus 4.5, Haiku 4.5 | stream-json |
-| **Codex** | GPT-5.2 Codex | GPT-5.1 Codex Max, GPT-5.1 Codex Mini, GPT-5.2 | Codex |
-| **GitHub Copilot** | GPT-4.1 | GPT-5.2, Claude Sonnet 4.5, Gemini 3 Pro, +10 more | Copilot SDK |
+| **Claude Code** | Sonnet 4.5 | Opus 4.6, Opus 4.5, Haiku 4.5 | ACP (`@zed-industries/claude-agent-acp`) |
+| **Codex** | GPT-5.2 Codex | GPT-5.1 Codex Max, GPT-5.1 Codex Mini, GPT-5.2 | ACP (`@zed-industries/codex-acp`) |
+| **GitHub Copilot** | GPT-4.1 | GPT-5.2, Claude Sonnet 4.5, Gemini 3 Pro, +10 more | ACP |
 | **Gemini CLI** | Gemini 3 Flash | Gemini 3 Pro | ACP |
-| **Amp** | Smart Mode | Deep Mode | stream-json |
+| **Amp** | Smart Mode | Deep Mode | ACP (`amp-acp`) |
 | **Auggie** | Sonnet 4.5 | Opus 4.5, GPT-5.1, GPT-5, Haiku 4.5 (dynamic) | ACP |
-| **OpenCode** | GPT-5 Nano | Claude Sonnet 4, Opus 4, etc (dynamic) | REST/SSE |
+| **OpenCode** | GPT-5 Nano | Claude Sonnet 4, Opus 4, etc (dynamic) | ACP |
 
-> **CLI Passthrough mode** - we should be able to support any agent that has a CLI interface, even if they don't have an official API or SDK. The agent runs in a terminal session and we pass input/output through a websocket connection. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
+> All agents communicate via [ACP](https://www.anthropic.com/engineering/an-acp-sdk) (Agent Communication Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is also available for direct terminal interaction with any agent CLI. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 
 ## Quick Start
 
