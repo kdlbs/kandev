@@ -6,22 +6,9 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 
 | | |
 |:---:|:---:|
-| **Kanban** | **Task Session** |
-| ![Kanban](docs/screenshots/kanban.png) | ![Task Session](docs/screenshots/task%20session.png) |
-| **Pipeline** | **Plan Mode** |
-| ![Pipeline](docs/screenshots/pipeline.png) | ![Plan Mode](docs/screenshots/plan%20mode.png) |
-| **Workflows** | **Plan Comments** |
-| ![Workflows](docs/screenshots/workflows.png) | ![Plan Comments](docs/screenshots/plan%20comments.png) |
-| **CLI Agent** | **Quick Chats** |
-| ![CLI Agent](docs/screenshots/cli%20agent.png) | ![Quick Chats](docs/screenshots/quick%20chats.png) |
-| **File Editor** | **Git Operations** |
-| ![File Editor](docs/screenshots/file%20editor.png) | ![Git Operations](docs/screenshots/git%20operations.png) |
-| **Embedded VS Code** | **Review PRs** |
-| ![Embedded VS Code](docs/screenshots/embedded%20vscode.png) | ![Review PRs](docs/screenshots/review%20PRs.png) |
-| **Review Dialog** | **Stats** |
-| ![Review Dialog](docs/screenshots/review%20dialog.png) | ![Stats](docs/screenshots/stats.png) |
-| **Add Task** | |
-| ![Add Task](docs/screenshots/add%20task.png) | |
+| ![Add Task](docs/screenshots/add%20task.png) | ![Task Session](docs/screenshots/task%20session.png) |
+
+[See all screenshots](docs/screenshots.md)
 
 ## What
 
