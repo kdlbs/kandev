@@ -180,7 +180,7 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Click Task A to enter session view ---
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -198,7 +198,7 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to Task B ---
     await session.taskInSidebar("Dashboard Task").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     await session.clickTab("Changes");
 
     // Wait for PR data to load for Task B
@@ -216,7 +216,7 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to Task C (no PR) ---
     await session.taskInSidebar("No PR Task").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     await session.clickTab("Changes");
 
     // PR sections should NOT be visible for a task without a PR
@@ -225,7 +225,7 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch back to Task A to confirm data reappears ---
     await session.taskInSidebar("Auth Fix Task").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     await session.clickTab("Changes");
 
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });

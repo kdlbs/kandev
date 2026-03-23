@@ -82,7 +82,7 @@ test.describe("PR external detection", () => {
 
     // --- Open Feature Task session ---
     await kanban.taskCardInColumn("Feature Task", doneStep.id).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -140,10 +140,10 @@ test.describe("PR external detection", () => {
     // The useTaskPR hook fetches on mount when no PR is in the store.
     // Switching tasks changes activeTaskId, so switching back triggers a fresh fetch.
     await session.taskInSidebar("Helper Task").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     await session.taskInSidebar("Feature Task").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // --- Verify PR button appears in topbar ---
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });

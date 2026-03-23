@@ -39,7 +39,7 @@ test.describe("MCP create_task subtask", () => {
     const parentCard = kanban.taskCardByTitle("MCP Subtask Parent");
     await expect(parentCard).toBeVisible({ timeout: 10_000 });
     await parentCard.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to complete — the MCP create_task call happens during execution
     const session = new SessionPage(testPage);
@@ -75,7 +75,7 @@ test.describe("MCP create_task subtask", () => {
     const parentCard = kanban.taskCardByTitle("Subtask Button Parent");
     await expect(parentCard).toBeVisible({ timeout: 10_000 });
     await parentCard.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to finish
     const session = new SessionPage(testPage);
@@ -95,7 +95,7 @@ test.describe("MCP create_task subtask", () => {
     await testPage.getByRole("button", { name: "Create Subtask" }).click();
 
     // Should navigate to the new subtask's session
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 6. Go back to kanban — subtask card should be visible with parent badge
     await kanban.goto();

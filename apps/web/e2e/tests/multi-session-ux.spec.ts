@@ -39,7 +39,7 @@ async function createTaskAndNavigate(
   const card = kanban.taskCardByTitle(title);
   await expect(card).toBeVisible({ timeout: 10_000 });
   await card.click();
-  await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -347,7 +347,7 @@ test.describe("Multi-session UX", () => {
     const card1 = kanban.taskCardByTitle("Task Switch A");
     await expect(card1).toBeVisible({ timeout: 10_000 });
     await card1.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -363,7 +363,7 @@ test.describe("Multi-session UX", () => {
     await session.clickTaskInSidebar("Task Switch B");
 
     // Wait for URL to change to task 2's session
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Verify chat loads for task 2
     await session.waitForLoad();

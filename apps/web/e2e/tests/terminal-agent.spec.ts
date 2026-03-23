@@ -27,7 +27,7 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   const card = kanban.taskCardByTitle(title);
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.click();
-  await expect(page).toHaveURL(/\/s\//, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(page);
   await session.waitForPassthroughLoad();
@@ -296,7 +296,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     const taskB = session.taskInSidebar("TUI Beta Task");
     await expect(taskB).toBeVisible({ timeout: 15_000 });
     await taskB.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Wait for task B's passthrough terminal to load
     await session.waitForPassthroughLoad();

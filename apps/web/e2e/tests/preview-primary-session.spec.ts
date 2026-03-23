@@ -51,7 +51,7 @@ test.describe("Preview primary session", () => {
     const card = kanban.taskCardByTitle("Preview Primary Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -91,10 +91,12 @@ test.describe("Preview primary session", () => {
     // 7. Verify the kanban store has primarySessionId
     const storeData = await testPage.evaluate((taskId) => {
       // Access zustand store from the window (exposed by state-provider)
-      const store = (window as any).__KANDEV_STORE;
+      type KandevStore = { getState: () => { kanban: { tasks: { id: string; primarySessionId?: string | null }[] } } };
+      const win = window as unknown as { __KANDEV_STORE?: KandevStore };
+      const store = win.__KANDEV_STORE;
       if (!store) return { error: "no store" };
       const state = store.getState();
-      const kanbanTask = state.kanban.tasks.find((t: any) => t.id === taskId);
+      const kanbanTask = state.kanban.tasks.find((t) => t.id === taskId);
       return {
         primarySessionId: kanbanTask?.primarySessionId ?? null,
         taskFound: !!kanbanTask,

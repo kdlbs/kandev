@@ -75,7 +75,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to the session page
     await cardInDone.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -181,7 +181,7 @@ test.describe("Workflow automation", () => {
     // Click the card — creates a session (with workflow_step_id from the task)
     // and navigates to the session page.
     await cardInTodo.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -301,7 +301,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to session page
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -415,7 +415,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to the session page to verify per-step responses
     await cardInDeploy.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -533,7 +533,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to session to verify agent completed successfully
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

@@ -46,7 +46,7 @@ test.describe("New session dialog", () => {
     const card = kanban.taskCardByTitle("New Session Dialog Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -100,7 +100,7 @@ test.describe("New session dialog", () => {
     const card = kanban.taskCardByTitle("Second Session Tab Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -109,9 +109,6 @@ test.describe("New session dialog", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
-
-    // Capture the initial URL to detect the session switch
-    const initialUrl = testPage.url();
 
     // 4. Open the new session dialog
     await session.openNewSessionDialog();
@@ -124,11 +121,7 @@ test.describe("New session dialog", () => {
     // 6. Dialog should close
     await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
 
-    // 7. URL should change to the new session
-    await expect(testPage).not.toHaveURL(initialUrl, { timeout: 15_000 });
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 5_000 });
-
-    // 8. Verify a second session tab exists (at least 2 "Agent" tabs in dockview)
+    // 7. Verify a second session tab exists (at least 2 "Agent" tabs in dockview)
     const agentTabs = testPage.locator(".dv-default-tab:has-text('Agent')");
     await expect(agentTabs).toHaveCount(2, { timeout: 15_000 });
 
@@ -178,7 +171,7 @@ test.describe("New session dialog", () => {
     const card = kanban.taskCardByTitle("Env Reuse Dialog Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -250,7 +243,7 @@ test.describe("New session dialog", () => {
     const card = kanban.taskCardByTitle("Cancel Dialog Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -314,7 +307,7 @@ test.describe("New session dialog", () => {
     const card = kanban.taskCardByTitle("Session List Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
