@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,6 +111,12 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to seed default workflow steps: %w", err)
 	}
 
+	// Repair step_id references that were incorrectly saved as template aliases
+	// instead of UUIDs. This was caused by a frontend bug (fixed in PR #XXX).
+	if err := r.repairBrokenStepIDReferences(); err != nil {
+		return fmt.Errorf("failed to repair step_id references: %w", err)
+	}
+
 	return nil
 }
 
@@ -173,6 +180,146 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 	}
 
 	return nil
+}
+
+// repairBrokenStepIDReferences fixes workflow steps that have template aliases
+// (like "review", "in-progress") instead of actual UUIDs in their step_id config.
+// This repairs data corrupted by a frontend bug where template events overwrote
+// the backend's properly remapped events.
+func (r *Repository) repairBrokenStepIDReferences() error {
+	byWorkflow, err := r.loadStepsWithStepIDRefs()
+	if err != nil {
+		return err
+	}
+	for workflowID, steps := range byWorkflow {
+		nameToUUID, err := r.buildStepNameMapping(workflowID)
+		if err != nil {
+			return err
+		}
+		if err := r.repairWorkflowSteps(steps, nameToUUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type brokenStepRow struct {
+	id, workflowID, events string
+}
+
+func (r *Repository) loadStepsWithStepIDRefs() (map[string][]brokenStepRow, error) {
+	rows, err := r.db.Query(`
+		SELECT ws.id, ws.workflow_id, ws.events
+		FROM workflow_steps ws
+		WHERE ws.events LIKE '%"step_id"%'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	byWorkflow := make(map[string][]brokenStepRow)
+	for rows.Next() {
+		var s brokenStepRow
+		if err := rows.Scan(&s.id, &s.workflowID, &s.events); err != nil {
+			return nil, err
+		}
+		byWorkflow[s.workflowID] = append(byWorkflow[s.workflowID], s)
+	}
+	return byWorkflow, rows.Err()
+}
+
+func (r *Repository) buildStepNameMapping(workflowID string) (map[string]string, error) {
+	rows, err := r.db.Query(r.db.Rebind(`
+		SELECT id, name FROM workflow_steps WHERE workflow_id = ?
+	`), workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	nameToUUID := make(map[string]string)
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		nameToUUID[normalizeStepName(name)] = id
+	}
+	return nameToUUID, rows.Err()
+}
+
+func (r *Repository) repairWorkflowSteps(steps []brokenStepRow, nameToUUID map[string]string) error {
+	for _, step := range steps {
+		if err := r.repairSingleStep(step, nameToUUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) repairSingleStep(step brokenStepRow, nameToUUID map[string]string) error {
+	var events models.StepEvents
+	if err := json.Unmarshal([]byte(step.events), &events); err != nil {
+		return nil // Skip malformed JSON
+	}
+	if !repairEventsStepIDs(&events, nameToUUID) {
+		return nil // No repairs needed
+	}
+	data, err := json.Marshal(events)
+	if err != nil {
+		return nil
+	}
+	_, err = r.db.Exec(r.db.Rebind(`UPDATE workflow_steps SET events = ? WHERE id = ?`), string(data), step.id)
+	if err != nil {
+		return fmt.Errorf("repair step %s: %w", step.id, err)
+	}
+	return nil
+}
+
+func repairEventsStepIDs(events *models.StepEvents, nameToUUID map[string]string) bool {
+	modified := false
+	for i, a := range events.OnTurnStart {
+		if a.Type == models.OnTurnStartMoveToStep && a.Config != nil {
+			if repairStepIDConfig(a.Config, nameToUUID) {
+				events.OnTurnStart[i] = a
+				modified = true
+			}
+		}
+	}
+	for i, a := range events.OnTurnComplete {
+		if a.Type == models.OnTurnCompleteMoveToStep && a.Config != nil {
+			if repairStepIDConfig(a.Config, nameToUUID) {
+				events.OnTurnComplete[i] = a
+				modified = true
+			}
+		}
+	}
+	return modified
+}
+
+// normalizeStepName converts a step name to a lookup key (lowercase, spaces→hyphens)
+func normalizeStepName(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+}
+
+// repairStepIDConfig fixes a step_id config value if it's a template alias.
+// Returns true if a repair was made.
+func repairStepIDConfig(cfg map[string]interface{}, nameToUUID map[string]string) bool {
+	stepID, ok := cfg["step_id"].(string)
+	if !ok {
+		return false
+	}
+	// Check if it's already a UUID (36 chars with hyphens at expected positions)
+	if len(stepID) == 36 && stepID[8] == '-' && stepID[13] == '-' {
+		return false
+	}
+	// Look up the real UUID by normalized name
+	if realUUID, found := nameToUUID[normalizeStepName(stepID)]; found {
+		cfg["step_id"] = realUUID
+		return true
+	}
+	return false
 }
 
 // seedSystemTemplates inserts the default system workflow templates.

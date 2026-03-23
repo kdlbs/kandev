@@ -377,6 +377,12 @@ export function useStepDeleteHandlers({
   return { handleMigrateAndDeleteStep, handleDeleteStepAndTasks };
 }
 
+/**
+ * Compare user step edits against backend steps for reconciliation.
+ * NOTE: We intentionally do NOT compare events here. The backend creates steps
+ * with properly remapped step_id references (template aliases → real UUIDs).
+ * If we compared events, the template aliases would overwrite the backend's UUIDs.
+ */
 function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Partial<WorkflowStep> {
   const updates: Partial<WorkflowStep> = {};
   if (userStep.name !== backendStep.name) updates.name = userStep.name;
@@ -386,8 +392,7 @@ function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Par
     updates.is_start_step = userStep.is_start_step;
   if (userStep.allow_manual_move !== backendStep.allow_manual_move)
     updates.allow_manual_move = userStep.allow_manual_move;
-  if (JSON.stringify(userStep.events) !== JSON.stringify(backendStep.events))
-    updates.events = userStep.events;
+  // Events are NOT compared - backend has correct step_id UUIDs, user has template aliases
   return updates;
 }
 
@@ -411,6 +416,8 @@ async function reconcileTemplateSteps(
 ) {
   const { steps: backendSteps = [] } = await listWorkflowStepsAction(createdId);
 
+  // Reconcile user edits (name, color, etc.) with backend steps.
+  // We do NOT touch events - the backend has correct step_id UUIDs.
   for (const backendStep of backendSteps) {
     const userStep = userSteps.find((s) => s.position === backendStep.position);
     if (!userStep) continue;
@@ -418,9 +425,11 @@ async function reconcileTemplateSteps(
     if (Object.keys(updates).length > 0) await updateWorkflowStepAction(backendStep.id, updates);
   }
 
+  // Create any additional steps the user added beyond the template
   for (const step of userSteps) {
-    if (step.position >= templateStepCount)
+    if (step.position >= templateStepCount) {
       await createWorkflowStepAction(stepPayload(createdId, step));
+    }
   }
 }
 
