@@ -433,6 +433,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     [description, onDescriptionChange],
   );
 
+  const hasAttachments = contextItems.length > 0;
+
   return (
     <div
       className="relative"
@@ -440,29 +442,33 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <ContextZone items={contextItems} />
-      <Textarea
-        ref={textareaRef}
-        placeholder={
-          placeholder ??
-          (isSessionMode
-            ? "Describe what you want the agent to do..."
-            : "Write a prompt for the agent...")
-        }
-        value={description}
-        onChange={handleDescriptionChange}
-        onKeyDown={onKeyDown}
-        onPaste={handlePaste}
-        data-testid="task-description-input"
-        rows={2}
-        className={
-          isSessionMode
-            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
-            : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
-        }
-        required={isSessionMode}
-        disabled={disabled}
-      />
+      <div
+        className={`rounded-md border border-input bg-transparent ${hasAttachments ? "ring-0" : ""}`}
+      >
+        <ContextZone items={contextItems} />
+        <Textarea
+          ref={textareaRef}
+          placeholder={
+            placeholder ??
+            (isSessionMode
+              ? "Describe what you want the agent to do..."
+              : "Write a prompt for the agent...")
+          }
+          value={description}
+          onChange={handleDescriptionChange}
+          onKeyDown={onKeyDown}
+          onPaste={handlePaste}
+          data-testid="task-description-input"
+          rows={2}
+          className={`border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${
+            isSessionMode
+              ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+              : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
+          }`}
+          required={isSessionMode}
+          disabled={disabled}
+        />
+      </div>
       {isDragging && (
         <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
           <span className="text-sm text-primary font-medium">Drop files here</span>
