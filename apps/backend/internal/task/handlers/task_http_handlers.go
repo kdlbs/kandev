@@ -342,17 +342,30 @@ const (
 	maxAttachmentDataBytes   = 10 * 1024 * 1024 // 10 MB base64 string length cap
 )
 
+var allowedAttachmentTypes = map[string]struct{}{
+	"image":    {},
+	"audio":    {},
+	"resource": {},
+}
+
 func validateAttachments(items []v1.MessageAttachment) error {
 	if len(items) > maxCreateTaskAttachments {
 		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
 	}
 	var totalSize int
-	for _, a := range items {
-		if strings.TrimSpace(a.Type) == "" || strings.TrimSpace(a.MimeType) == "" {
-			return fmt.Errorf("attachment type and mime_type are required")
+	for i, a := range items {
+		typ := strings.TrimSpace(a.Type)
+		if _, ok := allowedAttachmentTypes[typ]; !ok {
+			return fmt.Errorf("attachment[%d] has unsupported type %q", i, typ)
+		}
+		if strings.TrimSpace(a.MimeType) == "" {
+			return fmt.Errorf("attachment[%d] mime_type is required", i)
+		}
+		if len(a.Data) == 0 {
+			return fmt.Errorf("attachment[%d] data is required", i)
 		}
 		if len(a.Data) > maxAttachmentDataBytes {
-			return fmt.Errorf("attachment data exceeds size limit")
+			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
 		}
 		totalSize += len(a.Data)
 	}

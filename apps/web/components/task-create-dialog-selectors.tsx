@@ -254,33 +254,33 @@ function useFileAttachments() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
-  const addFiles = useCallback(
-    async (files: File[]) => {
-      let nextCount = attachments.length;
-      let nextTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
-      if (nextCount >= MAX_FILES) {
-        console.warn(`Maximum ${MAX_FILES} files allowed`);
-        return;
-      }
+  const addFiles = useCallback(async (files: File[]) => {
+    const processed: FileAttachment[] = [];
+    for (const file of files) {
+      const attachment = await processFile(file);
+      if (attachment) processed.push(attachment);
+    }
+    if (processed.length === 0) return;
+
+    setAttachments((prev) => {
+      let nextCount = prev.length;
+      let nextTotalSize = prev.reduce((sum, att) => sum + att.size, 0);
       const accepted: FileAttachment[] = [];
-      for (const file of files) {
+      for (const att of processed) {
         if (nextCount >= MAX_FILES) break;
-        if (nextTotalSize + file.size > MAX_TOTAL_SIZE) {
-          console.warn(
-            `Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`,
-          );
-          break;
-        }
-        const attachment = await processFile(file);
-        if (!attachment) continue;
-        accepted.push(attachment);
+        if (nextTotalSize + att.size > MAX_TOTAL_SIZE) break;
+        accepted.push(att);
         nextCount += 1;
-        nextTotalSize += attachment.size;
+        nextTotalSize += att.size;
       }
-      if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
-    },
-    [attachments],
-  );
+      if (nextCount >= MAX_FILES && accepted.length < processed.length) {
+        console.warn(`Maximum ${MAX_FILES} files allowed`);
+      } else if (accepted.length < processed.length) {
+        console.warn(`Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`);
+      }
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  }, []);
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((att) => att.id !== id));
@@ -389,6 +389,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
         <TooltipTrigger asChild>
           <button
             type="button"
+            aria-label="Attach files"
             className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
