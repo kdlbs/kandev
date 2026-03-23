@@ -4,9 +4,12 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 
 [Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md)
 
-| | |
-|:---:|:---:|
-| ![Add Task](docs/screenshots/add%20task.png) | ![Task Session](docs/screenshots/task%20session.png) |
+<table>
+  <tr>
+    <td><img src="docs/screenshots/add task.png" alt="Add Task"></td>
+    <td><img src="docs/screenshots/task session.png" alt="Task Session"></td>
+  </tr>
+</table>
 
 [See all screenshots](docs/screenshots.md)
 
