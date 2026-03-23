@@ -55,9 +55,9 @@ test.describe("Preview primary session", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // 4. Create a second session via the new session dialog
     await session.addPanelButton().click();
@@ -91,7 +91,9 @@ test.describe("Preview primary session", () => {
     // 7. Verify the kanban store has primarySessionId
     const storeData = await testPage.evaluate((taskId) => {
       // Access zustand store from the window (exposed by state-provider)
-      type KandevStore = { getState: () => { kanban: { tasks: { id: string; primarySessionId?: string | null }[] } } };
+      type KandevStore = {
+        getState: () => { kanban: { tasks: { id: string; primarySessionId?: string | null }[] } };
+      };
       const win = window as unknown as { __KANDEV_STORE?: KandevStore };
       const store = win.__KANDEV_STORE;
       if (!store) return { error: "no store" };
@@ -115,9 +117,9 @@ test.describe("Preview primary session", () => {
 
     // 9. The preview should show the primary session's content
     const previewPanel = testPage.getByTestId("task-preview-panel");
-    await expect(
-      previewPanel.getByText("simple mock response", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(previewPanel.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // 10. The secondary session's content should NOT be visible
     await expect(

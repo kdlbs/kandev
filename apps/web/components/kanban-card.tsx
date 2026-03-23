@@ -101,7 +101,12 @@ function KanbanCardBody({
             </p>
           )}
           <div className="flex items-center gap-1">
-            <p data-testid="task-card-title" className="text-sm font-medium leading-tight line-clamp-1">{task.title}</p>
+            <p
+              data-testid="task-card-title"
+              className="text-sm font-medium leading-tight line-clamp-1"
+            >
+              {task.title}
+            </p>
             <PRTaskIcon taskId={task.id} />
           </div>
         </div>

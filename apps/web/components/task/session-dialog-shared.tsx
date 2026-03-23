@@ -88,18 +88,18 @@ export function ContextSelect({
             </SelectItem>
             {sessionOptions.length > 0 && (
               <SelectGroup>
-                  <SelectLabel className="text-[11px] text-muted-foreground/70">
-                    Summarize session
-                  </SelectLabel>
-                  {sessionOptions.map((opt) => (
-                    <SelectItem
-                      key={opt.id}
-                      value={`summarize:${opt.id}`}
-                      className="text-xs cursor-pointer"
-                    >
-                      {opt.label}
-                    </SelectItem>
-                  ))}
+                <SelectLabel className="text-[11px] text-muted-foreground/70">
+                  Summarize session
+                </SelectLabel>
+                {sessionOptions.map((opt) => (
+                  <SelectItem
+                    key={opt.id}
+                    value={`summarize:${opt.id}`}
+                    className="text-xs cursor-pointer"
+                  >
+                    {opt.label}
+                  </SelectItem>
+                ))}
               </SelectGroup>
             )}
           </SelectContent>

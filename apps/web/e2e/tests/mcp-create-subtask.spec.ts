@@ -6,9 +6,7 @@ const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;
 
 test.describe("MCP create_task subtask", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({
-    testPage,
-  }) => {
+  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
     const subtaskTitle = "MCP-subtask-e2e-verify";
 
     const script = [

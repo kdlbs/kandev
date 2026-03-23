@@ -206,9 +206,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             <AlertDialogTitle>Delete agent?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div>
-                <p>
-                  This will permanently delete the conversation history with this agent.
-                </p>
+                <p>This will permanently delete the conversation history with this agent.</p>
                 {isPrimary && sessionCount > 1 && (
                   <p className="mt-2 font-medium">
                     This is the primary agent. Another agent will be set as primary.

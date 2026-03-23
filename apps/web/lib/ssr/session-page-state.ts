@@ -223,11 +223,9 @@ async function fetchSessionDataFromTask(
     listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     fetchTerminals(sessionId).catch(() => []),
-    listTaskSessionMessages(
-      sessionId,
-      { limit: 50, sort: "desc" },
-      { cache: "no-store" },
-    ).catch(() => null as ListMessagesResponse | null),
+    listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
+      () => null as ListMessagesResponse | null,
+    ),
   ]);
 
   const allSessions = allSessionsResponse.sessions ?? [];

@@ -158,17 +158,12 @@ function useKanbanBoardHooks(
     deletingTaskId,
     archivingTaskId,
   } = useKanbanActions({ workspaceState, workflowsState });
-  const {
-    enablePreviewOnClick,
-    userSettings,
-    commitSettings,
-    activeSteps,
-    isMounted,
-  } = useKanbanData({
-    onWorkspaceChange: handleWorkspaceChange,
-    onWorkflowChange: handleWorkflowChange,
-    searchQuery,
-  });
+  const { enablePreviewOnClick, userSettings, commitSettings, activeSteps, isMounted } =
+    useKanbanData({
+      onWorkspaceChange: handleWorkspaceChange,
+      onWorkflowChange: handleWorkflowChange,
+      searchQuery,
+    });
   return {
     isDialogOpen,
     editingTask,

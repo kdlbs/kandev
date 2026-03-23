@@ -46,7 +46,10 @@ export function TaskPreviewPanel({
   };
 
   return (
-    <div data-testid="task-preview-panel" className="flex h-full w-full flex-col border-l bg-background">
+    <div
+      data-testid="task-preview-panel"
+      className="flex h-full w-full flex-col border-l bg-background"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold truncate">{task?.title ?? "Task Chat"}</h2>

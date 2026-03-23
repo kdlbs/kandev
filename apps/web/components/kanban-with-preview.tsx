@@ -270,9 +270,7 @@ function FloatingPreviewLayout({
             task={selectedTask}
             sessionId={activeSessionId}
             onClose={onClose}
-            onMaximize={
-              (task) => onNavigateToTask(task)
-            }
+            onMaximize={(task) => onNavigateToTask(task)}
           />
         </div>
       </div>
@@ -307,9 +305,7 @@ function InlinePreviewLayout({
               task={selectedTask}
               sessionId={activeSessionId}
               onClose={onClose}
-              onMaximize={
-                (task) => onNavigateToTask(task)
-              }
+              onMaximize={(task) => onNavigateToTask(task)}
             />
           </div>
         </div>
