@@ -18,9 +18,9 @@ export default async function TaskPage({
   let fetchedData: FetchedSessionData | null = null;
   const defaultLayouts = await readLayoutDefaults();
   const { layout: initialLayout } = await searchParams;
+  const { taskId } = await params;
 
   try {
-    const { taskId } = await params;
     fetchedData = await fetchSessionDataForTask(taskId);
   } catch (error) {
     console.warn(
@@ -43,6 +43,7 @@ export default async function TaskPage({
       ) : null}
       <TaskPageContent
         task={task}
+        taskId={taskId}
         sessionId={sessionId}
         initialRepositories={extractInitialRepositories(initialState, task)}
         initialScripts={extractInitialScripts(initialState, task)}

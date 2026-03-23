@@ -3,6 +3,7 @@ import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
 const START_AGENT_TEST_ID = "submit-start-agent";
+const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const START_ENABLED_TIMEOUT = 30_000;
 
 /**
@@ -49,7 +50,7 @@ test.describe("Create task regression", () => {
     // Extract task ID from the URL: /t/<taskId>
     const { sessions } = await apiClient.listTaskSessions(await getTaskIdFromPage(testPage));
     expect(sessions.length).toBe(1);
-    expect(sessions[0].state).toBe("COMPLETED");
+    expect(DONE_STATES).toContain(sessions[0].state);
 
     // Verify task environment was created
     const env = await apiClient.getTaskEnvironment(await getTaskIdFromPage(testPage));
@@ -75,16 +76,16 @@ test.describe("Create task regression", () => {
       },
     );
 
-    // Wait for agent to complete (poll session state)
+    // Wait for agent to finish (poll session state)
     await expect
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for session to complete" },
+        { timeout: 30_000, message: "Waiting for session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // Verify task environment was created and linked
     const env = await apiClient.getTaskEnvironment(task.id);

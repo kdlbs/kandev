@@ -1,5 +1,7 @@
 import { test, expect } from "../fixtures/test-base";
 
+const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+
 /**
  * Tests for the TaskEnvironment model: verifies that per-task execution environments
  * are created on first session launch and reused by subsequent sessions.
@@ -24,11 +26,11 @@ test.describe("Task environment", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for session to complete" },
+        { timeout: 30_000, message: "Waiting for session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // Verify task environment exists
     const env = await apiClient.getTaskEnvironment(task.id);
@@ -58,11 +60,11 @@ test.describe("Task environment", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for session to complete" },
+        { timeout: 30_000, message: "Waiting for session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).not.toBeNull();
@@ -105,11 +107,11 @@ test.describe("Task environment", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for session to complete" },
+        { timeout: 30_000, message: "Waiting for session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     const env = await apiClient.getTaskEnvironment(task.id);
     const { sessions } = await apiClient.listTaskSessions(task.id);

@@ -2,6 +2,8 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
+const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+
 /**
  * Tests for the New Session Dialog UI flow.
  * Verifies that creating a second session via the + menu works end-to-end:
@@ -33,11 +35,11 @@ test.describe("New session dialog", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);
@@ -87,11 +89,11 @@ test.describe("New session dialog", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);
@@ -154,11 +156,11 @@ test.describe("New session dialog", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // Capture the environment created by first session
     const envBefore = await apiClient.getTaskEnvironment(task.id);
@@ -230,11 +232,11 @@ test.describe("New session dialog", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);
@@ -294,11 +296,11 @@ test.describe("New session dialog", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);

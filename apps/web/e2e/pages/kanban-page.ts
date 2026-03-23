@@ -20,7 +20,7 @@ export class KanbanPage {
 
   taskCardByTitle(title: string): Locator {
     return this.board.locator(`[data-testid^="task-card-"]`, {
-      hasText: title,
+      has: this.page.locator('[data-testid="task-card-title"]', { hasText: title }),
     });
   }
 
@@ -30,7 +30,7 @@ export class KanbanPage {
 
   taskCardInColumn(title: string, stepId: string): Locator {
     return this.columnByStepId(stepId).locator('[data-testid^="task-card-"]', {
-      hasText: title,
+      has: this.page.locator('[data-testid="task-card-title"]', { hasText: title }),
     });
   }
 }

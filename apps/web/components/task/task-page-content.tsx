@@ -30,6 +30,7 @@ import {
 
 type TaskPageContentProps = {
   task: Task | null;
+  taskId?: string | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
   initialScripts?: RepositoryScript[];
@@ -438,14 +439,15 @@ function TaskPageInner({
 
 function syncActiveTaskSession(params: {
   initialTaskId: string | undefined;
+  fallbackTaskId: string | null | undefined;
   initialSessionId: string | null;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
 }) {
-  if (!params.initialTaskId) return;
-  if (params.initialSessionId)
-    params.setActiveSession(params.initialTaskId, params.initialSessionId);
-  else params.setActiveTask(params.initialTaskId);
+  const taskId = params.initialTaskId ?? params.fallbackTaskId;
+  if (!taskId) return;
+  if (params.initialSessionId) params.setActiveSession(taskId, params.initialSessionId);
+  else params.setActiveTask(taskId);
 }
 
 function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
@@ -483,6 +485,7 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
 
 function useTaskPageData(
   initialTask: Task | null,
+  fallbackTaskId: string | null | undefined,
   sessionId: string | null,
   initialRepositories: Repository[],
 ) {
@@ -500,11 +503,12 @@ function useTaskPageData(
   useEffect(() => {
     syncActiveTaskSession({
       initialTaskId: initialTask?.id,
+      fallbackTaskId,
       initialSessionId,
       setActiveSession,
       setActiveTask,
     });
-  }, [initialTask?.id, initialSessionId, setActiveSession, setActiveTask]);
+  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSession, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
@@ -521,6 +525,7 @@ function useTaskPageData(
 
 export function TaskPageContent({
   task: initialTask,
+  taskId: initialTaskId = null,
   sessionId = null,
   initialRepositories = [],
   initialScripts = [],
@@ -535,6 +540,7 @@ export function TaskPageContent({
 
   const { task, agent, effectiveSessionId, repository } = useTaskPageData(
     initialTask,
+    initialTaskId,
     sessionId,
     initialRepositories,
   );

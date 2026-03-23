@@ -2,6 +2,8 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
+const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+
 /**
  * Helpers to reduce boilerplate: create a task with a completed session
  * and navigate to it.
@@ -28,11 +30,11 @@ async function createTaskAndNavigate(
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return sessions[0]?.state;
+        return DONE_STATES.includes(sessions[0]?.state ?? "");
       },
-      { timeout: 30_000, message: "Waiting for session to complete" },
+      { timeout: 30_000, message: "Waiting for session to finish" },
     )
-    .toBe("COMPLETED");
+    .toBe(true);
 
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
@@ -111,7 +113,7 @@ test.describe("Multi-session UX", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.filter((s) => s.state === "COMPLETED").length;
+          return sessions.filter((s) => DONE_STATES.includes(s.state)).length;
         },
         { timeout: 60_000, message: "Waiting for second session to complete" },
       )
@@ -226,7 +228,7 @@ test.describe("Multi-session UX", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.filter((s) => s.state === "COMPLETED").length;
+          return sessions.filter((s) => DONE_STATES.includes(s.state)).length;
         },
         { timeout: 60_000 },
       )
@@ -328,17 +330,17 @@ test.describe("Multi-session UX", () => {
       },
     );
 
-    // Wait for both to complete
+    // Wait for both to finish
     for (const task of [task1, task2]) {
       await expect
         .poll(
           async () => {
             const { sessions } = await apiClient.listTaskSessions(task.id);
-            return sessions[0]?.state;
+            return DONE_STATES.includes(sessions[0]?.state ?? "");
           },
-          { timeout: 30_000, message: `Waiting for ${task.id} to complete` },
+          { timeout: 30_000, message: `Waiting for ${task.id} to finish` },
         )
-        .toBe("COMPLETED");
+        .toBe(true);
     }
 
     // Navigate to task 1

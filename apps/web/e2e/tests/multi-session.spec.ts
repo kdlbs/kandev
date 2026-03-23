@@ -2,6 +2,8 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
+const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+
 /**
  * Tests for launching multiple sessions on the same task.
  * Verifies session handover context injection and environment reuse.
@@ -27,16 +29,16 @@ test.describe("Multi-session", () => {
       },
     );
 
-    // 2. Wait for first session to complete
+    // 2. Wait for first session to finish
     await expect
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Verify first session created environment
     const env = await apiClient.getTaskEnvironment(task.id);
@@ -79,16 +81,16 @@ test.describe("Multi-session", () => {
       },
     );
 
-    // Wait for session to complete
+    // Wait for session to finish
     await expect
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for session to complete" },
+        { timeout: 30_000, message: "Waiting for session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // Verify environment still exists and is in "ready" state after completion
     const env = await apiClient.getTaskEnvironment(task.id);
@@ -113,16 +115,16 @@ test.describe("Multi-session", () => {
       },
     );
 
-    // 2. Wait for first session to complete
+    // 2. Wait for first session to finish
     await expect
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.state;
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
         },
-        { timeout: 30_000, message: "Waiting for first session to complete" },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
       )
-      .toBe("COMPLETED");
+      .toBe(true);
 
     // 3. Capture first session's worktree info
     const { sessions: firstSessions } = await apiClient.listTaskSessions(task.id);

@@ -179,28 +179,29 @@ type TaskSessionDTO struct {
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID               string                  `json:"id"`
-	TaskID           string                  `json:"task_id"`
-	AgentExecutionID string                  `json:"agent_execution_id,omitempty"`
-	ContainerID      string                  `json:"container_id,omitempty"`
-	AgentProfileID   string                  `json:"agent_profile_id,omitempty"`
-	ExecutorID       string                  `json:"executor_id,omitempty"`
-	EnvironmentID    string                  `json:"environment_id,omitempty"`
-	RepositoryID     string                  `json:"repository_id,omitempty"`
-	BaseBranch       string                  `json:"base_branch,omitempty"`
-	BaseCommitSHA    string                  `json:"base_commit_sha,omitempty"`
-	WorktreeID       string                  `json:"worktree_id,omitempty"`
-	WorktreePath     string                  `json:"worktree_path,omitempty"`
-	WorktreeBranch   string                  `json:"worktree_branch,omitempty"`
-	State            models.TaskSessionState `json:"state"`
-	ErrorMessage     string                  `json:"error_message,omitempty"`
-	Metadata         map[string]interface{}  `json:"metadata,omitempty"`
-	StartedAt        time.Time               `json:"started_at"`
-	CompletedAt      *time.Time              `json:"completed_at,omitempty"`
-	UpdatedAt        time.Time               `json:"updated_at"`
-	IsPrimary        bool                    `json:"is_primary"`
-	IsPassthrough    bool                    `json:"is_passthrough"`
-	ReviewStatus     *string                 `json:"review_status,omitempty"`
+	ID                string                  `json:"id"`
+	TaskID            string                  `json:"task_id"`
+	AgentExecutionID  string                  `json:"agent_execution_id,omitempty"`
+	ContainerID       string                  `json:"container_id,omitempty"`
+	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
+	ExecutorID        string                  `json:"executor_id,omitempty"`
+	EnvironmentID     string                  `json:"environment_id,omitempty"`
+	RepositoryID      string                  `json:"repository_id,omitempty"`
+	BaseBranch        string                  `json:"base_branch,omitempty"`
+	BaseCommitSHA     string                  `json:"base_commit_sha,omitempty"`
+	WorktreeID        string                  `json:"worktree_id,omitempty"`
+	WorktreePath      string                  `json:"worktree_path,omitempty"`
+	WorktreeBranch    string                  `json:"worktree_branch,omitempty"`
+	State             models.TaskSessionState `json:"state"`
+	ErrorMessage      string                  `json:"error_message,omitempty"`
+	Metadata          map[string]interface{}  `json:"metadata,omitempty"`
+	StartedAt         time.Time               `json:"started_at"`
+	CompletedAt       *time.Time              `json:"completed_at,omitempty"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	IsPrimary         bool                    `json:"is_primary"`
+	IsPassthrough     bool                    `json:"is_passthrough"`
+	ReviewStatus      *string                 `json:"review_status,omitempty"`
+	TaskEnvironmentID string                  `json:"task_environment_id,omitempty"`
 }
 
 // ListTaskSessionSummariesResponse is the list response using summary DTOs.
@@ -520,25 +521,26 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:               session.ID,
-		TaskID:           session.TaskID,
-		AgentExecutionID: session.AgentExecutionID,
-		ContainerID:      session.ContainerID,
-		AgentProfileID:   session.AgentProfileID,
-		ExecutorID:       session.ExecutorID,
-		EnvironmentID:    session.EnvironmentID,
-		RepositoryID:     session.RepositoryID,
-		BaseBranch:       session.BaseBranch,
-		BaseCommitSHA:    session.BaseCommitSHA,
-		State:            session.State,
-		ErrorMessage:     session.ErrorMessage,
-		Metadata:         session.Metadata,
-		StartedAt:        session.StartedAt,
-		CompletedAt:      session.CompletedAt,
-		UpdatedAt:        session.UpdatedAt,
-		IsPrimary:        session.IsPrimary,
-		IsPassthrough:    session.IsPassthrough,
-		ReviewStatus:     session.ReviewStatus,
+		ID:                session.ID,
+		TaskID:            session.TaskID,
+		AgentExecutionID:  session.AgentExecutionID,
+		ContainerID:       session.ContainerID,
+		AgentProfileID:    session.AgentProfileID,
+		ExecutorID:        session.ExecutorID,
+		EnvironmentID:     session.EnvironmentID,
+		RepositoryID:      session.RepositoryID,
+		BaseBranch:        session.BaseBranch,
+		BaseCommitSHA:     session.BaseCommitSHA,
+		State:             session.State,
+		ErrorMessage:      session.ErrorMessage,
+		Metadata:          session.Metadata,
+		StartedAt:         session.StartedAt,
+		CompletedAt:       session.CompletedAt,
+		UpdatedAt:         session.UpdatedAt,
+		IsPrimary:         session.IsPrimary,
+		IsPassthrough:     session.IsPassthrough,
+		ReviewStatus:      session.ReviewStatus,
+		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
