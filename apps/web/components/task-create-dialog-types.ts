@@ -80,6 +80,13 @@ export type TaskCreateEffectsArgs = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
+import type { FileAttachment } from "@/components/task/chat/file-attachment";
+
+export type TaskFormInputsHandle = {
+  getValue: () => string;
+  getAttachments: () => FileAttachment[];
+};
+
 export type DialogFormState = {
   taskName: string;
   setTaskName: (v: string) => void;
@@ -93,7 +100,7 @@ export type DialogFormState = {
   openCycle: number;
   /** Computed defaults for current open cycle (includes draft restoration) */
   currentDefaults: { name: string; description: string };
-  descriptionInputRef: import("react").RefObject<{ getValue: () => string } | null>;
+  descriptionInputRef: import("react").RefObject<TaskFormInputsHandle | null>;
   repositoryId: string;
   setRepositoryId: (v: string) => void;
   branch: string;

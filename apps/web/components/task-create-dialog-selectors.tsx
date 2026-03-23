@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Combobox } from "./combobox";
+import {
+  processFile,
+  formatBytes,
+  MAX_FILES,
+  MAX_TOTAL_SIZE,
+  type FileAttachment,
+} from "@/components/task/chat/file-attachment";
+import { FileAttachmentPreview } from "@/components/task/chat/file-attachment-preview";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -233,10 +242,113 @@ type TaskFormInputsProps = {
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
-  descriptionValueRef: React.RefObject<{ getValue: () => string } | null>;
+  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
   disabled?: boolean;
   placeholder?: string;
 };
+
+function useFileAttachments() {
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      if (attachments.length >= MAX_FILES) {
+        console.warn(`Maximum ${MAX_FILES} files allowed`);
+        return;
+      }
+      const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+      for (const file of files) {
+        if (attachments.length >= MAX_FILES) break;
+        if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
+          console.warn(
+            `Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`,
+          );
+          break;
+        }
+        const attachment = await processFile(file);
+        if (attachment) setAttachments((prev) => [...prev, attachment]);
+      }
+    },
+    [attachments],
+  );
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((att) => att.id !== id));
+  }, []);
+
+  return { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment };
+}
+
+function useAttachmentHandlers(
+  disabled: boolean | undefined,
+  addFiles: (files: File[]) => Promise<void>,
+  setIsDragging: (v: boolean) => void,
+) {
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (const item of items) {
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        void addFiles(files);
+      }
+    },
+    [disabled, addFiles],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    },
+    [disabled, setIsDragging],
+  );
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const { clientX, clientY } = e;
+      if (
+        clientX <= rect.left ||
+        clientX >= rect.right ||
+        clientY <= rect.top ||
+        clientY >= rect.bottom
+      ) {
+        setIsDragging(false);
+      }
+    },
+    [setIsDragging],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      if (disabled) return;
+      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0 || f.type !== "");
+      if (files.length > 0) {
+        void addFiles(files);
+      }
+    },
+    [disabled, addFiles, setIsDragging],
+  );
+
+  return { handlePaste, handleDragOver, handleDragLeave, handleDrop };
+}
 
 export const TaskFormInputs = memo(function TaskFormInputs({
   isSessionMode,
@@ -251,14 +363,21 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    const ref = descriptionValueRef as React.MutableRefObject<{ getValue: () => string } | null>;
-    if (ref) {
-      ref.current = { getValue: () => description };
-    }
-  }, [description, descriptionValueRef]);
+  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
+    useFileAttachments();
+  const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
+    disabled,
+    addFiles,
+    setIsDragging,
+  );
 
-  // Auto-resize textarea + optional auto-focus with cursor at end
+  useEffect(() => {
+    const ref = descriptionValueRef as React.MutableRefObject<TaskFormInputsHandle | null>;
+    if (ref) {
+      ref.current = { getValue: () => description, getAttachments: () => attachments };
+    }
+  }, [description, attachments, descriptionValueRef]);
+
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -280,15 +399,18 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       const hadContent = description.trim().length > 0;
       const hasContent = newValue.trim().length > 0;
       setDescription(newValue);
-      if (hadContent !== hasContent) {
-        onDescriptionChange(hasContent);
-      }
+      if (hadContent !== hasContent) onDescriptionChange(hasContent);
     },
     [description, onDescriptionChange],
   );
 
   return (
-    <div>
+    <div
+      className="relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <Textarea
         ref={textareaRef}
         placeholder={
@@ -300,6 +422,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         value={description}
         onChange={handleDescriptionChange}
         onKeyDown={onKeyDown}
+        onPaste={handlePaste}
         data-testid="task-description-input"
         rows={2}
         className={
@@ -308,6 +431,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
             : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
         }
         required={isSessionMode}
+        disabled={disabled}
+      />
+      {isDragging && (
+        <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
+          <span className="text-sm text-primary font-medium">Drop files here</span>
+        </div>
+      )}
+      <FileAttachmentPreview
+        attachments={attachments}
+        onRemove={handleRemoveAttachment}
         disabled={disabled}
       />
     </div>

@@ -8,6 +8,7 @@ import type {
   ExecutorProfile,
   Branch,
 } from "@/lib/types/http";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useRepositoryBranches } from "@/hooks/domains/workspace/use-repository-branches";
@@ -261,7 +262,7 @@ function useFormStateValues(
   const [hasDescription, setHasDescription] = useState(false);
   const [draftDescription, setDraftDescription] = useState("");
 
-  const descriptionInputRef = useRef<{ getValue: () => string } | null>(null);
+  const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? "");
   const [branch, setBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
