@@ -19,7 +19,12 @@ import {
   useExecutorHint,
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
-import { setLocalStorage } from "@/lib/local-storage";
+import {
+  setLocalStorage,
+  getTaskCreateDraft,
+  setTaskCreateDraft,
+  removeTaskCreateDraft,
+} from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type {
   StepType,
@@ -62,53 +67,152 @@ type FormResetters = {
   setGitHubPrHeadBranch: (v: string | null) => void;
 };
 
-function useFormResetEffects(
-  open: boolean,
-  workspaceId: string | null,
-  workflowId: string | null,
-  initialValues: TaskCreateDialogInitialValues | undefined,
-  resetters: FormResetters,
-) {
+type FormResetEffectsArgs = {
+  open: boolean;
+  workspaceId: string | null;
+  workflowId: string | null;
+  initialValues: TaskCreateDialogInitialValues | undefined;
+  resetters: FormResetters;
+  setDraftDescription: (v: string) => void;
+  setCurrentDefaults: (v: { name: string; description: string }) => void;
+  setOpenCycle: React.Dispatch<React.SetStateAction<number>>;
+  prevOpenRef: React.RefObject<boolean>;
+};
+
+function useFormResetEffects({
+  open,
+  workspaceId,
+  workflowId,
+  initialValues,
+  resetters,
+  setDraftDescription,
+  setCurrentDefaults,
+  setOpenCycle,
+  prevOpenRef,
+}: FormResetEffectsArgs) {
+  // Restore draft or initialValues when dialog opens
   useEffect(() => {
-    if (!open) return;
-    const name = initialValues?.title || "";
-    void Promise.resolve().then(() => {
-      resetters.setTaskName(name);
-      resetters.setHasTitle(name.trim().length > 0);
-      resetters.setHasDescription(Boolean(initialValues?.description?.trim()));
-      resetters.setRepositoryId(initialValues?.repositoryId ?? "");
-      resetters.setBranch(initialValues?.branch ?? "");
-      resetters.setAgentProfileId("");
-      resetters.setExecutorId("");
-      resetters.setExecutorProfileId("");
-      resetters.setSelectedWorkflowId(workflowId);
-      resetters.setFetchedSteps(null);
-    });
+    // Only run on rising edge (dialog opening)
+    const wasOpen = prevOpenRef.current;
+    (prevOpenRef as React.MutableRefObject<boolean>).current = open;
+
+    if (!open || wasOpen) return;
+
+    // Increment cycle to force TaskFormInputs remount
+    setOpenCycle((c) => c + 1);
+
+    const defaults = resolveFormDefaults(initialValues, workspaceId);
+    setCurrentDefaults(defaults);
+    resetTaskForm(resetters, defaults.name, defaults.description, workflowId, initialValues);
+    setDraftDescription(defaults.description);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    initialValues?.branch,
-    initialValues?.description,
-    initialValues?.repositoryId,
-    initialValues?.title,
-    open,
-    workflowId,
-  ]);
+  }, [open, workflowId, workspaceId]);
+
   useEffect(() => {
     if (!open) return;
-    void Promise.resolve().then(() => {
-      resetters.setDiscoveredRepositories([]);
-      resetters.setDiscoveredRepoPath("");
-      resetters.setSelectedLocalRepo(null);
-      resetters.setLocalBranches([]);
-      resetters.setDiscoverReposLoaded(false);
-      resetters.setUseGitHubUrl(false);
-      resetters.setGitHubUrl("");
-      resetters.setGitHubBranches([]);
-      resetters.setGitHubUrlError(null);
-      resetters.setGitHubPrHeadBranch(null);
-    });
+    resetDiscoveryState(resetters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
+}
+
+/** Checks if initialValues has any user-provided content */
+function hasUserContent(initialValues?: TaskCreateDialogInitialValues): boolean {
+  const title = initialValues?.title ?? "";
+  const description = initialValues?.description ?? "";
+  return title.trim().length > 0 || description.trim().length > 0;
+}
+
+/** Resolves form defaults from draft (for create) or initialValues (for edit) */
+function resolveFormDefaults(
+  initialValues: TaskCreateDialogInitialValues | undefined,
+  workspaceId: string | null,
+) {
+  // In edit mode (has content), use initialValues; in create mode, try draft
+  const draft =
+    !hasUserContent(initialValues) && workspaceId ? getTaskCreateDraft(workspaceId) : null;
+  const initTitle = initialValues?.title ?? "";
+  const initDesc = initialValues?.description ?? "";
+  return {
+    name: draft?.title ?? initTitle,
+    description: draft?.description ?? initDesc,
+  };
+}
+
+/** Resets task form fields to specified values */
+function resetTaskForm(
+  resetters: FormResetters,
+  name: string,
+  description: string,
+  workflowId: string | null,
+  initialValues?: TaskCreateDialogInitialValues,
+) {
+  resetters.setTaskName(name);
+  resetters.setHasTitle(name.trim().length > 0);
+  resetters.setHasDescription(description.trim().length > 0);
+  resetters.setRepositoryId(initialValues?.repositoryId ?? "");
+  resetters.setBranch(initialValues?.branch ?? "");
+  resetters.setAgentProfileId("");
+  resetters.setExecutorId("");
+  resetters.setExecutorProfileId("");
+  resetters.setSelectedWorkflowId(workflowId);
+  resetters.setFetchedSteps(null);
+}
+
+/** Resets repository discovery state */
+function resetDiscoveryState(resetters: FormResetters) {
+  resetters.setDiscoveredRepositories([]);
+  resetters.setDiscoveredRepoPath("");
+  resetters.setSelectedLocalRepo(null);
+  resetters.setLocalBranches([]);
+  resetters.setDiscoverReposLoaded(false);
+  resetters.setUseGitHubUrl(false);
+  resetters.setGitHubUrl("");
+  resetters.setGitHubBranches([]);
+  resetters.setGitHubUrlError(null);
+  resetters.setGitHubPrHeadBranch(null);
+}
+
+/** Hook to manage draft persistence for task creation dialog */
+function useDraftPersistence(
+  open: boolean,
+  workspaceId: string | null,
+  initialValues: TaskCreateDialogInitialValues | undefined,
+  taskName: string,
+  descriptionInputRef: React.RefObject<{ getValue: () => string } | null>,
+) {
+  const wasOpenRef = useRef(false);
+  const skipDraftSaveRef = useRef(false);
+
+  // Save draft when dialog closes (only in create mode without initialValues)
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+
+    if (!wasOpen || open || !workspaceId) return;
+    // Skip if clearDraft was called (successful submission)
+    if (skipDraftSaveRef.current) {
+      skipDraftSaveRef.current = false;
+      return;
+    }
+    const hasInitialValues = Boolean(
+      initialValues?.title?.trim() || initialValues?.description?.trim(),
+    );
+    // Only save draft in create mode
+    if (!hasInitialValues) {
+      const currentDescription = descriptionInputRef.current?.getValue() ?? "";
+      setTaskCreateDraft(workspaceId, { title: taskName, description: currentDescription });
+    }
+  }, [open, workspaceId, initialValues, taskName, descriptionInputRef]);
+
+  // Clear draft (call on successful submission before closing dialog)
+  const clearDraft = useCallback(() => {
+    if (workspaceId) {
+      removeTaskCreateDraft(workspaceId);
+      skipDraftSaveRef.current = true;
+    }
+  }, [workspaceId]);
+
+  return { clearDraft };
 }
 
 function useGitHubUrlState() {
@@ -134,55 +238,39 @@ function useGitHubUrlState() {
   };
 }
 
-export function useDialogFormState(
-  open: boolean,
-  workspaceId: string | null,
+/** Core form state declarations */
+function useFormStateValues(
   workflowId: string | null,
+  workspaceId: string | null,
+  open: boolean,
   initialValues?: TaskCreateDialogInitialValues,
 ) {
+  // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
+  const [openCycle, setOpenCycle] = useState(0);
+  const prevOpenRef = useRef(open);
+
+  // currentDefaults stores the loaded draft/initial values for this open cycle
+  const [currentDefaults, setCurrentDefaults] = useState<{ name: string; description: string }>({
+    name: "",
+    description: "",
+  });
+
+  // These states are initialized with defaults and then managed by effects/handlers
   const [taskName, setTaskName] = useState("");
-  const [hasTitle, setHasTitle] = useState(Boolean(initialValues?.title?.trim()));
-  const [hasDescription, setHasDescription] = useState(Boolean(initialValues?.description?.trim()));
+  const [hasTitle, setHasTitle] = useState(false);
+  const [hasDescription, setHasDescription] = useState(false);
+  const [draftDescription, setDraftDescription] = useState("");
+
   const descriptionInputRef = useRef<{ getValue: () => string } | null>(null);
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? "");
   const [branch, setBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
-  const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
-  const [discoveredRepoPath, setDiscoveredRepoPath] = useState("");
-  const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
-  const [localBranches, setLocalBranches] = useState<Branch[]>([]);
-  const [localBranchesLoading, setLocalBranchesLoading] = useState(false);
-  const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
-  const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  const ghUrl = useGitHubUrlState();
-  useFormResetEffects(open, workspaceId, workflowId, initialValues, {
-    setTaskName,
-    setHasTitle,
-    setHasDescription,
-    setRepositoryId,
-    setBranch,
-    setAgentProfileId,
-    setExecutorId,
-    setExecutorProfileId,
-    setSelectedWorkflowId,
-    setFetchedSteps,
-    setDiscoveredRepositories,
-    setDiscoveredRepoPath,
-    setSelectedLocalRepo,
-    setLocalBranches,
-    setDiscoverReposLoaded,
-    setUseGitHubUrl: ghUrl.setUseGitHubUrl,
-    setGitHubUrl: ghUrl.setGitHubUrl,
-    setGitHubBranches: ghUrl.setGitHubBranches,
-    setGitHubUrlError: ghUrl.setGitHubUrlError,
-    setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
-  });
   return {
     taskName,
     setTaskName,
@@ -190,6 +278,8 @@ export function useDialogFormState(
     setHasTitle,
     hasDescription,
     setHasDescription,
+    draftDescription,
+    setDraftDescription,
     descriptionInputRef,
     repositoryId,
     setRepositoryId,
@@ -201,6 +291,32 @@ export function useDialogFormState(
     setExecutorId,
     executorProfileId,
     setExecutorProfileId,
+    selectedWorkflowId,
+    setSelectedWorkflowId,
+    fetchedSteps,
+    setFetchedSteps,
+    isCreatingSession,
+    setIsCreatingSession,
+    isCreatingTask,
+    setIsCreatingTask,
+    openCycle,
+    setOpenCycle,
+    currentDefaults,
+    setCurrentDefaults,
+    prevOpenRef,
+  };
+}
+
+/** Repository discovery state */
+function useDiscoveryState() {
+  const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
+  const [discoveredRepoPath, setDiscoveredRepoPath] = useState("");
+  const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
+  const [localBranches, setLocalBranches] = useState<Branch[]>([]);
+  const [localBranchesLoading, setLocalBranchesLoading] = useState(false);
+  const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
+  const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
+  return {
     discoveredRepositories,
     setDiscoveredRepositories,
     discoveredRepoPath,
@@ -215,16 +331,61 @@ export function useDialogFormState(
     setDiscoverReposLoading,
     discoverReposLoaded,
     setDiscoverReposLoaded,
-    selectedWorkflowId,
-    setSelectedWorkflowId,
-    fetchedSteps,
-    setFetchedSteps,
-    isCreatingSession,
-    setIsCreatingSession,
-    isCreatingTask,
-    setIsCreatingTask,
-    ...ghUrl,
   };
+}
+
+export function useDialogFormState(
+  open: boolean,
+  workspaceId: string | null,
+  workflowId: string | null,
+  initialValues?: TaskCreateDialogInitialValues,
+) {
+  const form = useFormStateValues(workflowId, workspaceId, open, initialValues);
+  const discovery = useDiscoveryState();
+  const ghUrl = useGitHubUrlState();
+
+  useFormResetEffects({
+    open,
+    workspaceId,
+    workflowId,
+    initialValues,
+    setDraftDescription: form.setDraftDescription,
+    setCurrentDefaults: form.setCurrentDefaults,
+    setOpenCycle: form.setOpenCycle,
+    prevOpenRef: form.prevOpenRef,
+    resetters: {
+      setTaskName: form.setTaskName,
+      setHasTitle: form.setHasTitle,
+      setHasDescription: form.setHasDescription,
+      setRepositoryId: form.setRepositoryId,
+      setBranch: form.setBranch,
+      setAgentProfileId: form.setAgentProfileId,
+      setExecutorId: form.setExecutorId,
+      setExecutorProfileId: form.setExecutorProfileId,
+      setSelectedWorkflowId: form.setSelectedWorkflowId,
+      setFetchedSteps: form.setFetchedSteps,
+      setDiscoveredRepositories: discovery.setDiscoveredRepositories,
+      setDiscoveredRepoPath: discovery.setDiscoveredRepoPath,
+      setSelectedLocalRepo: discovery.setSelectedLocalRepo,
+      setLocalBranches: discovery.setLocalBranches,
+      setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
+      setUseGitHubUrl: ghUrl.setUseGitHubUrl,
+      setGitHubUrl: ghUrl.setGitHubUrl,
+      setGitHubBranches: ghUrl.setGitHubBranches,
+      setGitHubUrlError: ghUrl.setGitHubUrlError,
+      setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
+    },
+  });
+
+  const { clearDraft } = useDraftPersistence(
+    open,
+    workspaceId,
+    initialValues,
+    form.taskName,
+    form.descriptionInputRef,
+  );
+
+  return { ...form, ...discovery, ...ghUrl, clearDraft };
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";

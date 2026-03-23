@@ -610,3 +610,51 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
     removeSessionStorage(`kandev.comments.${sessionId}`);
   }
 }
+
+// --- Task creation draft persistence (sessionStorage, per workspace) ---
+
+const TASK_CREATE_DRAFT_KEY = "kandev.taskCreateDraft";
+
+/**
+ * Draft data for task creation dialog.
+ * Only persists user-entered content fields (title, description).
+ * Other fields (repo, branch, agent) are handled by "last used" localStorage.
+ */
+export type TaskCreateDraft = {
+  title: string;
+  description: string;
+};
+
+/**
+ * Get the saved task creation draft for a workspace.
+ * @param workspaceId - The workspace ID
+ * @returns The draft data, or null if no draft exists
+ */
+export function getTaskCreateDraft(workspaceId: string): TaskCreateDraft | null {
+  if (!workspaceId) return null;
+  return getSessionStorage<TaskCreateDraft | null>(`${TASK_CREATE_DRAFT_KEY}.${workspaceId}`, null);
+}
+
+/**
+ * Save a task creation draft for a workspace.
+ * @param workspaceId - The workspace ID
+ * @param draft - The draft data to save
+ */
+export function setTaskCreateDraft(workspaceId: string, draft: TaskCreateDraft): void {
+  if (!workspaceId) return;
+  // Only save if there's actual content
+  if (!draft.title.trim() && !draft.description.trim()) {
+    removeTaskCreateDraft(workspaceId);
+    return;
+  }
+  setSessionStorage(`${TASK_CREATE_DRAFT_KEY}.${workspaceId}`, draft);
+}
+
+/**
+ * Remove the task creation draft for a workspace.
+ * @param workspaceId - The workspace ID
+ */
+export function removeTaskCreateDraft(workspaceId: string): void {
+  if (!workspaceId) return;
+  removeSessionStorage(`${TASK_CREATE_DRAFT_KEY}.${workspaceId}`);
+}

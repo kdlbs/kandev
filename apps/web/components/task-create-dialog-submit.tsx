@@ -9,6 +9,7 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
 import { linkToSession } from "@/lib/links";
+
 import {
   activatePlanMode,
   buildCreateTaskPayload,
@@ -64,6 +65,7 @@ export type SubmitHandlersDeps = {
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
+  clearDraft: () => void;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -102,6 +104,7 @@ export function useTaskSubmitHandlers({
   setExecutorId,
   setSelectedWorkflowId,
   setFetchedSteps,
+  clearDraft,
 }: SubmitHandlersDeps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -314,6 +317,7 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      clearDraft();
       onOpenChange(false);
       if (planMode && newSessionId) {
         activatePlanMode({
@@ -336,6 +340,7 @@ export function useTaskSubmitHandlers({
       isPassthroughProfile,
       onSuccess,
       onOpenChange,
+      clearDraft,
       setActiveDocument,
       setPlanMode,
       router,
@@ -361,6 +366,7 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      clearDraft();
       onOpenChange(false);
       if (newSessionId) {
         activatePlanMode({
@@ -380,6 +386,7 @@ export function useTaskSubmitHandlers({
       executorProfileId,
       onSuccess,
       onOpenChange,
+      clearDraft,
       setActiveDocument,
       setPlanMode,
       router,
@@ -561,6 +568,7 @@ export function useTaskSubmitHandlers({
         executor_profile_id: executorProfileId || undefined,
       });
       onSuccess?.(taskResponse, "create");
+      clearDraft();
       onOpenChange(false);
     } catch (error) {
       toast({
@@ -585,6 +593,7 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     onSuccess,
     onOpenChange,
+    clearDraft,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
