@@ -389,7 +389,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground cursor-pointer"
+            className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
           >

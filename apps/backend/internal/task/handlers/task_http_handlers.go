@@ -346,6 +346,7 @@ func validateAttachments(items []v1.MessageAttachment) error {
 	if len(items) > maxCreateTaskAttachments {
 		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
 	}
+	var totalSize int
 	for _, a := range items {
 		if strings.TrimSpace(a.Type) == "" || strings.TrimSpace(a.MimeType) == "" {
 			return fmt.Errorf("attachment type and mime_type are required")
@@ -353,6 +354,10 @@ func validateAttachments(items []v1.MessageAttachment) error {
 		if len(a.Data) > maxAttachmentDataBytes {
 			return fmt.Errorf("attachment data exceeds size limit")
 		}
+		totalSize += len(a.Data)
+	}
+	if totalSize > maxAttachmentDataBytes {
+		return fmt.Errorf("total attachment size exceeds limit")
 	}
 	return nil
 }
