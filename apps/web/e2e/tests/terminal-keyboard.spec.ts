@@ -67,6 +67,7 @@ async function readTerminalBuffer(page: Page): Promise<string> {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Routing: uses /t/{taskId} (task-keyed routing) instead of /s/{sessionId}
 test.describe("Terminal keyboard navigation", () => {
   // Standalone executor can fail on cold start; retry once for transient failures.
   test.describe.configure({ retries: 1 });
