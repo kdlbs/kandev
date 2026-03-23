@@ -42,21 +42,31 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 
 ## Supported ACP Agents
 
-| Agent | Default Model | Other Models | Protocol |
-|:-------:|:--------------:|--------------|:----------:|
-| **Claude Code** | Sonnet 4.5 | Opus 4.6, Opus 4.5, Haiku 4.5 | ACP (`@zed-industries/claude-agent-acp`) |
-| **Codex** | GPT-5.2 Codex | GPT-5.1 Codex Max, GPT-5.1 Codex Mini, GPT-5.2 | ACP (`@zed-industries/codex-acp`) |
-| **GitHub Copilot** | GPT-4.1 | GPT-5.2, Claude Sonnet 4.5, Gemini 3 Pro, +10 more | ACP |
-| **Gemini CLI** | Gemini 3 Flash | Gemini 3 Pro | ACP |
-| **Amp** | Smart Mode | Deep Mode | ACP (`amp-acp`) |
-| **Auggie** | Sonnet 4.5 | Opus 4.5, GPT-5.1, GPT-5, Haiku 4.5 (dynamic) | ACP |
-| **OpenCode** | GPT-5 Nano | Claude Sonnet 4, Opus 4, etc (dynamic) | ACP |
+| Agent | Protocol |
+|:-------:|:----------:|
+| **Claude Code** | ACP (`@zed-industries/claude-agent-acp`) |
+| **Codex** | ACP (`@zed-industries/codex-acp`) |
+| **GitHub Copilot** | ACP |
+| **Gemini CLI** | ACP |
+| **Amp** | ACP (`amp-acp`) |
+| **Auggie** | ACP |
+| **OpenCode** | ACP |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Communication Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is also available for direct terminal interaction with any agent CLI. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 
 ### Bring your own TUI agents
 
 There is support for running any agent as TUI inside a terminal. Just add the cli command in the agent profile settings and the task will start the agent inside a PTY terminal instead of using ACP.
+
+## Supported Executors
+
+| Executor | Description |
+|:--------:|-------------|
+| **Local Process** | Runs the agent as a local process on the host machine |
+| **Docker** | Runs the agent in an isolated Docker container |
+| **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
+
+Each executor uses git worktrees for workspace isolation, preventing concurrent agents from conflicting.
 
 ## Quick Start
 
