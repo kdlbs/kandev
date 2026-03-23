@@ -325,8 +325,8 @@ test.describe("New session dialog", () => {
     await expect(sessionItems.first()).toBeVisible({ timeout: 5_000 });
     await expect(sessionItems.first()).toContainText("#1");
 
-    // 6. Verify the "Sessions" label is visible
-    const sessionsLabel = testPage.getByText("Sessions", { exact: true });
+    // 6. Verify the "Agents" label is visible
+    const sessionsLabel = testPage.getByText("Agents", { exact: true });
     await expect(sessionsLabel).toBeVisible();
   });
 });

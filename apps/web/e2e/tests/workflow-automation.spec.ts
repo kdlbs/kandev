@@ -163,13 +163,20 @@ test.describe("Workflow automation", () => {
 
     const agentProfileId = seedData.agentProfileId;
 
-    // Create task in Todo without starting an agent.
-    const task = await apiClient.createTask(seedData.workspaceId, "Lifecycle Workflow Task", {
-      workflow_id: workflow.id,
-      workflow_step_id: todoStep.id,
-      agent_profile_id: agentProfileId,
-      repository_ids: [seedData.repositoryId],
-    });
+    // Create task in Todo and immediately start an agent session.
+    // Pass agent_profile_id in metadata so auto_start_agent can pick it up later
+    // when the task enters In Progress (on_enter: auto_start_agent).
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Lifecycle Workflow Task",
+      agentProfileId,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: todoStep.id,
+        repository_ids: [seedData.repositoryId],
+        metadata: { agent_profile_id: agentProfileId },
+      },
+    );
 
     // --- Kanban page: verify task starts in Todo ---
     const kanban = new KanbanPage(testPage);
@@ -178,8 +185,7 @@ test.describe("Workflow automation", () => {
     const cardInTodo = kanban.taskCardInColumn("Lifecycle Workflow Task", todoStep.id);
     await expect(cardInTodo).toBeVisible({ timeout: 10_000 });
 
-    // Click the card — creates a session (with workflow_step_id from the task)
-    // and navigates to the session page.
+    // Click the card — navigates to the session page.
     await cardInTodo.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

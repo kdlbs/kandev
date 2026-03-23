@@ -14,7 +14,7 @@ test.describe("Subtask support", () => {
     await apiClient.createTask(seedData.workspaceId, "Child Subtask", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      parent_id: parent.task_id,
+      parent_id: parent.id,
     });
 
     const kanban = new KanbanPage(testPage);

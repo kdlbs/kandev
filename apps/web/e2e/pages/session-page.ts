@@ -421,7 +421,7 @@ export class SessionPage {
 
   /** The new session dialog container. */
   newSessionDialog(): Locator {
-    return this.page.getByRole("dialog").filter({ hasText: "New session in" });
+    return this.page.getByRole("dialog").filter({ hasText: "New agent in" });
   }
 
   /** Prompt textarea inside the new session dialog. */
@@ -429,9 +429,9 @@ export class SessionPage {
     return this.newSessionDialog().locator("textarea");
   }
 
-  /** Start Session button inside the new session dialog. */
+  /** Start Agent button inside the new session dialog. */
   newSessionStartButton(): Locator {
-    return this.newSessionDialog().getByRole("button", { name: "Start Session" });
+    return this.newSessionDialog().getByRole("button", { name: "Start Agent" });
   }
 
   /** Environment info badges inside the new session dialog. */
