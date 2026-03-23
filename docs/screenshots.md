@@ -16,5 +16,5 @@
 | ![Embedded VS Code](screenshots/embedded%20vscode.png) | ![Review PRs](screenshots/review%20PRs.png) |
 | **Review Dialog** | **Stats** |
 | ![Review Dialog](screenshots/review%20dialog.png) | ![Stats](screenshots/stats.png) |
-| **Add Task** | |
-| ![Add Task](screenshots/add%20task.png) | |
+| **Add Task** | **Workflow Details** |
+| ![Add Task](screenshots/add%20task.png) | ![Workflow Details](screenshots/workflow%20details.png) |
