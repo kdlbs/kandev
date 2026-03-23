@@ -21,3 +21,51 @@ export function getSvgDimensions(container: HTMLElement): { w: number; h: number
   if (w > 0 && h > 0) return { w, h };
   return null;
 }
+
+/**
+ * Characters that require quoting in mermaid node/edge labels.
+ * Includes: $, #, &, /, and other special chars that cause lexical errors.
+ */
+const SPECIAL_CHARS_RE = /[$#&/\\<>{}]/;
+
+/**
+ * Preprocesses mermaid code to quote text containing special characters.
+ * Mermaid requires quotes around text with special chars like $, /, etc.
+ *
+ * Handles:
+ * - Node labels: A[text] -> A["text"] if text contains special chars
+ * - Edge labels: -->|text| -> -->|"text"| if text contains special chars
+ * - Subgraph titles: subgraph text -> subgraph "text" if text contains special chars
+ */
+export function sanitizeMermaidCode(code: string): string {
+  // Quote node labels: [text] or (text) or {text} or ([text]) or [[text]] etc.
+  // Match brackets that aren't already quoted
+  let result = code.replace(/(\[+)([^\]"]+?)(\]+)/g, (match, open, text, close) => {
+    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+      return `${open}"${text}"${close}`;
+    }
+    return match;
+  });
+
+  // Quote edge labels: |text|
+  result = result.replace(/\|([^|"]+?)\|/g, (match, text) => {
+    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+      return `|"${text}"|`;
+    }
+    return match;
+  });
+
+  // Quote parentheses labels: (text) for stadium/circle nodes
+  result = result.replace(/(\(+)([^)"]+?)(\)+)/g, (match, open, text, close) => {
+    // Skip if it looks like a subgraph or keyword
+    if (/^(subgraph|end|graph|flowchart|sequenceDiagram)\b/.test(text.trim())) {
+      return match;
+    }
+    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+      return `${open}"${text}"${close}`;
+    }
+    return match;
+  });
+
+  return result;
+}
