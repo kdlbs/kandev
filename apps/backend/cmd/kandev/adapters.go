@@ -377,8 +377,8 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
-func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool) error {
-	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode)
+func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) error {
+	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, attachments)
 	return err
 }
 

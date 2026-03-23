@@ -111,6 +111,7 @@ export type BuildCreatePayloadArgs = {
   executorProfileId: string;
   withAgent: boolean;
   planMode?: boolean;
+  attachments?: MessageAttachment[];
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -127,6 +128,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     executor_id: args.executorId || undefined,
     executor_profile_id: args.executorProfileId || undefined,
     plan_mode: args.planMode || undefined,
+    attachments: args.attachments,
   };
 }
 

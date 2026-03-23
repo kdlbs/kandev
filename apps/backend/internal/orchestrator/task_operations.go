@@ -202,7 +202,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive, nil)
 
 		if planModeActive {
 			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
@@ -223,7 +223,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
 // When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
 // When planMode is true, plan mode instructions are injected into the prompt and session metadata is set.
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -297,7 +297,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	executorID := session.ExecutorID
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true})
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, Attachments: attachments})
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
-	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive)
+	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, attachments)
 
 	return execution, nil
 }
@@ -314,9 +314,9 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // records the initial user message (unless skipped) and sets plan mode metadata.
 // It does NOT modify session state — the executor sets STARTING, and event handlers
 // (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
-func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool) {
+func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
-		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive)
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, attachments)
 	}
 
 	if planModeActive {
@@ -419,7 +419,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive || configMode)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive || configMode, attachments)
 
 		// Set plan mode in session metadata so the frontend can detect it.
 		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
@@ -472,9 +472,9 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 }
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
-func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool) {
+func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool, attachments []v1.MessageAttachment) {
 	if s.messageCreator != nil && prompt != "" {
-		meta := NewUserMessageMeta().WithPlanMode(planModeActive)
+		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAttachments(attachments)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",
 				zap.String("task_id", taskID),

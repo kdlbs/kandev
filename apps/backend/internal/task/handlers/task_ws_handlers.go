@@ -90,6 +90,7 @@ type wsCreateTaskRequest struct {
 	ExecutorID        string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
 	PlanMode          bool                      `json:"plan_mode,omitempty"`
+	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -175,6 +176,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			Prompt:            taskDTO.Description,
 			WorkflowStepID:    taskDTO.WorkflowStepID,
 			PlanMode:          req.PlanMode,
+			Attachments:       req.Attachments,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))

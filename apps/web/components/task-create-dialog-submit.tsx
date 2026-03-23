@@ -305,6 +305,7 @@ export function useTaskSubmitHandlers({
       trimmedDescription: string,
       repositoriesPayload: CreateTaskParams["repositories"],
       planMode?: boolean,
+      attachments?: ReturnType<typeof toMessageAttachments>,
     ) => {
       if (!workspaceId || !effectiveWorkflowId) return;
       const taskResponse = await createTask(
@@ -319,6 +320,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: true,
           planMode,
+          attachments,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -443,6 +445,7 @@ export function useTaskSubmitHandlers({
         const trimmedTitle = taskName.trim();
         const description = descriptionInputRef.current?.getValue() ?? "";
         const trimmedDescription = description.trim();
+        const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
         if (
           !validateCreateInputs({
             trimmedTitle,
@@ -460,6 +463,7 @@ export function useTaskSubmitHandlers({
           trimmedDescription,
           getRepositoriesPayload(),
           true,
+          attachments,
         );
       }
     } catch (error) {
@@ -492,6 +496,7 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
+    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (
       !validateCreateInputs({
         trimmedTitle,
@@ -508,7 +513,7 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
-        await performCreateWithAgent(trimmedTitle, trimmedDescription, repositoriesPayload);
+        await performCreateWithAgent(trimmedTitle, trimmedDescription, repositoriesPayload, undefined, attachments);
       } else {
         await handleCreatePlanMode(trimmedTitle, repositoriesPayload);
       }

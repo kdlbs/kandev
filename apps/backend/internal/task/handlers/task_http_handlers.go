@@ -327,6 +327,7 @@ type httpCreateTaskRequest struct {
 	ExecutorID        string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
 	PlanMode          bool                      `json:"plan_mode,omitempty"`
+	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -493,6 +494,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 			Prompt:            description,
 			SkipMessageRecord: false,
 			PlanMode:          body.PlanMode,
+			Attachments:       body.Attachments,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
