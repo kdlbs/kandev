@@ -242,10 +242,11 @@ function launchReleaseApps(prepared: PreparedRelease): {
   supervisor.attachSignalHandlers();
 
   // Start backend with piped stdio (quiet mode unless verbose/debug)
+  // In quiet mode, ignore stdout to avoid deadlock from unconsumed pipe buffer
   const backendProc = spawn(prepared.backendBin, [], {
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
-    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "pipe"],
   });
   supervisor.children.push(backendProc);
 
