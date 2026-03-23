@@ -241,19 +241,14 @@ function launchReleaseApps(prepared: PreparedRelease): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend with piped stdio (quiet mode unless verbose/debug)
-  // In quiet mode, ignore stdout to avoid deadlock from unconsumed pipe buffer
+  // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
+  // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
   const backendProc = spawn(prepared.backendBin, [], {
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
-    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "pipe"],
+    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
   });
   supervisor.children.push(backendProc);
-
-  // Forward stderr only (warnings/errors) when quiet
-  if (!prepared.showOutput) {
-    backendProc.stderr?.pipe(process.stderr);
-  }
 
   attachBackendExitHandler(backendProc, supervisor);
 

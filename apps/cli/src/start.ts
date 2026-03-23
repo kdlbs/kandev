@@ -133,18 +133,14 @@ export async function runStart({
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend with piped stdio (quiet mode unless verbose/debug)
+  // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
+  // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
   const backendProc = spawn(backendBin, [], {
     cwd: path.dirname(backendBin),
     env: backendEnv,
-    stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+    stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
   });
   supervisor.children.push(backendProc);
-
-  // Forward stderr only (warnings/errors) when quiet
-  if (!showOutput) {
-    backendProc.stderr?.pipe(process.stderr);
-  }
 
   attachBackendExitHandler(backendProc, supervisor);
 
