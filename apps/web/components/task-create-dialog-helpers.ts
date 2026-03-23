@@ -149,3 +149,37 @@ export function validateCreateInputs(inputs: {
     (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
   );
 }
+
+/** Builds the repositories payload for task creation from the current form state. */
+export function buildRepositoriesPayload(opts: {
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  branch: string;
+  githubPrHeadBranch: string | null;
+  repositoryId: string;
+  selectedLocalRepo: LocalRepository | null;
+}): NonNullable<CreateTaskParams["repositories"]> {
+  if (opts.useGitHubUrl && opts.githubUrl) {
+    return [
+      {
+        repository_id: "",
+        base_branch: opts.githubPrHeadBranch || opts.branch || undefined,
+        github_url: opts.githubUrl,
+      },
+    ];
+  }
+  if (opts.repositoryId) {
+    return [{ repository_id: opts.repositoryId, base_branch: opts.branch || undefined }];
+  }
+  if (opts.selectedLocalRepo) {
+    return [
+      {
+        repository_id: "",
+        base_branch: opts.branch || undefined,
+        local_path: opts.selectedLocalRepo.path,
+        default_branch: opts.selectedLocalRepo.default_branch || undefined,
+      },
+    ];
+  }
+  return [];
+}

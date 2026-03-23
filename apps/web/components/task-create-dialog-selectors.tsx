@@ -376,44 +376,35 @@ function toContextItems(
   );
 }
 
-export const TaskFormInputs = memo(function TaskFormInputs({
-  isSessionMode,
-  autoFocus,
-  initialDescription,
-  onDescriptionChange,
-  onKeyDown,
-  descriptionValueRef,
-  disabled,
-  placeholder,
-}: TaskFormInputsProps) {
+function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <div className="flex items-center px-1 pb-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground cursor-pointer"
+            onClick={onClick}
+            disabled={disabled}
+          >
+            <IconPaperclip className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Attach files</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function useDescriptionInput(
+  initialDescription: string,
+  autoFocus: boolean | undefined,
+  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>,
+  onDescriptionChange: (hasContent: boolean) => void,
+  attachments: FileAttachment[],
+) {
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
-    useFileAttachments();
-
-  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
-  const handleFileInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (files && files.length > 0) {
-        void addFiles(Array.from(files));
-      }
-      e.target.value = "";
-    },
-    [addFiles],
-  );
-  const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
-    disabled,
-    addFiles,
-    setIsDragging,
-  );
-
-  const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
-  );
 
   useEffect(() => {
     const ref = descriptionValueRef as React.MutableRefObject<TaskFormInputsHandle | null>;
@@ -448,7 +439,47 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     [description, onDescriptionChange],
   );
 
-  const hasAttachments = contextItems.length > 0;
+  return { description, textareaRef, handleDescriptionChange };
+}
+
+export const TaskFormInputs = memo(function TaskFormInputs({
+  isSessionMode,
+  autoFocus,
+  initialDescription,
+  onDescriptionChange,
+  onKeyDown,
+  descriptionValueRef,
+  disabled,
+  placeholder,
+}: TaskFormInputsProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
+    useFileAttachments();
+  const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
+    disabled,
+    addFiles,
+    setIsDragging,
+  );
+  const contextItems = useMemo(
+    () => toContextItems(attachments, handleRemoveAttachment),
+    [attachments, handleRemoveAttachment],
+  );
+  const { description, textareaRef, handleDescriptionChange } = useDescriptionInput(
+    initialDescription,
+    autoFocus,
+    descriptionValueRef,
+    onDescriptionChange,
+    attachments,
+  );
+  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) void addFiles(Array.from(files));
+      e.target.value = "";
+    },
+    [addFiles],
+  );
 
   return (
     <div
@@ -458,7 +489,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       onDrop={handleDrop}
     >
       <div
-        className={`rounded-md border border-input bg-transparent ${hasAttachments ? "ring-0" : ""}`}
+        className={`rounded-md border border-input bg-transparent ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
         <ContextZone items={contextItems} />
         <Textarea
@@ -475,29 +506,11 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           onPaste={handlePaste}
           data-testid="task-description-input"
           rows={2}
-          className={`border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${
-            isSessionMode
-              ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
-              : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
-          }`}
+          className={`border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
           required={isSessionMode}
           disabled={disabled}
         />
-        <div className="flex items-center px-1 pb-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground cursor-pointer"
-                onClick={handleAttachClick}
-                disabled={disabled}
-              >
-                <IconPaperclip className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Attach files</TooltipContent>
-          </Tooltip>
-        </div>
+        <AttachButton onClick={handleAttachClick} disabled={disabled} />
         <input
           ref={fileInputRef}
           type="file"

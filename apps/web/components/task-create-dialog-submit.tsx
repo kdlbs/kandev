@@ -2,75 +2,24 @@
 
 import { useCallback, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { Task, LocalRepository } from "@/lib/types/http";
 import { createTask, updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
 import { linkToSession } from "@/lib/links";
+import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
 
 import {
   activatePlanMode,
   buildCreateTaskPayload,
+  buildRepositoriesPayload,
   validateCreateInputs,
   toMessageAttachments,
   type CreateTaskParams,
 } from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
-
-export type SubmitHandlersDeps = {
-  isSessionMode: boolean;
-  isEditMode: boolean;
-  isPassthroughProfile: boolean;
-  taskName: string;
-  workspaceId: string | null;
-  workflowId: string | null;
-  effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
-  repositoryId: string;
-  selectedLocalRepo: LocalRepository | null;
-  useGitHubUrl: boolean;
-  githubUrl: string;
-  githubPrHeadBranch: string | null;
-  branch: string;
-  agentProfileId: string;
-  executorId: string;
-  executorProfileId: string;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-  } | null;
-  onSuccess?: (
-    task: Task,
-    mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
-  ) => void;
-  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
-  onOpenChange: (open: boolean) => void;
-  taskId: string | null;
-  descriptionInputRef: React.RefObject<{
-    getValue: () => string;
-    getAttachments: () => import("@/components/task/chat/file-attachment").FileAttachment[];
-  } | null>;
-  setIsCreatingSession: (v: boolean) => void;
-  setIsCreatingTask: (v: boolean) => void;
-  setHasTitle: (v: boolean) => void;
-  setHasDescription: (v: boolean) => void;
-  setTaskName: (v: string) => void;
-  setRepositoryId: (v: string) => void;
-  setBranch: (v: string) => void;
-  setAgentProfileId: (v: string) => void;
-  setExecutorId: (v: string) => void;
-  setSelectedWorkflowId: (v: string | null) => void;
-  setFetchedSteps: (v: null) => void;
-  clearDraft: () => void;
-};
 
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
@@ -139,32 +88,18 @@ export function useTaskSubmitHandlers({
     setFetchedSteps,
   ]);
 
-  const getRepositoriesPayload = useCallback(() => {
-    if (useGitHubUrl && githubUrl) {
-      return [
-        {
-          repository_id: "",
-          base_branch: branch || undefined,
-          checkout_branch: githubPrHeadBranch || undefined,
-          github_url: githubUrl,
-        },
-      ];
-    }
-    if (repositoryId) {
-      return [{ repository_id: repositoryId, base_branch: branch || undefined }];
-    }
-    if (selectedLocalRepo) {
-      return [
-        {
-          repository_id: "",
-          base_branch: branch || undefined,
-          local_path: selectedLocalRepo.path,
-          default_branch: selectedLocalRepo.default_branch || undefined,
-        },
-      ];
-    }
-    return [];
-  }, [useGitHubUrl, repositoryId, branch, githubUrl, githubPrHeadBranch, selectedLocalRepo]);
+  const getRepositoriesPayload = useCallback(
+    () =>
+      buildRepositoriesPayload({
+        useGitHubUrl,
+        githubUrl,
+        branch,
+        githubPrHeadBranch,
+        repositoryId,
+        selectedLocalRepo,
+      }),
+    [useGitHubUrl, repositoryId, branch, githubUrl, githubPrHeadBranch, selectedLocalRepo],
+  );
 
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? "";
@@ -553,8 +488,7 @@ export function useTaskSubmitHandlers({
 
   const handleCreateWithoutAgent = useCallback(async () => {
     const trimmedTitle = taskName.trim();
-    const description = descriptionInputRef.current?.getValue() ?? "";
-    const trimmedDescription = description.trim();
+    const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
     if (
       !validateCreateInputs({
         trimmedTitle,
@@ -567,25 +501,24 @@ export function useTaskSubmitHandlers({
       })
     )
       return;
-    if (!trimmedDescription) return;
-    const stepId = effectiveDefaultStepId;
-    if (!stepId || !workspaceId || !effectiveWorkflowId) return;
+    if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
+      return;
 
     setIsCreatingTask(true);
     try {
-      const reposPayload = getRepositoriesPayload();
-      const taskResponse = await createTask({
-        workspace_id: workspaceId,
-        workflow_id: effectiveWorkflowId,
-        workflow_step_id: stepId,
-        title: trimmedTitle,
-        description: trimmedDescription,
-        repositories: reposPayload,
-        state: "CREATED",
-        agent_profile_id: agentProfileId || undefined,
-        executor_id: executorId || undefined,
-        executor_profile_id: executorProfileId || undefined,
+      const payload = buildCreateTaskPayload({
+        workspaceId,
+        effectiveWorkflowId,
+        trimmedTitle,
+        trimmedDescription,
+        repositoriesPayload: getRepositoriesPayload(),
+        agentProfileId,
+        executorId,
+        executorProfileId,
+        withAgent: false,
       });
+      payload.workflow_step_id = effectiveDefaultStepId;
+      const taskResponse = await createTask(payload);
       onSuccess?.(taskResponse, "create");
       clearDraft();
       onOpenChange(false);

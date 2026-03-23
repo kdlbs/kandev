@@ -148,3 +148,52 @@ export type DialogFormState = {
   /** Clear draft on successful submission (before closing dialog) */
   clearDraft: () => void;
 };
+
+export type SubmitHandlersDeps = {
+  isSessionMode: boolean;
+  isEditMode: boolean;
+  isPassthroughProfile: boolean;
+  taskName: string;
+  workspaceId: string | null;
+  workflowId: string | null;
+  effectiveWorkflowId: string | null;
+  effectiveDefaultStepId: string | null;
+  repositoryId: string;
+  selectedLocalRepo: LocalRepository | null;
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  githubPrHeadBranch: string | null;
+  branch: string;
+  agentProfileId: string;
+  executorId: string;
+  executorProfileId: string;
+  editingTask?: {
+    id: string;
+    title: string;
+    description?: string;
+    workflowStepId: string;
+    state?: Task["state"];
+    repositoryId?: string;
+  } | null;
+  onSuccess?: (
+    task: Task,
+    mode: "create" | "edit",
+    meta?: { taskSessionId?: string | null },
+  ) => void;
+  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
+  onOpenChange: (open: boolean) => void;
+  taskId: string | null;
+  descriptionInputRef: React.RefObject<TaskFormInputsHandle | null>;
+  setIsCreatingSession: (v: boolean) => void;
+  setIsCreatingTask: (v: boolean) => void;
+  setHasTitle: (v: boolean) => void;
+  setHasDescription: (v: boolean) => void;
+  setTaskName: (v: string) => void;
+  setRepositoryId: (v: string) => void;
+  setBranch: (v: string) => void;
+  setAgentProfileId: (v: string) => void;
+  setExecutorId: (v: string) => void;
+  setSelectedWorkflowId: (v: string | null) => void;
+  setFetchedSteps: (v: null) => void;
+  clearDraft: () => void;
+};
