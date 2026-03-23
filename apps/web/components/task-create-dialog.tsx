@@ -230,7 +230,6 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
 }
 
 type DialogFormBodyProps = {
-  open: boolean;
   isSessionMode: boolean;
   isCreateMode: boolean;
   isTaskStarted: boolean;
@@ -262,7 +261,6 @@ type DialogFormBodyProps = {
 };
 
 function DialogFormBody({
-  open,
   isSessionMode,
   isCreateMode,
   isTaskStarted,
@@ -291,7 +289,7 @@ function DialogFormBody({
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
       <TaskFormInputs
-        key={`${open}-${initialDescription}`}
+        key={fs.openCycle}
         isSessionMode={isSessionMode}
         autoFocus={isTaskStarted ? false : true}
         initialDescription={initialDescription}
@@ -429,6 +427,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
+    clearDraft: fs.clearDraft,
   });
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
@@ -491,12 +490,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <DialogFormBody
-            open={open}
             isSessionMode={isSessionMode}
             isCreateMode={isCreateMode}
             isTaskStarted={isTaskStarted}
             isPassthroughProfile={computed.isPassthroughProfile}
-            initialDescription={initialValues?.description ?? ""}
+            initialDescription={fs.currentDefaults.description}
             hasDescription={fs.hasDescription}
             branchOptions={computed.branchOptions}
             branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}

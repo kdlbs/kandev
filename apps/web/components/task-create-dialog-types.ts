@@ -87,6 +87,12 @@ export type DialogFormState = {
   setHasTitle: (v: boolean) => void;
   hasDescription: boolean;
   setHasDescription: (v: boolean) => void;
+  /** Restored draft description, used as initialDescription for TaskFormInputs */
+  draftDescription: string;
+  /** Cycle counter incremented each time dialog opens - used in key for remount */
+  openCycle: number;
+  /** Computed defaults for current open cycle (includes draft restoration) */
+  currentDefaults: { name: string; description: string };
   descriptionInputRef: import("react").RefObject<{ getValue: () => string } | null>;
   repositoryId: string;
   setRepositoryId: (v: string) => void;
@@ -132,4 +138,6 @@ export type DialogFormState = {
   setGitHubUrlError: (v: string | null) => void;
   githubPrHeadBranch: string | null;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  /** Clear draft on successful submission (before closing dialog) */
+  clearDraft: () => void;
 };
