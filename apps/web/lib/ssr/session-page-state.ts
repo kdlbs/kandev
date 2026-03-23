@@ -207,17 +207,23 @@ async function fetchTaskDataOnly(
   task: Task,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
 ): Promise<FetchedSessionData> {
-  const [snapshot, agents, repositoriesResponse, workspacesResponse, workflowsResponse, userSettingsResponse] =
-    await Promise.all([
-      task.workflow_id
-        ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
-        : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
-      listAgents({ cache: "no-store" }),
-      listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
-      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-      listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
-      fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    ]);
+  const [
+    snapshot,
+    agents,
+    repositoriesResponse,
+    workspacesResponse,
+    workflowsResponse,
+    userSettingsResponse,
+  ] = await Promise.all([
+    task.workflow_id
+      ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+      : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
+    listAgents({ cache: "no-store" }),
+    listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
+    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+    listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+    fetchUserSettings({ cache: "no-store" }).catch(() => null),
+  ]);
 
   const allSessions = allSessionsResponse.sessions ?? [];
   const repositories = repositoriesResponse.repositories ?? [];
