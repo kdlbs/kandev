@@ -1,3 +1,4 @@
+// Routing: /t/{taskId} (task-keyed, not /s/{sessionId})
 import { type Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
