@@ -163,20 +163,16 @@ test.describe("Workflow automation", () => {
 
     const agentProfileId = seedData.agentProfileId;
 
-    // Create task in Todo and immediately start an agent session.
-    // Pass agent_profile_id in metadata so auto_start_agent can pick it up later
-    // when the task enters In Progress (on_enter: auto_start_agent).
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Lifecycle Workflow Task",
-      agentProfileId,
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: todoStep.id,
-        repository_ids: [seedData.repositoryId],
-        metadata: { agent_profile_id: agentProfileId },
-      },
-    );
+    // Create task in Todo without starting an agent. The session page's
+    // useAutoStartSession hook will fire and send task.description as the
+    // initial prompt when the user navigates to the task page.
+    const task = await apiClient.createTask(seedData.workspaceId, "Lifecycle Workflow Task", {
+      description: "/e2e:simple-message",
+      workflow_id: workflow.id,
+      workflow_step_id: todoStep.id,
+      agent_profile_id: agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     // --- Kanban page: verify task starts in Todo ---
     const kanban = new KanbanPage(testPage);
@@ -192,18 +188,12 @@ test.describe("Workflow automation", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Stepper initially shows Todo
-    await expect(session.stepperStep("Todo")).toHaveAttribute("aria-current", "step", {
-      timeout: 10_000,
-    });
-
-    // --- Send a message: agent responds → on_turn_complete fires → cascade ---
+    // --- Auto-start fires: useAutoStartSession sends task.description as prompt ---
     // Todo on_turn_complete: move_to_next → In Progress
     // In Progress on_enter: auto_start_agent queues /e2e:multi-turn step prompt
     // Step prompt runs → on_turn_complete: move_to_next → Review
-    await session.sendMessage("/e2e:simple-message");
 
-    // Wait for the first mock response (from user's /e2e:simple-message on Todo step)
+    // Wait for the first mock response (from auto-started /e2e:simple-message on Todo step)
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });

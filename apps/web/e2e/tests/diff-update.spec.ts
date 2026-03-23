@@ -121,8 +121,8 @@ test.describe("Diff update on file change", () => {
       timeout: 15_000,
     });
 
-    // Click on the Agent tab to make the chat input visible again
-    await session.clickTab("Agent");
+    // Click on the session tab to make the chat input visible again
+    await session.clickTab("#1");
 
     // Send another message to trigger the second modification
     await session.sendMessage("/e2e:diff-update-modify");
@@ -179,8 +179,8 @@ test.describe("Untracked file diff update", () => {
       timeout: 15_000,
     });
 
-    // Click on the Agent tab to make the chat input visible again
-    await session.clickTab("Agent");
+    // Click on the session tab to make the chat input visible again
+    await session.clickTab("#1");
 
     // Send another message to trigger the modification
     await session.sendMessage("/e2e:untracked-file-modify");

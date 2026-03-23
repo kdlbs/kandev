@@ -107,9 +107,15 @@ test.describe("Preview primary session", () => {
     }, task.id);
     console.log("Store debug:", JSON.stringify(storeData));
 
-    // 8. Click the task card to open the preview panel
+    // 8. Click the task card to open the preview panel.
+    // Wait for the "Open full page" button to appear on the card — this button is only
+    // rendered when enablePreviewOnClick: true, so its presence confirms the SSR-hydrated
+    // settings have been applied to the store before we click.
     const previewCard = kanban.taskCardByTitle("Preview Primary Task");
     await expect(previewCard).toBeVisible({ timeout: 10_000 });
+    await expect(previewCard.getByRole("button", { name: "Open full page" })).toBeVisible({
+      timeout: 10_000,
+    });
     await previewCard.click();
 
     // Wait for preview panel to appear

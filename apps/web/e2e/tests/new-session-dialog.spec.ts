@@ -123,9 +123,9 @@ test.describe("New session dialog", () => {
     // 6. Dialog should close
     await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
 
-    // 7. Verify a second session tab exists (at least 2 "Agent" tabs in dockview)
-    const agentTabs = testPage.locator(".dv-default-tab:has-text('Agent')");
-    await expect(agentTabs).toHaveCount(2, { timeout: 15_000 });
+    // 7. Verify two session tabs exist (tabs use "#N Label" format)
+    await expect(session.sessionTabByText("#1")).toBeVisible({ timeout: 15_000 });
+    await expect(session.sessionTabByText("#2")).toBeVisible({ timeout: 15_000 });
 
     // 9. Verify the new session is active (chat loads fresh context)
     await session.waitForLoad();

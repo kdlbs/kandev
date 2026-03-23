@@ -279,9 +279,9 @@ export class SessionPage {
     await editor.press(`${modifier}+Enter`);
   }
 
-  /** Toggle plan mode on/off via Shift+Tab in the TipTap editor. */
+  /** Toggle plan mode on/off via Shift+Tab in the chat input. */
   async togglePlanMode() {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = this.planModeInput();
     await editor.click();
     await editor.press("Shift+Tab");
   }

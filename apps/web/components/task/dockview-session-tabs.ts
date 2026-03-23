@@ -89,6 +89,13 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
       return;
     }
+    // In maximized state the session panel is intentionally absent from the layout;
+    // it will be restored when the user exits maximize (via preMaximizeLayout).
+    // Adding it here would destroy the saved maximize layout.
+    if (useDockviewStore.getState().preMaximizeLayout !== null) {
+      sessionTabCreatedRef.current.add(effectiveSessionId);
+      return;
+    }
     // Always remove the generic "chat" panel — it's replaced by per-session tabs
     const chatPanel = api.getPanel("chat");
     if (chatPanel) {
