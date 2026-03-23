@@ -27,27 +27,20 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Your workflow** - Every team is different, and not every developer uses AI the same way. Define workflows once, share them across the team, and give everyone a consistent process for working with agents - regardless of experience level.
 - **Remote agents** - Running multiple agents on a large codebase can quickly saturate a local machine. The goal is a single control plane: offload execution to servers, orchestrate from anywhere, including your phone.
 
-<details>
-<summary><strong>Where this is heading</strong></summary>
-
-While agents can already plan, implement, test, and deploy autonomously with the right workflows, we don't yet trust their output enough for production-grade software without human review. Crossing that trust threshold will fundamentally transform our industry.
-
-</details>
-
 ## Features
 
 - **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode
-- **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting efficiency and productivity with AI agents.
-- **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, and chat in one IDE-like view
+- **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting productivity with AI agents
+- **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, embedded vscode and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
 - **Agentic workflows** - Multi-step pipelines that chain agents through automated task routing. See [docs/workflows.md](docs/workflow-tips.md)
 - **CLI passthrough** - Drop into raw agent CLI mode for direct terminal interaction with any supported agent, leverage the full power of their TUIs
 - **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
-- **Flexible runtimes** - Run agents as local processes or in isolated Docker containers
+- **Flexible runtimes** - Run agents as local processes, in isolated Docker containers or in remote executors like sprites.dev
 - **Session management** - Resume and review agent conversations
 - **Stats** - Track your productivity with stats on the completed tasks, agent turns, etc
 
-## Supported Agents
+## Supported ACP Agents
 
 | Agent | Default Model | Other Models | Protocol |
 |:-------:|:--------------:|--------------|:----------:|
@@ -60,6 +53,10 @@ While agents can already plan, implement, test, and deploy autonomously with the
 | **OpenCode** | GPT-5 Nano | Claude Sonnet 4, Opus 4, etc (dynamic) | ACP |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Communication Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is also available for direct terminal interaction with any agent CLI. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
+
+### Bring your own TUI agents
+
+There is support for running any agent as TUI inside a terminal. Just add the cli command in the agent profile settings and the task will start the agent inside a PTY terminal instead of using ACP.
 
 ## Quick Start
 
