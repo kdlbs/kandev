@@ -143,7 +143,7 @@ func TestStartCreatedSession_WrongTask(t *testing.T) {
 	// Session belongs to "task-other", not "task1"
 	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCreated)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
 	}
@@ -155,7 +155,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
 	}
@@ -229,7 +229,7 @@ func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false)
+	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false, nil)
 
 	// Session state must remain STARTING — recordInitialMessage should not modify state.
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -256,7 +256,7 @@ func TestPostLaunchCreated_SkipMessage_DoesNotChangeSessionState(t *testing.T) {
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false)
+	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false, nil)
 
 	// Session state must remain STARTING when skipMessage=true.
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -277,7 +277,7 @@ func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false)
+	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false, nil)
 
 	// Session state must remain STARTING — postLaunchCreated delegates to
 	// recordInitialMessage which only creates the message.
@@ -303,7 +303,7 @@ func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true)
+	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true, nil)
 
 	// User message should have plan_mode metadata.
 	if len(mc.userMessages) != 1 {

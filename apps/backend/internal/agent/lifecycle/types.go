@@ -248,10 +248,11 @@ type LaunchRequest struct {
 	SessionID       string
 	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentProfileID  string
-	WorkspacePath   string            // Host path to workspace (original repository path)
-	TaskDescription string            // Task description to send via ACP prompt
-	Env             map[string]string // Additional env vars
-	ACPSessionID    string            // ACP session ID to resume, if available
+	WorkspacePath   string              // Host path to workspace (original repository path)
+	TaskDescription string              // Task description to send via ACP prompt
+	Attachments     []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env             map[string]string   // Additional env vars
+	ACPSessionID    string              // ACP session ID to resume, if available
 	Metadata        map[string]interface{}
 	ModelOverride   string // If set, use this model instead of the profile's model
 
@@ -272,6 +273,14 @@ type LaunchRequest struct {
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+}
+
+// MessageAttachment represents an image or file attachment for agent prompts.
+type MessageAttachment struct {
+	Type     string // "image", "audio", or "resource"
+	Data     string // base64-encoded data
+	MimeType string // MIME type
+	Name     string // optional filename for resource attachments
 }
 
 // CredentialsManager interface for credential retrieval

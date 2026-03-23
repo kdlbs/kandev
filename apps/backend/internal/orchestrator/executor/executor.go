@@ -210,7 +210,8 @@ type LaunchAgentRequest struct {
 	AgentProfileID      string
 	RepositoryURL       string
 	Branch              string
-	TaskDescription     string // Task description to send via ACP prompt
+	TaskDescription     string                 // Task description to send via ACP prompt
+	Attachments         []v1.MessageAttachment // Attachments for the initial prompt (images/files)
 	Priority            int
 	Metadata            map[string]interface{}
 	Env                 map[string]string
@@ -246,6 +247,7 @@ type LaunchOptions struct {
 	WorkflowStepID string
 	StartAgent     bool
 	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
+	Attachments    []v1.MessageAttachment
 }
 
 // LaunchAgentResponse contains the result of launching an agent

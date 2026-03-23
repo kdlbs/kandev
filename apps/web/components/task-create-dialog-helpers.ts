@@ -10,10 +10,29 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToSession } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
 import { createTask } from "@/lib/api";
+import type { FileAttachment } from "@/components/task/chat/file-attachment";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
 
 export type { CreateTaskParams };
+
+/** Converts FileAttachment array to MessageAttachment array for the launch request. */
+export function toMessageAttachments(
+  attachments: FileAttachment[],
+): MessageAttachment[] | undefined {
+  if (attachments.length === 0) return undefined;
+  return attachments.map((att) =>
+    att.isImage
+      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
+      : {
+          type: "resource" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+        },
+  );
+}
 
 export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
   const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
@@ -92,6 +111,7 @@ export type BuildCreatePayloadArgs = {
   executorProfileId: string;
   withAgent: boolean;
   planMode?: boolean;
+  attachments?: MessageAttachment[];
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -108,6 +128,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     executor_id: args.executorId || undefined,
     executor_profile_id: args.executorProfileId || undefined,
     plan_mode: args.planMode || undefined,
+    attachments: args.attachments,
   };
 }
 
@@ -127,4 +148,39 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
   );
+}
+
+/** Builds the repositories payload for task creation from the current form state. */
+export function buildRepositoriesPayload(opts: {
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  branch: string;
+  githubPrHeadBranch: string | null;
+  repositoryId: string;
+  selectedLocalRepo: LocalRepository | null;
+}): NonNullable<CreateTaskParams["repositories"]> {
+  if (opts.useGitHubUrl && opts.githubUrl) {
+    return [
+      {
+        repository_id: "",
+        base_branch: opts.branch || undefined,
+        checkout_branch: opts.githubPrHeadBranch || undefined,
+        github_url: opts.githubUrl.trim(),
+      },
+    ];
+  }
+  if (opts.repositoryId) {
+    return [{ repository_id: opts.repositoryId, base_branch: opts.branch || undefined }];
+  }
+  if (opts.selectedLocalRepo) {
+    return [
+      {
+        repository_id: "",
+        base_branch: opts.branch || undefined,
+        local_path: opts.selectedLocalRepo.path,
+        default_branch: opts.selectedLocalRepo.default_branch || undefined,
+      },
+    ];
+  }
+  return [];
 }

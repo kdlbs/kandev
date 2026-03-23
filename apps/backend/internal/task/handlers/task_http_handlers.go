@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -327,6 +328,7 @@ type httpCreateTaskRequest struct {
 	ExecutorID        string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
 	PlanMode          bool                      `json:"plan_mode,omitempty"`
+	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -335,10 +337,52 @@ type createTaskResponse struct {
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
 }
 
+const (
+	maxCreateTaskAttachments = 10
+	maxAttachmentDataBytes   = 10 * 1024 * 1024 // 10 MB base64 string length cap
+)
+
+var allowedAttachmentTypes = map[string]struct{}{
+	"image":    {},
+	"audio":    {},
+	"resource": {},
+}
+
+func validateAttachments(items []v1.MessageAttachment) error {
+	if len(items) > maxCreateTaskAttachments {
+		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
+	}
+	var totalSize int
+	for i, a := range items {
+		typ := strings.TrimSpace(a.Type)
+		if _, ok := allowedAttachmentTypes[typ]; !ok {
+			return fmt.Errorf("attachment[%d] has unsupported type %q", i, typ)
+		}
+		if strings.TrimSpace(a.MimeType) == "" {
+			return fmt.Errorf("attachment[%d] mime_type is required", i)
+		}
+		if len(a.Data) == 0 {
+			return fmt.Errorf("attachment[%d] data is required", i)
+		}
+		if len(a.Data) > maxAttachmentDataBytes {
+			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
+		}
+		totalSize += len(a.Data)
+	}
+	if totalSize > maxAttachmentDataBytes {
+		return fmt.Errorf("total attachment size exceeds limit")
+	}
+	return nil
+}
+
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := validateAttachments(body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if body.WorkspaceID == "" {
@@ -493,6 +537,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 			Prompt:            description,
 			SkipMessageRecord: false,
 			PlanMode:          body.PlanMode,
+			Attachments:       body.Attachments,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))

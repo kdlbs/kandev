@@ -202,7 +202,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive, nil)
 
 		if planModeActive {
 			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
@@ -223,7 +223,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
 // When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
 // When planMode is true, plan mode instructions are injected into the prompt and session metadata is set.
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -297,7 +297,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	executorID := session.ExecutorID
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true})
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, Attachments: attachments})
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
-	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive)
+	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, attachments)
 
 	return execution, nil
 }
@@ -314,9 +314,9 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // records the initial user message (unless skipped) and sets plan mode metadata.
 // It does NOT modify session state — the executor sets STARTING, and event handlers
 // (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
-func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool) {
+func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
-		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive)
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, attachments)
 	}
 
 	if planModeActive {
@@ -333,7 +333,7 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -341,7 +341,8 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Int("priority", priority),
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("workflow_step_id", workflowStepID),
-		zap.Bool("plan_mode", planMode))
+		zap.Bool("plan_mode", planMode),
+		zap.Int("attachments", len(attachments)))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -349,26 +350,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 			zap.Error(err))
 	}
 
-	// Move task to the target workflow step if provided and different from current
-	if workflowStepID != "" {
-		dbTask, err := s.repo.GetTask(ctx, taskID)
-		if err == nil && dbTask.WorkflowStepID != workflowStepID {
-			dbTask.WorkflowStepID = workflowStepID
-			dbTask.UpdatedAt = time.Now().UTC()
-			if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
-				s.logger.Warn("failed to move task to workflow step",
-					zap.String("task_id", taskID),
-					zap.String("workflow_step_id", workflowStepID),
-					zap.Error(err))
-			} else if s.eventBus != nil {
-				_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-					events.TaskUpdated,
-					"orchestrator",
-					buildTaskEventPayload(dbTask),
-				))
-			}
-		}
-	}
+	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
 
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -411,18 +393,51 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		Prompt:         effectivePrompt,
 		WorkflowStepID: workflowStepID,
 		StartAgent:     true,
+		Attachments:    attachments,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive || configMode)
+	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, attachments)
 
-		// Set plan mode in session metadata so the frontend can detect it.
-		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
-		// the session metadata is needed for the frontend to switch the layout.
-		if planModeActive {
+	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
+	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
+
+	return execution, nil
+}
+
+// moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
+func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowStepID string) {
+	if workflowStepID == "" {
+		return
+	}
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || dbTask.WorkflowStepID == workflowStepID {
+		return
+	}
+	dbTask.WorkflowStepID = workflowStepID
+	dbTask.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
+		s.logger.Warn("failed to move task to workflow step",
+			zap.String("task_id", taskID),
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+	} else if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
+			events.TaskUpdated,
+			"orchestrator",
+			buildTaskEventPayload(dbTask),
+		))
+	}
+}
+
+// postLaunchStart records the initial message and sets plan mode after a successful launch.
+func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode bool, attachments []v1.MessageAttachment) {
+	if execution.SessionID != "" {
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, attachments)
+
+		if setPlanMode {
 			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
 			if err == nil {
 				s.setSessionPlanMode(ctx, session, true)
@@ -432,11 +447,6 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	}
-
-	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
-	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
-
-	return execution, nil
 }
 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
@@ -470,9 +480,9 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 }
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
-func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool) {
-	if s.messageCreator != nil && prompt != "" {
-		meta := NewUserMessageMeta().WithPlanMode(planModeActive)
+func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool, attachments []v1.MessageAttachment) {
+	if s.messageCreator != nil && (prompt != "" || len(attachments) > 0) {
+		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAttachments(attachments)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",
 				zap.String("task_id", taskID),

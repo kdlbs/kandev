@@ -232,7 +232,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
 	}, "")
 	if err != nil {
@@ -304,7 +304,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
 	}, "")
 
@@ -357,7 +357,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, func(executionID string) error {
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
 	}, "")
 	if err != nil {
@@ -425,7 +425,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 
 	// This will fail because the stream isn't connected (sendStreamRequest returns error).
 	// But it should NOT panic due to nil streamManager.
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
 	}, "")
 

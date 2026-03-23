@@ -262,6 +262,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution *AgentExecution,
 	agentConfig agents.Agent,
 	taskDescription string,
+	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
 	profileModel string,
@@ -356,18 +357,35 @@ func (sm *SessionManager) InitializeAndPrompt(
 	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
-	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, markReady)
+	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 
 	return nil
+}
+
+// convertAttachments converts lifecycle.MessageAttachment to v1.MessageAttachment for ACP.
+func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]v1.MessageAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		result = append(result, v1.MessageAttachment{
+			Type:     att.Type,
+			Data:     att.Data,
+			MimeType: att.MimeType,
+			Name:     att.Name,
+		})
+	}
+	return result
 }
 
 // dispatchInitialPrompt sends the initial task prompt or marks the execution as ready.
 // For sessions with a task description, sends the prompt asynchronously.
 // For resumed sessions (fork_session pattern), defers context injection to the first user message.
 // For all other cases, marks the execution ready immediately.
-func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, markReady func(executionID string) error) {
+func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, markReady func(executionID string) error) {
 	switch {
-	case taskDescription != "":
+	case taskDescription != "" || len(attachments) > 0:
 		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
 		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithContext)
 		if effectivePrompt != taskDescription {
@@ -377,10 +395,11 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				zap.Int("original_length", len(taskDescription)),
 				zap.Int("effective_length", len(effectivePrompt)))
 		}
+		acpAttachments := convertAttachments(attachments)
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, constants.PromptTimeout)
 			defer cancel()
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, nil)
+			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),

@@ -8,6 +8,13 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
+export type MessageAttachment = {
+  type: "image" | "audio" | "resource";
+  data: string;
+  mime_type: string;
+  name?: string;
+};
+
 export type LaunchSessionRequest = {
   task_id: string;
   intent?: SessionIntent;
@@ -21,6 +28,7 @@ export type LaunchSessionRequest = {
   priority?: number;
   launch_workspace?: boolean;
   skip_message_record?: boolean;
+  attachments?: MessageAttachment[];
 };
 
 export type LaunchSessionResponse = {

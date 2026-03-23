@@ -33,6 +33,7 @@ export async function createTask(
     repositories?: Array<{
       repository_id: string;
       base_branch?: string;
+      checkout_branch?: string;
       local_path?: string;
       name?: string;
       default_branch?: string;
@@ -45,6 +46,7 @@ export async function createTask(
     executor_id?: string;
     executor_profile_id?: string;
     plan_mode?: boolean;
+    attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
   },
   options?: ApiRequestOptions,
 ) {

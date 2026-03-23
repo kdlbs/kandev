@@ -26,18 +26,19 @@ const (
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID            string        `json:"task_id"`
-	Intent            SessionIntent `json:"intent,omitempty"`
-	SessionID         string        `json:"session_id,omitempty"`
-	AgentProfileID    string        `json:"agent_profile_id,omitempty"`
-	ExecutorID        string        `json:"executor_id,omitempty"`
-	ExecutorProfileID string        `json:"executor_profile_id,omitempty"`
-	Prompt            string        `json:"prompt,omitempty"`
-	PlanMode          bool          `json:"plan_mode,omitempty"`
-	WorkflowStepID    string        `json:"workflow_step_id,omitempty"`
-	Priority          int           `json:"priority,omitempty"`
-	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
+	TaskID            string                 `json:"task_id"`
+	Intent            SessionIntent          `json:"intent,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`
+	AgentProfileID    string                 `json:"agent_profile_id,omitempty"`
+	ExecutorID        string                 `json:"executor_id,omitempty"`
+	ExecutorProfileID string                 `json:"executor_profile_id,omitempty"`
+	Prompt            string                 `json:"prompt,omitempty"`
+	PlanMode          bool                   `json:"plan_mode,omitempty"`
+	WorkflowStepID    string                 `json:"workflow_step_id,omitempty"`
+	Priority          int                    `json:"priority,omitempty"`
+	LaunchWorkspace   bool                   `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool                   `json:"skip_message_record,omitempty"`
+	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 // LaunchSessionResponse is the unified response for session.launch.
@@ -121,7 +122,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	execution, err := s.StartTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
-		req.WorkflowStepID, req.PlanMode,
+		req.WorkflowStepID, req.PlanMode, req.Attachments,
 	)
 	if err != nil {
 		return nil, err
@@ -133,7 +134,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.Attachments,
 	)
 	if err != nil {
 		return nil, err
