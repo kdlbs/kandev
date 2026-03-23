@@ -445,7 +445,9 @@ export function useTaskSubmitHandlers({
         const trimmedTitle = taskName.trim();
         const description = descriptionInputRef.current?.getValue() ?? "";
         const trimmedDescription = description.trim();
-        const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
+        const attachments = toMessageAttachments(
+          descriptionInputRef.current?.getAttachments() ?? [],
+        );
         if (
           !validateCreateInputs({
             trimmedTitle,
@@ -513,7 +515,13 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
-        await performCreateWithAgent(trimmedTitle, trimmedDescription, repositoriesPayload, undefined, attachments);
+        await performCreateWithAgent(
+          trimmedTitle,
+          trimmedDescription,
+          repositoriesPayload,
+          undefined,
+          attachments,
+        );
       } else {
         await handleCreatePlanMode(trimmedTitle, repositoriesPayload);
       }

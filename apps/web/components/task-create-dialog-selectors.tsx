@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Textarea } from "@kandev/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
 import {
   processFile,
@@ -386,9 +388,22 @@ export const TaskFormInputs = memo(function TaskFormInputs({
 }: TaskFormInputsProps) {
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
     useFileAttachments();
+
+  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        void addFiles(Array.from(files));
+      }
+      e.target.value = "";
+    },
+    [addFiles],
+  );
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
@@ -467,6 +482,29 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           }`}
           required={isSessionMode}
           disabled={disabled}
+        />
+        <div className="flex items-center px-1 pb-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground cursor-pointer"
+                onClick={handleAttachClick}
+                disabled={disabled}
+              >
+                <IconPaperclip className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Attach files</TooltipContent>
+          </Tooltip>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileInputChange}
+          tabIndex={-1}
         />
       </div>
       {isDragging && (

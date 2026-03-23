@@ -350,26 +350,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 			zap.Error(err))
 	}
 
-	// Move task to the target workflow step if provided and different from current
-	if workflowStepID != "" {
-		dbTask, err := s.repo.GetTask(ctx, taskID)
-		if err == nil && dbTask.WorkflowStepID != workflowStepID {
-			dbTask.WorkflowStepID = workflowStepID
-			dbTask.UpdatedAt = time.Now().UTC()
-			if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
-				s.logger.Warn("failed to move task to workflow step",
-					zap.String("task_id", taskID),
-					zap.String("workflow_step_id", workflowStepID),
-					zap.Error(err))
-			} else if s.eventBus != nil {
-				_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-					events.TaskUpdated,
-					"orchestrator",
-					buildTaskEventPayload(dbTask),
-				))
-			}
-		}
-	}
+	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
 
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -418,13 +399,45 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 
-	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive || configMode, attachments)
+	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, attachments)
 
-		// Set plan mode in session metadata so the frontend can detect it.
-		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
-		// the session metadata is needed for the frontend to switch the layout.
-		if planModeActive {
+	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
+	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
+
+	return execution, nil
+}
+
+// moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
+func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowStepID string) {
+	if workflowStepID == "" {
+		return
+	}
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || dbTask.WorkflowStepID == workflowStepID {
+		return
+	}
+	dbTask.WorkflowStepID = workflowStepID
+	dbTask.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
+		s.logger.Warn("failed to move task to workflow step",
+			zap.String("task_id", taskID),
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+	} else if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
+			events.TaskUpdated,
+			"orchestrator",
+			buildTaskEventPayload(dbTask),
+		))
+	}
+}
+
+// postLaunchStart records the initial message and sets plan mode after a successful launch.
+func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode bool, attachments []v1.MessageAttachment) {
+	if execution.SessionID != "" {
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, attachments)
+
+		if setPlanMode {
 			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
 			if err == nil {
 				s.setSessionPlanMode(ctx, session, true)
@@ -434,12 +447,8 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	}
-
-	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
-	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
-
-	return execution, nil
 }
+
 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
