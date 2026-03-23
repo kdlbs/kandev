@@ -24,6 +24,10 @@ export type RunOptions = {
   version?: string;
   backendPort?: number;
   webPort?: number;
+  /** Show info logs from backend + web */
+  verbose?: boolean;
+  /** Show debug logs + agent message dumps */
+  debug?: boolean;
 };
 
 type PreparedRelease = {
@@ -38,6 +42,7 @@ type PreparedRelease = {
   agentctlPort: number;
   dbPath: string;
   logLevel: string;
+  showOutput: boolean;
 };
 
 /**
@@ -108,6 +113,8 @@ async function prepareReleaseBundle({
   version,
   backendPort,
   webPort,
+  verbose = false,
+  debug = false,
 }: RunOptions): Promise<PreparedRelease> {
   const platformDir = getPlatformDir();
   let tag: string;
@@ -162,7 +169,9 @@ async function prepareReleaseBundle({
   const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
   const backendUrl = `http://localhost:${actualBackendPort}`;
-  const logLevel = process.env.KANDEV_LOG_LEVEL?.trim() || "warn";
+  const showOutput = verbose || debug;
+  const logLevel =
+    process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbPath = path.join(DATA_DIR, "kandev.db");
@@ -170,20 +179,24 @@ async function prepareReleaseBundle({
   // Note: Release mode doesn't configure MCP server ports as it uses
   // the bundled configuration. Only backend and agentctl ports are set.
   // Log level defaults to warn for clean output and can be overridden
-  // via KANDEV_LOG_LEVEL.
-  const backendEnv = {
+  // via KANDEV_LOG_LEVEL or --verbose/--debug flags.
+  const backendEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
     KANDEV_WEB_INTERNAL_URL: `http://localhost:${actualWebPort}`,
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
     KANDEV_DATABASE_PATH: dbPath,
     KANDEV_LOG_LEVEL: logLevel,
+    ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
   };
 
   const webEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_API_BASE_URL: backendUrl,
     PORT: String(actualWebPort),
+    // Ensure Next.js standalone server binds to 127.0.0.1 so localhost health checks work.
+    // Without this, HOSTNAME from the host environment can cause binding issues.
+    HOSTNAME: "127.0.0.1",
   };
   (webEnv as Record<string, string>).NODE_ENV = "production";
 
@@ -199,6 +212,7 @@ async function prepareReleaseBundle({
     agentctlPort,
     dbPath,
     logLevel,
+    showOutput,
   };
 }
 
@@ -227,12 +241,18 @@ function launchReleaseApps(prepared: PreparedRelease): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
+  // Start backend with piped stdio (quiet mode unless verbose/debug)
   const backendProc = spawn(prepared.backendBin, [], {
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
-    stdio: "inherit",
+    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
   });
   supervisor.children.push(backendProc);
+
+  // Forward stderr only (warnings/errors) when quiet
+  if (!prepared.showOutput) {
+    backendProc.stderr?.pipe(process.stderr);
+  }
 
   attachBackendExitHandler(backendProc, supervisor);
 
@@ -244,8 +264,14 @@ function launchReleaseApps(prepared: PreparedRelease): {
   return { supervisor, backendProc, webServerPath };
 }
 
-export async function runRelease({ version, backendPort, webPort }: RunOptions): Promise<void> {
-  const prepared = await prepareReleaseBundle({ version, backendPort, webPort });
+export async function runRelease({
+  version,
+  backendPort,
+  webPort,
+  verbose = false,
+  debug = false,
+}: RunOptions): Promise<void> {
+  const prepared = await prepareReleaseBundle({ version, backendPort, webPort, verbose, debug });
   const { supervisor, backendProc, webServerPath } = launchReleaseApps(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
@@ -261,7 +287,7 @@ export async function runRelease({ version, backendPort, webPort }: RunOptions):
     env: prepared.webEnv,
     supervisor,
     label: "web",
-    quiet: true,
+    quiet: !prepared.showOutput,
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log("[kandev] ready at " + prepared.backendUrl);

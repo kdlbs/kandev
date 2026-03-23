@@ -100,6 +100,9 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     // In production, the backend reverse-proxies Next.js so the client uses same-origin.
     NEXT_PUBLIC_KANDEV_API_PORT: String(ports.backendPort),
     PORT: String(ports.webPort),
+    // Ensure Next.js standalone server binds to 127.0.0.1 so localhost health checks work.
+    // Without this, HOSTNAME from the host environment can cause binding issues.
+    HOSTNAME: "127.0.0.1",
   };
 
   if (production) {

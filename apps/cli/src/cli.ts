@@ -23,10 +23,10 @@ function printHelp() {
   console.log(`kandev launcher
 
 Usage:
-  kandev run [--version <tag>] [--backend-port <port>] [--web-port <port>]
+  kandev run [--version <tag>] [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
   kandev dev [--backend-port <port>] [--web-port <port>]
   kandev start [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
-  kandev [--version <tag>] [--backend-port <port>] [--web-port <port>]
+  kandev [--version <tag>] [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
   kandev --dev [--backend-port <port>] [--web-port <port>]
 
 Examples:
@@ -37,6 +37,7 @@ Examples:
   kandev start
   kandev --version v0.1.0
   kandev --backend-port 18080 --web-port 13000
+  kandev --debug
 
 Options:
   dev             Use local repo for dev (make dev + next dev) if available.
@@ -46,8 +47,8 @@ Options:
   --version        Release tag to install (default: latest).
   --backend-port   Override backend port (or KANDEV_BACKEND_PORT env var).
   --web-port       Override web port (or KANDEV_WEB_PORT env var).
-  --verbose, -v    Show info logs from backend + web (start mode only).
-  --debug          Show debug logs + agent message dumps (start mode only).
+  --verbose, -v    Show info logs from backend + web.
+  --debug          Show debug logs + agent message dumps.
   --help, -h       Show help.
 `);
 }
@@ -162,7 +163,13 @@ async function main(): Promise<void> {
   }
 
   await maybePromptForUpdate(pkg.version, process.argv.slice(2));
-  await runRelease({ version: raw.version, backendPort, webPort });
+  await runRelease({
+    version: raw.version,
+    backendPort,
+    webPort,
+    verbose: raw.verbose,
+    debug: raw.debug,
+  });
 }
 
 main().catch((err) => {
