@@ -10,8 +10,6 @@ type NavigationOptions = {
   isMobile?: boolean;
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task) => void;
-  onNoSession: (task: Task) => void;
-  setTaskSessionAvailability: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
 
 export function useKanbanNavigation({

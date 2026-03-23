@@ -49,7 +49,6 @@ export interface Task {
   description?: string;
   position?: number;
   repositoryId?: string;
-  hasSession?: boolean;
   // Workflow fields
   sessionCount?: number | null;
   primarySessionId?: string | null;
@@ -212,9 +211,7 @@ function KanbanCardActions({
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4");
   const hasKnownSession =
-    Boolean(task.primarySessionId) ||
-    Boolean(task.sessionCount && task.sessionCount > 0) ||
-    task.hasSession === true;
+    Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
   return (
     <div className="flex items-center gap-2">

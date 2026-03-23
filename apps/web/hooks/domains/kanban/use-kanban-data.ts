@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
@@ -19,10 +19,6 @@ export function useKanbanData({
   onWorkflowChange,
   searchQuery = "",
 }: KanbanDataOptions) {
-  const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>(
-    {},
-  );
-
   // Store selectors
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
@@ -78,6 +74,7 @@ export function useKanbanData({
     primarySessionId: task.primarySessionId,
     sessionCount: task.sessionCount,
     reviewStatus: task.reviewStatus,
+    parentTaskId: task.parentTaskId,
   }));
 
   const activeSteps = kanban.workflowId ? steps : [];
@@ -113,15 +110,6 @@ export function useKanbanData({
     });
   }, [visibleTasks, searchQuery, workspaceState.activeId, repositoriesByWorkspace]);
 
-  const visibleTasksWithSessions = useMemo(
-    () =>
-      filteredTasks.map((task) => ({
-        ...task,
-        hasSession: taskSessionAvailability[task.id],
-      })),
-    [filteredTasks, taskSessionAvailability],
-  );
-
   return {
     // State
     kanban,
@@ -131,12 +119,10 @@ export function useKanbanData({
     userSettings,
     commitSettings,
     selectedRepositoryIds,
-    taskSessionAvailability,
-    setTaskSessionAvailability,
     isMounted,
 
     // Derived data
     activeSteps,
-    visibleTasksWithSessions,
+    filteredTasks,
   };
 }
