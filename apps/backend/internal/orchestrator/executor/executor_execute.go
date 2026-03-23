@@ -340,6 +340,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.McpMode = opts.McpMode
 	}
 
+	// Pass attachments for the initial prompt
+	if len(opts.Attachments) > 0 {
+		req.Attachments = opts.Attachments
+	}
+
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),

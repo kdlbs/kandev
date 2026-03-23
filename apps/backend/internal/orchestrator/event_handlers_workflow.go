@@ -334,7 +334,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
-	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode)
+	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
 	if err != nil {
 		s.logger.Error("task.moved: failed to auto-start task",
 			zap.String("task_id", data.TaskID),

@@ -176,6 +176,9 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	if req.TaskDescription != "" {
 		reqWithWorktree.Metadata["task_description"] = req.TaskDescription
 	}
+	if len(req.Attachments) > 0 {
+		reqWithWorktree.Metadata["attachments"] = req.Attachments
+	}
 	if req.SessionID != "" {
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
@@ -576,6 +579,18 @@ func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
 	return ""
 }
 
+// getAttachmentsFromMetadata extracts attachments from execution metadata.
+func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
+	if execution.Metadata == nil {
+		return nil
+	}
+	attachments, ok := execution.Metadata["attachments"].([]MessageAttachment)
+	if ok {
+		return attachments
+	}
+	return nil
+}
+
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, taskDescription, approvalPolicy string) (string, error) {
@@ -622,7 +637,8 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
 
-	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
+	attachments := getAttachmentsFromMetadata(execution)
+	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
 		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)

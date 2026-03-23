@@ -333,7 +333,7 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -341,7 +341,8 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Int("priority", priority),
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("workflow_step_id", workflowStepID),
-		zap.Bool("plan_mode", planMode))
+		zap.Bool("plan_mode", planMode),
+		zap.Int("attachments", len(attachments)))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -411,6 +412,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		Prompt:         effectivePrompt,
 		WorkflowStepID: workflowStepID,
 		StartAgent:     true,
+		Attachments:    attachments,
 	})
 	if err != nil {
 		return nil, err

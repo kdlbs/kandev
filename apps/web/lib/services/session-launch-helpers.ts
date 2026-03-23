@@ -1,4 +1,4 @@
-import type { LaunchSessionRequest } from "./session-launch-service";
+import type { LaunchSessionRequest, MessageAttachment } from "./session-launch-service";
 
 export type LayoutIntentHint = "default" | "plan" | "pr-review" | "keep";
 
@@ -16,6 +16,7 @@ export function buildStartRequest(
     prompt?: string;
     planMode?: boolean;
     priority?: number;
+    attachments?: MessageAttachment[];
   },
 ): BuildResult {
   return {
@@ -28,6 +29,7 @@ export function buildStartRequest(
       prompt: opts?.prompt,
       plan_mode: opts?.planMode,
       priority: opts?.priority,
+      attachments: opts?.attachments,
     },
     layout: opts?.planMode ? "plan" : "default",
   };

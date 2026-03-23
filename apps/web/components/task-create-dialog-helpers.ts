@@ -10,10 +10,29 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToSession } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
 import { createTask } from "@/lib/api";
+import type { FileAttachment } from "@/components/task/chat/file-attachment";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
 
 export type { CreateTaskParams };
+
+/** Converts FileAttachment array to MessageAttachment array for the launch request. */
+export function toMessageAttachments(
+  attachments: FileAttachment[],
+): MessageAttachment[] | undefined {
+  if (attachments.length === 0) return undefined;
+  return attachments.map((att) =>
+    att.isImage
+      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
+      : {
+          type: "resource" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+        },
+  );
+}
 
 export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
   const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);

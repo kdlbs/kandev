@@ -14,6 +14,7 @@ import {
   activatePlanMode,
   buildCreateTaskPayload,
   validateCreateInputs,
+  toMessageAttachments,
   type CreateTaskParams,
 } from "@/components/task-create-dialog-helpers";
 
@@ -53,7 +54,10 @@ export type SubmitHandlersDeps = {
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
-  descriptionInputRef: React.RefObject<{ getValue: () => string } | null>;
+  descriptionInputRef: React.RefObject<{
+    getValue: () => string;
+    getAttachments: () => import("@/components/task/chat/file-attachment").FileAttachment[];
+  } | null>;
   setIsCreatingSession: (v: boolean) => void;
   setIsCreatingTask: (v: boolean) => void;
   setHasTitle: (v: boolean) => void;
@@ -165,6 +169,7 @@ export function useTaskSubmitHandlers({
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
+    const attachments = descriptionInputRef.current?.getAttachments() ?? [];
     if (!agentProfileId) return;
     if (!trimmedDescription && !isPassthroughProfile) return;
 
@@ -182,6 +187,7 @@ export function useTaskSubmitHandlers({
         executorId,
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
+        attachments: toMessageAttachments(attachments),
       });
       const response = await launchSession(request);
 

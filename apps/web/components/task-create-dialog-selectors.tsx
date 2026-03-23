@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Combobox } from "./combobox";
 import {
@@ -10,7 +10,8 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "@/components/task/chat/file-attachment";
-import { FileAttachmentPreview } from "@/components/task/chat/file-attachment-preview";
+import { ContextZone } from "@/components/task/chat/context-items/context-zone";
+import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
@@ -350,6 +351,29 @@ function useAttachmentHandlers(
   return { handlePaste, handleDragOver, handleDragLeave, handleDrop };
 }
 
+function toContextItems(
+  attachments: FileAttachment[],
+  onRemove: (id: string) => void,
+): ContextItem[] {
+  return attachments.map((att) =>
+    att.isImage
+      ? ({
+          kind: "image" as const,
+          id: `image:${att.id}`,
+          label: `Image (${formatBytes(att.size)})`,
+          attachment: att,
+          onRemove: () => onRemove(att.id),
+        } as ImageContextItem)
+      : ({
+          kind: "file-attachment" as const,
+          id: `file:${att.id}`,
+          label: att.fileName,
+          attachment: att,
+          onRemove: () => onRemove(att.id),
+        } as FileAttachmentContextItem),
+  );
+}
+
 export const TaskFormInputs = memo(function TaskFormInputs({
   isSessionMode,
   autoFocus,
@@ -369,6 +393,11 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     disabled,
     addFiles,
     setIsDragging,
+  );
+
+  const contextItems = useMemo(
+    () => toContextItems(attachments, handleRemoveAttachment),
+    [attachments, handleRemoveAttachment],
   );
 
   useEffect(() => {
@@ -411,6 +440,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <ContextZone items={contextItems} />
       <Textarea
         ref={textareaRef}
         placeholder={
@@ -438,11 +468,6 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           <span className="text-sm text-primary font-medium">Drop files here</span>
         </div>
       )}
-      <FileAttachmentPreview
-        attachments={attachments}
-        onRemove={handleRemoveAttachment}
-        disabled={disabled}
-      />
     </div>
   );
 });
