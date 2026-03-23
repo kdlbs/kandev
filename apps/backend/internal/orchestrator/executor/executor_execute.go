@@ -219,6 +219,19 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	// Resolve agent profile to get model and other settings for snapshot
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
+	// Determine if this new session should become primary.
+	// Only the first session for a task is primary by default; subsequent sessions
+	// leave the existing primary unchanged so the user's explicit choice is preserved.
+	existingSessions, _ := e.repo.ListTaskSessions(ctx, task.ID)
+	hasPrimary := false
+	for _, s := range existingSessions {
+		if s.IsPrimary {
+			hasPrimary = true
+			break
+		}
+	}
+	isFirstSession := !hasPrimary
+
 	// Create agent session in database
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
@@ -232,7 +245,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            true,
+		IsPrimary:            isFirstSession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
@@ -260,12 +273,15 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		return "", err
 	}
 
-	// Clear primary flag on any other sessions for this task
-	if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
-		e.logger.Warn("failed to update primary session flag",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+	// Set primary flag only for the first session (no existing primary).
+	// Subsequent sessions do not override the established primary.
+	if isFirstSession {
+		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+			e.logger.Warn("failed to update primary session flag",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("session entry created",

@@ -56,7 +56,13 @@ export class SessionPage {
   }
 
   async waitForLoad(timeout = 15_000) {
-    await this.chat.first().waitFor({ state: "visible", timeout });
+    // When multiple session tabs are open, multiple session-chat panels exist in
+    // the DOM but only the active one is visible. Use :visible to avoid matching
+    // a hidden background panel (which would cause the wait to time out).
+    await this.page
+      .locator("[data-testid='session-chat']:visible")
+      .first()
+      .waitFor({ state: "visible", timeout });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
