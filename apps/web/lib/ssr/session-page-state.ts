@@ -50,7 +50,7 @@ function buildWorktreeState(allSessions: TaskSession[]) {
 
 type BuildSessionPageStateParams = {
   task: Task;
-  sessionId: string;
+  sessionId: string | null;
   snapshot: Awaited<ReturnType<typeof fetchWorkflowSnapshot>>;
   agents: Awaited<ReturnType<typeof listAgents>>;
   repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
@@ -145,12 +145,14 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       loadingByTaskId: { [task.id]: false },
       loadedByTaskId: { [task.id]: true },
     },
-    turns: {
-      bySession: { [sessionId]: turns },
-      activeBySession: {
-        [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
-      },
-    },
+    turns: sessionId
+      ? {
+          bySession: { [sessionId]: turns },
+          activeBySession: {
+            [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
+          },
+        }
+      : { bySession: {}, activeBySession: {} },
     ...buildWorktreeState(allSessions),
     environmentIdBySessionId: Object.fromEntries(
       allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
@@ -166,7 +168,7 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
 
 export type FetchedSessionData = {
   task: Task;
-  sessionId: string;
+  sessionId: string | null;
   initialState: ReturnType<typeof taskToState>;
   initialTerminals: Terminal[];
 };
@@ -192,9 +194,51 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
   const sessions = allSessionsResponse.sessions ?? [];
 
   const sessionId = task.primary_session_id ?? sessions[0]?.id;
-  if (!sessionId) throw new Error("No sessions found for task");
+  if (!sessionId) {
+    // No sessions yet — fetch task/workspace data so the store is seeded and
+    // the auto-start hook can fire immediately without a client-side crash.
+    return fetchTaskDataOnly(task, allSessionsResponse);
+  }
 
   return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+}
+
+async function fetchTaskDataOnly(
+  task: Task,
+  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+): Promise<FetchedSessionData> {
+  const [snapshot, agents, repositoriesResponse, workspacesResponse, workflowsResponse, userSettingsResponse] =
+    await Promise.all([
+      task.workflow_id
+        ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+        : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
+      listAgents({ cache: "no-store" }),
+      listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
+      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+      listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+      fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    ]);
+
+  const allSessions = allSessionsResponse.sessions ?? [];
+  const repositories = repositoriesResponse.repositories ?? [];
+  const workspaces = workspacesResponse.workspaces ?? [];
+  const workflows = workflowsResponse.workflows ?? [];
+
+  const initialState = buildSessionPageState({
+    task,
+    sessionId: null,
+    snapshot,
+    agents,
+    repositories,
+    allSessions,
+    workspaces,
+    workflows,
+    turns: [],
+    userSettingsResponse,
+    messagesResponse: null,
+  });
+
+  return { task, sessionId: null, initialState, initialTerminals: [] };
 }
 
 async function fetchSessionDataFromTask(
