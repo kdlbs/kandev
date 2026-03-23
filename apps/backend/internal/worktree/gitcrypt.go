@@ -36,7 +36,7 @@ func hasGitCryptFilter(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -60,8 +60,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 	m.logger.Debug("unlocking git-crypt in worktree",
 		zap.String("worktree_path", worktreePath))
 
-	// Step 1: Unlock git-crypt
-	// git-crypt unlock will find the key from GIT_COMMON_DIR (the main repo's .git)
+	// Step 1: Unlock using the key from GIT_COMMON_DIR (the main repo's .git)
 	unlockCmd := exec.CommandContext(ctx, "git-crypt", "unlock")
 	unlockCmd.Dir = worktreePath
 	if output, err := unlockCmd.CombinedOutput(); err != nil {
