@@ -43,6 +43,9 @@ var (
 
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
+
+	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
+	ErrGitCryptFailed = errors.New("git-crypt unlock failed")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.
