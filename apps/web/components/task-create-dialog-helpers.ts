@@ -163,7 +163,8 @@ export function buildRepositoriesPayload(opts: {
     return [
       {
         repository_id: "",
-        base_branch: opts.githubPrHeadBranch || opts.branch || undefined,
+        base_branch: opts.branch || undefined,
+        checkout_branch: opts.githubPrHeadBranch || undefined,
         github_url: opts.githubUrl,
       },
     ];
