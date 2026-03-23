@@ -256,22 +256,28 @@ function useFileAttachments() {
 
   const addFiles = useCallback(
     async (files: File[]) => {
-      if (attachments.length >= MAX_FILES) {
+      let nextCount = attachments.length;
+      let nextTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+      if (nextCount >= MAX_FILES) {
         console.warn(`Maximum ${MAX_FILES} files allowed`);
         return;
       }
-      const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+      const accepted: FileAttachment[] = [];
       for (const file of files) {
-        if (attachments.length >= MAX_FILES) break;
-        if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
+        if (nextCount >= MAX_FILES) break;
+        if (nextTotalSize + file.size > MAX_TOTAL_SIZE) {
           console.warn(
             `Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`,
           );
           break;
         }
         const attachment = await processFile(file);
-        if (attachment) setAttachments((prev) => [...prev, attachment]);
+        if (!attachment) continue;
+        accepted.push(attachment);
+        nextCount += 1;
+        nextTotalSize += attachment.size;
       }
+      if (accepted.length > 0) setAttachments((prev) => [...prev, ...accepted]);
     },
     [attachments],
   );

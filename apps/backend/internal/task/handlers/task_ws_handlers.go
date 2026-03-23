@@ -164,33 +164,40 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
-		// Use task description as the initial prompt with workflow step config
-		// Use taskDTO.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
-		launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-			TaskID:            taskDTO.ID,
-			Intent:            orchestrator.IntentStart,
-			AgentProfileID:    req.AgentProfileID,
-			ExecutorID:        req.ExecutorID,
-			ExecutorProfileID: req.ExecutorProfileID,
-			Priority:          req.Priority,
-			Prompt:            taskDTO.Description,
-			WorkflowStepID:    taskDTO.WorkflowStepID,
-			PlanMode:          req.PlanMode,
-			Attachments:       req.Attachments,
-		})
+		launchResp, err := h.launchAgentForNewTask(ctx, taskDTO, req)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
 		}
-		h.logger.Info("wsCreateTask started agent",
-			zap.String("task_id", taskDTO.ID),
-			zap.String("executor_id", req.ExecutorID),
-			zap.String("workflow_step_id", taskDTO.WorkflowStepID),
-			zap.String("session_id", launchResp.SessionID))
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// launchAgentForNewTask starts an agent session for a newly created task via WebSocket.
+func (h *TaskHandlers) launchAgentForNewTask(ctx context.Context, taskDTO dto.TaskDTO, req wsCreateTaskRequest) (*orchestrator.LaunchSessionResponse, error) {
+	launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:            taskDTO.ID,
+		Intent:            orchestrator.IntentStart,
+		AgentProfileID:    req.AgentProfileID,
+		ExecutorID:        req.ExecutorID,
+		ExecutorProfileID: req.ExecutorProfileID,
+		Priority:          req.Priority,
+		Prompt:            taskDTO.Description,
+		WorkflowStepID:    taskDTO.WorkflowStepID,
+		PlanMode:          req.PlanMode,
+		Attachments:       req.Attachments,
+	})
+	if err != nil {
+		return nil, err
+	}
+	h.logger.Info("wsCreateTask started agent",
+		zap.String("task_id", taskDTO.ID),
+		zap.String("executor_id", req.ExecutorID),
+		zap.String("workflow_step_id", taskDTO.WorkflowStepID),
+		zap.String("session_id", launchResp.SessionID))
+	return launchResp, nil
 }
 
 type wsGetTaskRequest struct {

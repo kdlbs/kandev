@@ -449,7 +449,6 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 	}
 }
 
-
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
@@ -482,7 +481,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
 func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool, attachments []v1.MessageAttachment) {
-	if s.messageCreator != nil && prompt != "" {
+	if s.messageCreator != nil && (prompt != "" || len(attachments) > 0) {
 		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAttachments(attachments)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",

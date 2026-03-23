@@ -385,7 +385,7 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 // For all other cases, marks the execution ready immediately.
 func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, markReady func(executionID string) error) {
 	switch {
-	case taskDescription != "":
+	case taskDescription != "" || len(attachments) > 0:
 		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
 		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithContext)
 		if effectivePrompt != taskDescription {

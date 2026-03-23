@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -336,10 +337,34 @@ type createTaskResponse struct {
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
 }
 
+const (
+	maxCreateTaskAttachments = 10
+	maxAttachmentDataBytes   = 10 * 1024 * 1024 // 10 MB base64 string length cap
+)
+
+func validateAttachments(items []v1.MessageAttachment) error {
+	if len(items) > maxCreateTaskAttachments {
+		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
+	}
+	for _, a := range items {
+		if strings.TrimSpace(a.Type) == "" || strings.TrimSpace(a.MimeType) == "" {
+			return fmt.Errorf("attachment type and mime_type are required")
+		}
+		if len(a.Data) > maxAttachmentDataBytes {
+			return fmt.Errorf("attachment data exceeds size limit")
+		}
+	}
+	return nil
+}
+
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := validateAttachments(body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if body.WorkspaceID == "" {

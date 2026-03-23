@@ -143,7 +143,6 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	return result
 }
 
-
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
