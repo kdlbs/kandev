@@ -159,7 +159,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   return (
     <>
       <ContextMenu>
-        <ContextMenuTrigger className="flex h-full items-center">
+        <ContextMenuTrigger
+          className="flex h-full items-center"
+          data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
+        >
           <div className="flex items-center">
             {isPrimary && (
               <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />

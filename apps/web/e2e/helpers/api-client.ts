@@ -598,6 +598,7 @@ export class ApiClient {
       id: string;
       task_id: string;
       state: string;
+      started_at: string;
       task_environment_id?: string;
       worktree_path?: string;
       worktree_branch?: string;

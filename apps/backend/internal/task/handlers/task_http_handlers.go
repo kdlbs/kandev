@@ -180,7 +180,13 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, dto.FromTask(task))
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, []*models.Task{task})
+	if err != nil {
+		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
+		c.JSON(http.StatusOK, dto.FromTask(task))
+		return
+	}
+	c.JSON(http.StatusOK, dtos[0])
 }
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {

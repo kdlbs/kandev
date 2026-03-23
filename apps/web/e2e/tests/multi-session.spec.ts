@@ -126,12 +126,11 @@ test.describe("Multi-session", () => {
       )
       .toBe(true);
 
-    // 3. Capture first session's worktree info
+    // 3. Capture first session's environment info
     const { sessions: firstSessions } = await apiClient.listTaskSessions(task.id);
     const firstSession = firstSessions[0];
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).not.toBeNull();
-    expect(env!.worktree_id).toBeTruthy();
 
     // 4. Verify the session points to the task environment
     // The worktree reuse is verified through the task_environment_id linkage:

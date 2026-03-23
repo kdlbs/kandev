@@ -56,7 +56,7 @@ export class SessionPage {
   }
 
   async waitForLoad(timeout = 15_000) {
-    await this.chat.waitFor({ state: "visible", timeout });
+    await this.chat.first().waitFor({ state: "visible", timeout });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -279,11 +279,11 @@ export class SessionPage {
     await editor.press(`${modifier}+Enter`);
   }
 
-  /** Toggle plan mode on/off via Shift+Tab in the chat input. */
+  /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar. */
   async togglePlanMode() {
-    const editor = this.planModeInput();
-    await editor.click();
-    await editor.press("Shift+Tab");
+    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await btn.click();
   }
 
   /**
@@ -464,6 +464,11 @@ export class SessionPage {
   /** Dockview session tab matched by partial text (e.g., "#1 Mock Agent"). */
   sessionTabByText(text: string): Locator {
     return this.page.locator(`.dv-default-tab:has-text('${text}')`);
+  }
+
+  /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
+  sessionTabBySessionId(sessionId: string): Locator {
+    return this.page.getByTestId(`session-tab-${sessionId}`);
   }
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */

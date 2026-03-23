@@ -234,6 +234,14 @@ test.describe("Multi-session UX", () => {
       )
       .toBe(2);
 
+    // Capture session IDs now so we can identify tabs by ID (display numbers
+    // get renumbered after deletion, making text-based locators unreliable).
+    const { sessions: sessionsBeforeDelete } = await apiClient.listTaskSessions(task.id);
+    const sorted = sessionsBeforeDelete.sort(
+      (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+    );
+    const session1Id = sorted[0].id;
+
     // Right-click on session #1 tab → Delete → Confirm
     const tab1 = session.sessionTabByText("#1");
     await expect(tab1).toBeVisible({ timeout: 10_000 });
@@ -247,8 +255,9 @@ test.describe("Multi-session UX", () => {
     await confirmBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
-    // Wait for the tab to disappear
-    await expect(tab1).not.toBeVisible({ timeout: 10_000 });
+    // Wait for the deleted session's tab to disappear (identified by session ID,
+    // not display number, because the remaining session gets renumbered to #1).
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
 
     // Verify backend only has 1 session
     await expect
