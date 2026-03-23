@@ -23,16 +23,35 @@ export type SessionSwitchParams = {
 /**
  * Remove ephemeral panels (file-editors, diffs, commit-details) from the
  * live layout. These are session-specific panels that shouldn't carry over.
+ *
+ * When `keepSessionId` is provided, session chat panels whose ID does not
+ * match `session:{keepSessionId}` are also removed. This handles cross-task
+ * switches where the fast path is taken: without this, session tabs from the
+ * old task remain visible alongside the new task's tab.
  */
-function removeEphemeralPanels(api: DockviewApi): void {
+function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
   const toRemove = api.panels.filter((p) => {
     const comp = p.api.component;
-    return (
+    if (
       comp === "file-editor" ||
       comp === "diff-viewer" ||
       comp === "commit-detail" ||
       comp === "pr-detail"
-    );
+    ) {
+      return true;
+    }
+    // Remove session chat tabs that belong to a different session.
+    // This covers cross-task switches where the layout structures match and
+    // the fast path is taken — old task's session tabs must not bleed through.
+    if (
+      keepSessionId !== undefined &&
+      comp === "chat" &&
+      p.id.startsWith("session:") &&
+      p.id !== `session:${keepSessionId}`
+    ) {
+      return true;
+    }
+    return false;
   });
   for (const p of toRemove) {
     try {
@@ -64,10 +83,11 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
 
   if (!structuresMatch) return null;
 
-  // Fast path: keep the grid structure, just clean up ephemeral panels.
+  // Fast path: keep the grid structure, clean up ephemeral panels and any
+  // session chat tabs that belong to a different session (cross-task switch).
   // Session-scoped portals (terminal, browser, etc.) will be re-acquired
   // via usePortalSlot's sessionId dependency change.
-  removeEphemeralPanels(api);
+  removeEphemeralPanels(api, newSessionId);
   return applyLayoutFixups(api);
 }
 

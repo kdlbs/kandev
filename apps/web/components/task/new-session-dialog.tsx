@@ -12,7 +12,6 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
-import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -118,7 +117,6 @@ function NewSessionForm({
 }) {
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const isUtilityConfigured = useIsUtilityConfigured();
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
@@ -138,10 +136,19 @@ function NewSessionForm({
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
         const result = await summarize(sessionId);
-        if (result && promptRef.current) promptRef.current.value = result;
+        if (result && promptRef.current) {
+          promptRef.current.value = result;
+        } else if (result === null) {
+          setContextValue("blank");
+          toast({
+            title: "Summarize failed",
+            description: "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
+            variant: "error",
+          });
+        }
       }
     },
-    [initialPrompt, summarize],
+    [initialPrompt, summarize, toast],
   );
 
   const handleSubmit = useCallback(
@@ -196,7 +203,7 @@ function NewSessionForm({
     ],
   );
 
-  const showSessions = isUtilityConfigured ? sessionOptions : [];
+  const showSessions = sessionOptions;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">

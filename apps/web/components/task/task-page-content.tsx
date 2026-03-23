@@ -29,6 +29,12 @@ import {
   resolveTaskProps,
 } from "@/components/task/task-page-content-helpers";
 
+// Stable empty array used as the fallback in useAppStore selectors that return
+// arrays — avoids creating a new reference on every call, which would cause
+// React's useSyncExternalStore (getServerSnapshot) to throw an infinite-loop
+// error during SSR / hydration.
+const EMPTY_SESSIONS: never[] = [];
+
 type TaskPageContentProps = {
   task: Task | null;
   taskId?: string | null;
@@ -490,7 +496,7 @@ function useAutoStartSession(
 ) {
   const { isLoaded } = useTaskSessions(task?.id ?? null);
   const sessions = useAppStore((state) =>
-    task?.id ? (state.taskSessionsByTask.itemsByTaskId[task.id] ?? []) : [],
+    task?.id ? (state.taskSessionsByTask.itemsByTaskId[task.id] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
   const workspaceDefaultProfileId = useAppStore((state) => {
     const activeId = state.workspaces.activeId;
