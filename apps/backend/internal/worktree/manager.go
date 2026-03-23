@@ -370,17 +370,41 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 
 // gitAddWorktreeExisting creates a worktree that checks out an existing local branch.
 // If the branch is already checked out in a stale worktree (directory no longer exists),
-// it automatically prunes and retries.
+// it automatically prunes and retries. If the repository uses git-crypt, it creates
+// the worktree without checkout, then unlocks git-crypt and performs the checkout.
 func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
 	worktreeID := uuid.New().String()
-	cmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, branchName)
+	usesGitCrypt := m.usesGitCrypt(repoPath)
+
+	// Build worktree add command
+	args := []string{"worktree", "add"}
+	if usesGitCrypt {
+		args = append(args, "--no-checkout")
+	}
+	args = append(args, worktreePath, branchName)
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err == nil {
+		if usesGitCrypt {
+			if unlockErr := m.unlockGitCryptAndCheckout(ctx, worktreePath); unlockErr != nil {
+				_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+				return "", unlockErr
+			}
+		}
 		return worktreeID, nil
 	}
 
 	outStr := string(output)
+
+	// Check for git-crypt smudge error and retry with --no-checkout
+	if isGitCryptSmudgeError(outStr) && !usesGitCrypt {
+		m.logger.Warn("git-crypt smudge error detected, retrying with --no-checkout",
+			zap.String("output", outStr))
+		return m.gitAddWorktreeExistingWithGitCrypt(ctx, repoPath, branchName, worktreePath)
+	}
+
 	if !isBranchCheckedOutError(outStr) {
 		m.logger.Error("git worktree add (existing branch) failed",
 			zap.String("output", outStr), zap.Error(err))
@@ -388,17 +412,29 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 	}
 
 	if recoveryErr := m.tryRecoverCheckedOutBranch(ctx, repoPath, branchName, outStr); recoveryErr != nil {
-		// Branch is genuinely in use by an active worktree — return sentinel error
-		// so callers can fall back to creating a unique branch.
 		m.logger.Warn("branch is checked out in active worktree",
 			zap.String("branch", branchName), zap.Error(recoveryErr))
 		return "", ErrBranchCheckedOut
 	}
 
-	// Retry after pruning stale worktree.
-	retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, branchName)
+	// Retry after pruning stale worktree
+	return m.retryWorktreeExisting(ctx, repoPath, branchName, worktreePath, usesGitCrypt)
+}
+
+// retryWorktreeExisting retries worktree creation after pruning stale worktrees.
+func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string, usesGitCrypt bool) (string, error) {
+	worktreeID := uuid.New().String()
+
+	args := []string{"worktree", "add"}
+	if usesGitCrypt {
+		args = append(args, "--no-checkout")
+	}
+	args = append(args, worktreePath, branchName)
+
+	retryCmd := exec.CommandContext(ctx, "git", args...)
 	retryCmd.Dir = repoPath
-	if retryOutput, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+	retryOutput, retryErr := retryCmd.CombinedOutput()
+	if retryErr != nil {
 		retryOutStr := string(retryOutput)
 		if isBranchCheckedOutError(retryOutStr) {
 			return "", ErrBranchCheckedOut
@@ -407,7 +443,41 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 			zap.String("output", retryOutStr), zap.Error(retryErr))
 		return "", ClassifyGitError(retryOutStr, retryErr)
 	}
+
+	if usesGitCrypt {
+		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
+			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+			return "", err
+		}
+	}
+
 	m.logger.Info("recovered from stale worktree checkout", zap.String("branch", branchName))
+	return worktreeID, nil
+}
+
+// gitAddWorktreeExistingWithGitCrypt creates a worktree for an existing branch
+// using --no-checkout, then unlocks git-crypt. Used as fallback when smudge error detected.
+func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+	worktreeID := uuid.New().String()
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branchName)
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		if isBranchCheckedOutError(outStr) {
+			return "", ErrBranchCheckedOut
+		}
+		m.logger.Error("git worktree add (--no-checkout, existing) failed",
+			zap.String("output", outStr), zap.Error(err))
+		return "", ClassifyGitError(outStr, err)
+	}
+
+	if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
+		_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+		return "", err
+	}
+
 	return worktreeID, nil
 }
 
@@ -483,21 +553,75 @@ func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName str
 }
 
 // gitAddWorktree runs "git worktree add" and returns the new worktree UUID.
+// If the repository uses git-crypt, it creates the worktree without checkout,
+// then unlocks git-crypt and performs the checkout separately.
 func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
-	// git worktree add -b <branch> <path> <base-branch>
+	usesGitCrypt := m.usesGitCrypt(repoPath)
+
+	// Build worktree add command
+	args := []string{"worktree", "add", "-b", branchName}
+	if usesGitCrypt {
+		args = append(args, "--no-checkout")
+	}
+	args = append(args, worktreePath, baseRef)
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		// Check if this is a git-crypt error we didn't anticipate
+		if isGitCryptSmudgeError(outStr) {
+			m.logger.Warn("git-crypt smudge error detected, retrying with --no-checkout",
+				zap.String("output", outStr))
+			return m.gitAddWorktreeWithGitCrypt(ctx, repoPath, branchName, worktreePath, baseRef)
+		}
+		m.logger.Error("git worktree add failed",
+			zap.String("output", outStr),
+			zap.Error(err))
+		return "", fmt.Errorf("%w: %s", ErrGitCommandFailed, outStr)
+	}
+
+	// If we used --no-checkout, we need to unlock git-crypt and checkout
+	if usesGitCrypt {
+		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
+			// Cleanup the worktree on failure
+			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+			return "", err
+		}
+	}
+
+	return worktreeID, nil
+}
+
+// gitAddWorktreeWithGitCrypt creates a worktree using --no-checkout and then
+// unlocks git-crypt. This is used as a fallback when we detect a git-crypt
+// smudge filter error.
+func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
+	worktreeID := uuid.New().String()
+
+	// Create worktree without checkout
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add",
 		"-b", branchName,
+		"--no-checkout",
 		worktreePath,
 		baseRef)
 	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		m.logger.Error("git worktree add failed",
+		m.logger.Error("git worktree add (--no-checkout) failed",
 			zap.String("output", string(output)),
 			zap.Error(err))
 		return "", fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
 	}
+
+	// Unlock git-crypt and checkout
+	if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
+		_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+		return "", err
+	}
+
 	return worktreeID, nil
 }
 
@@ -1148,16 +1272,46 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 
 	// Try to add worktree using existing branch
-	cmd = exec.CommandContext(ctx, "git", "worktree", "add",
-		worktreePath,
-		existing.Branch)
+	usesGitCrypt := m.usesGitCrypt(req.RepositoryPath)
+	args := []string{"worktree", "add"}
+	if usesGitCrypt {
+		args = append(args, "--no-checkout")
+	}
+	args = append(args, worktreePath, existing.Branch)
+
+	cmd = exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = req.RepositoryPath
 
-	if output, err := cmd.CombinedOutput(); err != nil {
-		m.logger.Error("failed to recreate worktree",
-			zap.String("output", string(output)),
-			zap.Error(err))
-		return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		// If git-crypt smudge error and we didn't detect git-crypt, retry with --no-checkout
+		if isGitCryptSmudgeError(outStr) && !usesGitCrypt {
+			m.logger.Warn("git-crypt smudge error during recreate, retrying with --no-checkout",
+				zap.String("output", outStr))
+			retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, existing.Branch)
+			retryCmd.Dir = req.RepositoryPath
+			if retryOutput, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+				m.logger.Error("failed to recreate worktree (--no-checkout)",
+					zap.String("output", string(retryOutput)),
+					zap.Error(retryErr))
+				return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(retryOutput))
+			}
+			usesGitCrypt = true // Force unlock/checkout
+		} else {
+			m.logger.Error("failed to recreate worktree",
+				zap.String("output", outStr),
+				zap.Error(err))
+			return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, outStr)
+		}
+	}
+
+	// If using git-crypt, unlock and checkout
+	if usesGitCrypt {
+		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
+			_ = m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
+			return nil, err
+		}
 	}
 
 	// Update record
