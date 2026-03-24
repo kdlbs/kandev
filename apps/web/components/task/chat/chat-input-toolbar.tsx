@@ -3,6 +3,7 @@
 import { memo, useRef, useState, useCallback, type ReactNode } from "react";
 import {
   IconArrowUp,
+  IconChevronsLeft,
   IconDots,
   IconFileTextSpark,
   IconPlayerPauseFilled,
@@ -27,8 +28,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { Separator } from "@kandev/ui/separator";
 import { cn } from "@/lib/utils";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -327,58 +326,50 @@ type ToolbarItemConfig = {
   visible?: boolean;
 };
 
-function ToolbarOverflowMenu({ items }: { items: ToolbarItemConfig[] }) {
-  const visible = items.filter((i) => i.visible !== false);
-  if (visible.length === 0) return null;
-
+function ToolbarExpandToggle({
+  isExpanded,
+  onToggle,
+}: {
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Tooltip>
+      <TooltipTrigger asChild>
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="More toolbar actions"
+          aria-label={isExpanded ? "Collapse toolbar" : "More toolbar actions"}
           className="h-7 w-7 cursor-pointer hover:bg-muted/40"
           data-testid="toolbar-overflow-menu"
+          onClick={onToggle}
         >
-          <IconDots className="h-4 w-4" />
+          {isExpanded ? <IconChevronsLeft className="h-4 w-4" /> : <IconDots className="h-4 w-4" />}
         </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="start"
-        className="w-auto min-w-[180px] p-1.5"
-        data-testid="toolbar-overflow-content"
-      >
-        <div className="flex flex-col gap-0.5">
-          {visible.map((item, i) => (
-            <div key={item.id} data-testid={`toolbar-overflow-item-${item.id}`}>
-              {i > 0 && item.section !== visible[i - 1]?.section && <Separator className="my-1" />}
-              {item.render()}
-            </div>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+      </TooltipTrigger>
+      <TooltipContent>{isExpanded ? "Collapse" : "More actions"}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function ContextTriggerButton({ contextCount }: { contextCount: number }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
-    >
-      <IconAt className="h-4 w-4" />
+    <span className="relative">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+      >
+        <IconAt className="h-4 w-4" />
+      </Button>
       {contextCount > 0 && (
-        <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
+        <span className="absolute -top-1 -right-0.5 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
           {contextCount}
         </span>
       )}
-    </Button>
+    </span>
   );
 }
 
@@ -514,6 +505,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
   const submitShortcut = props.submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isCollapsed = useToolbarCollapsed(toolbarRef);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const showCollapsed = isCollapsed && !isExpanded;
 
   if (props.minimalToolbar) {
     return (
@@ -537,7 +530,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     <div
       ref={toolbarRef}
       data-testid="chat-input-toolbar"
-      className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border overflow-x-auto scrollbar-hide"
+      className="flex items-center gap-1 px-1 pt-1 pb-0.5 border-t border-border overflow-x-auto overflow-y-visible scrollbar-hide"
     >
       <div className="flex items-center gap-0.5 shrink-0">
         {!props.hidePlanMode && (
@@ -547,7 +540,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
             onPlanModeChange={props.onPlanModeChange}
           />
         )}
-        {!isCollapsed &&
+        {!showCollapsed &&
           leftItems.map((i) => (
             <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
               {i.render()}
@@ -563,13 +556,15 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
           contextFiles={props.contextFiles}
           onToggleFile={props.onToggleFile ?? (() => {})}
         />
-        {isCollapsed && <ToolbarOverflowMenu items={items} />}
+        {isCollapsed && (
+          <ToolbarExpandToggle isExpanded={isExpanded} onToggle={() => setIsExpanded((v) => !v)} />
+        )}
       </div>
 
       <div className="flex-1" />
 
       <div className="flex items-center gap-0.5 shrink-0">
-        {!isCollapsed &&
+        {!showCollapsed &&
           rightItems.map((i) => (
             <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
               {i.render()}

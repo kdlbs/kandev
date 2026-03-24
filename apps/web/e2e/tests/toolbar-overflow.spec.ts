@@ -54,7 +54,7 @@ async function constrainToolbar(page: Page, maxWidth: string | null) {
 test.describe("Toolbar overflow menu", () => {
   test.describe.configure({ retries: 1 });
 
-  test("collapses toolbar items into overflow menu when narrow", async ({
+  test("collapses toolbar items and expands inline when toggled", async ({
     testPage,
     apiClient,
     seedData,
@@ -76,7 +76,7 @@ test.describe("Toolbar overflow menu", () => {
     // Constrain toolbar to a narrow width to force overflow
     await constrainToolbar(testPage, "300px");
 
-    // Collapsible items should disappear and overflow button should appear
+    // Collapsible items should disappear and expand toggle should appear
     await expect(overflowBtn).toBeVisible({ timeout: 5_000 });
     await expect(modelItem).not.toBeVisible();
 
@@ -84,18 +84,19 @@ test.describe("Toolbar overflow menu", () => {
     const submitBtn = toolbar.locator("button.rounded-full");
     await expect(submitBtn).toBeVisible();
 
-    // Click overflow menu and verify collapsed items are inside
+    // Click expand toggle — items appear inline (scrollable)
     await overflowBtn.click();
-    const overflowContent = testPage.getByTestId("toolbar-overflow-content");
-    await expect(overflowContent).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByTestId("toolbar-overflow-item-model")).toBeVisible();
-    await expect(testPage.getByTestId("toolbar-overflow-item-mcp")).toBeVisible();
+    await expect(modelItem).toBeVisible({ timeout: 5_000 });
+    await expect(mcpItem).toBeVisible({ timeout: 5_000 });
 
-    // Close the overflow popover by clicking outside
-    await testPage.locator("body").click({ position: { x: 10, y: 10 } });
-    await expect(overflowContent).not.toBeVisible({ timeout: 3_000 });
+    // Collapse button should still be visible to toggle back
+    await expect(overflowBtn).toBeVisible();
 
-    // Remove constraint — items should reappear inline
+    // Click again to collapse back
+    await overflowBtn.click();
+    await expect(modelItem).not.toBeVisible({ timeout: 5_000 });
+
+    // Remove constraint — items should reappear inline normally
     await constrainToolbar(testPage, null);
 
     await expect(modelItem).toBeVisible({ timeout: 5_000 });
