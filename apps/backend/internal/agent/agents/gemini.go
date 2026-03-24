@@ -14,7 +14,7 @@ var geminiLogoLight []byte
 //go:embed logos/gemini_dark.svg
 var geminiLogoDark []byte
 
-const geminiPkg = "@google/gemini-cli@0.25.2"
+const geminiPkg = "@google/gemini-cli"
 
 var (
 	_ Agent            = (*Gemini)(nil)

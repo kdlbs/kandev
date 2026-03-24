@@ -4,12 +4,9 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 
 [Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md)
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/add task.png" alt="Add Task"></td>
-    <td><img src="docs/screenshots/task session.png" alt="Task Session"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/readme-intro.gif" alt="Kandev Demo">
+</p>
 
 [See all screenshots](docs/screenshots.md)
 
@@ -72,8 +69,6 @@ There is support for running any agent as TUI inside a terminal. Just add the cl
 Each executor uses git worktrees for workspace isolation, preventing concurrent agents from conflicting.
 
 ## Quick Start
-
-> **Beta** - Under active development. Expect rough edges and breaking changes. Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ### NPX (recommended)
 
