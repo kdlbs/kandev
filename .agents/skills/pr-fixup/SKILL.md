@@ -21,7 +21,7 @@ Get the PR number from context or the user. Fetch the current state:
 ```bash
 gh pr checks <number>
 gh pr view <number> --json comments
-gh api repos/{owner}/{repo}/pulls/<number>/comments
+gh api repos/:owner/:repo/pulls/<number>/comments
 ```
 
 ### 2. Wait for CI checks
@@ -70,7 +70,7 @@ Fetch all review comments — both human reviewers and CodeRabbit:
 
 ```bash
 gh pr view <number> --json reviews,comments
-gh api repos/{owner}/{repo}/pulls/<number>/comments
+gh api repos/:owner/:repo/pulls/<number>/comments
 ```
 
 For each comment, decide:
@@ -86,13 +86,30 @@ For each valid comment:
 2. Implement the fix
 3. React with thumbs up:
    ```bash
-   gh api repos/{owner}/{repo}/pulls/comments/<comment_id>/reactions -f content="+1"
+   gh api repos/:owner/:repo/pulls/comments/<comment_id>/reactions -f content="+1"
    ```
-4. Resolve the review thread:
+4. Resolve the review thread. First fetch thread node IDs to map comment IDs to threads:
+   ```bash
+   gh api graphql -f query='
+   query($owner: String!, $repo: String!, $number: Int!) {
+     repository(owner: $owner, name: $repo) {
+       pullRequest(number: $number) {
+         reviewThreads(first: 100) {
+           nodes {
+             id
+             comments(first: 1) {
+               nodes { databaseId }
+             }
+           }
+         }
+       }
+     }
+   }' -f owner=":owner" -f repo=":repo" -F number=<number>
+   ```
+   Then resolve the thread using its `id`:
    ```bash
    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
    ```
-   Get the `thread_node_id` from the review threads query (use `node_id` field from the thread, not the comment ID).
 
 ### 7. Verify (sub-agent)
 

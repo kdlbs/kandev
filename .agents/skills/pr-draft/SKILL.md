@@ -14,7 +14,7 @@ description: Commit, push, and open a draft PR. Use when the user wants to push 
 
 Push the current branch and open a **draft** pull request.
 
-### Rules
+### Steps
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run the `/commit` skill first to commit them before proceeding.
 
