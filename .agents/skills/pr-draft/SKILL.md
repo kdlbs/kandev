@@ -1,6 +1,6 @@
 ---
-name: push-pr
-description: Push the current branch and open a draft PR. Use when the user wants to open a pull request or push their work for review.
+name: pr-draft
+description: Commit, push, and open a draft PR. Use when the user wants to push work without triggering review.
 ---
 
 ## Context
@@ -18,11 +18,13 @@ Push the current branch and open a **draft** pull request.
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run the `/commit` skill first to commit them before proceeding.
 
-2. **Branch:** If on `main`, create a new branch from the commits (use a descriptive name like `feat/short-description` or `fix/short-description`) and switch to it before pushing. If already on a feature branch, use it as-is.
+2. **Verify:** Run `/verify` to ensure formatters, linters, typechecks, and tests all pass. Fix any issues and commit before proceeding.
 
-3. **Push:** Push the branch to origin with `-u` to set upstream tracking.
+3. **Branch:** If on `main`, create a new branch from the commits (use a descriptive name like `feat/short-description` or `fix/short-description`) and switch to it before pushing. If already on a feature branch, use it as-is.
 
-4. **PR title** must follow Conventional Commits format (CI validates this via `pr-title.yml`, and it becomes the squash-merge commit used for release notes):
+4. **Push:** Push the branch to origin with `-u` to set upstream tracking.
+
+5. **PR title** must follow Conventional Commits format (CI validates this via `pr-title.yml`, and it becomes the squash-merge commit used for release notes):
    - Format: `type(scope): lowercase description` or `type: lowercase description`
    - Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `chore`, `ci`, `test`
    - Subject starts with a lowercase letter
@@ -30,7 +32,7 @@ Push the current branch and open a **draft** pull request.
    - Add `!` after type for breaking changes: `feat!: remove legacy API`
    - Examples: `feat(ui): add task filter dialog`, `fix: prevent duplicate session on reconnect`
 
-5. **PR body** must follow the project's pull request template. Fill in each section using these rules:
+6. **PR body** must follow the project's pull request template. Fill in each section using these rules:
    - **Summary** (required): 1–2 sentences of prose, no heading. Lead with the problem/goal, end with the outcome. Say WHY, not what.
    - **Important Changes** (optional): short bullet list of significant architectural changes. Remove section if not needed.
    - **Validation** (required): list commands or checks run (e.g. `go test ./...`, `make lint`).
@@ -41,9 +43,9 @@ Push the current branch and open a **draft** pull request.
    - Do NOT add tool attribution footers.
    - Do NOT leave placeholder text or unfilled sections.
 
-6. **Always create as draft:** Use `gh pr create --draft`.
+7. **Always create as draft:** Use `gh pr create --draft`.
 
-7. **Execute in a single message.** Push and create the PR using parallel tool calls where possible. Do not read files or do anything else beyond what's listed here.
+8. **Execute in a single message.** Push and create the PR using parallel tool calls where possible. Do not read files or do anything else beyond what's listed here.
 
 ### Command
 
@@ -54,4 +56,4 @@ EOF
 )"
 ```
 
-8. **Return the PR URL** when done.
+9. **Return the PR URL** when done.
