@@ -48,7 +48,7 @@ ci: add PR title linting workflow
 
 1. Run `git status` and `git diff` to understand all changes
 2. Review recent commits with `git log --oneline -10` to match project style
-3. Run `/verify` to ensure formatters, linters, typechecks, and tests all pass. Fix any issues before committing.
+3. Run `/verify` as a **sub-agent** to ensure formatters, linters, typechecks, and tests all pass. Fix any issues before committing.
 4. Stage relevant files (prefer specific files over `git add -A`)
 5. Write a commit message following the format above
 6. If changes span multiple concerns, consider separate commits
