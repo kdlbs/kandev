@@ -16,15 +16,13 @@ Commit, push, create a **ready-for-review** pull request, then wait for CI and c
 
 ### Steps
 
-1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first.
+1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
-2. **Verify:** Run `/verify` to ensure formatters, linters, typechecks, and tests all pass. Fix any issues and commit before proceeding.
+2. **Branch:** If on `main`, create a new branch (e.g. `feat/short-description` or `fix/short-description`) and switch to it. If already on a feature branch, use it.
 
-3. **Branch:** If on `main`, create a new branch (e.g. `feat/short-description` or `fix/short-description`) and switch to it. If already on a feature branch, use it.
+3. **Push** the branch to origin with `-u` to set upstream tracking.
 
-4. **Push** the branch to origin with `-u` to set upstream tracking.
-
-5. **Create the PR as ready** (no `--draft` flag). Follow the same rules as `/pr-draft` for title and body:
+4. **Create the PR as ready** (no `--draft` flag). Follow the same rules as `/pr-draft` for title and body:
 
    **PR title** — Conventional Commits format:
    - Format: `type(scope): lowercase description` or `type: lowercase description`
@@ -49,6 +47,6 @@ Commit, push, create a **ready-for-review** pull request, then wait for CI and c
    )"
    ```
 
-6. **Run `/pr-fixup`** to wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
+5. **Run `/pr-fixup`** to wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
 
-7. **Return the PR URL** when done.
+6. **Return the PR URL** when done.

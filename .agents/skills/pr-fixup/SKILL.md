@@ -111,13 +111,9 @@ For each valid comment:
    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
    ```
 
-### 7. Verify (sub-agent)
+### 7. Commit and push
 
-Run `/verify` as a **sub-agent** to ensure formatters, linters, typechecks, and tests all pass. Do NOT push until verify passes clean.
-
-### 8. Commit and push
-
-Run `/commit` to stage and commit fixes. Use a descriptive message, e.g.:
+Run `/commit` to stage and commit fixes (it runs `/verify` internally). Use a descriptive message, e.g.:
 ```
 fix: address PR review feedback
 fix: resolve CI lint failures
@@ -129,7 +125,7 @@ Then push:
 git push
 ```
 
-### 9. Summary
+### 8. Summary
 
 Report what was done:
 - CI checks: which failed and how they were fixed
