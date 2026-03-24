@@ -353,9 +353,7 @@ function ToolbarOverflowMenu({ items }: { items: ToolbarItemConfig[] }) {
         <div className="flex flex-col gap-0.5">
           {visible.map((item, i) => (
             <div key={item.id} data-testid={`toolbar-overflow-item-${item.id}`}>
-              {i > 0 && item.section !== visible[i - 1]?.section && (
-                <Separator className="my-1" />
-              )}
+              {i > 0 && item.section !== visible[i - 1]?.section && <Separator className="my-1" />}
               {item.render()}
             </div>
           ))}
