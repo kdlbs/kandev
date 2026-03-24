@@ -91,6 +91,7 @@ function TimelineSection({
                 canCollapse && "cursor-pointer hover:text-foreground/90",
               )}
               onClick={canCollapse ? () => setCollapsed((c) => !c) : undefined}
+              aria-expanded={canCollapse ? !collapsed : undefined}
               data-testid={
                 canCollapse ? `${testId ?? label.toLowerCase()}-collapse-toggle` : undefined
               }

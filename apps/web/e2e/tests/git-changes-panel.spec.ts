@@ -1061,12 +1061,14 @@ test.describe("Git Changes Panel", () => {
     // --- Collapse the unstaged section ---
     const unstagedToggle = testPage.getByTestId("unstaged-files-section-collapse-toggle");
     await expect(unstagedToggle).toBeVisible({ timeout: 5_000 });
+    await expect(unstagedToggle).toHaveAttribute("aria-expanded", "true");
     await unstagedToggle.click();
 
-    // The unstaged file should now be hidden
+    // The unstaged file should now be hidden and toggle reflects collapsed state
     await expect(session.changes.getByText("collapse-unstaged.txt")).not.toBeVisible({
       timeout: 5_000,
     });
+    await expect(unstagedToggle).toHaveAttribute("aria-expanded", "false");
 
     // The section header should still be visible (with count)
     await expect(unstagedToggle).toBeVisible();
@@ -1075,12 +1077,14 @@ test.describe("Git Changes Panel", () => {
     // --- Collapse the commits section ---
     const commitsToggle = testPage.getByTestId("commits-section-collapse-toggle");
     await expect(commitsToggle).toBeVisible({ timeout: 5_000 });
+    await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
     await commitsToggle.click();
 
-    // The commit should now be hidden
+    // The commit should now be hidden and toggle reflects collapsed state
     await expect(session.changes.getByText("Collapse test commit")).not.toBeVisible({
       timeout: 5_000,
     });
+    await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
 
     // --- Expand the unstaged section back ---
     await unstagedToggle.click();
@@ -1089,12 +1093,14 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("collapse-unstaged.txt")).toBeVisible({
       timeout: 5_000,
     });
+    await expect(unstagedToggle).toHaveAttribute("aria-expanded", "true");
 
     // --- Expand the commits section back ---
     await commitsToggle.click();
 
     // The commit should be visible again
     await expect(session.changes.getByText("Collapse test commit")).toBeVisible({ timeout: 5_000 });
+    await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
 
     // Clean up
     git.deleteFile("collapse-unstaged.txt");
