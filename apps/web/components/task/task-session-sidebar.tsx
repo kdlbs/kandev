@@ -15,7 +15,7 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { CommandItem } from "@/lib/commands/types";
 import { replaceSessionUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { performLayoutSwitch, useDockviewStore } from "@/lib/state/dockview-store";
 import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
@@ -256,7 +256,8 @@ function useSidebarActions(store: StoreApi) {
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, archiveTaskById, renameTaskById } = useTaskActions();
+  const { deleteTaskById, renameTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
@@ -302,18 +303,13 @@ function useSidebarActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     async (taskId: string) => {
-      // Capture active state before the async API call — the WS "task.updated"
-      // handler removes the archived task from kanbans before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
       try {
-        await archiveTaskById(taskId);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await archiveAndSwitch(taskId);
       } catch (error) {
         console.error("Failed to archive task:", error);
       }
     },
-    [archiveTaskById, removeTaskFromBoard, store],
+    [archiveAndSwitch],
   );
 
   const handleDeleteTask = useCallback(
