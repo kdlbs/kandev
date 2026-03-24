@@ -81,37 +81,52 @@ For each comment, decide:
 - **Nitpick or preference** — subjective style not covered by linters. Skip unless the reviewer insists.
 - **Wrong or outdated** — misunderstands the code or refers to old state. Skip.
 
-### 6. Fix valid comments
+### 6. Address each comment
 
-For each valid comment:
+Every comment must get a response — either a fix or a reply explaining why it was skipped.
+
+**For valid comments:**
 1. Read the file at the referenced line
 2. Implement the fix
 3. React with thumbs up:
    ```bash
    gh api repos/:owner/:repo/pulls/comments/<comment_id>/reactions -f content="+1"
    ```
-4. Resolve the review thread. First fetch thread node IDs to map comment IDs to threads:
+4. Resolve the review thread (see below for thread ID retrieval)
+
+**For skipped comments** (already addressed, nitpick, wrong, or outdated):
+1. Reply to the comment explaining why it was skipped:
    ```bash
-   gh api graphql -f query='
-   query($owner: String!, $repo: String!, $number: Int!) {
-     repository(owner: $owner, name: $repo) {
-       pullRequest(number: $number) {
-         reviewThreads(first: 100) {
-           nodes {
-             id
-             comments(first: 1) {
-               nodes { databaseId }
-             }
-           }
-         }
-       }
-     }
-   }' -f owner=":owner" -f repo=":repo" -F number=<number>
+   gh api repos/:owner/:repo/pulls/<number>/comments/<comment_id>/replies -f body="<explanation>"
    ```
-   Then resolve the thread using its `id`:
-   ```bash
-   gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
-   ```
+   Examples:
+   - "This is already handled by X on line Y."
+   - "This is a style preference not enforced by our linters — keeping as-is."
+   - "This refers to code that was changed in a later commit."
+2. Resolve the review thread
+
+**Resolving threads:** First fetch thread node IDs to map comment IDs to threads:
+```bash
+gh api graphql -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          comments(first: 1) {
+            nodes { databaseId }
+          }
+        }
+      }
+    }
+  }
+}' -f owner=":owner" -f repo=":repo" -F number=<number>
+```
+Then resolve using the thread `id`:
+```bash
+gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
+```
 
 ### 7. Commit and push
 
