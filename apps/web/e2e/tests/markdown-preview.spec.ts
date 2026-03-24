@@ -44,6 +44,28 @@ async function seedTaskWithSession(
   return { session, sessionId: task.session_id };
 }
 
+/** Open a markdown file from the Files panel and enable preview mode. */
+async function openFileInPreview(
+  testPage: Page,
+  session: SessionPage,
+  fileName: string,
+): Promise<void> {
+  await session.clickTab("Files");
+  await expect(session.files).toBeVisible({ timeout: 5_000 });
+  const fileRow = session.files.getByText(fileName);
+  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  await fileRow.click();
+
+  const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
+  await expect(editorTab).toBeVisible({ timeout: 10_000 });
+
+  const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
+  await expect(previewToggle).toBeVisible({ timeout: 10_000 });
+  await previewToggle.click();
+
+  await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 5_000 });
+}
+
 test.describe("Markdown preview", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
@@ -105,7 +127,7 @@ test.describe("Markdown preview", () => {
     await expect(preview).not.toBeVisible({ timeout: 5_000 });
   });
 
-  test("markdown preview state is persisted to sessionStorage", async ({
+  test("markdown preview persists across page refresh", async ({
     testPage,
     apiClient,
     seedData,
@@ -124,23 +146,12 @@ test.describe("Markdown preview", () => {
     );
 
     // Open file and enable preview
-    await session.clickTab("Files");
-    await expect(session.files).toBeVisible({ timeout: 5_000 });
-    const fileRow = session.files.getByText("persist-test.md");
-    await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.click();
+    await openFileInPreview(testPage, session, "persist-test.md");
+    await expect(testPage.getByTestId("markdown-preview").locator("h1")).toContainText(
+      "Persist Test",
+    );
 
-    const editorTab = testPage.locator(".dv-default-tab:has-text('persist-test.md')");
-    await expect(editorTab).toBeVisible({ timeout: 10_000 });
-
-    const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
-    await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-    await previewToggle.click();
-
-    const preview = testPage.getByTestId("markdown-preview");
-    await expect(preview).toBeVisible({ timeout: 5_000 });
-
-    // Verify the markdownPreview flag is persisted in sessionStorage
+    // Verify the markdownPreview flag is in sessionStorage
     const storedTabs = await testPage.evaluate((sid) => {
       const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
       return raw ? JSON.parse(raw) : null;
@@ -150,18 +161,72 @@ test.describe("Markdown preview", () => {
     expect(mdTab).toBeTruthy();
     expect(mdTab.markdownPreview).toBe(true);
 
-    // Toggle preview off and verify the flag is cleared
-    const codeToggle = testPage.getByTestId("markdown-preview-toggle").first();
-    await codeToggle.click();
-    await expect(preview).not.toBeVisible({ timeout: 5_000 });
+    // Brief pause to let the sessionStorage write settle before reload
+    await testPage.waitForTimeout(500);
 
-    const storedTabsAfter = await testPage.evaluate((sid) => {
-      const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
-      return raw ? JSON.parse(raw) : null;
-    }, sessionId);
-    const mdTabAfter = storedTabsAfter.find((t: { path: string }) =>
-      t.path.endsWith("persist-test.md"),
+    // Reload the page — sessionStorage survives same-URL reload.
+    // After reload, the restored file tab becomes active (not the chat),
+    // so we wait for the sidebar instead of the chat panel.
+    await testPage.reload();
+    const sessionAfter = new SessionPage(testPage);
+    await expect(sessionAfter.sidebar).toBeVisible({ timeout: 30_000 });
+
+    // The file tab should be restored with preview still active
+    const editorTabAfter = testPage.locator(".dv-default-tab:has-text('persist-test.md')");
+    await expect(editorTabAfter).toBeVisible({ timeout: 15_000 });
+    await editorTabAfter.click();
+
+    const previewAfter = testPage.getByTestId("markdown-preview");
+    await expect(previewAfter).toBeVisible({ timeout: 10_000 });
+    await expect(previewAfter.locator("h1")).toContainText("Persist Test");
+  });
+
+  test("open markdown preview from diff toolbar", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Create a markdown file as an untracked file — it will show in Changes
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const filePath = path.join(repoDir, "preview-from-diff.md");
+    fs.writeFileSync(filePath, "# Preview From Diff\n\nThis file was created for the diff test.");
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Diff Preview Test",
     );
-    expect(mdTabAfter.markdownPreview).toBeFalsy();
+
+    // Open Changes panel — the untracked .md file should appear in the file list.
+    // Click "Changes" tab first, then click the file to open its diff.
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 5_000 });
+
+    // Wait for git status to detect the file and show it in the changes list
+    const fileEntry = session.changes.getByText("preview-from-diff.md");
+    await expect(fileEntry).toBeVisible({ timeout: 15_000 });
+    await fileEntry.click();
+
+    // The diff opens as a center panel tab "Diff [preview-from-diff.md]".
+    // Wait for the diff tab and its content to render.
+    const diffTab = testPage.locator(".dv-default-tab:has-text('preview-from-diff.md')");
+    await expect(diffTab).toBeVisible({ timeout: 10_000 });
+
+    // The diff content should show our markdown text
+    await expect(testPage.getByText("# Preview From Diff")).toBeVisible({ timeout: 15_000 });
+
+    // Click the "Preview markdown" button (eye icon) in the diff header toolbar.
+    // The button is in the center diff panel, not the right-side changes panel.
+    const previewBtn = testPage.getByRole("button", { name: "Preview markdown" }).first();
+    await expect(previewBtn).toBeVisible({ timeout: 10_000 });
+    await previewBtn.click();
+
+    // The file editor should open in preview mode (not code mode).
+    // The markdown preview should be active immediately (no need to toggle).
+    const preview = testPage.getByTestId("markdown-preview");
+    await expect(preview).toBeVisible({ timeout: 10_000 });
+    await expect(preview.locator("h1")).toContainText("Preview From Diff");
   });
 });
