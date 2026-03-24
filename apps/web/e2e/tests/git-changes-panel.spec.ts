@@ -1001,4 +1001,102 @@ test.describe("Git Changes Panel", () => {
     // The cumulative diff should NOT show "No changes"
     await expect(testPage.locator("text=No changes")).not.toBeVisible({ timeout: 5_000 });
   });
+
+  /**
+   * Verifies that sections in the changes panel can be collapsed and expanded.
+   * Clicking the section header (label + count + chevron) toggles visibility of the section content.
+   */
+  test("sections can be collapsed and expanded", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Collapse Profile");
+
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Collapse Test", profile.id, {
+      description: "Testing section collapse",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, "Git Collapse Test");
+
+    // Set up git helper
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Create an unstaged file and a committed file so both sections appear
+    git.createFile("collapse-committed.txt", "committed content");
+    git.stageFile("collapse-committed.txt");
+    git.commit("Collapse test commit");
+
+    git.createFile("collapse-unstaged.txt", "unstaged content");
+
+    // Click the Changes tab
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+
+    // Wait for both sections to appear
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+
+    // Verify the unstaged file is visible
+    await expect(session.changes.getByText("collapse-unstaged.txt")).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // Verify the commit is visible
+    await expect(session.changes.getByText("Collapse test commit")).toBeVisible({ timeout: 5_000 });
+
+    // --- Collapse the unstaged section ---
+    const unstagedToggle = testPage.getByTestId("unstaged-files-section-collapse-toggle");
+    await expect(unstagedToggle).toBeVisible({ timeout: 5_000 });
+    await unstagedToggle.click();
+
+    // The unstaged file should now be hidden
+    await expect(session.changes.getByText("collapse-unstaged.txt")).not.toBeVisible({
+      timeout: 5_000,
+    });
+
+    // The section header should still be visible (with count)
+    await expect(unstagedToggle).toBeVisible();
+    await expect(unstagedToggle).toContainText("Unstaged");
+
+    // --- Collapse the commits section ---
+    const commitsToggle = testPage.getByTestId("commits-section-collapse-toggle");
+    await expect(commitsToggle).toBeVisible({ timeout: 5_000 });
+    await commitsToggle.click();
+
+    // The commit should now be hidden
+    await expect(session.changes.getByText("Collapse test commit")).not.toBeVisible({
+      timeout: 5_000,
+    });
+
+    // --- Expand the unstaged section back ---
+    await unstagedToggle.click();
+
+    // The unstaged file should be visible again
+    await expect(session.changes.getByText("collapse-unstaged.txt")).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // --- Expand the commits section back ---
+    await commitsToggle.click();
+
+    // The commit should be visible again
+    await expect(session.changes.getByText("Collapse test commit")).toBeVisible({ timeout: 5_000 });
+
+    // Clean up
+    git.deleteFile("collapse-unstaged.txt");
+  });
 });
