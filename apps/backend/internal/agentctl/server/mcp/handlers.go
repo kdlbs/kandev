@@ -97,13 +97,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		payload := map[string]string{
-			"parent_id":        parentID,
-			"workspace_id":     workspaceID,
-			"workflow_id":      workflowID,
-			"workflow_step_id": workflowStepID,
-			"title":            title,
-			"description":      req.GetString("description", ""),
-			"agent_profile_id": req.GetString("agent_profile_id", ""),
+			"parent_id":           parentID,
+			"workspace_id":        workspaceID,
+			"workflow_id":         workflowID,
+			"workflow_step_id":    workflowStepID,
+			"title":               title,
+			"description":         req.GetString("description", ""),
+			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 		}
 		var result map[string]interface{}

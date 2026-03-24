@@ -153,6 +153,7 @@ type TaskSessionDTO struct {
 	ContainerID          string                  `json:"container_id,omitempty"`
 	AgentProfileID       string                  `json:"agent_profile_id,omitempty"`
 	ExecutorID           string                  `json:"executor_id,omitempty"`
+	ExecutorProfileID    string                  `json:"executor_profile_id,omitempty"`
 	EnvironmentID        string                  `json:"environment_id,omitempty"`
 	RepositoryID         string                  `json:"repository_id,omitempty"`
 	BaseBranch           string                  `json:"base_branch,omitempty"`
@@ -185,6 +186,7 @@ type TaskSessionSummaryDTO struct {
 	ContainerID       string                  `json:"container_id,omitempty"`
 	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                  `json:"executor_id,omitempty"`
+	ExecutorProfileID string                  `json:"executor_profile_id,omitempty"`
 	EnvironmentID     string                  `json:"environment_id,omitempty"`
 	RepositoryID      string                  `json:"repository_id,omitempty"`
 	BaseBranch        string                  `json:"base_branch,omitempty"`
@@ -527,6 +529,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		ContainerID:       session.ContainerID,
 		AgentProfileID:    session.AgentProfileID,
 		ExecutorID:        session.ExecutorID,
+		ExecutorProfileID: session.ExecutorProfileID,
 		EnvironmentID:     session.EnvironmentID,
 		RepositoryID:      session.RepositoryID,
 		BaseBranch:        session.BaseBranch,
@@ -558,6 +561,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		ContainerID:          session.ContainerID,
 		AgentProfileID:       session.AgentProfileID,
 		ExecutorID:           session.ExecutorID,
+		ExecutorProfileID:    session.ExecutorProfileID,
 		EnvironmentID:        session.EnvironmentID,
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,

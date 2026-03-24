@@ -292,12 +292,12 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
-		ParentID       string `json:"parent_id"`
-		WorkspaceID    string `json:"workspace_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Title          string `json:"title"`
-		Description    string `json:"description"`
+		ParentID          string `json:"parent_id"`
+		WorkspaceID       string `json:"workspace_id"`
+		WorkflowID        string `json:"workflow_id"`
+		WorkflowStepID    string `json:"workflow_step_id"`
+		Title             string `json:"title"`
+		Description       string `json:"description"`
 		AgentProfileID    string `json:"agent_profile_id"`
 		ExecutorProfileID string `json:"executor_profile_id"`
 	}
