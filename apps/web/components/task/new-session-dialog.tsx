@@ -142,7 +142,8 @@ function NewSessionForm({
           setContextValue("blank");
           toast({
             title: "Summarize failed",
-            description: "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
+            description:
+              "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
             variant: "error",
           });
         }

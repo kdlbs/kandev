@@ -295,7 +295,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID string `json:"workflow_step_id"`
 		Title          string `json:"title"`
 		Description    string `json:"description"`
-		AgentProfileID string `json:"agent_profile_id"`
+		AgentProfileID    string `json:"agent_profile_id"`
+		ExecutorProfileID string `json:"executor_profile_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -342,25 +343,21 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Auto-start agent session asynchronously
-	h.autoStartTask(task, req.AgentProfileID)
+	h.autoStartTask(task, req.AgentProfileID, req.ExecutorProfileID)
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // autoStartTask launches an agent session for a newly created task in the background.
 // It resolves the agent profile: explicit > parent's session > workspace default.
-func (h *Handlers) autoStartTask(task *models.Task, agentProfileID string) {
+// It resolves the executor profile: explicit > parent's session.
+func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID string) {
 	if h.sessionLauncher == nil {
 		return
 	}
 
-	// Resolve agent profile: explicit > parent's primary session > workspace default
-	if agentProfileID == "" && task.ParentID != "" {
-		parentSession, err := h.taskSvc.GetPrimarySession(context.Background(), task.ParentID)
-		if err == nil && parentSession != nil && parentSession.AgentProfileID != "" {
-			agentProfileID = parentSession.AgentProfileID
-		}
-	}
+	// Inherit from parent's primary session when not explicitly provided.
+	agentProfileID, executorProfileID = h.inheritFromParentSession(task.ParentID, agentProfileID, executorProfileID)
 	if agentProfileID == "" {
 		workspace, err := h.taskSvc.GetWorkspace(context.Background(), task.WorkspaceID)
 		if err == nil && workspace.DefaultAgentProfileID != nil {
@@ -379,10 +376,11 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID string) {
 		defer cancel()
 
 		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-			TaskID:         task.ID,
-			Intent:         orchestrator.IntentStart,
-			AgentProfileID: agentProfileID,
-			Prompt:         task.Description,
+			TaskID:            task.ID,
+			Intent:            orchestrator.IntentStart,
+			AgentProfileID:    agentProfileID,
+			ExecutorProfileID: executorProfileID,
+			Prompt:            task.Description,
 		})
 		if err != nil {
 			h.logger.Error("failed to auto-start task",
@@ -393,6 +391,25 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID string) {
 			zap.String("task_id", task.ID),
 			zap.String("session_id", resp.SessionID))
 	}()
+}
+
+// inheritFromParentSession returns agentProfileID and executorProfileID, filling
+// any empty value from the parent task's primary session.
+func (h *Handlers) inheritFromParentSession(parentID, agentProfileID, executorProfileID string) (string, string) {
+	if parentID == "" {
+		return agentProfileID, executorProfileID
+	}
+	parent, err := h.taskSvc.GetPrimarySession(context.Background(), parentID)
+	if err != nil || parent == nil {
+		return agentProfileID, executorProfileID
+	}
+	if agentProfileID == "" {
+		agentProfileID = parent.AgentProfileID
+	}
+	if executorProfileID == "" {
+		executorProfileID = parent.ExecutorProfileID
+	}
+	return agentProfileID, executorProfileID
 }
 
 // handleUpdateTask updates an existing task.
