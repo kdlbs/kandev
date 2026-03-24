@@ -353,14 +353,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 // autoStartTask launches an agent session for a newly created task in the background.
 // It resolves the agent profile: explicit > parent's session > workspace default.
-// It resolves the executor profile: explicit > parent's session.
+// It resolves the executor: explicit executor_profile_id > parent's executor_profile_id >
+// parent's executor_id (fallback for sessions that have no profile).
 func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID string) {
 	if h.sessionLauncher == nil {
 		return
 	}
 
-	// Inherit from parent's primary session when not explicitly provided.
-	agentProfileID, executorProfileID = h.inheritFromParentSession(task.ParentID, agentProfileID, executorProfileID)
+	executorID := h.inheritFromParentSession(task.ParentID, &agentProfileID, &executorProfileID)
 	if agentProfileID == "" {
 		workspace, err := h.taskSvc.GetWorkspace(context.Background(), task.WorkspaceID)
 		if err == nil && workspace.DefaultAgentProfileID != nil {
@@ -382,6 +382,7 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProf
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
 			AgentProfileID:    agentProfileID,
+			ExecutorID:        executorID,
 			ExecutorProfileID: executorProfileID,
 			Prompt:            task.Description,
 		})
@@ -396,23 +397,31 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProf
 	}()
 }
 
-// inheritFromParentSession returns agentProfileID and executorProfileID, filling
-// any empty value from the parent task's primary session.
-func (h *Handlers) inheritFromParentSession(parentID, agentProfileID, executorProfileID string) (string, string) {
+// inheritFromParentSession fills agentProfileID and executorProfileID from the parent
+// task's primary session when not explicitly provided. It returns the parent's ExecutorID
+// as a fallback for when the parent session has no executor profile (common for
+// UI-created sessions). If ExecutorProfileID is resolved, ExecutorID is redundant
+// since the profile already encodes the executor reference.
+func (h *Handlers) inheritFromParentSession(parentID string, agentProfileID, executorProfileID *string) string {
 	if parentID == "" {
-		return agentProfileID, executorProfileID
+		return ""
 	}
 	parent, err := h.taskSvc.GetPrimarySession(context.Background(), parentID)
 	if err != nil || parent == nil {
-		return agentProfileID, executorProfileID
+		return ""
 	}
-	if agentProfileID == "" {
-		agentProfileID = parent.AgentProfileID
+	if *agentProfileID == "" {
+		*agentProfileID = parent.AgentProfileID
 	}
-	if executorProfileID == "" {
-		executorProfileID = parent.ExecutorProfileID
+	if *executorProfileID == "" {
+		*executorProfileID = parent.ExecutorProfileID
 	}
-	return agentProfileID, executorProfileID
+	// Only return ExecutorID as fallback when no profile was resolved.
+	// An executor profile already encodes its executor reference.
+	if *executorProfileID == "" {
+		return parent.ExecutorID
+	}
+	return ""
 }
 
 // handleUpdateTask updates an existing task.
