@@ -271,7 +271,7 @@ function PRMergedBanner({ taskId }: { taskId: string }) {
   return (
     <div
       data-testid="pr-merged-banner"
-      className="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400"
+      className="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 px-2 py-1 text-purple-600 dark:text-purple-400"
     >
       <IconGitMerge className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1">
