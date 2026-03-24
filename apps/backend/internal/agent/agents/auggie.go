@@ -17,7 +17,7 @@ var auggieLogoLight []byte
 //go:embed logos/auggie_dark.svg
 var auggieLogoDark []byte
 
-const auggiePkg = "@augmentcode/auggie@0.18.1"
+const auggiePkg = "@augmentcode/auggie"
 
 var (
 	_ Agent            = (*Auggie)(nil)
