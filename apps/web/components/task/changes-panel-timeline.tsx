@@ -84,29 +84,32 @@ function TimelineSection({
         {/* Header */}
         {label && (
           <div className="flex items-center justify-between gap-2 -mt-0.5 mb-1">
-            <button
-              type="button"
-              className={cn(
-                "flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70",
-                canCollapse && "cursor-pointer hover:text-foreground/90",
-              )}
-              onClick={canCollapse ? () => setCollapsed((c) => !c) : undefined}
-              aria-expanded={canCollapse ? !collapsed : undefined}
-              data-testid={
-                canCollapse ? `${testId ?? label.toLowerCase()}-collapse-toggle` : undefined
-              }
-            >
-              {label}
-              {typeof count === "number" && (
-                <span className="text-muted-foreground/50 font-normal">({count})</span>
-              )}
-              {canCollapse &&
-                (collapsed ? (
+            {canCollapse ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90"
+                onClick={() => setCollapsed((c) => !c)}
+                aria-expanded={!collapsed}
+                data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
+              >
+                {label}
+                {typeof count === "number" && (
+                  <span className="text-muted-foreground/50 font-normal">({count})</span>
+                )}
+                {collapsed ? (
                   <IconChevronRight className="h-3 w-3 text-muted-foreground/50" />
                 ) : (
                   <IconChevronDown className="h-3 w-3 text-muted-foreground/50" />
-                ))}
-            </button>
+                )}
+              </button>
+            ) : (
+              <span className="text-[11px] font-medium uppercase tracking-wider text-foreground/70">
+                {label}
+                {typeof count === "number" && (
+                  <span className="ml-1 text-muted-foreground/50 font-normal">({count})</span>
+                )}
+              </span>
+            )}
             {action}
           </div>
         )}
