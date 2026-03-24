@@ -242,7 +242,7 @@ func (s *Server) registerTools() {
 		}
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 6
+		count += 8
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -302,6 +302,20 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 		),
 		s.wrapHandler("create_task", s.createTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("list_agents",
+			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("list_agents", s.listAgentsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_executor_profiles",
+			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
+		),
+		s.wrapHandler("list_executor_profiles", s.listExecutorProfilesHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task",

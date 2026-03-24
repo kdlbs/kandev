@@ -155,6 +155,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
 		count += 6
 	}
+	// list_executor_profiles is always available (read-only, used in task mode for create_task)
+	if h.taskSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
+		count++
+	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
@@ -167,14 +172,12 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
 		count += 4
 
-		// Executor config handlers (gated on config-mode via workflowSvc)
+		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
-			d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
-			d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 5
+			count += 3
 		}
 	}
 
