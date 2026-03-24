@@ -353,24 +353,6 @@ function ToolbarExpandToggle({
   );
 }
 
-function ContextTriggerButton({ contextCount }: { contextCount: number }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative overflow-visible"
-    >
-      <IconAt className="h-4 w-4" />
-      {contextCount > 0 && (
-        <span className="absolute -top-1 -right-0.5 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
-          {contextCount}
-        </span>
-      )}
-    </Button>
-  );
-}
-
 function buildCollapsibleItems(props: {
   mcpServers: string[];
   sessionId: string | null;
@@ -528,7 +510,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     <div
       ref={toolbarRef}
       data-testid="chat-input-toolbar"
-      className="flex items-center gap-1 px-1 pt-1 pb-0.5 border-t border-border overflow-x-auto overflow-y-visible scrollbar-hide"
+      className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border overflow-x-auto scrollbar-hide"
     >
       <div className="flex items-center gap-0.5 shrink-0">
         {!props.hidePlanMode && (
@@ -548,7 +530,21 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         <ContextPopover
           open={props.contextPopoverOpen}
           onOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
-          trigger={<ContextTriggerButton contextCount={props.contextCount} />}
+          trigger={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative overflow-visible"
+            >
+              <IconAt className="h-4 w-4" />
+              {props.contextCount > 0 && (
+                <span className="absolute -top-1 -right-0.5 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
+                  {props.contextCount}
+                </span>
+              )}
+            </Button>
+          }
           sessionId={props.sessionId}
           planContextEnabled={props.planContextEnabled}
           contextFiles={props.contextFiles}

@@ -103,4 +103,27 @@ test.describe("Toolbar overflow menu", () => {
     await expect(mcpItem).toBeVisible({ timeout: 5_000 });
     await expect(overflowBtn).not.toBeVisible();
   });
+
+  test("context popover opens when @ button is clicked", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAndNavigate(testPage, apiClient, seedData);
+
+    const toolbar = testPage.getByTestId("chat-input-toolbar");
+    await expect(toolbar).toBeVisible({ timeout: 10_000 });
+
+    // Find the @ context button and click it
+    const contextBtn = toolbar.locator("button", { has: testPage.locator("svg.tabler-icon-at") });
+    await expect(contextBtn).toBeVisible({ timeout: 5_000 });
+    await contextBtn.click();
+
+    // The context popover should open with "Context" header and search input
+    const popoverContent = testPage.getByText("Select files and prompts to include");
+    await expect(popoverContent).toBeVisible({ timeout: 5_000 });
+
+    const searchInput = testPage.getByPlaceholder("Search files and prompts...");
+    await expect(searchInput).toBeVisible();
+  });
 });
