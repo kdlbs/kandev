@@ -14,8 +14,6 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Steps
 
-**Before starting, create a task for each step below using TaskCreate. Mark each task as completed as you finish it.**
-
 ### 1. Gather PR state
 
 Get the PR number from context or the user. Fetch the current state:

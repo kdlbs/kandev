@@ -16,8 +16,6 @@ Commit, push, create a **ready-for-review** pull request, then wait for CI and c
 
 ### Steps
 
-**Before starting, create a task for each step below using TaskCreate. Mark each task as completed as you finish it.**
-
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
 2. **Branch:** If on `main`, create a new branch (e.g. `feat/short-description` or `fix/short-description`) and switch to it. If already on a feature branch, use it.
