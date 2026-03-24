@@ -14,6 +14,8 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Steps
 
+**Create a todo/task for each step below and mark them as completed as you go.**
+
 ### 1. Gather PR state
 
 Get the PR number from context or the user. Fetch the current state:

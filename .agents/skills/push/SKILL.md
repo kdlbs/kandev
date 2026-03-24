@@ -14,6 +14,8 @@ Commit any pending changes and push to the remote branch.
 
 ### Steps
 
+**Create a todo/task for each step below and mark them as completed as you go.**
+
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
 2. **Push** the current branch:

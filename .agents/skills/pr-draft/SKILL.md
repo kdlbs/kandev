@@ -16,6 +16,8 @@ Push the current branch and open a **draft** pull request.
 
 ### Steps
 
+**Create a todo/task for each step below and mark them as completed as you go.**
+
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
 2. **Branch:** If on `main`, create a new branch from the commits (use a descriptive name like `feat/short-description` or `fix/short-description`) and switch to it before pushing. If already on a feature branch, use it as-is.
