@@ -7,7 +7,9 @@ import { useEffect, useRef, useState, type RefObject } from "react";
  * to the container's available width. Returns `true` when children overflow.
  *
  * Uses a cached "full width" (measured when expanded) to prevent toggle loops
- * at the collapse/expand boundary.
+ * at the collapse/expand boundary. Observes both container resizes and DOM
+ * mutations (child additions/removals) to stay in sync when toolbar items
+ * appear or disappear.
  */
 export function useToolbarCollapsed(containerRef: RefObject<HTMLDivElement | null>): boolean {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -47,9 +49,18 @@ export function useToolbarCollapsed(containerRef: RefObject<HTMLDivElement | nul
       }
     };
 
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => observer.disconnect();
+    const resizeObserver = new ResizeObserver(check);
+    resizeObserver.observe(el);
+
+    // Also observe DOM mutations so we remeasure when children change
+    // (e.g. isAgentBusy flips and items appear/disappear).
+    const mutationObserver = new MutationObserver(check);
+    mutationObserver.observe(el, { childList: true, subtree: true });
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
   }, [containerRef]);
 
   return isCollapsed;

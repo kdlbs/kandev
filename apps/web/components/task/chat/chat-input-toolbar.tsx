@@ -338,6 +338,7 @@ function ToolbarOverflowMenu({ items }: { items: ToolbarItemConfig[] }) {
           type="button"
           variant="ghost"
           size="icon"
+          aria-label="More toolbar actions"
           className="h-7 w-7 cursor-pointer hover:bg-muted/40"
           data-testid="toolbar-overflow-menu"
         >
