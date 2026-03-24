@@ -59,4 +59,10 @@ Commit, push, and create a pull request.
 
 5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
 
-6. **Return the PR URL** when done.
+6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
+   - Read the manifest to list available screenshots/GIFs
+   - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
+   - Read `apps/web/.pr-assets/embed.md` and append its contents to the PR body using `gh pr edit <PR_NUMBER> --body "..."`
+   - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
+
+7. **Return the PR URL** when done.

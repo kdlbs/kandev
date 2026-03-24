@@ -12,7 +12,8 @@
     "test": "vitest run",
     "e2e": "playwright test --config e2e/playwright.config.ts",
     "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
-    "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed"
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed",
+    "e2e:capture": "cross-env CAPTURE_PR_ASSETS=true playwright test --config e2e/playwright.config.ts && tsx e2e/scripts/convert-assets.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
@@ -129,6 +130,7 @@
     "eslint-plugin-unused-imports": "^4.4.1",
     "happy-dom": "^20.1.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^1.6.0"
   }

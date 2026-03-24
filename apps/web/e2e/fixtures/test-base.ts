@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
+import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import type { WorkflowStep } from "../../lib/types/http";
 
 export type SeedData = {
@@ -16,7 +17,7 @@ export type SeedData = {
 };
 
 export const test = backendFixture.extend<
-  { testPage: Page },
+  { testPage: Page; prCapture: PrAssetCapture },
   { apiClient: ApiClient; seedData: SeedData }
 >({
   // Worker-scoped API client
@@ -98,6 +99,15 @@ export const test = backendFixture.extend<
     await setupPage(page, backend, seedData);
     await use(page);
     await context.close();
+  },
+
+  // PR asset capture — gated behind CAPTURE_PR_ASSETS env var.
+  // When enabled, provides screenshot/recording helpers for PR descriptions.
+  // Destructure in tests that need it: { testPage, prCapture }
+  prCapture: async ({ testPage }, use, testInfo) => {
+    const capture = new PrAssetCapture(testPage, testInfo.file);
+    await use(capture);
+    capture.flush();
   },
 });
 

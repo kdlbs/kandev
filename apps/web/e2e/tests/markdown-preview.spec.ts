@@ -52,6 +52,7 @@ test.describe("Markdown preview", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     // Create a markdown file in the workspace repo before navigating
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -90,6 +91,11 @@ test.describe("Markdown preview", () => {
     await expect(preview.locator("h1")).toContainText("Hello World");
     // Check that list items are rendered
     await expect(preview.locator("li")).toHaveCount(3);
+
+    // Capture screenshot for PR description (only when CAPTURE_PR_ASSETS=true)
+    await prCapture.screenshot("markdown-preview-on", {
+      caption: "Markdown file rendered in preview mode",
+    });
 
     // Toggle back to code view
     const codeToggle = testPage.getByTestId("markdown-preview-toggle").first();
