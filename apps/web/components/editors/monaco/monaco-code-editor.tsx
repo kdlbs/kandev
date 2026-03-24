@@ -28,6 +28,7 @@ type MonacoCodeEditorProps = {
   sessionId?: string;
   worktreePath?: string;
   enableComments?: boolean;
+  onToggleMarkdownPreview?: () => void;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -175,6 +176,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     sessionId,
     worktreePath,
     enableComments = false,
+    onToggleMarkdownPreview,
     onSave,
     onReloadFromAgent,
     onDelete,
@@ -205,6 +207,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
+        onToggleMarkdownPreview={onToggleMarkdownPreview}
       />
       <div className="flex-1 overflow-hidden relative">
         <Editor

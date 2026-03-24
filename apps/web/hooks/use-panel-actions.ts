@@ -25,7 +25,8 @@ export function usePanelActions() {
   const dockAddVscode = useDockviewStore((s) => s.addVscodePanel);
 
   // File editors (works on desktop through dockview)
-  const { openFile: dockOpenFile } = useFileEditors();
+  const { openFile: dockOpenFile, openFileInMarkdownPreview: dockOpenFileInPreview } =
+    useFileEditors();
 
   // Mobile/Tablet: layout store
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -101,6 +102,15 @@ export function usePanelActions() {
     [isDesktop, dockOpenFile],
   );
 
+  const openFileInMarkdownPreview = useCallback(
+    (filePath: string) => {
+      if (isDesktop) {
+        dockOpenFileInPreview(filePath);
+      }
+    },
+    [isDesktop, dockOpenFileInPreview],
+  );
+
   return {
     addBrowser,
     addPlan,
@@ -109,5 +119,6 @@ export function usePanelActions() {
     addTerminal,
     addVscode,
     openFile,
+    openFileInMarkdownPreview,
   };
 }

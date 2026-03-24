@@ -20,6 +20,7 @@ interface FileDiffViewerProps {
   compact?: boolean;
   hideHeader?: boolean;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
@@ -57,6 +58,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   compact,
   hideHeader,
   onOpenFile,
+  onPreviewMarkdown,
   onRevert,
   enableAcceptReject,
   onRevertBlock,
@@ -81,6 +83,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       compact={compact}
       hideHeader={hideHeader}
       onOpenFile={onOpenFile}
+      onPreviewMarkdown={onPreviewMarkdown}
       onRevert={onRevert}
       enableAcceptReject={enableAcceptReject}
       onRevertBlock={onRevertBlock}

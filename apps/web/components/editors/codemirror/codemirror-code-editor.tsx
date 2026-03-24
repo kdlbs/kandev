@@ -11,6 +11,7 @@ import {
   IconTextWrapDisabled,
   IconMessagePlus,
   IconRefresh,
+  IconEye,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDiffStats } from "@/lib/utils/file-diff";
@@ -35,6 +36,7 @@ type FileEditorContentProps = {
   sessionId?: string;
   worktreePath?: string;
   enableComments?: boolean;
+  onToggleMarkdownPreview?: () => void;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -170,6 +172,25 @@ function CodeMirrorSaveButton({
   );
 }
 
+function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onToggle}
+          className="h-8 w-8 p-0 cursor-pointer text-muted-foreground"
+          data-testid="markdown-preview-toggle"
+        >
+          <IconEye className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Preview markdown</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Toolbar for the CodeMirror code editor. */
 function CodeMirrorToolbar({
   path,
@@ -186,6 +207,7 @@ function CodeMirrorToolbar({
   onSave,
   onReloadFromAgent,
   onDelete,
+  onToggleMarkdownPreview,
 }: {
   path: string;
   worktreePath?: string;
@@ -201,6 +223,7 @@ function CodeMirrorToolbar({
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onToggleMarkdownPreview?: () => void;
 }) {
   return (
     <PanelHeaderBarSplit
@@ -221,6 +244,9 @@ function CodeMirrorToolbar({
             sessionId={sessionId}
             commentCount={commentCount}
           />
+          {onToggleMarkdownPreview && (
+            <CodeMirrorMarkdownPreviewButton onToggle={onToggleMarkdownPreview} />
+          )}
           <CodeMirrorWrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
           <CodeMirrorReloadButton
             hasRemoteUpdate={hasRemoteUpdate}
@@ -234,6 +260,46 @@ function CodeMirrorToolbar({
   );
 }
 
+type CodeMirrorEditorState = ReturnType<typeof useCodeMirrorEditorState>;
+
+function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
+  return (
+    <>
+      {state.floatingButtonPos && !state.textSelection && (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
+          style={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={state.handleFloatingButtonClick}
+        >
+          <IconMessagePlus className="h-3.5 w-3.5" />
+          Comment
+        </Button>
+      )}
+      {state.textSelection && (
+        <EditorCommentPopover
+          selectedText={state.textSelection.text}
+          lineRange={{ start: state.textSelection.startLine, end: state.textSelection.endLine }}
+          position={state.textSelection.position}
+          onSubmit={state.handleCommentSubmit}
+          onSubmitAndRun={state.handleCommentSubmitAndRun}
+          onClose={state.handlePopoverClose}
+        />
+      )}
+      {state.commentView && (
+        <CommentViewPopover
+          comments={state.commentView.comments}
+          position={state.commentView.position}
+          onDelete={state.handleDeleteComment}
+          onClose={state.handleCommentViewClose}
+        />
+      )}
+    </>
+  );
+}
+
 export function CodeMirrorCodeEditor({
   path,
   content,
@@ -244,6 +310,7 @@ export function CodeMirrorCodeEditor({
   sessionId,
   worktreePath,
   enableComments = false,
+  onToggleMarkdownPreview,
   onChange,
   onSave,
   onReloadFromAgent,
@@ -251,7 +318,6 @@ export function CodeMirrorCodeEditor({
 }: FileEditorContentProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
-
   const state = useCodeMirrorEditorState({
     path,
     content,
@@ -283,8 +349,8 @@ export function CodeMirrorCodeEditor({
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
+        onToggleMarkdownPreview={onToggleMarkdownPreview}
       />
-
       <div className="flex-1 overflow-hidden relative">
         <CodeMirror
           ref={editorRef}
@@ -302,40 +368,7 @@ export function CodeMirrorCodeEditor({
           }}
           className="h-full overflow-auto text-xs"
         />
-
-        {state.floatingButtonPos && !state.textSelection && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-            style={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={state.handleFloatingButtonClick}
-          >
-            <IconMessagePlus className="h-3.5 w-3.5" />
-            Comment
-          </Button>
-        )}
-
-        {state.textSelection && (
-          <EditorCommentPopover
-            selectedText={state.textSelection.text}
-            lineRange={{ start: state.textSelection.startLine, end: state.textSelection.endLine }}
-            position={state.textSelection.position}
-            onSubmit={state.handleCommentSubmit}
-            onSubmitAndRun={state.handleCommentSubmitAndRun}
-            onClose={state.handlePopoverClose}
-          />
-        )}
-
-        {state.commentView && (
-          <CommentViewPopover
-            comments={state.commentView.comments}
-            position={state.commentView.position}
-            onDelete={state.handleDeleteComment}
-            onClose={state.handleCommentViewClose}
-          />
-        )}
+        <CodeMirrorOverlays state={state} />
       </div>
     </div>
   );

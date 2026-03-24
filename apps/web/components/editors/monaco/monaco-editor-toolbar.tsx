@@ -11,6 +11,7 @@ import {
   IconMessagePlus,
   IconArrowsDiff,
   IconRefresh,
+  IconEye,
 } from "@tabler/icons-react";
 import { formatDiffStats } from "@/lib/utils/file-diff";
 import { toRelativePath } from "@/lib/utils";
@@ -193,6 +194,25 @@ function DeleteButton({ onDelete }: { onDelete?: () => void }) {
   );
 }
 
+function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onTogglePreview}
+          className="h-8 w-8 p-0 cursor-pointer text-muted-foreground"
+          data-testid="markdown-preview-toggle"
+        >
+          <IconEye className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Preview markdown</TooltipContent>
+    </Tooltip>
+  );
+}
+
 interface MonacoEditorToolbarProps {
   path: string;
   worktreePath?: string;
@@ -214,6 +234,7 @@ interface MonacoEditorToolbarProps {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onToggleMarkdownPreview?: () => void;
 }
 
 export function MonacoEditorToolbar({
@@ -237,6 +258,7 @@ export function MonacoEditorToolbar({
   onSave,
   onReloadFromAgent,
   onDelete,
+  onToggleMarkdownPreview,
 }: MonacoEditorToolbarProps) {
   return (
     <PanelHeaderBarSplit
@@ -261,6 +283,9 @@ export function MonacoEditorToolbar({
               isVisible={showDiffIndicators}
               onToggle={onToggleDiffIndicators}
             />
+          )}
+          {onToggleMarkdownPreview && (
+            <MarkdownPreviewButton onTogglePreview={onToggleMarkdownPreview} />
           )}
           <WrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
           <ReloadFromAgentButton

@@ -23,6 +23,7 @@ interface DiffViewerResolverProps {
   compact?: boolean;
   hideHeader?: boolean;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
@@ -50,6 +51,7 @@ export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffVi
       enableExpansion,
       expandUnchanged,
       onToggleExpandUnchanged,
+      onPreviewMarkdown,
       ...rest
     } = props;
     /* eslint-enable @typescript-eslint/no-unused-vars */

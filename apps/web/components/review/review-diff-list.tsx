@@ -13,6 +13,7 @@ import {
   IconLayoutRows,
   IconPencil,
   IconTextWrap,
+  IconEye,
 } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Button } from "@kandev/ui/button";
@@ -29,6 +30,11 @@ import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
 import type { ReviewFile } from "./types";
 
+function isMarkdownPath(filePath: string): boolean {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  return ext === "md" || ext === "mdx";
+}
+
 type ReviewDiffListProps = {
   files: ReviewFile[];
   reviewedFiles: Set<string>;
@@ -40,6 +46,7 @@ type ReviewDiffListProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -54,6 +61,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   onToggleReviewed,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +83,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           onToggleReviewed={onToggleReviewed}
           onDiscard={onDiscard}
           onOpenFile={onOpenFile}
+          onPreviewMarkdown={onPreviewMarkdown}
           sectionRef={fileRefs.get(file.path)}
           scrollContainer={scrollContainerRef}
         />
@@ -95,6 +104,7 @@ type FileDiffSectionProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
 };
@@ -179,6 +189,7 @@ type FileDiffToolbarProps = {
   expandUnchanged: boolean;
   onDiscard: () => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
 };
@@ -226,6 +237,7 @@ function FileDiffToolbar(props: FileDiffToolbarProps) {
     expandUnchanged,
     onDiscard,
     onOpenFile,
+    onPreviewMarkdown,
     onToggleExpandUnchanged,
     onToggleWordWrap,
   } = props;
@@ -266,6 +278,11 @@ function FileDiffToolbar(props: FileDiffToolbarProps) {
           <IconLayoutColumns className="h-3.5 w-3.5" />
         )}
       </ToolbarIconBtn>
+      {onPreviewMarkdown && isMarkdownPath(filePath) && (
+        <ToolbarIconBtn onClick={() => onPreviewMarkdown(filePath)} tooltip="Preview markdown">
+          <IconEye className="h-3.5 w-3.5" />
+        </ToolbarIconBtn>
+      )}
       {onOpenFile && (
         <ToolbarIconBtn onClick={() => onOpenFile(filePath)} tooltip="Edit">
           <IconPencil className="h-3.5 w-3.5" />
@@ -296,6 +313,7 @@ type FileDiffHeaderProps = {
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onToggleCollapse: () => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
@@ -312,6 +330,7 @@ function FileDiffHeader({
   onCheckboxChange,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   onToggleCollapse,
   onToggleExpandUnchanged,
   onToggleWordWrap,
@@ -354,6 +373,7 @@ function FileDiffHeader({
         expandUnchanged={expandUnchanged}
         onDiscard={onDiscard}
         onOpenFile={onOpenFile}
+        onPreviewMarkdown={onPreviewMarkdown}
         onToggleExpandUnchanged={onToggleExpandUnchanged}
         onToggleWordWrap={onToggleWordWrap}
       />
@@ -429,6 +449,7 @@ function FileDiffSection({
   onToggleReviewed,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   sectionRef,
   scrollContainer,
 }: FileDiffSectionProps) {
@@ -485,6 +506,7 @@ function FileDiffSection({
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
         onOpenFile={onOpenFile}
+        onPreviewMarkdown={onPreviewMarkdown}
         onToggleCollapse={handleToggleCollapse}
         onToggleExpandUnchanged={handleToggleExpandUnchanged}
         onToggleWordWrap={handleToggleWordWrap}

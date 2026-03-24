@@ -67,6 +67,7 @@ type UseDiffOptionsArgs = {
   onLineEnter: (props: { lineType?: string; lineNumber?: number; annotationSide?: string }) => void;
   onLineLeave: () => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   /** Enable diff expansion (requires oldLines/newLines in metadata) */
   enableExpansion?: boolean;
@@ -97,6 +98,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onLineEnter,
     onLineLeave,
     onOpenFile,
+    onPreviewMarkdown,
     onRevert,
     enableExpansion = false,
     expansionLineCount = 20,
@@ -122,6 +124,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     viewMode: globalViewMode,
     onToggleViewMode: toggleViewMode,
     onOpenFile,
+    onPreviewMarkdown,
     onRevert,
     expandUnchanged,
     onToggleExpandUnchanged,

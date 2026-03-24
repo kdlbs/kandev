@@ -16,6 +16,11 @@ import { calculateHash } from "@/lib/utils/file-diff";
 
 type FileCategory = "image" | "binary" | "text";
 
+function isMarkdownFile(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext === "md" || ext === "mdx";
+}
+
 function resolveFileCategory(isBinary: boolean, path: string): FileCategory {
   if (!isBinary) return "text";
   return getFileCategory(path) === "image" ? "image" : "binary";
@@ -92,7 +97,9 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
   const hasRemoteUpdate = useDockviewStore((s) => s.openFiles.get(path)?.hasRemoteUpdate ?? false);
   const isBinary = useDockviewStore((s) => s.openFiles.get(path)?.isBinary ?? false);
   const originalContent = useDockviewStore((s) => s.openFiles.get(path)?.originalContent ?? "");
+  const markdownPreview = useDockviewStore((s) => s.openFiles.get(path)?.markdownPreview ?? false);
   const setFileState = useDockviewStore((s) => s.setFileState);
+  const updateFileState = useDockviewStore((s) => s.updateFileState);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
@@ -111,6 +118,10 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
   const onSave = useCallback(() => saveFile(path), [saveFile, path]);
   const onReloadFromAgent = useCallback(() => applyRemoteUpdate(path), [applyRemoteUpdate, path]);
   const onDelete = useCallback(() => deleteFile(path), [deleteFile, path]);
+  const onToggleMarkdownPreview = useCallback(
+    () => updateFileState(path, { markdownPreview: !markdownPreview }),
+    [updateFileState, path, markdownPreview],
+  );
 
   if (!hasFile) {
     return (
@@ -141,6 +152,8 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
     );
   }
 
+  const isMarkdown = isMarkdownFile(path);
+
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
@@ -155,6 +168,8 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
           sessionId={activeSessionId || undefined}
           worktreePath={worktreePath}
           enableComments={!!activeSessionId}
+          markdownPreview={isMarkdown ? markdownPreview : false}
+          onToggleMarkdownPreview={isMarkdown ? onToggleMarkdownPreview : undefined}
           onChange={onChange}
           onSave={onSave}
           onReloadFromAgent={onReloadFromAgent}

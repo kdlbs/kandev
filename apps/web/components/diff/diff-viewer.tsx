@@ -30,6 +30,7 @@ interface DiffViewerProps {
   compact?: boolean;
   hideHeader?: boolean;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
@@ -51,6 +52,7 @@ const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "hideHeader",
   "className",
   "onOpenFile",
+  "onPreviewMarkdown",
   "onRevert",
   "enableAcceptReject",
   "onRevertBlock",
@@ -126,6 +128,7 @@ export const DiffViewer = memo(function DiffViewer({
   compact = false,
   hideHeader = false,
   onOpenFile,
+  onPreviewMarkdown,
   onRevert,
   enableAcceptReject = false,
   onRevertBlock,
@@ -193,6 +196,7 @@ export const DiffViewer = memo(function DiffViewer({
     onLineEnter,
     onLineLeave,
     onOpenFile,
+    onPreviewMarkdown,
     onRevert,
     enableExpansion: canUseExpansion,
     expandUnchanged,

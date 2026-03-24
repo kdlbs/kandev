@@ -150,7 +150,7 @@ async function syncOpenFileFromWorkspace({
 
 type RestoreTabsParams = {
   activeSessionId: string;
-  savedTabs: Array<{ path: string; name: string }>;
+  savedTabs: Array<{ path: string; name: string; markdownPreview?: boolean }>;
   savedActiveTab: string;
   setFileState: (path: string, state: FileEditorState) => void;
   addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
@@ -183,6 +183,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        markdownPreview: savedTab.markdownPreview,
       });
       addFileEditorPanel(savedTab.path, savedTab.name, true);
     } catch {
@@ -242,7 +243,11 @@ function useFileEditorEffects({
       if (!sessionId || _restorationInProgress || state.isRestoringLayout) return;
       saveOpenFileTabs(
         sessionId,
-        Array.from(state.openFiles.values()).map(({ path, name }) => ({ path, name })),
+        Array.from(state.openFiles.values()).map(({ path, name, markdownPreview }) => ({
+          path,
+          name,
+          ...(markdownPreview ? { markdownPreview } : {}),
+        })),
       );
     });
     return unsub;
@@ -494,7 +499,45 @@ function useFileEditorActions({
     toast,
   });
 
-  return { openFile, handleFileChange, saveFile, deleteFileAction, applyRemoteUpdate };
+  const openFileInMarkdownPreview = useCallback(
+    async (filePath: string) => {
+      const client = getWebSocketClient();
+      const currentSessionId = activeSessionIdRef.current;
+      if (!client || !currentSessionId) return;
+      const files = getOpenFiles();
+      if (files.has(filePath)) {
+        updateFileState(filePath, { markdownPreview: true });
+        addFileEditorPanel(filePath, filePath.split("/").pop() || filePath);
+        return;
+      }
+      try {
+        const response: FileContentResponse = await requestFileContent(
+          client,
+          currentSessionId,
+          filePath,
+        );
+        const state = await buildFileEditorState(filePath, response);
+        setFileState(filePath, { ...state, markdownPreview: true });
+        addFileEditorPanel(filePath, state.name);
+      } catch (error) {
+        toast({
+          title: "Failed to open file",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "error",
+        });
+      }
+    },
+    [activeSessionIdRef, setFileState, updateFileState, addFileEditorPanel, toast],
+  );
+
+  return {
+    openFile,
+    openFileInMarkdownPreview,
+    handleFileChange,
+    saveFile,
+    deleteFileAction,
+    applyRemoteUpdate,
+  };
 }
 
 export function useFileEditors() {
@@ -533,19 +576,26 @@ export function useFileEditors() {
     activeSessionIdRef,
     gitFileSignaturesRef,
   });
-  const { openFile, handleFileChange, saveFile, deleteFileAction, applyRemoteUpdate } =
-    useFileEditorActions({
-      activeSessionIdRef,
-      setFileState,
-      updateFileState,
-      addFileEditorPanel,
-      setSavingFiles,
-      toast,
-    });
+  const {
+    openFile,
+    openFileInMarkdownPreview,
+    handleFileChange,
+    saveFile,
+    deleteFileAction,
+    applyRemoteUpdate,
+  } = useFileEditorActions({
+    activeSessionIdRef,
+    setFileState,
+    updateFileState,
+    addFileEditorPanel,
+    setSavingFiles,
+    toast,
+  });
 
   return {
     savingFiles,
     openFile,
+    openFileInMarkdownPreview,
     saveFile,
     deleteFile: deleteFileAction,
     handleFileChange,

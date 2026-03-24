@@ -416,6 +416,7 @@ const ACTIVE_TAB_KEY = "kandev.activeTab";
 export interface StoredFileTab {
   path: string;
   name: string;
+  markdownPreview?: boolean;
 }
 
 /**

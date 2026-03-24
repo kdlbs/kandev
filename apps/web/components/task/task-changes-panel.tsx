@@ -325,7 +325,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onOpenFile: onOpenFileProp,
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { openFile: panelOpenFile } = usePanelActions();
+  const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
   const {
@@ -413,6 +413,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           onToggleReviewed={handleToggleReviewed}
           onDiscard={handleDiscard}
           onOpenFile={handleOpenFile}
+          onPreviewMarkdown={openFileInMarkdownPreview}
           fileRefs={visibleFileRefs}
         />
       </PanelBody>
@@ -432,6 +433,7 @@ function ChangesPanelContent({
   onToggleReviewed,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   fileRefs,
 }: {
   isLoading: boolean;
@@ -445,6 +447,7 @@ function ChangesPanelContent({
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
   onOpenFile: (path: string) => void;
+  onPreviewMarkdown?: (path: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {
   if (isLoading && files.length === 0) {
@@ -474,6 +477,7 @@ function ChangesPanelContent({
       onToggleReviewed={onToggleReviewed}
       onDiscard={onDiscard}
       onOpenFile={onOpenFile}
+      onPreviewMarkdown={onPreviewMarkdown}
       fileRefs={fileRefs}
     />
   );

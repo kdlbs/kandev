@@ -13,6 +13,7 @@ import {
   IconArrowBackUp,
   IconFoldDown,
   IconFold,
+  IconEye,
 } from "@tabler/icons-react";
 import type { RenderHeaderMetadataProps } from "@pierre/diffs";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
@@ -56,6 +57,7 @@ interface DiffHeaderToolbarOptions {
   viewMode: ViewMode;
   onToggleViewMode: () => void;
   onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   expandUnchanged?: boolean;
   onToggleExpandUnchanged?: () => void;
@@ -64,6 +66,7 @@ interface DiffHeaderToolbarOptions {
 type ToolbarButtonsProps = Omit<DiffHeaderToolbarOptions, "filePath" | "diff"> & {
   resolvedPath: string;
   onCopyDiff: () => void;
+  isMarkdownFile: boolean;
 };
 
 function DiffHeaderToolbarButtons({
@@ -77,6 +80,8 @@ function DiffHeaderToolbarButtons({
   viewMode,
   onToggleViewMode,
   onOpenFile,
+  onPreviewMarkdown,
+  isMarkdownFile,
 }: ToolbarButtonsProps) {
   return (
     <div className="flex items-center gap-1">
@@ -123,6 +128,16 @@ function DiffHeaderToolbarButtons({
         )}
       </ToolbarBtn>
 
+      {isMarkdownFile && onPreviewMarkdown && (
+        <ToolbarBtn
+          onClick={() => onPreviewMarkdown(resolvedPath)}
+          tooltip="Preview markdown"
+          className={iconBtn}
+        >
+          <IconEye className="h-3.5 w-3.5" />
+        </ToolbarBtn>
+      )}
+
       {onOpenFile && (
         <ToolbarBtn onClick={() => onOpenFile(resolvedPath)} tooltip="Edit">
           <IconPencil className="h-3.5 w-3.5" />
@@ -130,6 +145,11 @@ function DiffHeaderToolbarButtons({
       )}
     </div>
   );
+}
+
+function checkIsMarkdown(filePath: string): boolean {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  return ext === "md" || ext === "mdx";
 }
 
 export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
@@ -141,6 +161,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
     viewMode,
     onToggleViewMode,
     onOpenFile,
+    onPreviewMarkdown,
     onRevert,
     expandUnchanged,
     onToggleExpandUnchanged,
@@ -152,12 +173,14 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
       return (
         <DiffHeaderToolbarButtons
           resolvedPath={resolvedPath}
+          isMarkdownFile={checkIsMarkdown(resolvedPath)}
           onCopyDiff={() => navigator.clipboard.writeText(diff || "")}
           wordWrap={wordWrap}
           onToggleWordWrap={onToggleWordWrap}
           viewMode={viewMode}
           onToggleViewMode={onToggleViewMode}
           onOpenFile={onOpenFile}
+          onPreviewMarkdown={onPreviewMarkdown}
           onRevert={onRevert}
           expandUnchanged={expandUnchanged}
           onToggleExpandUnchanged={onToggleExpandUnchanged}
@@ -172,6 +195,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
       viewMode,
       onToggleViewMode,
       onOpenFile,
+      onPreviewMarkdown,
       onRevert,
       expandUnchanged,
       onToggleExpandUnchanged,
