@@ -46,6 +46,8 @@ ci: add PR title linting workflow
 
 ## Steps
 
+**Before starting, create a task for each step below using TaskCreate. Mark each task as completed as you finish it.**
+
 1. Run `git status` and `git diff` to understand all changes
 2. Review recent commits with `git log --oneline -10` to match project style
 3. Run `/verify` as a **sub-agent** to ensure formatters, linters, typechecks, and tests all pass. Fix any issues before committing.
