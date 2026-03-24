@@ -103,6 +103,27 @@ function buildCreateTaskBody(
   return body;
 }
 
+/** Build the optional fields object for createTaskWithAgent requests. */
+function buildOptionalAgentTaskFields(opts?: {
+  workflow_id?: string;
+  workflow_step_id?: string;
+  repository_ids?: string[];
+  executor_id?: string;
+  executor_profile_id?: string;
+  metadata?: Record<string, unknown>;
+  parent_id?: string;
+}): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (opts?.workflow_id) fields.workflow_id = opts.workflow_id;
+  if (opts?.workflow_step_id) fields.workflow_step_id = opts.workflow_step_id;
+  if (opts?.repository_ids) fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
+  if (opts?.executor_id) fields.executor_id = opts.executor_id;
+  if (opts?.executor_profile_id) fields.executor_profile_id = opts.executor_profile_id;
+  if (opts?.metadata) fields.metadata = opts.metadata;
+  if (opts?.parent_id) fields.parent_id = opts.parent_id;
+  return fields;
+}
+
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
@@ -223,6 +244,7 @@ export class ApiClient {
       workflow_step_id?: string;
       repository_ids?: string[];
       executor_id?: string;
+      executor_profile_id?: string;
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
@@ -234,14 +256,7 @@ export class ApiClient {
       description: opts?.description ?? "",
       start_agent: true,
       agent_profile_id: agentProfileId,
-      ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
-      ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
-      ...(opts?.repository_ids
-        ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
-        : {}),
-      ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
-      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
-      ...(opts?.parent_id ? { parent_id: opts.parent_id } : {}),
+      ...buildOptionalAgentTaskFields(opts),
     });
   }
 
