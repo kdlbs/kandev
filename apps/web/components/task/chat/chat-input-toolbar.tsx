@@ -355,21 +355,19 @@ function ToolbarExpandToggle({
 
 function ContextTriggerButton({ contextCount }: { contextCount: number }) {
   return (
-    <span className="relative">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-      >
-        <IconAt className="h-4 w-4" />
-      </Button>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative overflow-visible"
+    >
+      <IconAt className="h-4 w-4" />
       {contextCount > 0 && (
         <span className="absolute -top-1 -right-0.5 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
           {contextCount}
         </span>
       )}
-    </span>
+    </Button>
   );
 }
 
