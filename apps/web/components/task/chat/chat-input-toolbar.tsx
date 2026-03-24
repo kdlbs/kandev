@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import { memo, useRef, useState, useCallback, type ReactNode } from "react";
 import {
   IconArrowUp,
+  IconDots,
   IconFileTextSpark,
   IconPlayerPauseFilled,
   IconAt,
@@ -26,7 +27,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Separator } from "@kandev/ui/separator";
 import { cn } from "@/lib/utils";
+import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
@@ -315,81 +319,136 @@ function ResetContextButton({ sessionId }: { sessionId: string }) {
   );
 }
 
-type ToolbarRightSectionProps = {
-  taskId: string | null;
-  sessionId: string | null;
-  taskTitle?: string;
-  taskDescription: string;
-  planModeEnabled: boolean;
-  isAgentBusy: boolean;
-  isDisabled: boolean;
-  isSending: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onEnhancePrompt?: () => void;
-  isEnhancingPrompt?: boolean;
-  isUtilityConfigured?: boolean;
-  onImplementPlan?: () => void;
-  hideSessionsDropdown?: boolean;
+type ToolbarItemConfig = {
+  id: string;
+  collapsible: boolean;
+  section: "left" | "right";
+  render: () => ReactNode;
+  visible?: boolean;
 };
 
-function ToolbarRightSection({
-  taskId,
-  sessionId,
-  taskTitle,
-  taskDescription,
-  planModeEnabled,
-  isAgentBusy,
-  isDisabled,
-  isSending,
-  onCancel,
-  onSubmit,
-  submitShortcut,
-  onEnhancePrompt,
-  isEnhancingPrompt,
-  isUtilityConfigured,
-  onImplementPlan,
-  hideSessionsDropdown,
-}: ToolbarRightSectionProps) {
-  const showEnhance = !isAgentBusy;
-  const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
-  const showResetContext = !!sessionId && !isAgentBusy;
+function ToolbarOverflowMenu({ items }: { items: ToolbarItemConfig[] }) {
+  const visible = items.filter((i) => i.visible !== false);
+  if (visible.length === 0) return null;
+
   return (
-    <div className="flex items-center gap-0.5 shrink-0">
-      {showResetContext && <ResetContextButton sessionId={sessionId} />}
-      {!hideSessionsDropdown && (
-        <SessionsDropdown
-          taskId={taskId}
-          activeSessionId={sessionId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
-      )}
-      <TokenUsageDisplay sessionId={sessionId} />
-      <ModelSelector sessionId={sessionId} />
-      {/* AuthMethodsIndicator hidden — UX needs rethinking */}
-      {showEnhance && (
-        <EnhancePromptButton
-          onClick={onEnhancePrompt ?? (() => {})}
-          isLoading={isEnhancingPrompt ?? false}
-          isConfigured={isUtilityConfigured}
-        />
-      )}
-      {showImplement && <ImplementPlanButton onClick={onImplementPlan} />}
-      <div className="ml-1">
-        <SubmitButton
-          isAgentBusy={isAgentBusy}
-          isDisabled={isDisabled}
-          isSending={isSending}
-          planModeEnabled={planModeEnabled}
-          onCancel={onCancel}
-          onSubmit={onSubmit}
-          submitShortcut={submitShortcut}
-        />
-      </div>
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 cursor-pointer hover:bg-muted/40"
+          data-testid="toolbar-overflow-menu"
+        >
+          <IconDots className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        className="w-auto min-w-[180px] p-1.5"
+        data-testid="toolbar-overflow-content"
+      >
+        <div className="flex flex-col gap-0.5">
+          {visible.map((item, i) => (
+            <div key={item.id} data-testid={`toolbar-overflow-item-${item.id}`}>
+              {i > 0 && item.section !== visible[i - 1]?.section && (
+                <Separator className="my-1" />
+              )}
+              {item.render()}
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
+}
+
+function ContextTriggerButton({ contextCount }: { contextCount: number }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
+    >
+      <IconAt className="h-4 w-4" />
+      {contextCount > 0 && (
+        <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
+          {contextCount}
+        </span>
+      )}
+    </Button>
+  );
+}
+
+function buildCollapsibleItems(props: {
+  mcpServers: string[];
+  sessionId: string | null;
+  taskId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+  hideSessionsDropdown?: boolean;
+  isAgentBusy: boolean;
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt: boolean;
+  isUtilityConfigured: boolean;
+}): ToolbarItemConfig[] {
+  return [
+    {
+      id: "mcp",
+      section: "left",
+      collapsible: true,
+      render: () => <McpIndicator mcpServers={props.mcpServers} />,
+    },
+    {
+      id: "mode",
+      section: "left",
+      collapsible: true,
+      render: () => <ModeSelector sessionId={props.sessionId} />,
+    },
+    {
+      id: "reset-context",
+      section: "right",
+      collapsible: true,
+      visible: !!props.sessionId && !props.isAgentBusy,
+      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+    },
+    {
+      id: "sessions",
+      section: "right",
+      collapsible: true,
+      visible: !props.hideSessionsDropdown,
+      render: () => (
+        <SessionsDropdown
+          taskId={props.taskId}
+          activeSessionId={props.sessionId}
+          taskTitle={props.taskTitle}
+          taskDescription={props.taskDescription}
+        />
+      ),
+    },
+    {
+      id: "model",
+      section: "right",
+      collapsible: true,
+      render: () => <ModelSelector sessionId={props.sessionId} />,
+    },
+    {
+      id: "enhance",
+      section: "right",
+      collapsible: true,
+      visible: !props.isAgentBusy,
+      render: () => (
+        <EnhancePromptButton
+          onClick={props.onEnhancePrompt ?? (() => {})}
+          isLoading={props.isEnhancingPrompt}
+          isConfigured={props.isUtilityConfigured}
+        />
+      ),
+    },
+  ];
 }
 
 function AttachFilesButton({ onClick }: { onClick: () => void }) {
@@ -454,6 +513,8 @@ const toolbarDefaults = {
 export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
   const props = { ...toolbarDefaults, ...rawProps };
   const submitShortcut = props.submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const isCollapsed = useToolbarCollapsed(toolbarRef);
 
   if (props.minimalToolbar) {
     return (
@@ -468,9 +529,18 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     );
   }
 
+  const items = buildCollapsibleItems(props);
+  const showImplement = props.planModeEnabled && !props.isAgentBusy && !!props.onImplementPlan;
+  const leftItems = items.filter((i) => i.section === "left" && i.visible !== false);
+  const rightItems = items.filter((i) => i.section === "right" && i.visible !== false);
+
   return (
-    <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
-      <div className="flex items-center gap-0.5">
+    <div
+      ref={toolbarRef}
+      data-testid="chat-input-toolbar"
+      className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border overflow-x-auto scrollbar-hide"
+    >
+      <div className="flex items-center gap-0.5 shrink-0">
         {!props.hidePlanMode && (
           <PlanToggleButton
             planModeEnabled={props.planModeEnabled}
@@ -478,56 +548,48 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
             onPlanModeChange={props.onPlanModeChange}
           />
         )}
-
-        <McpIndicator mcpServers={props.mcpServers} />
-
+        {!isCollapsed &&
+          leftItems.map((i) => (
+            <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
+              {i.render()}
+            </div>
+          ))}
         {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
-
         <ContextPopover
           open={props.contextPopoverOpen}
           onOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
-          trigger={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
-            >
-              <IconAt className="h-4 w-4" />
-              {props.contextCount > 0 && (
-                <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
-                  {props.contextCount}
-                </span>
-              )}
-            </Button>
-          }
+          trigger={<ContextTriggerButton contextCount={props.contextCount} />}
           sessionId={props.sessionId}
           planContextEnabled={props.planContextEnabled}
           contextFiles={props.contextFiles}
           onToggleFile={props.onToggleFile ?? (() => {})}
         />
-        <ModeSelector sessionId={props.sessionId} />
+        {isCollapsed && <ToolbarOverflowMenu items={items} />}
       </div>
 
       <div className="flex-1" />
-      <ToolbarRightSection
-        taskId={props.taskId}
-        sessionId={props.sessionId}
-        taskTitle={props.taskTitle}
-        taskDescription={props.taskDescription}
-        planModeEnabled={props.planModeEnabled}
-        isAgentBusy={props.isAgentBusy}
-        isDisabled={props.isDisabled}
-        isSending={props.isSending}
-        onCancel={props.onCancel}
-        onSubmit={props.onSubmit}
-        submitShortcut={submitShortcut}
-        onEnhancePrompt={props.onEnhancePrompt}
-        isEnhancingPrompt={props.isEnhancingPrompt}
-        isUtilityConfigured={props.isUtilityConfigured}
-        onImplementPlan={props.onImplementPlan}
-        hideSessionsDropdown={props.hideSessionsDropdown}
-      />
+
+      <div className="flex items-center gap-0.5 shrink-0">
+        {!isCollapsed &&
+          rightItems.map((i) => (
+            <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
+              {i.render()}
+            </div>
+          ))}
+        <TokenUsageDisplay sessionId={props.sessionId} />
+        {showImplement && <ImplementPlanButton onClick={props.onImplementPlan!} />}
+        <div className="ml-1">
+          <SubmitButton
+            isAgentBusy={props.isAgentBusy}
+            isDisabled={props.isDisabled}
+            isSending={props.isSending}
+            planModeEnabled={props.planModeEnabled}
+            onCancel={props.onCancel}
+            onSubmit={props.onSubmit}
+            submitShortcut={submitShortcut}
+          />
+        </div>
+      </div>
     </div>
   );
 });
