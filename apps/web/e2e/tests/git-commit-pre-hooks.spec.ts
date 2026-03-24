@@ -125,7 +125,8 @@ test.describe("Git commit pre-hooks", () => {
       await session.changes.getByRole("button", { name: "Stage all" }).click();
 
       // Wait for the "Commit" button to appear (indicates staged section is ready)
-      const commitButton = session.changes.getByRole("button", { name: "Commit" });
+      // Use exact match to avoid matching the "Commits" section toggle
+      const commitButton = session.changes.getByRole("button", { name: "Commit", exact: true });
       await expect(commitButton).toBeVisible({ timeout: 15_000 });
       await commitButton.click();
 
