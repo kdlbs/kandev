@@ -20,7 +20,7 @@ import {
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { setChatDraftContent } from "@/lib/local-storage";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
@@ -254,28 +254,32 @@ After completing the implementation, provide a summary of what was done.
 function PRMergedBanner({ taskId }: { taskId: string }) {
   const taskPR = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
   const [dismissed, setDismissed] = useState(false);
-  const { archiveTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
 
   const handleArchive = useCallback(async () => {
     try {
-      await archiveTaskById(taskId);
+      await archiveAndSwitch(taskId);
       toast({ description: "Task archived" });
     } catch {
       toast({ description: "Failed to archive task", variant: "error" });
     }
-  }, [taskId, archiveTaskById, toast]);
+  }, [taskId, archiveAndSwitch, toast]);
 
   if (taskPR?.state !== "merged" || dismissed) return null;
 
   return (
-    <div className="flex items-center gap-2 mx-1 mb-1 px-3 py-1.5 text-xs rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
+    <div
+      data-testid="pr-merged-banner"
+      className="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 px-2 text-purple-600 dark:text-purple-400"
+    >
       <IconGitMerge className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1">
         PR #{taskPR.pr_number} has been merged. You can archive this task.
       </span>
       <button
         type="button"
+        data-testid="pr-merged-archive-button"
         onClick={handleArchive}
         className="underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
       >
@@ -299,12 +303,22 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
-function SessionStatusBar({ todoItems }: { todoItems: TodoDisplayItem[] }) {
+function ChatStatusBar({
+  todoItems,
+  taskId,
+}: {
+  todoItems: TodoDisplayItem[];
+  taskId: string | null;
+}) {
   const showTodos = todoItems.length > 0;
-  if (!showTodos) return null;
+  // PRMergedBanner returns null internally when not applicable
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
-      <TodoIndicator todos={todoItems} />
+    <div
+      data-testid="chat-status-bar"
+      className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground"
+    >
+      {showTodos && <TodoIndicator todos={todoItems} />}
+      {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
     </div>
   );
 }
@@ -387,8 +401,7 @@ export function ChatInputArea({
     );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      <SessionStatusBar todoItems={todoItems} />
-      {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
+      <ChatStatusBar todoItems={todoItems} taskId={taskId} />
       <ChatInputContainer
         ref={chatInputRef}
         key={clarificationKey}

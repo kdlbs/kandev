@@ -72,6 +72,7 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
       <HoverCardTrigger asChild>
         <button
           type="button"
+          data-testid="todo-indicator"
           className={cn(
             "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
             allComplete

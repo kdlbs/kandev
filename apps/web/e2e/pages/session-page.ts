@@ -41,6 +41,20 @@ export class SessionPage {
     return this.page.getByTestId(`port-forward-row-${port}`);
   }
 
+  // Chat status bar locators
+  chatStatusBar() {
+    return this.page.getByTestId("chat-status-bar");
+  }
+  prMergedBanner() {
+    return this.page.getByTestId("pr-merged-banner");
+  }
+  prMergedArchiveButton() {
+    return this.page.getByTestId("pr-merged-archive-button");
+  }
+  todoIndicator() {
+    return this.page.getByTestId("todo-indicator");
+  }
+
   async waitForLoad(timeout = 15_000) {
     await this.chat.waitFor({ state: "visible", timeout });
   }
