@@ -55,11 +55,7 @@ test.describe("Chat status bar", () => {
     );
   });
 
-  test("archive via PR banner switches to next task", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("archive via PR banner switches to next task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
     const taskA = await apiClient.createTaskWithAgent(
