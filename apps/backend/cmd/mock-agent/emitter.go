@@ -65,6 +65,14 @@ func (e *emitter) completeTool(id acp.ToolCallId, output any) {
 	})
 }
 
+// plan sends an ACP Plan update with the provided entries.
+func (e *emitter) plan(entries []acp.PlanEntry) {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update:    acp.UpdatePlan(entries...),
+	})
+}
+
 // requestPermission asks the client for permission to proceed with a tool call.
 // Returns true if permission was granted, false otherwise.
 func (e *emitter) requestPermission(toolCallID acp.ToolCallId, title string, kind acp.ToolKind, input any) bool {

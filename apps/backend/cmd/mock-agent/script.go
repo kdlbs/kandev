@@ -47,6 +47,9 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 	case strings.HasPrefix(line, "e2e:mcp:"):
 		executeMCPCommand(e, fullPrompt, line)
 
+	case strings.HasPrefix(line, "e2e:plan("):
+		executePlanCommand(e, line)
+
 	case strings.HasPrefix(line, "e2e:tool_use("):
 		executeSimulatedToolUse(e, line)
 
@@ -98,6 +101,30 @@ func executeMCPCommand(e *emitter, fullPrompt, line string) {
 	} else {
 		e.completeTool(toolID, map[string]any{"result": result})
 	}
+}
+
+// executePlanCommand emits an ACP Plan update.
+// Format: e2e:plan([{"content":"task","status":"in_progress"},{"content":"task2","status":"pending"}])
+func executePlanCommand(e *emitter, line string) {
+	argsStr := extractParenContent(line, "e2e:plan(")
+	var rawEntries []struct {
+		Content  string `json:"content"`
+		Status   string `json:"status"`
+		Priority string `json:"priority,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(argsStr), &rawEntries); err != nil {
+		e.text(fmt.Sprintf("Script error: bad plan JSON: %v", err))
+		return
+	}
+	entries := make([]acp.PlanEntry, len(rawEntries))
+	for i, r := range rawEntries {
+		entries[i] = acp.PlanEntry{
+			Content:  r.Content,
+			Status:   acp.PlanEntryStatus(r.Status),
+			Priority: acp.PlanEntryPriority(r.Priority),
+		}
+	}
+	e.plan(entries)
 }
 
 // executeSimulatedToolUse emits a simulated tool call start (no real execution).
