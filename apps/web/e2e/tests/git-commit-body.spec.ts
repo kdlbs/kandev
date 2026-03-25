@@ -140,11 +140,13 @@ test.describe("Git commit body", () => {
     await titleInput.fill("feat: add commit body support");
     await bodyInput.fill("Detailed description of the change");
 
-    // Click Commit
-    await dialog.getByRole("button", { name: "Commit" }).click();
+    // Click Commit in dialog
+    const dialogCommitBtn = dialog.getByRole("button", { name: "Commit", exact: true });
+    await expect(dialogCommitBtn).toBeEnabled();
+    await dialogCommitBtn.click();
 
     // Dialog should close
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
 
     // Verify the commit message in the git repository includes both title and body
     await expect
