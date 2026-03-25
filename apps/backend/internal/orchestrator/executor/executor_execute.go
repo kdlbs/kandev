@@ -378,6 +378,9 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),
 		zap.Error(launchErr))
+	if e.onLaunchFailed != nil {
+		e.onLaunchFailed(ctx, taskID, sessionID, launchErr)
+	}
 	if updateErr := e.updateSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),

@@ -315,6 +315,10 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 // and the executor should skip its default FAILED state updates.
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) (handled bool)
 
+// LaunchFailedFunc is called when session launch fails before the agent starts.
+// Useful for creating user-facing status messages tied to launch errors.
+type LaunchFailedFunc func(ctx context.Context, taskID, sessionID string, err error)
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -348,6 +352,10 @@ type Executor struct {
 	// delegates failure handling to this callback, allowing the orchestrator
 	// to detect auth errors and treat them as recoverable.
 	onAgentStartFailed AgentStartFailedFunc
+
+	// Callback for session launch failures (pre-start). Allows orchestrator
+	// to emit user-friendly guidance for known failure patterns.
+	onLaunchFailed LaunchFailedFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -420,6 +428,12 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // recoverable instead of terminal failures.
 func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 	e.onAgentStartFailed = fn
+}
+
+// SetOnLaunchFailed sets a callback for launch failures that happen before
+// the agent process has started.
+func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
+	e.onLaunchFailed = fn
 }
 
 // SetCapabilities sets the executor type capabilities provider.

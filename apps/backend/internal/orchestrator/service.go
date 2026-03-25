@@ -13,6 +13,8 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -279,6 +281,7 @@ func NewService(
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	exec.SetOnLaunchFailed(s.handleSessionLaunchFailed)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
@@ -728,6 +731,70 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 		return true
 	}
 	return models.IsAlwaysResumableRuntime(running.Runtime)
+}
+
+func isMissingMergedPRBranchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "couldn't find remote ref") ||
+		(strings.Contains(msg, "not found locally or on remote") && strings.Contains(msg, "branch"))
+}
+
+var (
+	quotedBranchPattern = regexp.MustCompile(`branch "([^"]+)"`)
+	remoteRefPattern    = regexp.MustCompile(`remote ref ([^\s]+)`)
+)
+
+func extractMissingBranchName(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	return ""
+}
+
+func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID string, launchErr error) {
+	if s.messageCreator == nil || !isMissingMergedPRBranchError(launchErr) {
+		return
+	}
+
+	branch := extractMissingBranchName(launchErr)
+	content := "This task references a PR branch that no longer exists on remote (likely merged and deleted)."
+	if branch != "" {
+		content = "The remote PR branch \"" + branch + "\" no longer exists (likely merged and deleted)."
+	}
+	content += "\n\nOptions:\n1) Archive task — keep history and hide it from active work.\n2) Delete task — permanently remove it if no longer needed."
+	metadata := map[string]interface{}{
+		"variant":            "warning",
+		"failure_kind":       "missing_pr_branch",
+		"suggested_actions":  []string{"archive_task", "delete_task"},
+		"launch_error":       launchErr.Error(),
+		"remote_branch_gone": true,
+		"missing_branch":     branch,
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		taskID,
+		content,
+		sessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(sessionID),
+		metadata,
+		false,
+	); err != nil {
+		s.logger.Warn("failed to create missing PR branch launch failure message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // IsRunning returns true if the service is running

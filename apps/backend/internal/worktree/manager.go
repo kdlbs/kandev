@@ -251,18 +251,26 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	worktreeDirName, branchName := m.buildWorktreeNames(req)
 	startPoint := baseRef
+	checkoutBranch := req.CheckoutBranch
 
 	// If a checkout branch is specified (e.g. a PR's head branch), fetch it
 	// and try to check it out directly. If the branch is already checked out
 	// in another worktree, fall back to a unique branch with a random suffix.
 	var fetchResult *FetchBranchResult
-	if req.CheckoutBranch != "" {
+	if checkoutBranch != "" {
 		var err error
-		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch)
+		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, checkoutBranch, baseRef)
 		if err != nil {
 			return nil, err
 		}
-		startPoint = req.CheckoutBranch
+		if fetchResult.CheckoutAvailable {
+			startPoint = checkoutBranch
+		} else {
+			// The requested checkout branch no longer exists remotely and isn't
+			// available locally (e.g. merged PR with deleted head branch).
+			// Fall back to creating the worktree from the base branch.
+			req.CheckoutBranch = ""
+		}
 	}
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -324,8 +332,9 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 
 // FetchBranchResult holds the outcome of a fetchBranchToLocal call.
 type FetchBranchResult struct {
-	Warning       string // User-friendly warning (non-empty when fell back to local)
-	WarningDetail string // Raw git command output for debugging
+	Warning           string // User-friendly warning (non-empty when fell back to local)
+	WarningDetail     string // Raw git command output for debugging
+	CheckoutAvailable bool   // True when checkout branch can be used as worktree start point.
 }
 
 // fetchBranchToLocal ensures a branch exists locally and is up-to-date.
@@ -333,7 +342,7 @@ type FetchBranchResult struct {
 // fails (no remote, auth issue, offline), it falls back to the local branch.
 // Returns a FetchBranchResult with warning info and an error if the branch
 // doesn't exist anywhere.
-func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch string) (*FetchBranchResult, error) {
+func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch, baseBranch string) (*FetchBranchResult, error) {
 	m.logger.Info("syncing checkout branch",
 		zap.String("branch", branch),
 		zap.String("repo_path", repoPath))
@@ -344,28 +353,42 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch+":"+branch)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		outputStr := string(output)
 		m.logger.Warn("fetch from origin failed, checking local branch",
 			zap.String("branch", branch),
-			zap.String("output", string(output)),
+			zap.String("output", outputStr),
 			zap.Error(err))
 
 		// Fall back to local branch if it exists.
 		if !m.branchExists(repoPath, branch) {
-			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, string(output))
+			if isMissingRemoteRefError(outputStr) {
+				warning := fmt.Sprintf("Checkout branch %q no longer exists on origin and is not available locally. Using base branch %q instead.", branch, baseBranch)
+				return &FetchBranchResult{
+					Warning:           warning,
+					WarningDetail:     strings.TrimSpace(outputStr),
+					CheckoutAvailable: false,
+				}, nil
+			}
+			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 		}
 
-		reason := classifyGitFallbackReason(err, string(output), fetchCtx.Err())
+		reason := classifyGitFallbackReason(err, outputStr, fetchCtx.Err())
 		warning := fmt.Sprintf("Could not fetch latest from origin (%s). Using local version of branch %q which may be outdated.", reason, branch)
 		m.logger.Info("using local branch (fetch failed)",
 			zap.String("branch", branch),
 			zap.String("warning", warning))
 		return &FetchBranchResult{
-			Warning:       warning,
-			WarningDetail: strings.TrimSpace(string(output)),
+			Warning:           warning,
+			WarningDetail:     strings.TrimSpace(outputStr),
+			CheckoutAvailable: true,
 		}, nil
 	}
 
-	return &FetchBranchResult{}, nil
+	return &FetchBranchResult{CheckoutAvailable: true}, nil
+}
+
+func isMissingRemoteRefError(output string) bool {
+	return strings.Contains(output, "couldn't find remote ref")
 }
 
 // gitAddWorktreeExisting creates a worktree that checks out an existing local branch.
