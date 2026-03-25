@@ -42,6 +42,7 @@ func (r *sqliteRepository) getBuiltinAgents() []*models.UtilityAgent {
 	now := time.Now().UTC()
 	return []*models.UtilityAgent{
 		r.builtinCommitMessage(now),
+		r.builtinCommitDescription(now),
 		r.builtinBranchName(now),
 		r.builtinPRDescription(now),
 		r.builtinEnhancePrompt(now),
@@ -74,6 +75,35 @@ func (r *sqliteRepository) builtinCommitMessage(now time.Time) *models.UtilityAg
 
 ## Output Format:
 Return ONLY the commit message, no explanations or markdown.`,
+	}
+}
+
+func (r *sqliteRepository) builtinCommitDescription(now time.Time) *models.UtilityAgent {
+	return &models.UtilityAgent{
+		ID:          "builtin-commit-description",
+		Name:        "commit-description",
+		Description: "Generate a detailed commit description explaining the changes",
+		AgentID:     "", // User must configure
+		Model:       "", // User must configure
+		Builtin:     true,
+		Enabled:     false, // Disabled until user configures
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Prompt: `Generate a detailed commit description (body) for the following staged changes.
+
+## Staged Changes (git diff --staged):
+{{GitDiff}}
+
+## Instructions:
+1. Do NOT include a commit title/subject line — only generate the body
+2. Use bullet points to explain what changed and why
+3. Focus on the intent and reasoning behind the changes, not just what files were modified
+4. Group related changes together
+5. Mention any side effects, trade-offs, or things reviewers should know
+6. Keep it concise but informative (3-8 bullet points)
+
+## Output Format:
+Return ONLY the commit body text as bullet points. No title line, no markdown fences, no explanations.`,
 	}
 }
 

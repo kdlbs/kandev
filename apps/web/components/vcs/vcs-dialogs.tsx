@@ -136,18 +136,68 @@ function GenerateButton({
   );
 }
 
+type CommitBodyFieldProps = {
+  commitBody: string;
+  onCommitBodyChange: (v: string) => void;
+  onGenerateDescription: () => void;
+  isGeneratingDescription: boolean;
+  isUtilityConfigured: boolean;
+  disabled: boolean;
+};
+
+function CommitBodyField({
+  commitBody,
+  onCommitBodyChange,
+  onGenerateDescription,
+  isGeneratingDescription,
+  isUtilityConfigured,
+  disabled,
+}: CommitBodyFieldProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor="vcs-commit-body" className="text-sm">
+          Description (optional)
+        </Label>
+        <GenerateButton
+          onClick={onGenerateDescription}
+          isGenerating={isGeneratingDescription}
+          disabled={disabled}
+          tooltip="Generate commit description with AI"
+          isConfigured={isUtilityConfigured}
+          size="sm"
+          showLabel
+        />
+      </div>
+      <Textarea
+        id="vcs-commit-body"
+        data-testid="commit-body-input"
+        placeholder="Add details about this change..."
+        value={commitBody}
+        onChange={(e) => onCommitBodyChange(e.target.value)}
+        rows={3}
+        className="resize-none max-h-[200px] overflow-y-auto"
+      />
+    </div>
+  );
+}
+
 type CommitDialogProps = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   fileSummary: FileSummary;
   commitMessage: string;
   onCommitMessageChange: (v: string) => void;
+  commitBody: string;
+  onCommitBodyChange: (v: string) => void;
   stageAll: boolean;
   onStageAllChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCommit: () => void;
   onGenerateMessage: () => void;
   isGenerating: boolean;
+  onGenerateDescription: () => void;
+  isGeneratingDescription: boolean;
   isUtilityConfigured: boolean;
 };
 
@@ -157,12 +207,16 @@ function CommitDialog({
   fileSummary,
   commitMessage,
   onCommitMessageChange,
+  commitBody,
+  onCommitBodyChange,
   stageAll,
   onStageAllChange,
   isGitLoading,
   onCommit,
   onGenerateMessage,
   isGenerating,
+  onGenerateDescription,
+  isGeneratingDescription,
   isUtilityConfigured,
 }: CommitDialogProps) {
   return (
@@ -180,6 +234,7 @@ function CommitDialog({
           </div>
           <div className="relative">
             <Input
+              data-testid="commit-title-input"
               placeholder="Enter commit message..."
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
@@ -196,6 +251,14 @@ function CommitDialog({
               />
             </div>
           </div>
+          <CommitBodyField
+            commitBody={commitBody}
+            onCommitBodyChange={onCommitBodyChange}
+            onGenerateDescription={onGenerateDescription}
+            isGeneratingDescription={isGeneratingDescription}
+            isUtilityConfigured={isUtilityConfigured}
+            disabled={fileSummary.count === 0}
+          />
           <div className="flex items-center gap-2">
             <Checkbox
               id="vcs-stage-all"
@@ -379,6 +442,8 @@ type UseCommitDialogReturn = {
   setOpen: (v: boolean) => void;
   message: string;
   setMessage: (v: string) => void;
+  body: string;
+  setBody: (v: string) => void;
   stageAll: boolean;
   setStageAll: (v: boolean) => void;
   openDialog: () => void;
@@ -387,13 +452,15 @@ type UseCommitDialogReturn = {
 function useCommitDialogState(): UseCommitDialogReturn {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [body, setBody] = useState("");
   const [stageAll, setStageAll] = useState(true);
   const openDialog = useCallback(() => {
     setMessage("");
+    setBody("");
     setStageAll(true);
     setOpen(true);
   }, []);
-  return { open, setOpen, message, setMessage, stageAll, setStageAll, openDialog };
+  return { open, setOpen, message, setMessage, body, setBody, stageAll, setStageAll, openDialog };
 }
 
 type UsePRDialogReturn = {
@@ -475,8 +542,10 @@ export function VcsDialogsProvider({
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,
+    isGeneratingCommitDescription,
     isGeneratingPRDescription,
     generateCommitMessage,
+    generateCommitDescription,
     generatePRDescription,
   } = useUtilityAgentGenerator({ sessionId, taskTitle });
   const fileSummary = computeFileSummary(gitStatus?.files);
@@ -484,8 +553,12 @@ export function VcsDialogsProvider({
   const handleCommit = useCallback(async () => {
     if (!cs.message.trim()) return;
     cs.setOpen(false);
-    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
+    const title = cs.message.trim();
+    const body = cs.body.trim();
+    const fullMessage = body ? `${title}\n\n${body}` : title;
+    await gitWithFeedback(() => commit(fullMessage, cs.stageAll), "Commit");
     cs.setMessage("");
+    cs.setBody("");
   }, [cs, gitWithFeedback, commit]);
 
   const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
@@ -507,12 +580,16 @@ export function VcsDialogsProvider({
         fileSummary={fileSummary}
         commitMessage={cs.message}
         onCommitMessageChange={cs.setMessage}
+        commitBody={cs.body}
+        onCommitBodyChange={cs.setBody}
         stageAll={cs.stageAll}
         onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
         onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
         isGenerating={isGeneratingCommitMessage}
+        onGenerateDescription={() => generateCommitDescription(cs.setBody)}
+        isGeneratingDescription={isGeneratingCommitDescription}
         isUtilityConfigured={isUtilityConfigured}
       />
       <PRDialog
