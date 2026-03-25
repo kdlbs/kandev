@@ -2,6 +2,11 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
+type TaskWithRepos = {
+  id: string;
+  repositories?: Array<{ repository_id: string }>;
+};
+
 const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;
 
@@ -50,6 +55,64 @@ test.describe("MCP create_task subtask", () => {
     const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
     await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+  });
+
+  test("MCP-created subtask inherits parent task repositories", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const subtaskTitle = "Repo-Inherit Subtask E2E";
+
+    const script = [
+      'e2e:thinking("Creating subtask...")',
+      "e2e:delay(100)",
+      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}"})`,
+      "e2e:delay(100)",
+      'e2e:message("Done.")',
+    ].join("\n");
+
+    // 1. Create parent task via API with an explicit repository. Without the
+    //    fix, the MCP handler would not copy repositories to the subtask and
+    //    it would run as a repository-less "quick chat" session.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Repo Inherit Parent Task",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    expect(parentTask.id).toBeTruthy();
+
+    // 2. Navigate to parent task and wait for the agent to complete (which
+    //    includes the MCP create_task call that creates the subtask).
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Locate the subtask created by the MCP call.
+    const allTasks = await apiClient.listTasks(seedData.workspaceId);
+    const subtask = allTasks.tasks.find((t) => t.title === subtaskTitle);
+    expect(subtask).toBeDefined();
+
+    // 4. Verify the subtask inherited the parent's repository.
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    expect(
+      subtaskData.repositories?.length,
+      `subtask should have at least 1 repository; got: ${JSON.stringify(subtaskData.repositories)}`,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      subtaskData.repositories?.[0]?.repository_id,
+      `subtask repository_id should match parent's (${seedData.repositoryId})`,
+    ).toBe(seedData.repositoryId);
   });
 
   test("user creates subtask via sidebar button", async ({ testPage }) => {

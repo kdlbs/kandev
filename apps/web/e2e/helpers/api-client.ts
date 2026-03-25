@@ -116,7 +116,8 @@ function buildOptionalAgentTaskFields(opts?: {
   const fields: Record<string, unknown> = {};
   if (opts?.workflow_id) fields.workflow_id = opts.workflow_id;
   if (opts?.workflow_step_id) fields.workflow_step_id = opts.workflow_step_id;
-  if (opts?.repository_ids) fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
+  if (opts?.repository_ids)
+    fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
   if (opts?.executor_id) fields.executor_id = opts.executor_id;
   if (opts?.executor_profile_id) fields.executor_profile_id = opts.executor_profile_id;
   if (opts?.metadata) fields.metadata = opts.metadata;

@@ -308,10 +308,11 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	// Inherit workspace/workflow from parent when not explicitly provided.
+	// Inherit workspace/workflow/repositories from parent when not explicitly provided.
 	// WorkflowStepID is intentionally NOT inherited — the service layer resolves
 	// the start step so subtasks always begin at the first workflow step, not the
 	// parent's current (potentially advanced) step.
+	var inheritedRepos []service.TaskRepositoryInput
 	if req.ParentID != "" {
 		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
 		if err != nil {
@@ -322,6 +323,13 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if req.WorkflowID == "" {
 			req.WorkflowID = parent.WorkflowID
+		}
+		for _, r := range parent.Repositories {
+			inheritedRepos = append(inheritedRepos, service.TaskRepositoryInput{
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+			})
 		}
 	}
 
@@ -339,6 +347,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
+		Repositories:   inheritedRepos,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
