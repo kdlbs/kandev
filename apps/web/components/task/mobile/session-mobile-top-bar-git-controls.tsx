@@ -204,7 +204,11 @@ export function CommitDialog({
               Cancel
             </Button>
           </DialogClose>
-          <Button onClick={form.handleCommit} disabled={!form.commitMessage.trim() || isGitLoading}>
+          <Button
+            className="cursor-pointer"
+            onClick={form.handleCommit}
+            disabled={!form.commitMessage.trim() || isGitLoading}
+          >
             {isGitLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
