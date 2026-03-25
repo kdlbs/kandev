@@ -165,6 +165,8 @@ function CommitBodyField({
           disabled={disabled}
           tooltip="Generate commit description with AI"
           isConfigured={isUtilityConfigured}
+          size="sm"
+          showLabel
         />
       </div>
       <Textarea
