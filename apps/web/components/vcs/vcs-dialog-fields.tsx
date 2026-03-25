@@ -35,6 +35,7 @@ export function GenerateButton({
             type="button"
             size="icon"
             variant="ghost"
+            aria-label={tooltip}
             className="h-7 w-7 cursor-pointer"
             onClick={isConfigured ? onClick : undefined}
             disabled={isDisabled}
@@ -113,6 +114,7 @@ export function PRTitleField({
     <div className="relative">
       <Input
         id="vcs-pr-title"
+        aria-label="Pull request title"
         placeholder="Pull request title..."
         value={prTitle}
         onChange={(e) => onPrTitleChange(e.target.value)}
