@@ -73,12 +73,29 @@ test.describe("Toolbar overflow menu", () => {
     await expect(mcpItem).toBeVisible({ timeout: 5_000 });
     await expect(overflowBtn).not.toBeVisible();
 
+    // Check context badge visibility: add a context item via the popover
+    const contextBtn = toolbar.locator("button", { has: testPage.locator("svg.tabler-icon-at") });
+    await contextBtn.click();
+    const searchInput = testPage.getByPlaceholder("Search files and prompts...");
+    await expect(searchInput).toBeVisible({ timeout: 5_000 });
+    // Toggle the Plan context checkbox to get contextCount > 0
+    const planCheckbox = testPage.getByText("Plan", { exact: true });
+    await planCheckbox.click();
+    // Close the popover
+    await testPage.locator("body").click({ position: { x: 10, y: 10 } });
+    // Badge should be visible at full width
+    const contextBadge = contextBtn.locator("span.rounded-full");
+    await expect(contextBadge).toBeVisible({ timeout: 3_000 });
+
     // Constrain toolbar to a narrow width to force overflow
     await constrainToolbar(testPage, "300px");
 
     // Collapsible items should disappear and expand toggle should appear
     await expect(overflowBtn).toBeVisible({ timeout: 5_000 });
     await expect(modelItem).not.toBeVisible();
+
+    // Context badge should be hidden when collapsed to avoid clipping
+    await expect(contextBadge).not.toBeVisible();
 
     // Submit button should remain visible (always-visible item)
     const submitBtn = toolbar.locator("button.rounded-full");

@@ -353,6 +353,53 @@ function ToolbarExpandToggle({
   );
 }
 
+function ToolbarRightSection({
+  showCollapsed,
+  rightItems,
+  sessionId,
+  planModeEnabled,
+  isAgentBusy,
+  onImplementPlan,
+  isDisabled,
+  isSending,
+  onCancel,
+  onSubmit,
+  submitShortcut,
+}: {
+  showCollapsed: boolean;
+  rightItems: ToolbarItemConfig[];
+  sessionId: string | null;
+  planModeEnabled: boolean;
+  isAgentBusy: boolean;
+  onImplementPlan?: () => void;
+  isDisabled: boolean;
+  isSending: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+}) {
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {!showCollapsed && <CollapsibleItems items={rightItems} testIdPrefix="toolbar-item-" />}
+      <TokenUsageDisplay sessionId={sessionId} />
+      {planModeEnabled && !isAgentBusy && onImplementPlan && (
+        <ImplementPlanButton onClick={onImplementPlan} />
+      )}
+      <div className="ml-1">
+        <SubmitButton
+          isAgentBusy={isAgentBusy}
+          isDisabled={isDisabled}
+          isSending={isSending}
+          planModeEnabled={planModeEnabled}
+          onCancel={onCancel}
+          onSubmit={onSubmit}
+          submitShortcut={submitShortcut}
+        />
+      </div>
+    </div>
+  );
+}
+
 function buildCollapsibleItems(props: {
   mcpServers: string[];
   sessionId: string | null;
@@ -419,6 +466,20 @@ function buildCollapsibleItems(props: {
       ),
     },
   ];
+}
+
+function CollapsibleItems({
+  items,
+  testIdPrefix,
+}: {
+  items: ToolbarItemConfig[];
+  testIdPrefix: string;
+}) {
+  return items.map((i) => (
+    <div key={i.id} data-testid={`${testIdPrefix}${i.id}`}>
+      {i.render()}
+    </div>
+  ));
 }
 
 function AttachFilesButton({ onClick }: { onClick: () => void }) {
@@ -502,7 +563,6 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
   }
 
   const items = buildCollapsibleItems(props);
-  const showImplement = props.planModeEnabled && !props.isAgentBusy && !!props.onImplementPlan;
   const leftItems = items.filter((i) => i.section === "left" && i.visible !== false);
   const rightItems = items.filter((i) => i.section === "right" && i.visible !== false);
 
@@ -510,7 +570,10 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     <div
       ref={toolbarRef}
       data-testid="chat-input-toolbar"
-      className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border overflow-x-auto scrollbar-hide"
+      className={cn(
+        "flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border",
+        isCollapsed ? "overflow-x-auto scrollbar-hide" : "overflow-visible",
+      )}
     >
       <div className="flex items-center gap-0.5 shrink-0">
         {!props.hidePlanMode && (
@@ -520,12 +583,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
             onPlanModeChange={props.onPlanModeChange}
           />
         )}
-        {!showCollapsed &&
-          leftItems.map((i) => (
-            <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
-              {i.render()}
-            </div>
-          ))}
+        {!showCollapsed && <CollapsibleItems items={leftItems} testIdPrefix="toolbar-item-" />}
         {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
         <ContextPopover
           open={props.contextPopoverOpen}
@@ -535,11 +593,11 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40"
+              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
             >
               <IconAt className="h-4 w-4" />
-              {props.contextCount > 0 && (
-                <span className="h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
+              {props.contextCount > 0 && !isCollapsed && (
+                <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
                   {props.contextCount}
                 </span>
               )}
@@ -557,27 +615,19 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-0.5 shrink-0">
-        {!showCollapsed &&
-          rightItems.map((i) => (
-            <div key={i.id} data-testid={`toolbar-item-${i.id}`}>
-              {i.render()}
-            </div>
-          ))}
-        <TokenUsageDisplay sessionId={props.sessionId} />
-        {showImplement && <ImplementPlanButton onClick={props.onImplementPlan!} />}
-        <div className="ml-1">
-          <SubmitButton
-            isAgentBusy={props.isAgentBusy}
-            isDisabled={props.isDisabled}
-            isSending={props.isSending}
-            planModeEnabled={props.planModeEnabled}
-            onCancel={props.onCancel}
-            onSubmit={props.onSubmit}
-            submitShortcut={submitShortcut}
-          />
-        </div>
-      </div>
+      <ToolbarRightSection
+        showCollapsed={showCollapsed}
+        rightItems={rightItems}
+        sessionId={props.sessionId}
+        planModeEnabled={props.planModeEnabled}
+        isAgentBusy={props.isAgentBusy}
+        onImplementPlan={props.onImplementPlan}
+        isDisabled={props.isDisabled}
+        isSending={props.isSending}
+        onCancel={props.onCancel}
+        onSubmit={props.onSubmit}
+        submitShortcut={submitShortcut}
+      />
     </div>
   );
 });
