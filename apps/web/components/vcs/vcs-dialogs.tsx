@@ -157,7 +157,7 @@ function CommitBodyField({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label htmlFor="vcs-commit-body" className="text-sm">
-          Description (optional)
+          Description
         </Label>
         <GenerateButton
           onClick={onGenerateDescription}
@@ -165,8 +165,6 @@ function CommitBodyField({
           disabled={disabled}
           tooltip="Generate commit description with AI"
           isConfigured={isUtilityConfigured}
-          size="sm"
-          showLabel
         />
       </div>
       <Textarea

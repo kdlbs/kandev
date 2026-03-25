@@ -172,7 +172,7 @@ export function CommitDialog({
           />
           <div className="space-y-2">
             <Label htmlFor="commit-body-mobile" className="text-sm">
-              Description (optional)
+              Description
             </Label>
             <Textarea
               id="commit-body-mobile"
