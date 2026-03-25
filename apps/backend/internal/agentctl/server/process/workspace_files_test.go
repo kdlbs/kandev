@@ -116,6 +116,18 @@ func TestResolveNonExistentPath(t *testing.T) {
 	})
 }
 
+// requireChild finds a child node by name in the tree, failing the test if not found.
+func requireChild(t *testing.T, node *types.FileTreeNode, name string) *types.FileTreeNode {
+	t.Helper()
+	for _, c := range node.Children {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("%s not found in tree children", name)
+	return nil // unreachable, but satisfies staticcheck
+}
+
 func findChild(node *types.FileTreeNode, name string) *types.FileTreeNode {
 	for _, c := range node.Children {
 		if c.Name == name {
@@ -143,10 +155,7 @@ func TestGetFileTree_Symlinks(t *testing.T) {
 			t.Fatalf("GetFileTree failed: %v", err)
 		}
 
-		node := findChild(tree, "link.txt")
-		if node == nil {
-			t.Fatal("link.txt not found in tree")
-		}
+		node := requireChild(t, tree, "link.txt")
 		if node.IsDir {
 			t.Error("symlink to file should not be a directory")
 		}
@@ -175,10 +184,7 @@ func TestGetFileTree_Symlinks(t *testing.T) {
 			t.Fatalf("GetFileTree failed: %v", err)
 		}
 
-		node := findChild(tree, "linkdir")
-		if node == nil {
-			t.Fatal("linkdir not found in tree")
-		}
+		node := requireChild(t, tree, "linkdir")
 		if !node.IsDir {
 			t.Error("symlink to directory should have IsDir=true")
 		}
