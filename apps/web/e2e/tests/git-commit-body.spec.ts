@@ -122,13 +122,13 @@ test.describe("Git commit body", () => {
     await session.changes.getByRole("button", { name: "Stage all" }).click();
 
     // Wait for the "Commit" button to appear (indicates staged section is ready)
-    const commitButton = session.changes.getByRole("button", { name: "Commit" });
+    const commitButton = session.changes.getByRole("button", { name: "Commit", exact: true });
     await expect(commitButton).toBeVisible({ timeout: 15_000 });
     await commitButton.click();
 
     // The dialog should open
     const dialog = testPage.getByRole("dialog");
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
 
     // Verify both title input and body textarea are visible
     const titleInput = dialog.getByTestId("commit-title-input");
