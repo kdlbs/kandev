@@ -2,6 +2,31 @@
 
 All notable changes to Kandev.
 
+## 0.24 - 2026-03-25
+
+### Features
+
+- add collapsible sections to changes panel ([#457](https://github.com/kdlbs/kandev/pull/457))
+- collapse chat input toolbar items into overflow menu when narrow ([#459](https://github.com/kdlbs/kandev/pull/459))
+- add markdown preview mode and PR screenshot capture ([#461](https://github.com/kdlbs/kandev/pull/461))
+- add pr-fixup, pr-ready, and pr-draft skills ([#463](https://github.com/kdlbs/kandev/pull/463))
+- add image and file paste/drop support to task creation dialog ([#453](https://github.com/kdlbs/kandev/pull/453))
+
+### Bug Fixes
+
+- merge chat status bar into single row and switch task on archive ([#460](https://github.com/kdlbs/kandev/pull/460))
+- add git-crypt support for worktree creation ([#454](https://github.com/kdlbs/kandev/pull/454))
+- persist task creation draft when modal closes ([#455](https://github.com/kdlbs/kandev/pull/455))
+- add --debug/--verbose to run command and fix web hostname binding ([#452](https://github.com/kdlbs/kandev/pull/452))
+- prevent template step events from overwriting backend step_id UUIDs ([#451](https://github.com/kdlbs/kandev/pull/451))
+- sanitize mermaid code to handle special characters ([#444](https://github.com/kdlbs/kandev/pull/444))
+- pass MCP servers through LoadSession so tools survive session resume ([#450](https://github.com/kdlbs/kandev/pull/450))
+
+### Documentation
+
+- remove beta status and replace screenshots with demo gif ([#462](https://github.com/kdlbs/kandev/pull/462))
+- add readme screenshots and update agent protocols to ACP ([#456](https://github.com/kdlbs/kandev/pull/456))
+
 ## 0.23 - 2026-03-19
 
 ### Features
