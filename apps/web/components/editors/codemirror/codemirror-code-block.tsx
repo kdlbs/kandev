@@ -40,7 +40,7 @@ export function CodeMirrorCodeBlock({ children, className }: CodeBlockProps) {
   };
 
   return (
-    <div className="relative group/code-block my-4 w-fit max-w-full min-w-[50%]">
+    <div className="relative group/code-block my-4 max-w-full">
       {/* Copy button */}
       <button
         onClick={handleCopy}

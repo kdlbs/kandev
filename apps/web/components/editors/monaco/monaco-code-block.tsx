@@ -28,7 +28,7 @@ export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
   const height = Math.min(Math.max(lineCount * 16 + 8, 32), 500);
 
   return (
-    <div className="relative group/code-block my-4 w-fit max-w-full min-w-[50%]">
+    <div className="relative group/code-block my-4 max-w-full">
       <button
         onClick={() => copy(code)}
         className={cn(
