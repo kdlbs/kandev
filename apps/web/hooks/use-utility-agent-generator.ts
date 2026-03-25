@@ -138,10 +138,8 @@ function useGeneratorCallbacks(
   );
 
   const generatePRTitle = useCallback(
-    (
-      onSuccess: (title: string) => void,
-      extra?: { commitLog?: string; diffSummary?: string },
-    ) => generate("pr-title", { onSuccess, ...extra }),
+    (onSuccess: (title: string) => void, extra?: { commitLog?: string; diffSummary?: string }) =>
+      generate("pr-title", { onSuccess, ...extra }),
     [generate],
   );
 
