@@ -6,11 +6,17 @@ import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileInfo } from "@/lib/state/slices";
 
-type GeneratorType = "commit-message" | "commit-description" | "pr-description" | "enhance-prompt";
+type GeneratorType =
+  | "commit-message"
+  | "commit-description"
+  | "pr-title"
+  | "pr-description"
+  | "enhance-prompt";
 
 const UTILITY_AGENT_IDS: Record<GeneratorType, string> = {
   "commit-message": "builtin-commit-message",
   "commit-description": "builtin-commit-description",
+  "pr-title": "builtin-pr-title",
   "pr-description": "builtin-pr-description",
   "enhance-prompt": "builtin-enhance-prompt",
 };
@@ -131,6 +137,14 @@ function useGeneratorCallbacks(
     [generate],
   );
 
+  const generatePRTitle = useCallback(
+    (
+      onSuccess: (title: string) => void,
+      extra?: { commitLog?: string; diffSummary?: string },
+    ) => generate("pr-title", { onSuccess, ...extra }),
+    [generate],
+  );
+
   const generatePRDescription = useCallback(
     (
       onSuccess: (description: string) => void,
@@ -149,10 +163,12 @@ function useGeneratorCallbacks(
     isGenerating: generating.size > 0,
     isGeneratingCommitMessage: generating.has("commit-message"),
     isGeneratingCommitDescription: generating.has("commit-description"),
+    isGeneratingPRTitle: generating.has("pr-title"),
     isGeneratingPRDescription: generating.has("pr-description"),
     isEnhancingPrompt: generating.has("enhance-prompt"),
     generateCommitMessage,
     generateCommitDescription,
+    generatePRTitle,
     generatePRDescription,
     enhancePrompt,
   };

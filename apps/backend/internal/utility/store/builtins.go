@@ -44,6 +44,7 @@ func (r *sqliteRepository) getBuiltinAgents() []*models.UtilityAgent {
 		r.builtinCommitMessage(now),
 		r.builtinCommitDescription(now),
 		r.builtinBranchName(now),
+		r.builtinPRTitle(now),
 		r.builtinPRDescription(now),
 		r.builtinEnhancePrompt(now),
 	}
@@ -136,6 +137,41 @@ func (r *sqliteRepository) builtinBranchName(now time.Time) *models.UtilityAgent
 ## Output Format:
 Return ONLY the branch name, no explanations.
 Example: feature/add-user-authentication`,
+	}
+}
+
+func (r *sqliteRepository) builtinPRTitle(now time.Time) *models.UtilityAgent {
+	return &models.UtilityAgent{
+		ID:          "builtin-pr-title",
+		Name:        "pr-title",
+		Description: "Generate a PR title based on commits and changes",
+		AgentID:     "", // User must configure
+		Model:       "", // User must configure
+		Builtin:     true,
+		Enabled:     false, // Disabled until user configures
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Prompt: `Generate a concise Pull Request title for the following changes.
+
+## Commits:
+{{CommitLog}}
+
+## Changed Files:
+{{ChangedFiles}}
+
+## Diff Summary:
+{{DiffSummary}}
+
+## Instructions:
+1. Follow the Conventional Commits format: <type>(<scope>): <description>
+2. Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore
+3. Scope is optional but recommended (e.g., api, ui, db)
+4. Description should be imperative mood ("add" not "added")
+5. Keep it under 72 characters
+6. Focus on the overall purpose of the PR, not individual commits
+
+## Output Format:
+Return ONLY the PR title, no explanations or markdown.`,
 	}
 }
 

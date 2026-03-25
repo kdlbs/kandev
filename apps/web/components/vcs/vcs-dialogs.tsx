@@ -1,13 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
-import {
-  IconGitCommit,
-  IconGitPullRequest,
-  IconLoader2,
-  IconCheck,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +15,12 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  GenerateButton,
+  CommitBodyField,
+  PRTitleField,
+  PRBranchSummary,
+} from "./vcs-dialog-fields";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
@@ -80,105 +79,6 @@ function FileSummaryText({ count, additions, deletions }: FileSummary) {
         </span>
       )}
     </span>
-  );
-}
-
-type GenerateButtonProps = {
-  onClick: () => void;
-  isGenerating: boolean;
-  disabled?: boolean;
-  tooltip: string;
-  notConfiguredTooltip?: string;
-  isConfigured?: boolean;
-  size?: "icon" | "sm";
-  showLabel?: boolean;
-};
-
-function GenerateButton({
-  onClick,
-  isGenerating,
-  disabled,
-  tooltip,
-  notConfiguredTooltip = "Configure a utility agent in settings to enable AI generation",
-  isConfigured = true,
-  size = "icon",
-  showLabel,
-}: GenerateButtonProps) {
-  const isDisabled = !isConfigured || disabled || isGenerating;
-  const tooltipText = isConfigured ? tooltip : notConfiguredTooltip;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Wrap in span so tooltip works even when button is disabled */}
-        <span className="inline-flex">
-          <Button
-            type="button"
-            size={size}
-            variant="ghost"
-            className={
-              size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
-            }
-            onClick={isConfigured ? onClick : undefined}
-            disabled={isDisabled}
-          >
-            {isGenerating ? (
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <IconSparkles className="h-4 w-4" />
-            )}
-            {showLabel && "Generate"}
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltipText}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-type CommitBodyFieldProps = {
-  commitBody: string;
-  onCommitBodyChange: (v: string) => void;
-  onGenerateDescription: () => void;
-  isGeneratingDescription: boolean;
-  isUtilityConfigured: boolean;
-  disabled: boolean;
-};
-
-function CommitBodyField({
-  commitBody,
-  onCommitBodyChange,
-  onGenerateDescription,
-  isGeneratingDescription,
-  isUtilityConfigured,
-  disabled,
-}: CommitBodyFieldProps) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label htmlFor="vcs-commit-body" className="text-sm">
-          Description
-        </Label>
-        <GenerateButton
-          onClick={onGenerateDescription}
-          isGenerating={isGeneratingDescription}
-          disabled={disabled}
-          tooltip="Generate commit description with AI"
-          isConfigured={isUtilityConfigured}
-          size="sm"
-          showLabel
-        />
-      </div>
-      <Textarea
-        id="vcs-commit-body"
-        data-testid="commit-body-input"
-        placeholder="Add details about this change..."
-        value={commitBody}
-        onChange={(e) => onCommitBodyChange(e.target.value)}
-        rows={3}
-        className="resize-none max-h-[200px] overflow-y-auto"
-      />
-    </div>
   );
 }
 
@@ -308,35 +208,12 @@ type PRDialogProps = {
   onPrDraftChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCreatePR: () => void;
+  onGenerateTitle: () => void;
+  isGeneratingTitle: boolean;
   onGenerateDescription: () => void;
-  isGenerating: boolean;
+  isGeneratingDescription: boolean;
   isUtilityConfigured: boolean;
 };
-
-function PRBranchSummary({
-  displayBranch,
-  baseBranch,
-}: {
-  displayBranch?: string | null;
-  baseBranch?: string;
-}) {
-  if (!displayBranch) return null;
-  return (
-    <div className="text-sm text-muted-foreground">
-      {baseBranch ? (
-        <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
-          {" → "}
-          <span className="font-medium text-foreground">{baseBranch}</span>
-        </span>
-      ) : (
-        <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
-        </span>
-      )}
-    </div>
-  );
-}
 
 function PRDialog({
   open,
@@ -351,8 +228,10 @@ function PRDialog({
   onPrDraftChange,
   isGitLoading,
   onCreatePR,
+  onGenerateTitle,
+  isGeneratingTitle,
   onGenerateDescription,
-  isGenerating,
+  isGeneratingDescription,
   isUtilityConfigured,
 }: PRDialogProps) {
   return (
@@ -366,18 +245,13 @@ function PRDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <PRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
-          <div className="space-y-2">
-            <Label htmlFor="vcs-pr-title" className="text-sm">
-              Title
-            </Label>
-            <Input
-              id="vcs-pr-title"
-              placeholder="Pull request title..."
-              value={prTitle}
-              onChange={(e) => onPrTitleChange(e.target.value)}
-              autoFocus
-            />
-          </div>
+          <PRTitleField
+            prTitle={prTitle}
+            onPrTitleChange={onPrTitleChange}
+            onGenerateTitle={onGenerateTitle}
+            isGeneratingTitle={isGeneratingTitle}
+            isUtilityConfigured={isUtilityConfigured}
+          />
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="vcs-pr-body" className="text-sm">
@@ -385,7 +259,7 @@ function PRDialog({
               </Label>
               <GenerateButton
                 onClick={onGenerateDescription}
-                isGenerating={isGenerating}
+                isGenerating={isGeneratingDescription}
                 tooltip="Generate PR description with AI"
                 isConfigured={isUtilityConfigured}
                 size="sm"
@@ -543,9 +417,11 @@ export function VcsDialogsProvider({
   const {
     isGeneratingCommitMessage,
     isGeneratingCommitDescription,
+    isGeneratingPRTitle,
     isGeneratingPRDescription,
     generateCommitMessage,
     generateCommitDescription,
+    generatePRTitle,
     generatePRDescription,
   } = useUtilityAgentGenerator({ sessionId, taskTitle });
   const fileSummary = computeFileSummary(gitStatus?.files);
@@ -605,8 +481,10 @@ export function VcsDialogsProvider({
         onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
+        onGenerateTitle={() => generatePRTitle(ps.setTitle)}
+        isGeneratingTitle={isGeneratingPRTitle}
         onGenerateDescription={() => generatePRDescription(ps.setBody)}
-        isGenerating={isGeneratingPRDescription}
+        isGeneratingDescription={isGeneratingPRDescription}
         isUtilityConfigured={isUtilityConfigured}
       />
     </VcsDialogsContext.Provider>
