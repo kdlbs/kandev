@@ -133,7 +133,15 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 		childFullPath := filepath.Join(safePath, name)
 		childRelPath := filepath.Join(relPath, name)
 
-		childInfo, err := entry.Info()
+		isSymlink := entry.Type()&os.ModeSymlink != 0
+		var childInfo os.FileInfo
+		if isSymlink {
+			// Follow symlink to get target's info (IsDir, Size).
+			// os.Stat returns ELOOP for circular symlinks, which we skip.
+			childInfo, err = os.Stat(childFullPath)
+		} else {
+			childInfo, err = entry.Info()
+		}
 		if err != nil {
 			continue
 		}
@@ -142,6 +150,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 		if err != nil {
 			continue
 		}
+		childNode.IsSymlink = isSymlink
 
 		node.Children = append(node.Children, childNode)
 	}
