@@ -375,18 +375,21 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.
 func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
+	// Detach from caller context so failure bookkeeping completes even if the
+	// original request context was cancelled.
+	failCtx := context.WithoutCancel(ctx)
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),
 		zap.Error(launchErr))
 	if e.onLaunchFailed != nil {
-		e.onLaunchFailed(ctx, taskID, sessionID, launchErr)
+		e.onLaunchFailed(failCtx, taskID, sessionID, launchErr)
 	}
-	if updateErr := e.updateSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
+	if updateErr := e.updateSessionState(failCtx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateFailed); updateErr != nil {
+	if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
 		e.logger.Warn("failed to mark task as failed after launch error",
 			zap.String("task_id", taskID),
 			zap.Error(updateErr))

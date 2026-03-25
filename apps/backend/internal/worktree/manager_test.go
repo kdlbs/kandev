@@ -802,15 +802,12 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", "main")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() unexpected error: %v", err)
 	}
 	if result.Warning != "" {
 		t.Fatalf("expected no warning on successful fetch, got %q", result.Warning)
-	}
-	if !result.CheckoutAvailable {
-		t.Fatal("expected checkout branch to be available after successful fetch")
 	}
 }
 
@@ -844,7 +841,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", "main")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() should fall back to local branch, got error: %v", err)
 	}
@@ -856,9 +853,6 @@ esac
 	}
 	if result.WarningDetail == "" {
 		t.Fatal("expected warning detail with raw git output")
-	}
-	if !result.CheckoutAvailable {
-		t.Fatal("expected checkout branch to remain available when local fallback exists")
 	}
 }
 
@@ -892,7 +886,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", "main")
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
 	if err == nil {
 		t.Fatal("fetchBranchToLocal() should fail when branch not found anywhere")
 	}
@@ -901,7 +895,7 @@ esac
 	}
 }
 
-func TestFetchBranchToLocal_MissingRemoteRefFallsBackToBaseBranch(t *testing.T) {
+func TestFetchBranchToLocal_MissingRemoteRefReturnsError(t *testing.T) {
 	scriptDir := writeFakeGitScript(t, `
 case "${1:-}" in
   fetch)
@@ -931,18 +925,15 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", "main")
-	if err != nil {
-		t.Fatalf("fetchBranchToLocal() should gracefully fall back for missing remote ref: %v", err)
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err == nil {
+		t.Fatal("fetchBranchToLocal() should fail when remote ref is missing and no local branch")
 	}
-	if result.Warning == "" {
-		t.Fatal("expected warning when remote checkout branch no longer exists")
+	if !strings.Contains(err.Error(), "not found locally or on remote") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
-	if !strings.Contains(result.Warning, "Using base branch") {
-		t.Fatalf("unexpected warning: %q", result.Warning)
-	}
-	if result.CheckoutAvailable {
-		t.Fatal("expected checkout branch to be marked unavailable when missing everywhere")
+	if !strings.Contains(err.Error(), "couldn't find remote ref") {
+		t.Fatalf("expected error to contain git output, got: %v", err)
 	}
 }
 

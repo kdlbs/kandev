@@ -786,7 +786,7 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		content,
 		sessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(sessionID),
+		"", // No turn — agent never started, avoid lazily creating a synthetic turn.
 		metadata,
 		false,
 	); err != nil {
