@@ -115,7 +115,16 @@ function useCommitDialogForm(
     onCommit(fullMessage, stageAll);
   };
 
-  return { commitMessage, setCommitMessage, commitBody, setCommitBody, stageAll, setStageAll, handleOpen, handleCommit };
+  return {
+    commitMessage,
+    setCommitMessage,
+    commitBody,
+    setCommitBody,
+    stageAll,
+    setStageAll,
+    handleOpen,
+    handleCommit,
+  };
 }
 
 export function CommitDialog({
@@ -195,10 +204,7 @@ export function CommitDialog({
               Cancel
             </Button>
           </DialogClose>
-          <Button
-            onClick={form.handleCommit}
-            disabled={!form.commitMessage.trim() || isGitLoading}
-          >
+          <Button onClick={form.handleCommit} disabled={!form.commitMessage.trim() || isGitLoading}>
             {isGitLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />

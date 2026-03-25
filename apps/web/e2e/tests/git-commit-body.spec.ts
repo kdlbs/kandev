@@ -114,7 +114,9 @@ test.describe("Git commit body", () => {
 
     // Create a file - it should appear as unstaged via git status polling
     git.createFile("commit-body-test.txt", "test content for commit body");
-    await expect(session.changes.getByText("commit-body-test.txt")).toBeVisible({ timeout: 30_000 });
+    await expect(session.changes.getByText("commit-body-test.txt")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Stage the file via the UI "Stage all" button
     await session.changes.getByRole("button", { name: "Stage all" }).click();
