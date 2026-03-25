@@ -14,11 +14,11 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
 import {
   GenerateButton,
   CommitBodyField,
   PRTitleField,
+  PRDescriptionField,
   PRBranchSummary,
 } from "./vcs-dialog-fields";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -252,29 +252,13 @@ function PRDialog({
             isGeneratingTitle={isGeneratingTitle}
             isUtilityConfigured={isUtilityConfigured}
           />
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="vcs-pr-body" className="text-sm">
-                Description
-              </Label>
-              <GenerateButton
-                onClick={onGenerateDescription}
-                isGenerating={isGeneratingDescription}
-                tooltip="Generate PR description with AI"
-                isConfigured={isUtilityConfigured}
-                size="sm"
-                showLabel
-              />
-            </div>
-            <Textarea
-              id="vcs-pr-body"
-              placeholder="Describe your changes..."
-              value={prBody}
-              onChange={(e) => onPrBodyChange(e.target.value)}
-              rows={6}
-              className="resize-none max-h-[200px] overflow-y-auto"
-            />
-          </div>
+          <PRDescriptionField
+            prBody={prBody}
+            onPrBodyChange={onPrBodyChange}
+            onGenerateDescription={onGenerateDescription}
+            isGeneratingDescription={isGeneratingDescription}
+            isUtilityConfigured={isUtilityConfigured}
+          />
           <div className="flex items-center space-x-2">
             <Checkbox
               id="vcs-pr-draft"

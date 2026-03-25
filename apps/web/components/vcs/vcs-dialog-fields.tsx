@@ -14,8 +14,6 @@ type GenerateButtonProps = {
   tooltip: string;
   notConfiguredTooltip?: string;
   isConfigured?: boolean;
-  size?: "icon" | "sm";
-  showLabel?: boolean;
 };
 
 export function GenerateButton({
@@ -25,8 +23,6 @@ export function GenerateButton({
   tooltip,
   notConfiguredTooltip = "Configure a utility agent in settings to enable AI generation",
   isConfigured = true,
-  size = "icon",
-  showLabel,
 }: GenerateButtonProps) {
   const isDisabled = !isConfigured || disabled || isGenerating;
   const tooltipText = isConfigured ? tooltip : notConfiguredTooltip;
@@ -34,15 +30,12 @@ export function GenerateButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* Wrap in span so tooltip works even when button is disabled */}
         <span className="inline-flex">
           <Button
             type="button"
-            size={size}
+            size="icon"
             variant="ghost"
-            className={
-              size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
-            }
+            className="h-7 w-7 cursor-pointer"
             onClick={isConfigured ? onClick : undefined}
             disabled={isDisabled}
           >
@@ -51,7 +44,6 @@ export function GenerateButton({
             ) : (
               <IconSparkles className="h-4 w-4" />
             )}
-            {showLabel && "Generate"}
           </Button>
         </span>
       </TooltipTrigger>
@@ -77,29 +69,29 @@ export function CommitBodyField({
 }) {
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label htmlFor="vcs-commit-body" className="text-sm">
-          Description
-        </Label>
-        <GenerateButton
-          onClick={onGenerateDescription}
-          isGenerating={isGeneratingDescription}
-          disabled={disabled}
-          tooltip="Generate commit description with AI"
-          isConfigured={isUtilityConfigured}
-          size="sm"
-          showLabel
+      <Label htmlFor="vcs-commit-body" className="text-sm">
+        Description
+      </Label>
+      <div className="relative">
+        <Textarea
+          id="vcs-commit-body"
+          data-testid="commit-body-input"
+          placeholder="Add details about this change..."
+          value={commitBody}
+          onChange={(e) => onCommitBodyChange(e.target.value)}
+          rows={3}
+          className="resize-none max-h-[200px] overflow-y-auto pr-10"
         />
+        <div className="absolute right-1.5 top-1.5">
+          <GenerateButton
+            onClick={onGenerateDescription}
+            isGenerating={isGeneratingDescription}
+            disabled={disabled}
+            tooltip="Generate commit description with AI"
+            isConfigured={isUtilityConfigured}
+          />
+        </div>
       </div>
-      <Textarea
-        id="vcs-commit-body"
-        data-testid="commit-body-input"
-        placeholder="Add details about this change..."
-        value={commitBody}
-        onChange={(e) => onCommitBodyChange(e.target.value)}
-        rows={3}
-        className="resize-none max-h-[200px] overflow-y-auto"
-      />
     </div>
   );
 }
@@ -134,6 +126,46 @@ export function PRTitleField({
           tooltip="Generate PR title with AI"
           isConfigured={isUtilityConfigured}
         />
+      </div>
+    </div>
+  );
+}
+
+export function PRDescriptionField({
+  prBody,
+  onPrBodyChange,
+  onGenerateDescription,
+  isGeneratingDescription,
+  isUtilityConfigured,
+}: {
+  prBody: string;
+  onPrBodyChange: (v: string) => void;
+  onGenerateDescription: () => void;
+  isGeneratingDescription: boolean;
+  isUtilityConfigured: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="vcs-pr-body" className="text-sm">
+        Description
+      </Label>
+      <div className="relative">
+        <Textarea
+          id="vcs-pr-body"
+          placeholder="Describe your changes..."
+          value={prBody}
+          onChange={(e) => onPrBodyChange(e.target.value)}
+          rows={6}
+          className="resize-none max-h-[200px] overflow-y-auto pr-10"
+        />
+        <div className="absolute right-1.5 top-1.5">
+          <GenerateButton
+            onClick={onGenerateDescription}
+            isGenerating={isGeneratingDescription}
+            tooltip="Generate PR description with AI"
+            isConfigured={isUtilityConfigured}
+          />
+        </div>
       </div>
     </div>
   );
