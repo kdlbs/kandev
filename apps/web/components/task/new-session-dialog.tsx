@@ -121,6 +121,7 @@ function NewSessionForm({
   const [isCreating, setIsCreating] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
+  const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
@@ -131,13 +132,16 @@ function NewSessionForm({
       setContextValue(value);
       if (value === "copy_prompt" && initialPrompt && promptRef.current) {
         promptRef.current.value = initialPrompt;
+        setHasPrompt(true);
       } else if (value === "blank" && promptRef.current) {
         promptRef.current.value = "";
+        setHasPrompt(false);
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
         const result = await summarize(sessionId);
         if (result && promptRef.current) {
           promptRef.current.value = result;
+          setHasPrompt(true);
         } else if (result === null) {
           setContextValue("blank");
           toast({
@@ -235,6 +239,7 @@ function NewSessionForm({
           className="w-full min-h-[100px] max-h-[240px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y overflow-auto disabled:opacity-60"
           autoFocus
           disabled={isCreating || isSummarizing}
+          onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -261,7 +266,11 @@ function NewSessionForm({
         >
           Cancel
         </Button>
-        <Button type="submit" disabled={isCreating || isSummarizing} className="cursor-pointer">
+        <Button
+          type="submit"
+          disabled={isCreating || isSummarizing || !hasPrompt}
+          className="cursor-pointer"
+        >
           {isCreating ? "Creating..." : "Start Agent"}
         </Button>
       </DialogFooter>
