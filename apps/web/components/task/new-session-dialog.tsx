@@ -12,11 +12,19 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
+import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { IconLoader2 } from "@tabler/icons-react";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
+import { FileAttachmentPreview } from "./chat/file-attachment-preview";
+import {
+  processFile,
+  MAX_FILES,
+  MAX_TOTAL_SIZE,
+  type FileAttachment,
+} from "./chat/file-attachment";
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -93,6 +101,88 @@ function useSessionOptions(taskId: string) {
   }, [sessions, agentProfiles]);
 }
 
+function useNewSessionAttachments(disabled: boolean) {
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const addFiles = useCallback(async (files: File[]) => {
+    const processed: FileAttachment[] = [];
+    for (const file of files) {
+      const attachment = await processFile(file);
+      if (attachment) processed.push(attachment);
+    }
+    if (processed.length === 0) return;
+    setAttachments((prev) => {
+      let count = prev.length;
+      let totalSize = prev.reduce((s, a) => s + a.size, 0);
+      const accepted: FileAttachment[] = [];
+      for (const att of processed) {
+        if (count >= MAX_FILES || totalSize + att.size > MAX_TOTAL_SIZE) break;
+        accepted.push(att);
+        count += 1;
+        totalSize += att.size;
+      }
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  }, []);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const files: File[] = [];
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.kind === "file") {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        void addFiles(files);
+      }
+    },
+    [disabled, addFiles],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    },
+    [disabled],
+  );
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const { clientX, clientY } = e;
+    if (clientX <= rect.left || clientX >= rect.right || clientY <= rect.top || clientY >= rect.bottom) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      if (disabled) return;
+      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0 || f.type !== "");
+      if (files.length > 0) void addFiles(files);
+    },
+    [disabled, addFiles],
+  );
+
+  return { attachments, isDragging, handleRemoveAttachment, handlePaste, handleDragOver, handleDragLeave, handleDrop };
+}
+
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
@@ -123,6 +213,8 @@ function NewSessionForm({
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const { attachments, isDragging, handleRemoveAttachment, handlePaste, handleDragOver, handleDragLeave, handleDrop } =
+    useNewSessionAttachments(isCreating || isSummarizing);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
 
@@ -168,6 +260,7 @@ function NewSessionForm({
         const { request } = buildStartRequest(taskId, selectedProfileId || defaultProfileId, {
           executorId,
           prompt,
+          attachments: toMessageAttachments(attachments),
         });
         const response = await launchSession(request);
         if (response.session_id) {
@@ -205,6 +298,7 @@ function NewSessionForm({
       onClose,
       toast,
       setActiveSession,
+      attachments,
     ],
   );
 
@@ -232,7 +326,12 @@ function NewSessionForm({
         sessionOptions={showSessions}
         isSummarizing={isSummarizing}
       />
-      <div className="relative">
+      <div
+        className="relative"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
@@ -240,6 +339,7 @@ function NewSessionForm({
           autoFocus
           disabled={isCreating || isSummarizing}
           onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
+          onPaste={handlePaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -247,6 +347,11 @@ function NewSessionForm({
             }
           }}
         />
+        {isDragging && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-md border-2 border-dashed border-primary bg-background/80 pointer-events-none">
+            <span className="text-xs text-muted-foreground">Drop files here</span>
+          </div>
+        )}
         {isSummarizing && (
           <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -256,6 +361,13 @@ function NewSessionForm({
           </div>
         )}
       </div>
+      {attachments.length > 0 && (
+        <FileAttachmentPreview
+          attachments={attachments}
+          onRemove={handleRemoveAttachment}
+          disabled={isCreating || isSummarizing}
+        />
+      )}
       <DialogFooter>
         <Button
           type="button"

@@ -443,7 +443,6 @@ function buildCollapsibleItems(props: {
           taskId={props.taskId}
           activeSessionId={props.sessionId}
           taskTitle={props.taskTitle}
-          taskDescription={props.taskDescription}
         />
       ),
     },
