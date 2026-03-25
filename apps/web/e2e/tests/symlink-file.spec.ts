@@ -67,9 +67,9 @@ async function seedSymlinkDiffTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  await expect(
-    session.chat.getByText("symlink-file-setup complete", { exact: false }),
-  ).toBeVisible({ timeout: 45_000 });
+  await expect(session.chat.getByText("symlink-file-setup complete", { exact: false })).toBeVisible(
+    { timeout: 45_000 },
+  );
 
   return session;
 }
