@@ -363,6 +363,21 @@ func (s *Store) HasReviewPRTask(ctx context.Context, reviewWatchID, repoOwner, r
 	return count > 0, err
 }
 
+// ListReviewPRTasksByWatch lists all dedup records for a given review watch.
+func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewPRTask, error) {
+	var tasks []*ReviewPRTask
+	err := s.ro.SelectContext(ctx, &tasks,
+		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
+		 FROM github_review_pr_tasks WHERE review_watch_id = ?`, watchID)
+	return tasks, err
+}
+
+// DeleteReviewPRTask deletes a dedup record by ID.
+func (s *Store) DeleteReviewPRTask(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM github_review_pr_tasks WHERE id = ?`, id)
+	return err
+}
+
 // --- Stats queries ---
 
 // prStatsQuery builds parameterised SELECT queries against the github_task_prs table.

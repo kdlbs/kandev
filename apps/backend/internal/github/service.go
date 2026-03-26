@@ -21,15 +21,27 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+// TaskDeleter deletes tasks by ID. Used for cleaning up merged PR tasks.
+type TaskDeleter interface {
+	DeleteTask(ctx context.Context, taskID string) error
+}
+
+// TaskSessionChecker checks if a task has any sessions.
+type TaskSessionChecker interface {
+	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu         sync.Mutex
-	client     Client
-	authMethod string
-	secrets    SecretProvider
-	store      *Store
-	eventBus   bus.EventBus
-	logger     *logger.Logger
+	mu                 sync.Mutex
+	client             Client
+	authMethod         string
+	secrets            SecretProvider
+	store              *Store
+	eventBus           bus.EventBus
+	logger             *logger.Logger
+	taskDeleter        TaskDeleter
+	taskSessionChecker TaskSessionChecker
 }
 
 // NewService creates a new GitHub service.
@@ -43,6 +55,12 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:     log,
 	}
 }
+
+// SetTaskDeleter sets the task deletion dependency for cleanup operations.
+func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetTaskSessionChecker sets the session checker for cleanup operations.
+func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {
@@ -775,6 +793,52 @@ func (s *Service) RecordReviewPRTask(ctx context.Context, watchID, repoOwner, re
 		TaskID:        taskID,
 	}
 	return s.store.CreateReviewPRTask(ctx, rpt)
+}
+
+// CleanupMergedReviewTasks checks PRs tracked by a review watch and deletes
+// tasks whose PRs are merged/closed, provided the user hasn't started them yet
+// (no sessions). Returns the number of tasks deleted.
+func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWatch) (int, error) {
+	if s.client == nil || s.taskDeleter == nil || s.taskSessionChecker == nil {
+		return 0, nil
+	}
+	prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, watch.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list review PR tasks: %w", err)
+	}
+	deleted := 0
+	for _, rpt := range prTasks {
+		pr, err := s.client.GetPR(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+		if err != nil {
+			s.logger.Debug("failed to fetch PR for cleanup check",
+				zap.Int("pr_number", rpt.PRNumber), zap.Error(err))
+			continue
+		}
+		if pr.State != prStateMerged && pr.State != prStateClosed {
+			continue
+		}
+		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, rpt.TaskID)
+		if err != nil {
+			s.logger.Debug("failed to check task sessions",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			continue
+		}
+		if hasSessions {
+			continue
+		}
+		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
+			s.logger.Warn("failed to delete merged PR task",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			continue
+		}
+		_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+		s.logger.Info("deleted task for merged PR",
+			zap.String("task_id", rpt.TaskID),
+			zap.Int("pr_number", rpt.PRNumber),
+			zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
+		deleted++
+	}
+	return deleted, nil
 }
 
 // TriggerAllReviewChecks triggers all review watches for a workspace.

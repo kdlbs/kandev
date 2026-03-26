@@ -264,5 +264,13 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 				zap.String("title", pr.Title))
 			p.service.publishNewReviewPREvent(ctx, watch, pr)
 		}
+		// Clean up tasks for merged/closed PRs that the user hasn't opened.
+		if cleaned, err := p.service.CleanupMergedReviewTasks(ctx, watch); err != nil {
+			p.logger.Warn("failed to cleanup merged review tasks",
+				zap.String("watch_id", watch.ID), zap.Error(err))
+		} else if cleaned > 0 {
+			p.logger.Info("cleaned up merged review tasks",
+				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
+		}
 	}
 }

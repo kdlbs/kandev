@@ -251,7 +251,9 @@ func (c *Controller) httpTriggerReviewWatch(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"new_prs": len(newPRs), "prs": newPRs})
+	// Clean up tasks for merged/closed PRs that haven't been started.
+	cleaned, _ := c.service.CleanupMergedReviewTasks(ctx.Request.Context(), watch)
+	ctx.JSON(http.StatusOK, gin.H{"new_prs": len(newPRs), "prs": newPRs, "cleaned": cleaned})
 }
 
 func (c *Controller) httpTriggerAllReviewChecks(ctx *gin.Context) {
