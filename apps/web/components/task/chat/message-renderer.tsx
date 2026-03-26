@@ -23,6 +23,7 @@ import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subage
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { AgentErrorRecoveryMessage } from "@/components/task/chat/messages/agent-error-recovery-message";
 import { GitOperationErrorMessage } from "@/components/task/chat/messages/git-operation-error-message";
+import { MissingBranchMessage } from "@/components/task/chat/messages/missing-branch-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -178,6 +179,13 @@ const adapters: MessageAdapter[] = [
       comment.type === "error" &&
       !!(comment.metadata as Record<string, unknown> | undefined)?.git_operation_error,
     render: (comment) => <GitOperationErrorMessage comment={comment} />,
+  },
+  {
+    matches: (comment) =>
+      comment.type === "status" &&
+      (comment.metadata as Record<string, unknown> | undefined)?.failure_kind ===
+        "missing_pr_branch",
+    render: (comment) => <MissingBranchMessage comment={comment} />,
   },
   {
     matches: (comment) =>

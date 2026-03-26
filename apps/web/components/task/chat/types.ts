@@ -131,6 +131,14 @@ export type GitOperationErrorMetadata = StatusMetadata & {
   task_id: string;
 };
 
+export type MissingBranchMetadata = StatusMetadata & {
+  failure_kind: "missing_pr_branch";
+  missing_branch: string;
+  suggested_actions: string[];
+  remote_branch_gone: boolean;
+  launch_error: string;
+};
+
 export type TodoMetadata = { text: string; done?: boolean } | string;
 
 export type ContentBlock = {

@@ -57,6 +57,21 @@ export type MockCheckRun = {
   html_url?: string;
 };
 
+function setIf(body: Record<string, unknown>, key: string, value: unknown) {
+  if (value !== undefined && value !== null) body[key] = value;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildCreateTaskBody(workspaceId: string, title: string, opts?: any): Record<string, unknown> {
+  const body: Record<string, unknown> = { workspace_id: workspaceId, title, description: opts?.description ?? "" };
+  setIf(body, "workflow_id", opts?.workflow_id);
+  setIf(body, "workflow_step_id", opts?.workflow_step_id);
+  setIf(body, "metadata", opts?.metadata ?? (opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : undefined));
+  setIf(body, "repositories", opts?.repositories ?? opts?.repository_ids?.map((id: string) => ({ repository_id: id })));
+  if (opts?.plan_mode) body.plan_mode = true;
+  return body;
+}
+
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
@@ -124,22 +139,7 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
     },
   ): Promise<CreateTaskResponse> {
-    const repos =
-      opts?.repositories ??
-      opts?.repository_ids?.map((id) => ({ repository_id: id }));
-    return this.request("POST", "/api/v1/tasks", {
-      workspace_id: workspaceId,
-      title,
-      description: opts?.description ?? "",
-      ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
-      ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
-      ...(opts?.agent_profile_id && !opts?.metadata
-        ? { metadata: { agent_profile_id: opts.agent_profile_id } }
-        : {}),
-      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
-      ...(repos ? { repositories: repos } : {}),
-      ...(opts?.plan_mode ? { plan_mode: true } : {}),
-    });
+    return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {

@@ -163,13 +163,20 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       extractContextWindow(store, sessionId, payload);
 
       if (newState === "FAILED") {
-        store.getState().setSessionFailureNotification({
-          sessionId,
-          taskId,
-          message: payload.error_message
-            ? String(payload.error_message)
-            : "Session failed unexpectedly",
-        });
+        // Suppress toast for missing PR branch failures — the chat guidance
+        // message with archive/delete actions is sufficient for this case.
+        const errorMsg = payload.error_message ? String(payload.error_message) : "";
+        const isMissingBranch =
+          errorMsg.includes("couldn't find remote ref") ||
+          (errorMsg.includes("not found locally or on remote") && errorMsg.includes("branch")) ||
+          (errorMsg.includes("pathspec") && errorMsg.includes("did not match"));
+        if (!isMissingBranch) {
+          store.getState().setSessionFailureNotification({
+            sessionId,
+            taskId,
+            message: errorMsg || "Session failed unexpectedly",
+          });
+        }
       }
     },
     "session.agentctl_starting": (message) => {

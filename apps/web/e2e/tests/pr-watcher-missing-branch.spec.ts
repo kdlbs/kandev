@@ -92,18 +92,17 @@ test.describe("PR watcher missing branch", () => {
     const session = new SessionPage(testPage);
 
     // --- Assert the guidance message appears in chat ---
-    // The backend creates a warning status message when the branch is missing.
-    // The message content mentions the branch and suggests archive/delete.
+    // The MissingBranchMessage component renders with archive/delete action buttons.
     await expect(
       session.chat.getByText("no longer exists", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
 
-    // Verify the guidance message mentions the branch and suggested actions
+    // Verify the action buttons are present
     await expect(
-      session.chat.getByText("merged and deleted", { exact: false }),
+      session.chat.getByTestId("missing-branch-archive-button"),
     ).toBeVisible({ timeout: 5_000 });
     await expect(
-      session.chat.getByText("Archive", { exact: false }),
+      session.chat.getByTestId("missing-branch-delete-button"),
     ).toBeVisible({ timeout: 5_000 });
 
     // Verify the session state via API — should be FAILED
