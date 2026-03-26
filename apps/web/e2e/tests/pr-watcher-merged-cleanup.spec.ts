@@ -210,4 +210,86 @@ test.describe("PR watcher merged cleanup", () => {
     const { tasks: tasksAfterCleanup } = await apiClient.listTasks(seedData.workspaceId);
     expect(tasksAfterCleanup.find((t) => t.title.includes("PR #202"))).toBeUndefined();
   });
+
+  /**
+   * When the user goes to GitHub directly and approves the PR (without using
+   * the Kandev task), the task should be auto-deleted since the review is done.
+   */
+  test("auto-deletes task when PR is approved on GitHub", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    // --- Setup mock GitHub ---
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 303,
+        title: "Quick fix to approve",
+        state: "open",
+        head_branch: "fix/quick",
+        base_branch: "main",
+        author_login: "contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        requested_reviewers: [{ login: "test-user", type: "User" }],
+      },
+    ]);
+
+    // Create a step without auto-start
+    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Review Inbox", 0);
+
+    const watch = await apiClient.createReviewWatch(
+      seedData.workspaceId,
+      seedData.workflowId,
+      inboxStep.id,
+      seedData.agentProfileId,
+      { repos: [{ owner: "testorg", name: "testrepo" }] },
+    );
+
+    // Trigger → task created
+    await apiClient.triggerReviewWatch(watch.id);
+
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.find((t) => t.title.includes("PR #303"));
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+
+    // Navigate to kanban and verify task visible
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle("PR #303: Quick fix to approve")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // --- Simulate: user approved the PR on GitHub directly ---
+    await apiClient.mockGitHubAddReviews("testorg", "testrepo", 303, [
+      {
+        id: 1,
+        author: "test-user",
+        state: "APPROVED",
+        body: "LGTM",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    // Trigger watch → should detect approved PR and delete the task
+    await apiClient.triggerReviewWatch(watch.id);
+
+    // Verify task was deleted
+    await expect(kanban.taskCardByTitle("PR #303: Quick fix to approve")).not.toBeVisible({
+      timeout: 15_000,
+    });
+
+    const { tasks: tasksAfterCleanup } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasksAfterCleanup.find((t) => t.title.includes("PR #303"))).toBeUndefined();
+  });
 });

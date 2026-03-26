@@ -798,28 +798,49 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 	}
 	deleted := 0
 	for _, rpt := range prTasks {
-		pr, err := s.client.GetPR(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
-		if err != nil {
-			s.logger.Debug("failed to fetch PR for cleanup check",
-				zap.Int("pr_number", rpt.PRNumber), zap.Error(err))
-			continue
-		}
-		if pr.State != prStateMerged && pr.State != prStateClosed {
+		shouldDelete, reason := s.shouldDeleteReviewTask(ctx, rpt)
+		if !shouldDelete {
 			continue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
-			s.logger.Warn("failed to delete merged PR task",
+			s.logger.Warn("failed to delete review PR task",
 				zap.String("task_id", rpt.TaskID), zap.Error(err))
 			continue
 		}
 		_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
-		s.logger.Info("deleted task for merged PR",
+		s.logger.Info("deleted review task",
 			zap.String("task_id", rpt.TaskID),
+			zap.String("reason", reason),
 			zap.Int("pr_number", rpt.PRNumber),
 			zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
 		deleted++
 	}
 	return deleted, nil
+}
+
+// shouldDeleteReviewTask checks if a review PR task should be cleaned up.
+// Returns true + reason if the PR is merged/closed or approved by the authenticated user.
+func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask) (bool, string) {
+	feedback, err := s.client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	if err != nil {
+		s.logger.Debug("failed to fetch PR feedback for cleanup",
+			zap.Int("pr_number", rpt.PRNumber), zap.Error(err))
+		return false, ""
+	}
+	if feedback.PR == nil {
+		return false, ""
+	}
+	if feedback.PR.State == prStateMerged || feedback.PR.State == prStateClosed {
+		return true, "pr_merged_or_closed"
+	}
+	// Check if the authenticated user already approved the PR on GitHub.
+	user, _ := s.client.GetAuthenticatedUser(ctx)
+	for _, review := range feedback.Reviews {
+		if review.State == "APPROVED" && review.Author == user {
+			return true, "pr_approved_by_user"
+		}
+	}
+	return false, ""
 }
 
 // TriggerAllReviewChecks triggers all review watches for a workspace.
