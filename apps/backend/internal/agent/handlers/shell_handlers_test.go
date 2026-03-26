@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,8 +209,9 @@ func TestWsShellStatus_NoInstanceFound(t *testing.T) {
 	if payload["available"] != false {
 		t.Errorf("expected available=false, got %v", payload["available"])
 	}
-	if payload["error"] != "no agent running for this session" {
-		t.Errorf("expected 'no agent running for this session', got %v", payload["error"])
+	errorStr, ok := payload["error"].(string)
+	if !ok || !strings.Contains(errorStr, "no agent running for this session") {
+		t.Errorf("expected error to contain 'no agent running for this session', got %v", payload["error"])
 	}
 }
 

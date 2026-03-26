@@ -515,11 +515,14 @@ func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 	return m.executionStore.Get(executionID)
 }
 
-// GetExecutionBySessionID returns the agent execution for a session.
+// GetExecutionBySessionID returns the agent execution for a session from the in-memory store only.
 //
 // Returns (execution, true) if found, or (nil, false) if not found.
 // A session can have at most one active execution at a time. If a session exists
 // but has no active execution, this returns (nil, false).
+//
+// For workspace-oriented operations that need restart recovery,
+// use GetOrEnsureExecution instead.
 //
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {

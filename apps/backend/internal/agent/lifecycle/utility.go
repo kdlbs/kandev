@@ -29,10 +29,10 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("agent %q inference not supported", agentID)
 	}
 
-	// Get the agentctl client
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
-	if !exists {
-		return nil, fmt.Errorf("no execution found for session %s", sessionID)
+	// Get or create execution on-demand (survives backend restart)
+	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
 
 	client := execution.GetAgentCtlClient()

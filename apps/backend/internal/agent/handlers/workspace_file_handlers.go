@@ -54,9 +54,9 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client
@@ -94,9 +94,9 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	}
 
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client
@@ -138,9 +138,9 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 	}
 
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client
@@ -190,9 +190,9 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	}
 
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client
@@ -214,7 +214,7 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 // resolveSessionFileClient parses session_id + path from the message payload
 // and returns the agentctl client, or an error response.
 func (h *WorkspaceFileHandlers) resolveSessionFileClient(
-	msg *ws.Message,
+	ctx context.Context, msg *ws.Message,
 ) (sessionID, path string, client *agentctl.Client, errResp *ws.Message) {
 	var req struct {
 		SessionID string `json:"session_id"`
@@ -234,9 +234,9 @@ func (h *WorkspaceFileHandlers) resolveSessionFileClient(
 		return "", "", nil, errResp
 	}
 
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, resolveErr := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if resolveErr != nil {
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+resolveErr.Error(), nil)
 		return "", "", nil, errResp
 	}
 	c := execution.GetAgentCtlClient()
@@ -249,7 +249,7 @@ func (h *WorkspaceFileHandlers) resolveSessionFileClient(
 
 // wsCreateFile handles workspace.file.create action
 func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, client, errResp := h.resolveSessionFileClient(msg)
+	sessionID, path, client, errResp := h.resolveSessionFileClient(ctx, msg)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -265,7 +265,7 @@ func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Messag
 
 // wsDeleteFile handles workspace.file.delete action
 func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, client, errResp := h.resolveSessionFileClient(msg)
+	sessionID, path, client, errResp := h.resolveSessionFileClient(ctx, msg)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -296,9 +296,9 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	}
 
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client
@@ -346,9 +346,9 @@ func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Messag
 	}
 
 	// Get agent execution for this session
-	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
-	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
 	}
 
 	// Get agentctl client

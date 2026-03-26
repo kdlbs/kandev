@@ -17,6 +17,36 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// GetOrEnsureExecution returns an existing execution or creates one on-demand.
+// Use this for workspace-oriented operations (files, shell, inference, ports, vscode, LSP)
+// that should survive backend restarts. For operations requiring a running agent
+// process (prompt, cancel, mode), use GetExecutionBySessionID instead.
+//
+// Concurrent calls for the same sessionID are deduplicated via singleflight.
+func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	// Fast path: execution already in memory
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution, nil
+	}
+
+	// Slow path: create on-demand, deduplicated by singleflight
+	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
+		// Double-check after acquiring singleflight slot
+		if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+			return execution, nil
+		}
+		return m.EnsureWorkspaceExecutionForSession(ctx, "", sessionID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*AgentExecution), nil
+}
+
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
@@ -35,6 +65,11 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
+	}
+
+	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
+	if taskID == "" {
+		taskID = info.TaskID
 	}
 
 	if info.WorkspacePath == "" {

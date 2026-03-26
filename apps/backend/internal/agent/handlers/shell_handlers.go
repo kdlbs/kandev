@@ -66,12 +66,12 @@ func (h *ShellHandlers) wsShellStatus(ctx context.Context, msg *ws.Message) (*ws
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the agent execution for this session
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
-	if !ok {
+	// Get or create execution on-demand (survives backend restart)
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"available": false,
-			"error":     "no agent running for this session",
+			"error":     "no agent running for this session: " + err.Error(),
 		})
 	}
 
