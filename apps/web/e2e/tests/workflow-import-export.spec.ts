@@ -40,8 +40,8 @@ workflows:
 `;
     const result = await apiClient.importWorkflows(seedData.workspaceId, yamlContent);
 
-    expect(result.created).toContain("Imported Workflow");
-    expect(result.skipped).toHaveLength(0);
+    expect(result.created ?? []).toContain("Imported Workflow");
+    expect(result.skipped ?? []).toHaveLength(0);
 
     // Verify the workflow exists
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
@@ -69,8 +69,8 @@ workflows:
 `;
     const result = await apiClient.importWorkflows(seedData.workspaceId, yamlContent);
 
-    expect(result.skipped).toContain("E2E Workflow");
-    expect(result.created).toHaveLength(0);
+    expect(result.skipped ?? []).toContain("E2E Workflow");
+    expect(result.created ?? []).toHaveLength(0);
   });
 
   test("round-trip export then import preserves structure", async ({ apiClient, seedData }) => {
@@ -81,7 +81,9 @@ workflows:
     // Customize a step prompt
     const planStep = originalSteps.find((s) => s.name === "Plan");
     if (planStep) {
-      await apiClient.updateWorkflowStep(planStep.id, { prompt: "Custom plan prompt for roundtrip" });
+      await apiClient.updateWorkflowStep(planStep.id, {
+        prompt: "Custom plan prompt for roundtrip",
+      });
     }
 
     // Re-fetch after update
@@ -97,7 +99,7 @@ workflows:
 
     // Import it back
     const result = await apiClient.importWorkflows(seedData.workspaceId, yaml);
-    expect(result.created).toContain("Roundtrip Test");
+    expect(result.created ?? []).toContain("Roundtrip Test");
 
     // Verify reimported structure
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
