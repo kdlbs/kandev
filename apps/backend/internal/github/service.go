@@ -26,22 +26,16 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
-// TaskSessionChecker checks if a task has any sessions.
-type TaskSessionChecker interface {
-	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
-}
-
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                 sync.Mutex
-	client             Client
-	authMethod         string
-	secrets            SecretProvider
-	store              *Store
-	eventBus           bus.EventBus
-	logger             *logger.Logger
-	taskDeleter        TaskDeleter
-	taskSessionChecker TaskSessionChecker
+	mu          sync.Mutex
+	client      Client
+	authMethod  string
+	secrets     SecretProvider
+	store       *Store
+	eventBus    bus.EventBus
+	logger      *logger.Logger
+	taskDeleter TaskDeleter
 }
 
 // NewService creates a new GitHub service.
@@ -58,9 +52,6 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
-
-// SetTaskSessionChecker sets the session checker for cleanup operations.
-func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {
@@ -796,10 +787,9 @@ func (s *Service) RecordReviewPRTask(ctx context.Context, watchID, repoOwner, re
 }
 
 // CleanupMergedReviewTasks checks PRs tracked by a review watch and deletes
-// tasks whose PRs are merged/closed, provided the user hasn't started them yet
-// (no sessions). Returns the number of tasks deleted.
+// tasks whose PRs are merged/closed. Returns the number of tasks deleted.
 func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWatch) (int, error) {
-	if s.client == nil || s.taskDeleter == nil || s.taskSessionChecker == nil {
+	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
 	}
 	prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, watch.ID)
@@ -815,15 +805,6 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 			continue
 		}
 		if pr.State != prStateMerged && pr.State != prStateClosed {
-			continue
-		}
-		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, rpt.TaskID)
-		if err != nil {
-			s.logger.Debug("failed to check task sessions",
-				zap.String("task_id", rpt.TaskID), zap.Error(err))
-			continue
-		}
-		if hasSessions {
 			continue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {

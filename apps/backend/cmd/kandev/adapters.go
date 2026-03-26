@@ -684,18 +684,3 @@ func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string
 func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
 	return &turnServiceAdapter{svc: svc}
 }
-
-// taskSessionCheckerAdapter adapts the task repository for github.TaskSessionChecker.
-type taskSessionCheckerAdapter struct {
-	repo interface {
-		ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	}
-}
-
-func (a *taskSessionCheckerAdapter) HasTaskSessions(ctx context.Context, taskID string) (bool, error) {
-	sessions, err := a.repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
-	return len(sessions) > 0, nil
-}

@@ -101,4 +101,113 @@ test.describe("PR watcher merged cleanup", () => {
     const deletedTask = tasksAfterCleanup.find((t) => t.title.includes("PR #101"));
     expect(deletedTask).toBeUndefined();
   });
+
+  /**
+   * When the user already opened a PR task and the agent completed (approved
+   * the PR), and the PR is subsequently merged, triggering the watch should
+   * still auto-delete the task.
+   */
+  test("auto-deletes started task when PR is merged after approval", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    // --- Setup mock GitHub ---
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 202,
+        title: "Approved feature",
+        state: "open",
+        head_branch: "feature/approved",
+        base_branch: "main",
+        author_login: "contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        requested_reviewers: [{ login: "test-user", type: "User" }],
+      },
+    ]);
+
+    // Create workflow: Inbox (no auto-start) → Working (auto-start + move to Done) → Done
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Approval Workflow");
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+    await apiClient.updateWorkflowStep(workingStep.id, {
+      prompt: 'e2e:message("review complete")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
+      },
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+
+    // Create review watch on the inbox step
+    const watch = await apiClient.createReviewWatch(
+      seedData.workspaceId,
+      workflow.id,
+      inboxStep.id,
+      seedData.agentProfileId,
+      { repos: [{ owner: "testorg", name: "testrepo" }] },
+    );
+
+    // Trigger → task created in Inbox
+    await apiClient.triggerReviewWatch(watch.id);
+
+    let prTask: { id: string; title: string } | undefined;
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          prTask = tasks.find((t) => t.title.includes("PR #202"));
+          return prTask;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+
+    // Navigate to kanban and verify task visible
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardInColumn("PR #202: Approved feature", inboxStep.id)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Move task to Working → auto-start agent → completes → moves to Done
+    await apiClient.moveTask(prTask!.id, workflow.id, workingStep.id);
+    await expect(kanban.taskCardInColumn("PR #202: Approved feature", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    // Task now has sessions (agent ran). Simulate PR merged.
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 202,
+        title: "Approved feature",
+        state: "closed",
+        head_branch: "feature/approved",
+        base_branch: "main",
+        author_login: "contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+    ]);
+
+    // Trigger watch → should still delete the task even though it has sessions
+    await apiClient.triggerReviewWatch(watch.id);
+
+    // Verify task was deleted
+    await expect(kanban.taskCardByTitle("PR #202: Approved feature")).not.toBeVisible({
+      timeout: 15_000,
+    });
+
+    const { tasks: tasksAfterCleanup } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasksAfterCleanup.find((t) => t.title.includes("PR #202"))).toBeUndefined();
+  });
 });
