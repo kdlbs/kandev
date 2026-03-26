@@ -357,6 +357,33 @@ export class ApiClient {
     return this.request("GET", "/api/v1/workflow/templates");
   }
 
+  // --- Workflow Export/Import ---
+
+  async exportWorkflow(workflowId: string): Promise<string> {
+    const res = await this.rawRequest("GET", `/api/v1/workflows/${workflowId}/export`);
+    if (!res.ok) throw new Error(`Export failed (${res.status}): ${await res.text()}`);
+    return res.text();
+  }
+
+  async exportAllWorkflows(workspaceId: string): Promise<string> {
+    const res = await this.rawRequest("GET", `/api/v1/workspaces/${workspaceId}/workflows/export`);
+    if (!res.ok) throw new Error(`Export failed (${res.status}): ${await res.text()}`);
+    return res.text();
+  }
+
+  async importWorkflows(
+    workspaceId: string,
+    yamlContent: string,
+  ): Promise<{ created: string[]; skipped: string[] }> {
+    const res = await fetch(`${this.baseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-yaml" },
+      body: yamlContent,
+    });
+    if (!res.ok) throw new Error(`Import failed (${res.status}): ${await res.text()}`);
+    return res.json() as Promise<{ created: string[]; skipped: string[] }>;
+  }
+
   async deleteTask(taskId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/tasks/${taskId}`);
   }
