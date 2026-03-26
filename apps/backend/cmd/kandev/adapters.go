@@ -298,6 +298,10 @@ func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Contex
 	return err
 }
 
+func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
+	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {

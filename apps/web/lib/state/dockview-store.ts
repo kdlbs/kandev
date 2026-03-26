@@ -531,6 +531,10 @@ function performBuildDefault(
   const { userDefaultLayout } = get();
   const intent = intentName ? resolveNamedIntent(intentName) : null;
   const freshPinned = new Map<string, number>();
+  // Capture dimensions before layout change — api.width can become stale
+  // after fromJSON inside applyLayout
+  const safeWidth = api.width;
+  const safeHeight = api.height;
   set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;
@@ -557,6 +561,7 @@ function performBuildDefault(
   }
 
   requestAnimationFrame(() => {
+    api.layout(safeWidth, safeHeight);
     syncPinnedWidthsFromApi(api, set);
     set({ isRestoringLayout: false });
   });

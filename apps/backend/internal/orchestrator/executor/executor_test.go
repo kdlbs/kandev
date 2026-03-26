@@ -18,11 +18,12 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc             func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc       func(ctx context.Context, agentExecutionID string) error
-	stopAgentFunc               func(ctx context.Context, agentExecutionID string, force bool) error
-	resolveAgentProfileFunc     func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-	setExecutionDescriptionFunc func(ctx context.Context, agentExecutionID string, description string) error
+	launchAgentFunc              func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc        func(ctx context.Context, agentExecutionID string) error
+	stopAgentFunc                func(ctx context.Context, agentExecutionID string, force bool) error
+	resolveAgentProfileFunc      func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc  func(ctx context.Context, agentExecutionID string, description string) error
+	getExecutionIDForSessionFunc func(ctx context.Context, sessionID string) (string, error)
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
@@ -116,6 +117,12 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context,
 }
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	return nil
+}
+func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
+	if m.getExecutionIDForSessionFunc != nil {
+		return m.getExecutionIDForSessionFunc(ctx, sessionID)
+	}
+	return "", fmt.Errorf("no execution found for session %s", sessionID)
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
@@ -948,6 +955,72 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 
 	if !startAgentCalled.Load() {
 		t.Error("Expected StartAgentProcess to be called")
+	}
+}
+
+func TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore(t *testing.T) {
+	repo := newMockRepository()
+
+	// Session has a stale AgentExecutionID from a previous backend run.
+	// After restart, EnsureWorkspaceExecutionForSession created a new execution
+	// with a different ID, but the database still holds the old one.
+	session := &models.TaskSession{
+		ID:               "session-123",
+		TaskID:           "task-123",
+		AgentProfileID:   "profile-123",
+		AgentExecutionID: "stale-exec-id", // stale ID from DB
+		State:            models.TaskSessionStateCreated,
+		StartedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	var startedWithID atomic.Value
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, id string) error {
+			startedWithID.Store(id)
+			return nil
+		},
+		// Simulate the live execution store having a different ID
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			if sessionID == "session-123" {
+				return "live-exec-id", nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}
+
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "do work", StartAgent: true})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	// Should use the live execution ID, not the stale one
+	if execution.AgentExecutionID != "live-exec-id" {
+		t.Errorf("Expected live execution ID 'live-exec-id', got %s", execution.AgentExecutionID)
+	}
+
+	// Wait for async goroutine
+	time.Sleep(100 * time.Millisecond)
+
+	// StartAgentProcess should be called with the live ID
+	got, _ := startedWithID.Load().(string)
+	if got != "live-exec-id" {
+		t.Errorf("Expected StartAgentProcess called with 'live-exec-id', got %q", got)
+	}
+
+	// Database should be updated with the corrected ID
+	updatedSession := repo.sessions["session-123"]
+	if updatedSession.AgentExecutionID != "live-exec-id" {
+		t.Errorf("Expected DB AgentExecutionID to be corrected to 'live-exec-id', got %s", updatedSession.AgentExecutionID)
 	}
 }
 

@@ -6,10 +6,17 @@ import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileInfo } from "@/lib/state/slices";
 
-type GeneratorType = "commit-message" | "pr-description" | "enhance-prompt";
+type GeneratorType =
+  | "commit-message"
+  | "commit-description"
+  | "pr-title"
+  | "pr-description"
+  | "enhance-prompt";
 
 const UTILITY_AGENT_IDS: Record<GeneratorType, string> = {
   "commit-message": "builtin-commit-message",
+  "commit-description": "builtin-commit-description",
+  "pr-title": "builtin-pr-title",
   "pr-description": "builtin-pr-description",
   "enhance-prompt": "builtin-enhance-prompt",
 };
@@ -34,7 +41,7 @@ export function useUtilityAgentGenerator({
   taskTitle,
   taskDescription,
 }: UseUtilityAgentGeneratorOptions) {
-  const [isGenerating, setIsGenerating] = useState<GeneratorType | null>(null);
+  const [generating, setGenerating] = useState<Set<GeneratorType>>(new Set());
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(sessionId);
 
@@ -60,7 +67,7 @@ export function useUtilityAgentGenerator({
         return;
       }
 
-      setIsGenerating(type);
+      setGenerating((prev) => new Set(prev).add(type));
       try {
         const { changedFiles, diffs } = collectGitContext();
 
@@ -79,10 +86,13 @@ export function useUtilityAgentGenerator({
         const resp = await executeUtilityPrompt(request);
 
         // Clear generating state BEFORE calling onSuccess so the editor is re-enabled
-        setIsGenerating(null);
+        setGenerating((prev) => {
+          const next = new Set(prev);
+          next.delete(type);
+          return next;
+        });
 
         if (resp.success && resp.response) {
-          // Use requestAnimationFrame to ensure React has re-rendered with editor enabled
           const response = resp.response;
           requestAnimationFrame(() => {
             options?.onSuccess?.(response);
@@ -95,7 +105,11 @@ export function useUtilityAgentGenerator({
           });
         }
       } catch (error) {
-        setIsGenerating(null);
+        setGenerating((prev) => {
+          const next = new Set(prev);
+          next.delete(type);
+          return next;
+        });
         toast({
           title: "Generation failed",
           description: error instanceof Error ? error.message : "Unknown error",
@@ -106,10 +120,26 @@ export function useUtilityAgentGenerator({
     [sessionId, taskTitle, taskDescription, collectGitContext, toast],
   );
 
+  return useGeneratorCallbacks(generate, generating);
+}
+
+function useGeneratorCallbacks(
+  generate: (type: GeneratorType, options?: GenerateOptions) => Promise<void>,
+  generating: Set<GeneratorType>,
+) {
   const generateCommitMessage = useCallback(
-    (onSuccess: (message: string) => void) => {
-      return generate("commit-message", { onSuccess });
-    },
+    (onSuccess: (message: string) => void) => generate("commit-message", { onSuccess }),
+    [generate],
+  );
+
+  const generateCommitDescription = useCallback(
+    (onSuccess: (description: string) => void) => generate("commit-description", { onSuccess }),
+    [generate],
+  );
+
+  const generatePRTitle = useCallback(
+    (onSuccess: (title: string) => void, extra?: { commitLog?: string; diffSummary?: string }) =>
+      generate("pr-title", { onSuccess, ...extra }),
     [generate],
   );
 
@@ -117,25 +147,26 @@ export function useUtilityAgentGenerator({
     (
       onSuccess: (description: string) => void,
       extra?: { commitLog?: string; diffSummary?: string },
-    ) => {
-      return generate("pr-description", { onSuccess, ...extra });
-    },
+    ) => generate("pr-description", { onSuccess, ...extra }),
     [generate],
   );
 
   const enhancePrompt = useCallback(
-    (userPrompt: string, onSuccess: (enhanced: string) => void) => {
-      return generate("enhance-prompt", { onSuccess, userPrompt });
-    },
+    (userPrompt: string, onSuccess: (enhanced: string) => void) =>
+      generate("enhance-prompt", { onSuccess, userPrompt }),
     [generate],
   );
 
   return {
-    isGenerating,
-    isGeneratingCommitMessage: isGenerating === "commit-message",
-    isGeneratingPRDescription: isGenerating === "pr-description",
-    isEnhancingPrompt: isGenerating === "enhance-prompt",
+    isGenerating: generating.size > 0,
+    isGeneratingCommitMessage: generating.has("commit-message"),
+    isGeneratingCommitDescription: generating.has("commit-description"),
+    isGeneratingPRTitle: generating.has("pr-title"),
+    isGeneratingPRDescription: generating.has("pr-description"),
+    isEnhancingPrompt: generating.has("enhance-prompt"),
     generateCommitMessage,
+    generateCommitDescription,
+    generatePRTitle,
     generatePRDescription,
     enhancePrompt,
   };

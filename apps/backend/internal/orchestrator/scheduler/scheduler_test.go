@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -113,6 +114,9 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context,
 }
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	return nil
+}
+func (m *mockAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
+	return "", fmt.Errorf("no execution found")
 }
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {

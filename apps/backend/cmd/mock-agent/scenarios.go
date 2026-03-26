@@ -30,6 +30,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"clarification":           scenarioClarification,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
+	"symlink-file-setup":      scenarioSymlinkFileSetup,
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -499,6 +500,48 @@ func scenarioReviewCumulativeSetup(e *emitter) {
 
 	fixedDelay(100)
 	e.text("review-cumulative-setup complete: " + filePath + " has COMMITTED_CHANGE and UNCOMMITTED_CHANGE")
+}
+
+// scenarioSymlinkFileSetup creates a file and a symlink to it, commits both,
+// then modifies the target file leaving an uncommitted diff.
+func scenarioSymlinkFileSetup(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("symlink-file-setup: getwd failed: " + err.Error())
+		return
+	}
+
+	runGitCmd := makeGitRunner(wd)
+
+	// Create target file and commit it.
+	targetFile := "real-file.txt"
+	if err := os.WriteFile(targetFile, []byte("Hello from symlink target!\n"), 0o644); err != nil {
+		e.text("symlink-file-setup: write target failed: " + err.Error())
+		return
+	}
+	_ = runGitCmd("add", targetFile)
+	_ = runGitCmd("commit", "-m", "add real-file.txt")
+
+	// Create symlink and commit it.
+	linkFile := "link-file.txt"
+	_ = os.Remove(linkFile) // clean up if leftover
+	if err := os.Symlink(targetFile, linkFile); err != nil {
+		e.text("symlink-file-setup: symlink failed: " + err.Error())
+		return
+	}
+	_ = runGitCmd("add", linkFile)
+	_ = runGitCmd("commit", "-m", "add link-file.txt symlink")
+
+	// Modify target file, leaving an uncommitted diff.
+	if err := os.WriteFile(targetFile, []byte("Modified symlink target content!\n"), 0o644); err != nil {
+		e.text("symlink-file-setup: write modified failed: " + err.Error())
+		return
+	}
+
+	fixedDelay(100)
+	e.text("symlink-file-setup complete")
 }
 
 // makeGitRunner returns a function that runs git commands in the given directory.

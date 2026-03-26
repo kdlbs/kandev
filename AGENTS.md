@@ -290,6 +290,7 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 ### Backend
 - Provider pattern for DI; stderr for logs, stdout for ACP only
 - Pass context through chains; event bus for cross-component comm
+- **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
 
 ### Frontend
 - **Data:** SSR fetch → hydrate → read store. Never fetch in components

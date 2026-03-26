@@ -600,6 +600,7 @@
   font-size: 13px;
   line-height: 1.625;
   color: var(--foreground);
+  overflow-wrap: anywhere;
   font-family:
     -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji";
@@ -635,6 +636,11 @@
 
 .markdown-body p {
   line-height: 1.625;
+}
+
+.markdown-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body ul {
@@ -1345,7 +1351,8 @@
 .shiki-code-block pre.shiki {
   margin: 0;
   padding: 8px 12px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: var(--font-mono-size);
   line-height: 1.5;
   background-color: var(--background) !important;

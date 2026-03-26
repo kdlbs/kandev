@@ -75,6 +75,9 @@ type FileTreeNode struct {
 	// Size is the file size in bytes (for files only).
 	Size int64 `json:"size,omitempty"`
 
+	// IsSymlink indicates this entry is a symbolic link.
+	IsSymlink bool `json:"is_symlink,omitempty"`
+
 	// Children contains child nodes (for directories only).
 	Children []*FileTreeNode `json:"children,omitempty"`
 }

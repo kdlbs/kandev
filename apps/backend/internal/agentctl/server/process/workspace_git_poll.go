@@ -39,6 +39,12 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		case <-wt.stopCh:
 			return
 		case <-ticker.C:
+			// Stop polling if the work directory was deleted (worktree removed)
+			if !wt.workDirExists() {
+				wt.logger.Warn("work directory no longer exists, stopping git polling",
+					zap.String("workDir", wt.workDir))
+				return
+			}
 			wt.checkGitChanges(ctx)
 		}
 	}

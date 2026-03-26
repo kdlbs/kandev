@@ -150,6 +150,11 @@ type AgentManagerClient interface {
 	// Used for restoring workspace access on terminal-state sessions.
 	EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error
 
+	// GetExecutionIDForSession returns the execution ID for a session from the
+	// in-memory execution store. Returns empty string and error if not found.
+	// Used to detect stale AgentExecutionID values in the database after restart.
+	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
+
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
 	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error)

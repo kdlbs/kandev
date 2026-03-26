@@ -1,13 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
-import {
-  IconGitCommit,
-  IconGitPullRequest,
-  IconLoader2,
-  IconCheck,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -20,8 +14,13 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  GenerateButton,
+  CommitBodyField,
+  PRTitleField,
+  PRDescriptionField,
+  PRBranchSummary,
+} from "./vcs-dialog-fields";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
@@ -83,71 +82,22 @@ function FileSummaryText({ count, additions, deletions }: FileSummary) {
   );
 }
 
-type GenerateButtonProps = {
-  onClick: () => void;
-  isGenerating: boolean;
-  disabled?: boolean;
-  tooltip: string;
-  notConfiguredTooltip?: string;
-  isConfigured?: boolean;
-  size?: "icon" | "sm";
-  showLabel?: boolean;
-};
-
-function GenerateButton({
-  onClick,
-  isGenerating,
-  disabled,
-  tooltip,
-  notConfiguredTooltip = "Configure a utility agent in settings to enable AI generation",
-  isConfigured = true,
-  size = "icon",
-  showLabel,
-}: GenerateButtonProps) {
-  const isDisabled = !isConfigured || disabled || isGenerating;
-  const tooltipText = isConfigured ? tooltip : notConfiguredTooltip;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Wrap in span so tooltip works even when button is disabled */}
-        <span className="inline-flex">
-          <Button
-            type="button"
-            size={size}
-            variant="ghost"
-            className={
-              size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
-            }
-            onClick={isConfigured ? onClick : undefined}
-            disabled={isDisabled}
-          >
-            {isGenerating ? (
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <IconSparkles className="h-4 w-4" />
-            )}
-            {showLabel && "Generate"}
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltipText}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 type CommitDialogProps = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   fileSummary: FileSummary;
   commitMessage: string;
   onCommitMessageChange: (v: string) => void;
+  commitBody: string;
+  onCommitBodyChange: (v: string) => void;
   stageAll: boolean;
   onStageAllChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCommit: () => void;
   onGenerateMessage: () => void;
   isGenerating: boolean;
+  onGenerateDescription: () => void;
+  isGeneratingDescription: boolean;
   isUtilityConfigured: boolean;
 };
 
@@ -157,12 +107,16 @@ function CommitDialog({
   fileSummary,
   commitMessage,
   onCommitMessageChange,
+  commitBody,
+  onCommitBodyChange,
   stageAll,
   onStageAllChange,
   isGitLoading,
   onCommit,
   onGenerateMessage,
   isGenerating,
+  onGenerateDescription,
+  isGeneratingDescription,
   isUtilityConfigured,
 }: CommitDialogProps) {
   return (
@@ -178,8 +132,9 @@ function CommitDialog({
           <div className="text-sm text-muted-foreground">
             <FileSummaryText {...fileSummary} />
           </div>
-          <div className="relative">
+          <div className="relative min-w-0">
             <Input
+              data-testid="commit-title-input"
               placeholder="Enter commit message..."
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
@@ -196,6 +151,14 @@ function CommitDialog({
               />
             </div>
           </div>
+          <CommitBodyField
+            commitBody={commitBody}
+            onCommitBodyChange={onCommitBodyChange}
+            onGenerateDescription={onGenerateDescription}
+            isGeneratingDescription={isGeneratingDescription}
+            isUtilityConfigured={isUtilityConfigured}
+            disabled={fileSummary.count === 0}
+          />
           <div className="flex items-center gap-2">
             <Checkbox
               id="vcs-stage-all"
@@ -245,35 +208,12 @@ type PRDialogProps = {
   onPrDraftChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCreatePR: () => void;
+  onGenerateTitle: () => void;
+  isGeneratingTitle: boolean;
   onGenerateDescription: () => void;
-  isGenerating: boolean;
+  isGeneratingDescription: boolean;
   isUtilityConfigured: boolean;
 };
-
-function PRBranchSummary({
-  displayBranch,
-  baseBranch,
-}: {
-  displayBranch?: string | null;
-  baseBranch?: string;
-}) {
-  if (!displayBranch) return null;
-  return (
-    <div className="text-sm text-muted-foreground">
-      {baseBranch ? (
-        <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
-          {" → "}
-          <span className="font-medium text-foreground">{baseBranch}</span>
-        </span>
-      ) : (
-        <span>
-          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
-        </span>
-      )}
-    </div>
-  );
-}
 
 function PRDialog({
   open,
@@ -288,8 +228,10 @@ function PRDialog({
   onPrDraftChange,
   isGitLoading,
   onCreatePR,
+  onGenerateTitle,
+  isGeneratingTitle,
   onGenerateDescription,
-  isGenerating,
+  isGeneratingDescription,
   isUtilityConfigured,
 }: PRDialogProps) {
   return (
@@ -303,41 +245,20 @@ function PRDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <PRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
-          <div className="space-y-2">
-            <Label htmlFor="vcs-pr-title" className="text-sm">
-              Title
-            </Label>
-            <Input
-              id="vcs-pr-title"
-              placeholder="Pull request title..."
-              value={prTitle}
-              onChange={(e) => onPrTitleChange(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="vcs-pr-body" className="text-sm">
-                Description
-              </Label>
-              <GenerateButton
-                onClick={onGenerateDescription}
-                isGenerating={isGenerating}
-                tooltip="Generate PR description with AI"
-                isConfigured={isUtilityConfigured}
-                size="sm"
-                showLabel
-              />
-            </div>
-            <Textarea
-              id="vcs-pr-body"
-              placeholder="Describe your changes..."
-              value={prBody}
-              onChange={(e) => onPrBodyChange(e.target.value)}
-              rows={6}
-              className="resize-none max-h-[200px] overflow-y-auto"
-            />
-          </div>
+          <PRTitleField
+            prTitle={prTitle}
+            onPrTitleChange={onPrTitleChange}
+            onGenerateTitle={onGenerateTitle}
+            isGeneratingTitle={isGeneratingTitle}
+            isUtilityConfigured={isUtilityConfigured}
+          />
+          <PRDescriptionField
+            prBody={prBody}
+            onPrBodyChange={onPrBodyChange}
+            onGenerateDescription={onGenerateDescription}
+            isGeneratingDescription={isGeneratingDescription}
+            isUtilityConfigured={isUtilityConfigured}
+          />
           <div className="flex items-center space-x-2">
             <Checkbox
               id="vcs-pr-draft"
@@ -379,6 +300,8 @@ type UseCommitDialogReturn = {
   setOpen: (v: boolean) => void;
   message: string;
   setMessage: (v: string) => void;
+  body: string;
+  setBody: (v: string) => void;
   stageAll: boolean;
   setStageAll: (v: boolean) => void;
   openDialog: () => void;
@@ -387,13 +310,15 @@ type UseCommitDialogReturn = {
 function useCommitDialogState(): UseCommitDialogReturn {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [body, setBody] = useState("");
   const [stageAll, setStageAll] = useState(true);
   const openDialog = useCallback(() => {
     setMessage("");
+    setBody("");
     setStageAll(true);
     setOpen(true);
   }, []);
-  return { open, setOpen, message, setMessage, stageAll, setStageAll, openDialog };
+  return { open, setOpen, message, setMessage, body, setBody, stageAll, setStageAll, openDialog };
 }
 
 type UsePRDialogReturn = {
@@ -475,8 +400,12 @@ export function VcsDialogsProvider({
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,
+    isGeneratingCommitDescription,
+    isGeneratingPRTitle,
     isGeneratingPRDescription,
     generateCommitMessage,
+    generateCommitDescription,
+    generatePRTitle,
     generatePRDescription,
   } = useUtilityAgentGenerator({ sessionId, taskTitle });
   const fileSummary = computeFileSummary(gitStatus?.files);
@@ -484,8 +413,12 @@ export function VcsDialogsProvider({
   const handleCommit = useCallback(async () => {
     if (!cs.message.trim()) return;
     cs.setOpen(false);
-    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
+    const title = cs.message.trim();
+    const body = cs.body.trim();
+    const fullMessage = body ? `${title}\n\n${body}` : title;
+    await gitWithFeedback(() => commit(fullMessage, cs.stageAll), "Commit");
     cs.setMessage("");
+    cs.setBody("");
   }, [cs, gitWithFeedback, commit]);
 
   const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
@@ -507,12 +440,16 @@ export function VcsDialogsProvider({
         fileSummary={fileSummary}
         commitMessage={cs.message}
         onCommitMessageChange={cs.setMessage}
+        commitBody={cs.body}
+        onCommitBodyChange={cs.setBody}
         stageAll={cs.stageAll}
         onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
         onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
         isGenerating={isGeneratingCommitMessage}
+        onGenerateDescription={() => generateCommitDescription(cs.setBody)}
+        isGeneratingDescription={isGeneratingCommitDescription}
         isUtilityConfigured={isUtilityConfigured}
       />
       <PRDialog
@@ -528,8 +465,10 @@ export function VcsDialogsProvider({
         onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
+        onGenerateTitle={() => generatePRTitle(ps.setTitle)}
+        isGeneratingTitle={isGeneratingPRTitle}
         onGenerateDescription={() => generatePRDescription(ps.setBody)}
-        isGenerating={isGeneratingPRDescription}
+        isGeneratingDescription={isGeneratingPRDescription}
         isUtilityConfigured={isUtilityConfigured}
       />
     </VcsDialogsContext.Provider>

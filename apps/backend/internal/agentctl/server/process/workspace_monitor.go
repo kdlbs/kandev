@@ -49,7 +49,16 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			// Quick state check using mtime + diff-files
 			currentState, err := wt.getWorkspaceState(ctx)
 			if err != nil {
-				// Git command failed - skip this cycle and retry on next tick.
+				// Check if the work directory has been deleted (e.g., worktree removed
+				// after task was archived or PR branch was deleted). If so, stop the
+				// tracker to avoid spamming warnings every poll cycle.
+				if !wt.workDirExists() {
+					wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
+						zap.String("workDir", wt.workDir))
+					return
+				}
+
+				// Git command failed for another reason - skip this cycle and retry on next tick.
 				// Don't update lastState so the change will be detected when git recovers.
 				wt.logger.Warn("failed to get workspace state, will retry next cycle",
 					zap.Error(err))

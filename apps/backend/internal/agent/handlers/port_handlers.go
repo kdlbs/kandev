@@ -61,9 +61,9 @@ func (h *PortHandlers) wsPortList(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
-	if !ok {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution", nil)
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
 	client := execution.GetAgentCtlClient()

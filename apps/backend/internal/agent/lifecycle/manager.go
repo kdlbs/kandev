@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -71,6 +72,9 @@ type Manager struct {
 	// mcpHandler is the MCP request dispatcher for handling MCP requests
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
+
+	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
+	ensureExecutionGroup singleflight.Group
 
 	// Background remote status polling
 	remoteStatusPollInterval time.Duration

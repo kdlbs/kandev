@@ -96,11 +96,12 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 		zap.String("session_id", sessionID),
 		zap.String("language", language))
 
-	// Get workspace path from execution
-	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !exists {
+	// Get or create execution on-demand (survives backend restart)
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(c.Request.Context(), sessionID)
+	if err != nil {
 		h.logger.Warn("LSP: session not found in lifecycle manager",
-			zap.String("session_id", sessionID))
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 		h.closeWithCode(c, lspCloseSessionNotFound, "session not found")
 		return
 	}

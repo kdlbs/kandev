@@ -3,6 +3,7 @@ export type FileTreeNode = {
   path: string;
   is_dir: boolean;
   size?: number;
+  is_symlink?: boolean;
   children?: FileTreeNode[];
 };
 

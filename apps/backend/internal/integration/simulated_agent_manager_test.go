@@ -442,6 +442,16 @@ func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx conte
 func (s *SimulatedAgentManagerClient) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	return nil
 }
+func (s *SimulatedAgentManagerClient) GetExecutionIDForSession(_ context.Context, sessionID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for execID, inst := range s.instances {
+		if inst.sessionID == sessionID {
+			return execID, nil
+		}
+	}
+	return "", fmt.Errorf("no execution found for session %s", sessionID)
+}
 func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
 	return nil, nil
 }

@@ -91,6 +91,42 @@ function useGitToast() {
   );
 }
 
+function useCommitDialogForm(
+  onOpenChange: (open: boolean) => void,
+  onCommit: (message: string, stageAll: boolean) => void,
+) {
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitBody, setCommitBody] = useState("");
+  const [stageAll, setStageAll] = useState(true);
+
+  const handleOpen = (isOpen: boolean) => {
+    if (isOpen) {
+      setCommitMessage("");
+      setCommitBody("");
+      setStageAll(true);
+    }
+    onOpenChange(isOpen);
+  };
+
+  const handleCommit = () => {
+    const title = commitMessage.trim();
+    const body = commitBody.trim();
+    const fullMessage = body ? `${title}\n\n${body}` : title;
+    onCommit(fullMessage, stageAll);
+  };
+
+  return {
+    commitMessage,
+    setCommitMessage,
+    commitBody,
+    setCommitBody,
+    stageAll,
+    setStageAll,
+    handleOpen,
+    handleCommit,
+  };
+}
+
 export function CommitDialog({
   open,
   onOpenChange,
@@ -108,19 +144,10 @@ export function CommitDialog({
   isGitLoading: boolean;
   onCommit: (message: string, stageAll: boolean) => void;
 }) {
-  const [commitMessage, setCommitMessage] = useState("");
-  const [stageAll, setStageAll] = useState(true);
-
-  const handleOpen = (isOpen: boolean) => {
-    if (isOpen) {
-      setCommitMessage("");
-      setStageAll(true);
-    }
-    onOpenChange(isOpen);
-  };
+  const form = useCommitDialogForm(onOpenChange, onCommit);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
+    <Dialog open={open} onOpenChange={form.handleOpen}>
       <DialogContent className="max-w-[90vw] sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -137,16 +164,31 @@ export function CommitDialog({
             />
           </div>
           <Input
+            data-testid="commit-title-input"
             placeholder="Enter commit message..."
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
+            value={form.commitMessage}
+            onChange={(e) => form.setCommitMessage(e.target.value)}
             autoFocus
           />
+          <div className="space-y-2">
+            <Label htmlFor="commit-body-mobile" className="text-sm">
+              Description
+            </Label>
+            <Textarea
+              id="commit-body-mobile"
+              data-testid="commit-body-input"
+              placeholder="Add details about this change..."
+              value={form.commitBody}
+              onChange={(e) => form.setCommitBody(e.target.value)}
+              rows={3}
+              className="resize-none max-h-[200px] overflow-y-auto"
+            />
+          </div>
           <div className="flex items-center gap-2">
             <Checkbox
               id="stage-all-mobile"
-              checked={stageAll}
-              onCheckedChange={(checked) => setStageAll(checked === true)}
+              checked={form.stageAll}
+              onCheckedChange={(checked) => form.setStageAll(checked === true)}
             />
             <Label
               htmlFor="stage-all-mobile"
@@ -163,8 +205,9 @@ export function CommitDialog({
             </Button>
           </DialogClose>
           <Button
-            onClick={() => onCommit(commitMessage.trim(), stageAll)}
-            disabled={!commitMessage.trim() || isGitLoading}
+            className="cursor-pointer"
+            onClick={form.handleCommit}
+            disabled={!form.commitMessage.trim() || isGitLoading}
           >
             {isGitLoading ? (
               <>

@@ -3,6 +3,7 @@ import { test, expect } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
+import { KanbanPage } from "../pages/kanban-page";
 
 /**
  * Seed a task + session with a clarification scenario and navigate to the session page.
@@ -106,5 +107,55 @@ test.describe("Clarification flow", () => {
 
     // Orchestrator resumes agent with new turn via ClarificationAnswered event
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("plan mode + clarification does not leave pointer-events stuck on body", async ({
+    testPage,
+  }) => {
+    // Navigate to kanban board and open the task create dialog
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    // Fill title
+    await testPage.getByTestId("task-title-input").fill("Plan Mode Clarification PE");
+
+    // Fill description with clarification scenario so the agent starts and
+    // calls the ask_user_question MCP tool.
+    const descriptionInput = dialog.getByRole("textbox", {
+      name: "Write a prompt for the agent...",
+    });
+    await descriptionInput.click();
+    await descriptionInput.fill("/e2e:clarification");
+
+    // With a description present, the footer shows a split button with dropdown.
+    // Open the chevron dropdown and click "Start task in plan mode".
+    await testPage.getByTestId("submit-start-agent-chevron").click();
+    await testPage.getByTestId("submit-plan-mode").click();
+
+    // Wait for navigation to session page
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Wait for clarification overlay to appear (agent calls ask_user_question MCP tool)
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // CRITICAL ASSERTION: body must not have pointer-events: none stuck on it.
+    // Radix Dialog sets pointer-events: none on body when modal. If the task
+    // create dialog unmounts mid-close (onOpenChange(false) then router.push),
+    // Radix never finishes cleanup, leaving the page unclickable.
+    const pointerEvents = await testPage.evaluate(() => document.body.style.pointerEvents);
+    expect(pointerEvents).not.toBe("none");
+
+    // Verify the UI is actually interactive by clicking a clarification option
+    await session.clarificationOption("PostgreSQL").click();
+
+    // Agent receives the answer and completes its turn (plan mode uses different placeholder)
+    await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
   });
 });
