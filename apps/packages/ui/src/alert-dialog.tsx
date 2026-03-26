@@ -7,6 +7,17 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 
 function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  React.useEffect(() => {
+    return () => {
+      // Safety cleanup: Radix AlertDialog sets pointer-events: none on body
+      // when modal. If unmounted mid-close (e.g. layout rebuild), Radix never
+      // finishes cleanup. Check the actual body state at unmount time.
+      if (document.body.style.pointerEvents === "none") {
+        document.body.style.removeProperty("pointer-events");
+      }
+    };
+  }, []);
+
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
 }
 

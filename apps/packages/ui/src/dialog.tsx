@@ -8,15 +8,14 @@ import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const openRef = React.useRef(props.open);
-  openRef.current = props.open;
-
   React.useEffect(() => {
     return () => {
       // Safety cleanup: Radix Dialog sets pointer-events: none on body when
-      // modal. If the dialog unmounts while open (e.g. page navigation),
-      // Radix never cleans up, leaving the page unclickable.
-      if (openRef.current) {
+      // modal. If the dialog unmounts mid-close (e.g. onOpenChange(false)
+      // followed immediately by router.push), Radix never finishes its
+      // animation-based cleanup. Check the actual body state rather than
+      // tracking the open prop, which may already be false by unmount time.
+      if (document.body.style.pointerEvents === "none") {
         document.body.style.removeProperty("pointer-events");
       }
     };
