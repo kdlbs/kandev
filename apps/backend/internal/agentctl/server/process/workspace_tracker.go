@@ -109,11 +109,7 @@ func resolveGitIndexPath(workDir string) string {
 // The workDir is validated at construction time via resolveExistingWorkDir,
 // so this only checks for subsequent deletion (e.g., worktree cleanup).
 func (wt *WorkspaceTracker) workDirExists() bool {
-	absPath, err := filepath.Abs(wt.workDir)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(absPath)
+	_, err := os.Stat(wt.workDir) //nolint:gosec // workDir is validated at construction via resolveExistingWorkDir
 	return !os.IsNotExist(err)
 }
 
