@@ -510,9 +510,7 @@ export async function exportWorkflowAction(workflowId: string): Promise<string> 
 }
 
 export async function exportAllWorkflowsAction(workspaceId: string): Promise<string> {
-  const response = await fetch(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`,
-  );
+  const response = await fetch(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`);
   if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
   return response.text();
 }

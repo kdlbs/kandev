@@ -50,7 +50,9 @@ export function ImportWorkflowsDialog({
           <div className="space-y-2">
             <Label>Or paste YAML</Label>
             <Textarea
-              placeholder={"version: 1\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]"}
+              placeholder={
+                "version: 1\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]"
+              }
               value={importYaml}
               onChange={(e) => onImportYamlChange(e.target.value)}
               className="font-mono text-xs max-h-96 overflow-y-auto"
