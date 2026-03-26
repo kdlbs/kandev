@@ -8,17 +8,14 @@ import (
 	"github.com/kandev/kandev/internal/utility/models"
 )
 
-// seedBuiltinAgents upserts the default built-in utility agents so their prompts
-// stay current with the embedded markdown files across restarts.
+// seedBuiltinAgents inserts the default built-in utility agents on first run.
+// Existing agents are not overwritten, so user customizations are preserved.
 func (r *sqliteRepository) seedBuiltinAgents() error {
 	for _, agent := range getBuiltinAgents() {
 		_, err := r.db.Exec(r.db.Rebind(`
 			INSERT INTO utility_agents (id, name, description, prompt, agent_id, model, builtin, enabled, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				prompt = excluded.prompt,
-				updated_at = excluded.updated_at
-			WHERE utility_agents.builtin = 1
+			ON CONFLICT(id) DO NOTHING
 		`), agent.ID, agent.Name, agent.Description, agent.Prompt, agent.AgentID, agent.Model,
 			agent.CreatedAt, agent.UpdatedAt)
 		if err != nil {

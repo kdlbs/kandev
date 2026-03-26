@@ -169,17 +169,14 @@ func (r *sqliteRepository) DeletePrompt(ctx context.Context, id string) error {
 	return err
 }
 
-// seedBuiltinPrompts upserts the default built-in prompts so their content
-// stays current with the embedded markdown files across restarts.
+// seedBuiltinPrompts inserts the default built-in prompts on first run.
+// Existing prompts are not overwritten, so user customizations are preserved.
 func (r *sqliteRepository) seedBuiltinPrompts() error {
 	for _, prompt := range r.getBuiltinPrompts() {
 		_, err := r.db.Exec(r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
 			VALUES (?, ?, ?, 1, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				content = excluded.content,
-				updated_at = excluded.updated_at
-			WHERE custom_prompts.builtin = 1
+			ON CONFLICT(id) DO NOTHING
 		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to upsert built-in prompt %s: %w", prompt.ID, err)

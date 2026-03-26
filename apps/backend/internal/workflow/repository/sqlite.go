@@ -358,11 +358,7 @@ func (r *Repository) seedSystemTemplates() error {
 		_, err = r.db.Exec(r.db.Rebind(`
 			INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				name = excluded.name,
-				description = excluded.description,
-				steps = excluded.steps,
-				updated_at = excluded.updated_at
+			ON CONFLICT(id) DO NOTHING
 		`), tmpl.ID, tmpl.Name, tmpl.Description, dialect.BoolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to upsert template %s: %w", tmpl.ID, err)
