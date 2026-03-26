@@ -73,7 +73,7 @@ export function CommitBodyField({
       <Label htmlFor="vcs-commit-body" className="text-sm">
         Description
       </Label>
-      <div className="relative">
+      <div className="relative min-w-0">
         <Textarea
           id="vcs-commit-body"
           data-testid="commit-body-input"
@@ -111,7 +111,7 @@ export function PRTitleField({
   isUtilityConfigured: boolean;
 }) {
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <Input
         id="vcs-pr-title"
         aria-label="Pull request title"
@@ -151,7 +151,7 @@ export function PRDescriptionField({
       <Label htmlFor="vcs-pr-body" className="text-sm">
         Description
       </Label>
-      <div className="relative">
+      <div className="relative min-w-0">
         <Textarea
           id="vcs-pr-body"
           placeholder="Describe your changes..."

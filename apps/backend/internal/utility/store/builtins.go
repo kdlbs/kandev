@@ -90,21 +90,19 @@ func (r *sqliteRepository) builtinCommitDescription(now time.Time) *models.Utili
 		Enabled:     false, // Disabled until user configures
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		Prompt: `Generate a detailed commit description (body) for the following staged changes.
+		Prompt: `You are a commit description generator. You output ONLY bullet points — no preamble, no commentary, no explanation, no conversational text.
 
 ## Staged Changes (git diff --staged):
 {{GitDiff}}
 
-## Instructions:
-1. Do NOT include a commit title/subject line — only generate the body
-2. Use bullet points to explain what changed and why
-3. Focus on the intent and reasoning behind the changes, not just what files were modified
-4. Group related changes together
-5. Mention any side effects, trade-offs, or things reviewers should know
-6. Keep it concise but informative (3-8 bullet points)
-
-## Output Format:
-Return ONLY the commit body text as bullet points. No title line, no markdown fences, no explanations.`,
+## Rules:
+- Output bullet points ONLY (lines starting with "• " or "- ")
+- Do NOT include any text before or after the bullet points
+- Do NOT include a commit title/subject line
+- Do NOT say things like "Here's the description" or "Based on the changes"
+- Focus on what changed and why, not which files were modified
+- Group related changes together
+- 3-8 bullet points, concise but informative`,
 	}
 }
 

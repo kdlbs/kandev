@@ -132,7 +132,7 @@ function CommitDialog({
           <div className="text-sm text-muted-foreground">
             <FileSummaryText {...fileSummary} />
           </div>
-          <div className="relative">
+          <div className="relative min-w-0">
             <Input
               data-testid="commit-title-input"
               placeholder="Enter commit message..."
