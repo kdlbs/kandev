@@ -314,6 +314,7 @@ func startAgentInfrastructure(
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
 		services.GitHub.SetTaskDeleter(services.Task)
+		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
 		// Start GitHub background poller

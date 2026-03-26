@@ -103,11 +103,11 @@ test.describe("PR watcher merged cleanup", () => {
   });
 
   /**
-   * When the user already opened a PR task and the agent completed (approved
-   * the PR), and the PR is subsequently merged, triggering the watch should
-   * still auto-delete the task.
+   * When the user already opened a PR task and the agent completed,
+   * triggering the watch after the PR is merged should NOT delete the task
+   * — the user's work history is preserved, and the PR merged banner shows.
    */
-  test("auto-deletes started task when PR is merged after approval", async ({
+  test("preserves started task when PR is merged (shows banner instead)", async ({
     testPage,
     apiClient,
     seedData,
@@ -120,9 +120,9 @@ test.describe("PR watcher merged cleanup", () => {
     await apiClient.mockGitHubAddPRs([
       {
         number: 202,
-        title: "Approved feature",
+        title: "Reviewed feature",
         state: "open",
-        head_branch: "feature/approved",
+        head_branch: "feature/reviewed",
         base_branch: "main",
         author_login: "contributor",
         repo_owner: "testorg",
@@ -131,8 +131,8 @@ test.describe("PR watcher merged cleanup", () => {
       },
     ]);
 
-    // Create workflow: Inbox (no auto-start) → Working (auto-start + move to Done) → Done
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Approval Workflow");
+    // Create workflow: Inbox → Working (auto-start + move to Done) → Done
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Review Workflow");
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
     const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
@@ -172,26 +172,26 @@ test.describe("PR watcher merged cleanup", () => {
       )
       .toBeTruthy();
 
-    // Navigate to kanban and verify task visible
+    // Navigate to kanban
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("PR #202: Approved feature", inboxStep.id)).toBeVisible({
+    await expect(kanban.taskCardInColumn("PR #202: Reviewed feature", inboxStep.id)).toBeVisible({
       timeout: 15_000,
     });
 
-    // Move task to Working → auto-start agent → completes → moves to Done
+    // Move task to Working → auto-start → completes → Done (task now has sessions)
     await apiClient.moveTask(prTask!.id, workflow.id, workingStep.id);
-    await expect(kanban.taskCardInColumn("PR #202: Approved feature", doneStep.id)).toBeVisible({
+    await expect(kanban.taskCardInColumn("PR #202: Reviewed feature", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
-    // Task now has sessions (agent ran). Simulate PR merged.
+    // Simulate PR merged
     await apiClient.mockGitHubAddPRs([
       {
         number: 202,
-        title: "Approved feature",
+        title: "Reviewed feature",
         state: "closed",
-        head_branch: "feature/approved",
+        head_branch: "feature/reviewed",
         base_branch: "main",
         author_login: "contributor",
         repo_owner: "testorg",
@@ -199,16 +199,17 @@ test.describe("PR watcher merged cleanup", () => {
       },
     ]);
 
-    // Trigger watch → should still delete the task even though it has sessions
+    // Trigger watch → should NOT delete task (user already worked on it)
     await apiClient.triggerReviewWatch(watch.id);
 
-    // Verify task was deleted
-    await expect(kanban.taskCardByTitle("PR #202: Approved feature")).not.toBeVisible({
-      timeout: 15_000,
+    // Task should still be visible
+    await expect(kanban.taskCardByTitle("PR #202: Reviewed feature")).toBeVisible({
+      timeout: 5_000,
     });
 
-    const { tasks: tasksAfterCleanup } = await apiClient.listTasks(seedData.workspaceId);
-    expect(tasksAfterCleanup.find((t) => t.title.includes("PR #202"))).toBeUndefined();
+    // Confirm via API
+    const { tasks: tasksAfter } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasksAfter.find((t) => t.title.includes("PR #202"))).toBeTruthy();
   });
 
   /**

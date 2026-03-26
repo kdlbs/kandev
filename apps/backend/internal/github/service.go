@@ -26,16 +26,22 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
+// TaskSessionChecker checks if a task has any sessions (user interacted with it).
+type TaskSessionChecker interface {
+	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu          sync.Mutex
-	client      Client
-	authMethod  string
-	secrets     SecretProvider
-	store       *Store
-	eventBus    bus.EventBus
-	logger      *logger.Logger
-	taskDeleter TaskDeleter
+	mu                 sync.Mutex
+	client             Client
+	authMethod         string
+	secrets            SecretProvider
+	store              *Store
+	eventBus           bus.EventBus
+	logger             *logger.Logger
+	taskDeleter        TaskDeleter
+	taskSessionChecker TaskSessionChecker
 }
 
 // NewService creates a new GitHub service.
@@ -52,6 +58,9 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetTaskSessionChecker sets the session checker for cleanup operations.
+func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {
@@ -819,7 +828,9 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 }
 
 // shouldDeleteReviewTask checks if a review PR task should be cleaned up.
-// Returns true + reason if the PR is merged/closed or approved by the authenticated user.
+// Returns true + reason if the PR is done (merged/closed/approved) AND the user
+// hasn't interacted with the task yet (no sessions). Tasks with sessions are
+// preserved so the user can see the PR merged banner and their work history.
 func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask) (bool, string) {
 	feedback, err := s.client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
 	if err != nil {
@@ -830,17 +841,36 @@ func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask)
 	if feedback.PR == nil {
 		return false, ""
 	}
+	var reason string
 	if feedback.PR.State == prStateMerged || feedback.PR.State == prStateClosed {
-		return true, "pr_merged_or_closed"
-	}
-	// Check if the authenticated user already approved the PR on GitHub.
-	user, _ := s.client.GetAuthenticatedUser(ctx)
-	for _, review := range feedback.Reviews {
-		if review.State == "APPROVED" && review.Author == user {
-			return true, "pr_approved_by_user"
+		reason = "pr_merged_or_closed"
+	} else {
+		// Check if the authenticated user already approved the PR on GitHub.
+		user, _ := s.client.GetAuthenticatedUser(ctx)
+		for _, review := range feedback.Reviews {
+			if review.State == "APPROVED" && review.Author == user {
+				reason = "pr_approved_by_user"
+				break
+			}
 		}
 	}
-	return false, ""
+	if reason == "" {
+		return false, ""
+	}
+	// Don't delete tasks the user has interacted with (has sessions).
+	// Those show the PR merged banner instead.
+	if s.taskSessionChecker != nil {
+		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, rpt.TaskID)
+		if err != nil {
+			s.logger.Debug("failed to check task sessions",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			return false, ""
+		}
+		if hasSessions {
+			return false, ""
+		}
+	}
+	return true, reason
 }
 
 // TriggerAllReviewChecks triggers all review watches for a workspace.
