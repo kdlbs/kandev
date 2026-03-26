@@ -739,12 +739,14 @@ func isMissingMergedPRBranchError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "couldn't find remote ref") ||
-		(strings.Contains(msg, "not found locally or on remote") && strings.Contains(msg, "branch"))
+		(strings.Contains(msg, "not found locally or on remote") && strings.Contains(msg, "branch")) ||
+		(strings.Contains(msg, "pathspec") && strings.Contains(msg, "did not match"))
 }
 
 var (
-	quotedBranchPattern = regexp.MustCompile(`branch "([^"]+)"`)
-	remoteRefPattern    = regexp.MustCompile(`remote ref ([^\s]+)`)
+	quotedBranchPattern   = regexp.MustCompile(`branch "([^"]+)"`)
+	remoteRefPattern      = regexp.MustCompile(`remote ref ([^\s]+)`)
+	pathspecBranchPattern = regexp.MustCompile(`pathspec '([^']+)'`)
 )
 
 func extractMissingBranchName(err error) string {
@@ -756,6 +758,9 @@ func extractMissingBranchName(err error) string {
 		return strings.TrimSpace(match[1])
 	}
 	if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
 		return strings.TrimSpace(match[1])
 	}
 	return ""

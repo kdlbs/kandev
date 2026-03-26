@@ -27,6 +27,11 @@ func TestIsMissingMergedPRBranchError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "pathspec did not match (local executor)",
+			err:  errors.New("environment preparation failed: checkout branch: git command failed: error: pathspec 'feature/foo' did not match any file(s) known to git"),
+			want: true,
+		},
+		{
 			name: "unrelated launch error",
 			err:  errors.New("failed to launch container"),
 			want: false,
@@ -61,6 +66,11 @@ func TestExtractMissingBranchName(t *testing.T) {
 			name: "remote ref form",
 			err:  errors.New("fatal: couldn't find remote ref hotfix/bar"),
 			want: "hotfix/bar",
+		},
+		{
+			name: "pathspec form (local executor)",
+			err:  errors.New("checkout branch: git command failed: error: pathspec 'feature/baz' did not match any file(s) known to git"),
+			want: "feature/baz",
 		},
 		{
 			name: "no branch available",

@@ -112,20 +112,32 @@ export class ApiClient {
       agent_profile_id?: string;
       /** Repository IDs to associate with the task (required for agent execution). */
       repository_ids?: string[];
+      /** Full repository entries with optional checkout_branch / base_branch. */
+      repositories?: Array<{
+        repository_id: string;
+        base_branch?: string;
+        checkout_branch?: string;
+      }>;
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Extra metadata to store on the task. */
+      metadata?: Record<string, unknown>;
     },
   ): Promise<CreateTaskResponse> {
+    const repos =
+      opts?.repositories ??
+      opts?.repository_ids?.map((id) => ({ repository_id: id }));
     return this.request("POST", "/api/v1/tasks", {
       workspace_id: workspaceId,
       title,
       description: opts?.description ?? "",
       ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
       ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
-      ...(opts?.agent_profile_id ? { metadata: { agent_profile_id: opts.agent_profile_id } } : {}),
-      ...(opts?.repository_ids
-        ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
+      ...(opts?.agent_profile_id && !opts?.metadata
+        ? { metadata: { agent_profile_id: opts.agent_profile_id } }
         : {}),
+      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+      ...(repos ? { repositories: repos } : {}),
       ...(opts?.plan_mode ? { plan_mode: true } : {}),
     });
   }
@@ -513,5 +525,41 @@ export class ApiClient {
     workspaceId: string,
   ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
+  }
+
+  async listTaskSessions(
+    taskId: string,
+  ): Promise<{ sessions: Array<{ id: string; state: string }> }> {
+    return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  // --- GitHub Review Watch ---
+
+  async createReviewWatch(
+    workspaceId: string,
+    workflowId: string,
+    workflowStepId: string,
+    agentProfileId: string,
+    opts?: {
+      repos?: Array<{ owner: string; name: string }>;
+      prompt?: string;
+      review_scope?: string;
+      poll_interval_seconds?: number;
+    },
+  ): Promise<{ id: string }> {
+    return this.request("POST", "/api/v1/github/watches/review", {
+      workspace_id: workspaceId,
+      workflow_id: workflowId,
+      workflow_step_id: workflowStepId,
+      agent_profile_id: agentProfileId,
+      repos: opts?.repos ?? [],
+      prompt: opts?.prompt ?? "",
+      review_scope: opts?.review_scope ?? "user_and_teams",
+      poll_interval_seconds: opts?.poll_interval_seconds ?? 300,
+    });
+  }
+
+  async triggerReviewWatch(watchId: string): Promise<{ new_prs: number }> {
+    return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`);
   }
 }
