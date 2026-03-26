@@ -493,6 +493,36 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
   }
 
+  // --- GitHub Review Watch ---
+
+  async createReviewWatch(
+    workspaceId: string,
+    workflowId: string,
+    workflowStepId: string,
+    agentProfileId: string,
+    opts?: {
+      repos?: Array<{ owner: string; name: string }>;
+      prompt?: string;
+      review_scope?: string;
+      poll_interval_seconds?: number;
+    },
+  ): Promise<{ id: string }> {
+    return this.request("POST", "/api/v1/github/watches/review", {
+      workspace_id: workspaceId,
+      workflow_id: workflowId,
+      workflow_step_id: workflowStepId,
+      agent_profile_id: agentProfileId,
+      repos: opts?.repos ?? [],
+      prompt: opts?.prompt ?? "",
+      review_scope: opts?.review_scope ?? "user_and_teams",
+      poll_interval_seconds: opts?.poll_interval_seconds ?? 300,
+    });
+  }
+
+  async triggerReviewWatch(watchId: string): Promise<{ new_prs: number }> {
+    return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`);
+  }
+
   async mockGitHubGetStatus(): Promise<{
     authenticated: boolean;
     username: string;

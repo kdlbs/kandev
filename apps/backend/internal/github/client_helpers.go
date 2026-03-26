@@ -47,6 +47,16 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if err != nil {
 		return nil, err
 	}
+	// Ensure non-nil slices so JSON serialization produces [] instead of null.
+	if reviews == nil {
+		reviews = []PRReview{}
+	}
+	if comments == nil {
+		comments = []PRComment{}
+	}
+	if checks == nil {
+		checks = []CheckRun{}
+	}
 	hasIssues := hasFailingChecks(checks) || hasChangesRequested(reviews)
 	return &PRFeedback{
 		PR:        pr,

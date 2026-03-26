@@ -100,11 +100,12 @@ type PRPanelMetrics = {
 
 function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["review_state"]) {
   const requestedReviewers = feedback.pr.requested_reviewers ?? [];
-  if (feedback.reviews.length === 0) {
+  const reviews = feedback.reviews ?? [];
+  if (reviews.length === 0) {
     return requestedReviewers.length > 0 ? "pending" : fallbackState || "";
   }
   const latestByAuthor = new Map<string, { state: string; createdAt: number }>();
-  for (const review of feedback.reviews) {
+  for (const review of reviews) {
     const current = latestByAuthor.get(review.author);
     const createdAt = new Date(review.created_at).getTime();
     if (!current || createdAt > current.createdAt) {
@@ -133,9 +134,9 @@ function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPane
   }
   const pendingReviewCount = feedback.pr.requested_reviewers?.length ?? taskPR.pending_review_count;
   return {
-    reviewCount: feedback.reviews.length,
+    reviewCount: (feedback.reviews ?? []).length,
     pendingReviewCount,
-    commentCount: feedback.comments.length,
+    commentCount: (feedback.comments ?? []).length,
     reviewState: computeLiveReviewState(feedback, taskPR.review_state),
   };
 }
@@ -168,7 +169,7 @@ function ApproveButton({
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return null;
 
-  const alreadyApproved = feedback?.reviews.some(
+  const alreadyApproved = feedback?.reviews?.some(
     (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
   );
   if (alreadyApproved) return null;
@@ -262,7 +263,7 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
             <>
               <DescriptionSection body={feedback.pr.body ?? ""} />
               <ReviewsSection
-                reviews={feedback.reviews}
+                reviews={feedback.reviews ?? []}
                 requestedReviewers={feedback.pr.requested_reviewers ?? []}
                 prUrl={taskPR.pr_url}
                 reviewState={metrics.reviewState}
@@ -270,11 +271,11 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
                 onAddAsContext={(msg) => addAsContext("review", msg)}
               />
               <ChecksSection
-                checks={feedback.checks}
+                checks={feedback.checks ?? []}
                 onAddAsContext={(msg) => addAsContext("check", msg)}
               />
               <CommentsSection
-                comments={feedback.comments}
+                comments={feedback.comments ?? []}
                 prUrl={taskPR.pr_url}
                 onAddAsContext={(msg) => addAsContext("comment", msg)}
               />

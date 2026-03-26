@@ -340,13 +340,45 @@ export class SessionPage {
 
   /**
    * Assert the layout is in the default (non-maximized) state:
-   * chat, terminal, files, and sidebar are all visible.
+   * chat, terminal, files, and sidebar are all visible, and layout fills the viewport.
    */
   async expectDefaultLayout(): Promise<void> {
     await expect(this.chat).toBeVisible({ timeout: 10_000 });
     await expect(this.terminal).toBeVisible({ timeout: 10_000 });
     await expect(this.files).toBeVisible({ timeout: 10_000 });
     await expect(this.sidebar).toBeVisible();
+    await this.expectNoLayoutGap();
+  }
+
+  /**
+   * Assert the dockview layout columns fill the container with no large empty gap.
+   * Catches bugs where columns don't expand after api.fromJSON() + setConstraints
+   * (e.g. missing api.layout() call).
+   */
+  async expectNoLayoutGap(maxGapPx = 20): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          return this.page.evaluate((maxGap: number) => {
+            const dv = document.querySelector(".dv-dockview");
+            if (!dv) return false;
+            const dvRect = dv.getBoundingClientRect();
+            // Find the rightmost edge among all top-level column views
+            const views = dv.querySelectorAll(
+              ".dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view",
+            );
+            if (views.length === 0) return false;
+            let maxRight = 0;
+            for (const v of views) {
+              const r = v.getBoundingClientRect();
+              if (r.width > 0) maxRight = Math.max(maxRight, r.right);
+            }
+            return dvRect.right - maxRight <= maxGap;
+          }, maxGapPx);
+        },
+        { timeout: 5_000, message: "Layout has an empty gap on the right side (squished layout)" },
+      )
+      .toBe(true);
   }
 
   /** Git operation error message in chat (shown when a git operation fails). */
