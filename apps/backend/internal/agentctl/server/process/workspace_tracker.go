@@ -104,6 +104,15 @@ func resolveGitIndexPath(workDir string) string {
 	return indexPath
 }
 
+// workDirExists checks whether the workspace directory still exists on disk.
+// Used to detect deleted worktrees and stop polling loops gracefully.
+// The workDir is validated at construction time via resolveExistingWorkDir,
+// so this only checks for subsequent deletion (e.g., worktree cleanup).
+func (wt *WorkspaceTracker) workDirExists() bool {
+	_, err := os.Stat(wt.workDir) // CodeQL: workDir is validated at construction time
+	return !os.IsNotExist(err)
+}
+
 // Start begins monitoring the workspace using polling (no fsnotify).
 // File changes are detected via git status polling, which is efficient and
 // doesn't consume file descriptors like fsnotify/kqueue does on macOS.

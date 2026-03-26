@@ -52,7 +52,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				// Check if the work directory has been deleted (e.g., worktree removed
 				// after task was archived or PR branch was deleted). If so, stop the
 				// tracker to avoid spamming warnings every poll cycle.
-				if _, statErr := os.Stat(filepath.Clean(wt.workDir)); os.IsNotExist(statErr) {
+				if !wt.workDirExists() {
 					wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
 						zap.String("workDir", wt.workDir))
 					return
