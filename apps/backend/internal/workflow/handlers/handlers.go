@@ -250,7 +250,8 @@ func (h *Handlers) httpExportWorkflows(c *gin.Context) {
 }
 
 func (h *Handlers) httpImportWorkflows(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	const maxImportSize = 1 << 20 // 1 MB
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxImportSize))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
 		return
