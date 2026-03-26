@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// Stop polling if the work directory was deleted (worktree removed)
-			if _, err := os.Stat(wt.workDir); os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Clean(wt.workDir)); os.IsNotExist(err) {
 				wt.logger.Warn("work directory no longer exists, stopping git polling",
 					zap.String("workDir", wt.workDir))
 				return
