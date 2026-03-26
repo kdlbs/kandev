@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -79,7 +80,9 @@ func loadTemplate(filename string) (*models.WorkflowTemplate, error) {
 	}
 
 	var raw templateYAML
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
@@ -94,51 +97,94 @@ func loadTemplate(filename string) (*models.WorkflowTemplate, error) {
 	}
 
 	for _, s := range raw.Steps {
-		tmpl.Steps = append(tmpl.Steps, convertStep(s))
+		step, err := convertStep(s)
+		if err != nil {
+			return nil, err
+		}
+		tmpl.Steps = append(tmpl.Steps, step)
 	}
 	return tmpl, nil
 }
 
-func convertStep(s stepDefYAML) models.StepDefinition {
+func convertStep(s stepDefYAML) (models.StepDefinition, error) {
+	events, err := convertEvents(s.Events)
+	if err != nil {
+		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
+	}
 	return models.StepDefinition{
 		ID:                    s.ID,
 		Name:                  s.Name,
 		Position:              s.Position,
 		Color:                 s.Color,
 		Prompt:                strings.TrimSpace(s.Prompt),
-		Events:                convertEvents(s.Events),
+		Events:                events,
 		AllowManualMove:       s.AllowManualMove,
 		IsStartStep:           s.IsStartStep,
 		ShowInCommandPanel:    s.ShowInCommandPanel,
 		AutoArchiveAfterHours: s.AutoArchiveAfterHours,
-	}
+	}, nil
 }
 
-func convertEvents(e stepEventsYAML) models.StepEvents {
+// Valid action types for each event trigger.
+var (
+	validOnEnter = map[string]bool{
+		string(models.OnEnterEnablePlanMode):    true,
+		string(models.OnEnterAutoStartAgent):    true,
+		string(models.OnEnterResetAgentContext): true,
+	}
+	validOnTurnStart = map[string]bool{
+		string(models.OnTurnStartMoveToNext):     true,
+		string(models.OnTurnStartMoveToPrevious): true,
+		string(models.OnTurnStartMoveToStep):     true,
+	}
+	validOnTurnComplete = map[string]bool{
+		string(models.OnTurnCompleteMoveToNext):      true,
+		string(models.OnTurnCompleteMoveToPrevious):  true,
+		string(models.OnTurnCompleteMoveToStep):      true,
+		string(models.OnTurnCompleteDisablePlanMode): true,
+	}
+	validOnExit = map[string]bool{
+		string(models.OnExitDisablePlanMode): true,
+	}
+)
+
+func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 	var events models.StepEvents
 	for _, a := range e.OnEnter {
+		if !validOnEnter[a.Type] {
+			return events, fmt.Errorf("invalid on_enter action type %q", a.Type)
+		}
 		events.OnEnter = append(events.OnEnter, models.OnEnterAction{
 			Type:   models.OnEnterActionType(a.Type),
 			Config: a.Config,
 		})
 	}
 	for _, a := range e.OnTurnStart {
+		if !validOnTurnStart[a.Type] {
+			return events, fmt.Errorf("invalid on_turn_start action type %q", a.Type)
+		}
 		events.OnTurnStart = append(events.OnTurnStart, models.OnTurnStartAction{
 			Type:   models.OnTurnStartActionType(a.Type),
 			Config: a.Config,
 		})
 	}
 	for _, a := range e.OnTurnComplete {
+		if !validOnTurnComplete[a.Type] {
+			return events, fmt.Errorf("invalid on_turn_complete action type %q", a.Type)
+		}
 		events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{
 			Type:   models.OnTurnCompleteActionType(a.Type),
 			Config: a.Config,
 		})
 	}
 	for _, a := range e.OnExit {
+		if !validOnExit[a.Type] {
+			return events, fmt.Errorf("invalid on_exit action type %q", a.Type)
+		}
 		events.OnExit = append(events.OnExit, models.OnExitAction{
 			Type:   models.OnExitActionType(a.Type),
 			Config: a.Config,
 		})
 	}
-	return events
+	return events, nil
 }

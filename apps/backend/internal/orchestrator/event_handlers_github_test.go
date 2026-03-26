@@ -66,7 +66,7 @@ func TestInterpolateReviewPrompt(t *testing.T) {
 		{
 			"empty template uses embedded default",
 			"",
-			"Review Pull Request #42: Add feature X\nRepository: myorg/myrepo\nPR: https://github.com/myorg/myrepo/pull/42\nAuthor: alice\nBranch: feature-x → main",
+			"Review Pull Request #42: Add feature X\nRepository: myorg/myrepo\nPR: https://github.com/myorg/myrepo/pull/42\nAuthor: alice\nBranch: feature-x → main\n\nTo see ONLY the PR changes, use:\n- git diff origin/main...HEAD (three-dot = only changes on the PR branch)\n- git log --oneline origin/main..HEAD (list PR commits)\nDo NOT review files outside this diff.",
 		},
 		{
 			"all placeholders",

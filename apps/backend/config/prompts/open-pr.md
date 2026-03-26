@@ -13,7 +13,7 @@ Please create and open a Pull Request for the current branch using the GitHub CL
 
 3. **Generate PR description:**
    Create a comprehensive PR description that includes:
-   - **Title:** Clear, concise summary of the changes (50-72 characters)
+   - **Title:** Conventional Commit summary (`type: description` or `type(scope): description`), 50-72 characters. Types: feat, fix, docs, refactor, perf, chore, ci, test
    - **Overview:** Brief description of what this PR does
    - **Changes:** Detailed list of changes made
    - **Motivation:** Why these changes are needed

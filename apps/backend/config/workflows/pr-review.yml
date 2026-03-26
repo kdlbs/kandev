@@ -25,11 +25,7 @@ steps:
       Please review the changes in this pull request.
 
       STEP 1: Determine what to review
-      Review ONLY the changes in this pull request.
-      - Use: git diff origin/{{pr.base_branch}}...HEAD to see the PR diff (three-dot = only changes on the PR branch)
-      - Use: git log --oneline origin/{{pr.base_branch}}..HEAD to list the PR commits
-      - Do NOT review files outside this diff
-      - Do NOT diff against origin/main if the base branch is different
+      Review ONLY the changes in this pull request. The task description below contains the PR details and the exact git commands to scope the diff — follow those instructions.
 
       STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
 

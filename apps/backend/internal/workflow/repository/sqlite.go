@@ -149,7 +149,10 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 
 	// Use the simple (kanban) template for default workflow steps
 	now := time.Now()
-	simpleTemplate := getKanbanTemplate()
+	simpleTemplate, err := getKanbanTemplate()
+	if err != nil {
+		return err
+	}
 
 	for _, workflowID := range workflowIDs {
 		// Build mapping from template step ID to new UUID
@@ -325,22 +328,25 @@ func repairStepIDConfig(cfg map[string]interface{}, nameToUUID map[string]string
 
 // getKanbanTemplate loads the kanban ("simple") template from embedded YAML.
 // Used by migration code to seed default workflow steps.
-func getKanbanTemplate() *models.WorkflowTemplate {
+func getKanbanTemplate() (*models.WorkflowTemplate, error) {
 	templates, err := workflowcfg.LoadTemplates()
 	if err != nil {
-		panic("workflows: failed to load embedded templates: " + err.Error())
+		return nil, fmt.Errorf("workflows: load embedded templates: %w", err)
 	}
 	for _, t := range templates {
 		if t.ID == "simple" {
-			return t
+			return t, nil
 		}
 	}
-	panic("workflows: kanban template (id=simple) not found in embedded YAML")
+	return nil, fmt.Errorf("workflows: kanban template (id=simple) not found in embedded YAML")
 }
 
 // seedSystemTemplates inserts the default system workflow templates.
 func (r *Repository) seedSystemTemplates() error {
-	templates := r.getSystemTemplates()
+	templates, err := r.getSystemTemplates()
+	if err != nil {
+		return err
+	}
 
 	for _, tmpl := range templates {
 		// Always upsert system templates to keep them current
@@ -367,13 +373,8 @@ func (r *Repository) seedSystemTemplates() error {
 }
 
 // getSystemTemplates returns the predefined system workflow templates loaded from embedded YAML files.
-func (r *Repository) getSystemTemplates() []*models.WorkflowTemplate {
-	templates, err := workflowcfg.LoadTemplates()
-	if err != nil {
-		// This should never happen — YAML files are embedded at compile time.
-		panic("workflows: failed to load embedded templates: " + err.Error())
-	}
-	return templates
+func (r *Repository) getSystemTemplates() ([]*models.WorkflowTemplate, error) {
+	return workflowcfg.LoadTemplates()
 }
 
 // ============================================================================
