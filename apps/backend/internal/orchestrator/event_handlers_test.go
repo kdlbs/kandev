@@ -208,6 +208,9 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
+	return "", fmt.Errorf("no execution found")
+}
 func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
 	return nil, nil
 }

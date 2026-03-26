@@ -502,12 +502,31 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
 // whose workspace (agentctl) was already launched. It optionally starts just the agent subprocess.
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
+	// Resolve the actual execution ID from the in-memory store. After a backend
+	// restart, EnsureWorkspaceExecutionForSession may have created a new execution
+	// with a different ID than what the database still holds. Using the stale DB
+	// value would cause "execution not found" errors.
+	executionID := session.AgentExecutionID
+	if liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID); err == nil && liveID != "" && liveID != executionID {
+		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
+			zap.String("session_id", session.ID),
+			zap.String("stale_id", executionID),
+			zap.String("live_id", liveID))
+		executionID = liveID
+		session.AgentExecutionID = liveID
+		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+			e.logger.Warn("failed to persist corrected execution ID",
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
+	}
+
 	if !startAgent {
 		// Workspace already launched, nothing else to do
 		now := time.Now().UTC()
 		return &TaskExecution{
 			TaskID:           task.ID,
-			AgentExecutionID: session.AgentExecutionID,
+			AgentExecutionID: executionID,
 			AgentProfileID:   session.AgentProfileID,
 			StartedAt:        session.StartedAt,
 			SessionState:     v1.TaskSessionState(session.State),
@@ -518,10 +537,10 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 
 	// Update the task description in the existing execution so StartAgentProcess picks it up
 	if prompt != "" {
-		if err := e.agentManager.SetExecutionDescription(ctx, session.AgentExecutionID, prompt); err != nil {
+		if err := e.agentManager.SetExecutionDescription(ctx, executionID, prompt); err != nil {
 			e.logger.Warn("failed to set execution description for existing workspace",
 				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.String("agent_execution_id", executionID),
 				zap.Error(err))
 			// Non-fatal: agent may start without description
 		}
@@ -534,10 +553,10 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		effectiveMcpMode = McpModeConfig
 	}
 	if effectiveMcpMode != "" {
-		if err := e.agentManager.SetMcpMode(ctx, session.AgentExecutionID, effectiveMcpMode); err != nil {
+		if err := e.agentManager.SetMcpMode(ctx, executionID, effectiveMcpMode); err != nil {
 			e.logger.Error("failed to set MCP mode for existing workspace",
 				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.String("agent_execution_id", executionID),
 				zap.String("mcp_mode", effectiveMcpMode),
 				zap.Error(err))
 			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
@@ -557,7 +576,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 
 	execution := &TaskExecution{
 		TaskID:           task.ID,
-		AgentExecutionID: session.AgentExecutionID,
+		AgentExecutionID: executionID,
 		AgentProfileID:   session.AgentProfileID,
 		StartedAt:        now,
 		SessionState:     v1.TaskSessionStateStarting,
@@ -566,12 +585,12 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 
 	// Start the agent process asynchronously
-	e.startAgentProcessAsync(ctx, task.ID, session.ID, session.AgentExecutionID)
+	e.startAgentProcessAsync(ctx, task.ID, session.ID, executionID)
 
 	e.logger.Info("agent starting on existing workspace",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
-		zap.String("agent_execution_id", session.AgentExecutionID))
+		zap.String("agent_execution_id", executionID))
 
 	return execution, nil
 }

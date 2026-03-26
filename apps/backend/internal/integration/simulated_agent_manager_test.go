@@ -442,6 +442,9 @@ func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx conte
 func (s *SimulatedAgentManagerClient) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	return nil
 }
+func (s *SimulatedAgentManagerClient) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
+	return "", fmt.Errorf("no execution found")
+}
 func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
 	return nil, nil
 }

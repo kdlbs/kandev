@@ -77,6 +77,15 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	return execution, nil
 }
 
+// GetExecutionIDForSession returns the execution ID for a session from the in-memory
+// execution store. Returns empty string and error if no execution is found.
+func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) (string, error) {
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution.ID, nil
+	}
+	return "", fmt.Errorf("no execution found for session %s", sessionID)
+}
+
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session
 // and starts the passthrough process if needed. This is called when the terminal
 // handler receives a connection for a session that might need recovery after backend restart.
