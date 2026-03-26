@@ -975,10 +975,10 @@ func TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore(t *testin
 	}
 	repo.sessions[session.ID] = session
 
-	var startedWithID string
+	var startedWithID atomic.Value
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, id string) error {
-			startedWithID = id
+			startedWithID.Store(id)
 			return nil
 		},
 		// Simulate the live execution store having a different ID
@@ -1012,8 +1012,9 @@ func TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore(t *testin
 	time.Sleep(100 * time.Millisecond)
 
 	// StartAgentProcess should be called with the live ID
-	if startedWithID != "live-exec-id" {
-		t.Errorf("Expected StartAgentProcess called with 'live-exec-id', got %q", startedWithID)
+	got, _ := startedWithID.Load().(string)
+	if got != "live-exec-id" {
+		t.Errorf("Expected StartAgentProcess called with 'live-exec-id', got %q", got)
 	}
 
 	// Database should be updated with the corrected ID
