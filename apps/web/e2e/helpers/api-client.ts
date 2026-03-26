@@ -590,6 +590,7 @@ export class ApiClient {
   }
 
   async triggerReviewWatch(watchId: string): Promise<{ new_prs: number }> {
-    return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`);
+    const path = `/api/v1/github/watches/review/${watchId}/trigger`;
+    return this.request("POST", path);
   }
 }

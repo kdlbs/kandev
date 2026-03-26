@@ -73,7 +73,7 @@ export const ActionMessage = memo(function ActionMessage({
           <div className={cn("text-xs font-mono", textClass)}>{message}</div>
           <ActionMessageDetails metadata={metadata} />
           {metadata?.actions && metadata.actions.length > 0 && (
-            <ActionButtons actions={metadata.actions} />
+            <ActionButtons actions={metadata.actions} taskId={comment.task_id} />
           )}
         </div>
       </div>
@@ -112,19 +112,26 @@ function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }
   );
 }
 
-function ActionButtons({ actions }: { actions: MessageAction[] }) {
+function ActionButtons({ actions, taskId }: { actions: MessageAction[]; taskId?: string }) {
   return (
     <div className="mt-2 flex items-center gap-2">
       {actions.map((action, i) => (
-        <ActionButton key={action.test_id ?? i} action={action} />
+        <ActionButton key={action.test_id ?? i} action={action} messageTaskId={taskId} />
       ))}
     </div>
   );
 }
 
-function ActionButton({ action }: { action: MessageAction }): ReactElement {
+function ActionButton({
+  action,
+  messageTaskId,
+}: {
+  action: MessageAction;
+  messageTaskId?: string;
+}): ReactElement {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
-  const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const taskId = messageTaskId || activeTaskId;
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard } = useTaskRemoval({ store });

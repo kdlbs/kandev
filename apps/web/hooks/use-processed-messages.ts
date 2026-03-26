@@ -107,7 +107,7 @@ function findPendingClarification(messages: Message[]): Message | null {
 
 function isRecoveryMessage(message: Message): boolean {
   const meta = message.metadata as Record<string, unknown> | undefined;
-  return meta?.recovery_actions === true || Array.isArray(meta?.actions);
+  return meta?.recovery_actions === true;
 }
 
 /** Hide recovery messages that have been superseded by later conversation activity
