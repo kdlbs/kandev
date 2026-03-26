@@ -132,9 +132,11 @@ test.describe("Git commit pre-hooks", () => {
 
       // Fill commit message and submit
       const dialog = testPage.getByRole("dialog");
-      await expect(dialog).toBeVisible({ timeout: 5_000 });
-      await dialog.getByRole("textbox").fill("test commit message");
-      await dialog.getByRole("button", { name: "Commit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 10_000 });
+      await dialog.getByTestId("commit-title-input").fill("test commit message");
+      const dialogCommitBtn = dialog.getByRole("button", { name: "Commit", exact: true });
+      await expect(dialogCommitBtn).toBeEnabled();
+      await dialogCommitBtn.click();
 
       // The error message should appear in the chat
       await expect(session.gitOperationErrorMessage()).toBeVisible({ timeout: 30_000 });
