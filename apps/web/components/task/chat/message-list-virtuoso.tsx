@@ -7,6 +7,7 @@ import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { PrepareProgress } from "@/components/session/prepare-progress";
+import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import {
   type MessageListProps,
@@ -218,7 +219,15 @@ function useVisibleScrollParent() {
 }
 
 export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: MessageListProps) {
-  const { items, messages, sessionId, messagesLoading, isWorking, sessionState } = props;
+  const {
+    items,
+    messages,
+    footerActionMessages,
+    sessionId,
+    messagesLoading,
+    isWorking,
+    sessionState,
+  } = props;
   const { scrollParent, setScrollRef } = useVisibleScrollParent();
   const isInitialLoading = messagesLoading && messages.length === 0;
   const isNonLoadableSession =
@@ -243,14 +252,24 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     [isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading, messages.length],
   );
 
+  const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
+
   const Footer = useCallback(
     () => (
       <>
         {sessionId && <PrepareProgress sessionId={sessionId} />}
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {footerActions.map((msg) => (
+          <MessageRenderer
+            key={msg.id}
+            comment={msg}
+            isTaskDescription={false}
+            sessionState={sessionState}
+          />
+        ))}
       </>
     ),
-    [sessionId, sessionState, messages],
+    [sessionId, sessionState, messages, footerActions],
   );
 
   if (isInitialLoading || items.length === 0) {
@@ -266,6 +285,14 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
         />
         {sessionId && <PrepareProgress sessionId={sessionId} />}
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {footerActions.map((msg) => (
+          <MessageRenderer
+            key={msg.id}
+            comment={msg}
+            isTaskDescription={false}
+            sessionState={sessionState}
+          />
+        ))}
       </SessionPanelContent>
     );
   }

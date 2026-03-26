@@ -84,6 +84,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messagesLoading,
     groupedItems,
     allMessages,
+    footerActionMessages,
     permissionsByToolCallId,
     childrenByParentToolCallId,
     agentMessageCount,
@@ -111,6 +112,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <MessageList
           items={groupedItems}
           messages={allMessages}
+          footerActionMessages={footerActionMessages}
           permissionsByToolCallId={permissionsByToolCallId}
           childrenByParentToolCallId={childrenByParentToolCallId}
           taskId={taskId ?? undefined}

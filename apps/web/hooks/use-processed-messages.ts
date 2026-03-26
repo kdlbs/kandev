@@ -259,15 +259,32 @@ export function useProcessedMessages(
     return visibleMessages.filter((c) => c.author_type !== "user").length;
   }, [visibleMessages]);
 
+  // Separate footer action messages (e.g. missing branch guidance with archive/delete
+  // buttons) from regular messages so they render after the env prep error status.
+  const { regularMessages, footerActionMessages } = useMemo(() => {
+    const regular: Message[] = [];
+    const footer: Message[] = [];
+    for (const msg of allMessages) {
+      const meta = msg.metadata as Record<string, unknown> | undefined;
+      if (Array.isArray(meta?.actions) && !meta?.recovery_actions) {
+        footer.push(msg);
+      } else {
+        regular.push(msg);
+      }
+    }
+    return { regularMessages: regular, footerActionMessages: footer };
+  }, [allMessages]);
+
   const groupedItems = useMemo<RenderItem[]>(
-    () => groupActivityMessages(allMessages),
-    [allMessages],
+    () => groupActivityMessages(regularMessages),
+    [regularMessages],
   );
 
   return {
     visibleMessages,
     allMessages,
     groupedItems,
+    footerActionMessages,
     toolCallIds,
     permissionsByToolCallId,
     childrenByParentToolCallId,

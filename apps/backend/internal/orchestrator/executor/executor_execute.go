@@ -381,6 +381,8 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),
 		zap.Error(launchErr))
+	// Call onLaunchFailed before state updates so it can set the suppressToast
+	// flag that updateSessionState will propagate to the frontend.
 	if e.onLaunchFailed != nil {
 		e.onLaunchFailed(failCtx, taskID, sessionID, launchErr)
 	}

@@ -6,6 +6,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { Message } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { PrepareProgress } from "@/components/session/prepare-progress";
+import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import {
   type MessageListProps,
@@ -173,6 +174,7 @@ function useScrollToMessage() {
 export const NativeMessageList = memo(function NativeMessageList({
   items,
   messages,
+  footerActionMessages,
   permissionsByToolCallId,
   childrenByParentToolCallId,
   taskId,
@@ -254,6 +256,14 @@ export const NativeMessageList = memo(function NativeMessageList({
 
       {sessionId && <PrepareProgress sessionId={sessionId} />}
       <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+      {(footerActionMessages ?? []).map((msg: Message) => (
+        <MessageRenderer
+          key={msg.id}
+          comment={msg}
+          isTaskDescription={false}
+          sessionState={sessionState}
+        />
+      ))}
 
       {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
       <div style={{ overflowAnchor: "auto", height: 1 }} />

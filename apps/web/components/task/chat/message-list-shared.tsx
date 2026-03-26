@@ -9,6 +9,8 @@ import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-mes
 export type MessageListProps = {
   items: RenderItem[];
   messages: Message[];
+  /** Action messages rendered after the env prep error status in the footer. */
+  footerActionMessages?: Message[];
   permissionsByToolCallId: Map<string, Message>;
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
