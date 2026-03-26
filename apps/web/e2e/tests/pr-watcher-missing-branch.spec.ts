@@ -45,24 +45,28 @@ test.describe("PR watcher missing branch", () => {
 
     // Create a task as the PR watcher would: with a checkout_branch that
     // no longer exists on remote (PR was merged, branch deleted).
-    const task = await apiClient.createTask(seedData.workspaceId, "PR #999: Already merged feature", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repositories: [
-        {
-          repository_id: seedData.repositoryId,
-          base_branch: "main",
-          checkout_branch: prBranch,
+    const task = await apiClient.createTask(
+      seedData.workspaceId,
+      "PR #999: Already merged feature",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [
+          {
+            repository_id: seedData.repositoryId,
+            base_branch: "main",
+            checkout_branch: prBranch,
+          },
+        ],
+        metadata: {
+          agent_profile_id: seedData.agentProfileId,
+          pr_number: 999,
+          pr_branch: prBranch,
+          pr_repo: "testorg/testrepo",
+          pr_author: "test-user",
         },
-      ],
-      metadata: {
-        agent_profile_id: seedData.agentProfileId,
-        pr_number: 999,
-        pr_branch: prBranch,
-        pr_repo: "testorg/testrepo",
-        pr_author: "test-user",
       },
-    });
+    );
 
     // Associate the PR with the task (as the watcher would)
     await apiClient.mockGitHubAssociateTaskPR({
@@ -93,17 +97,17 @@ test.describe("PR watcher missing branch", () => {
 
     // --- Assert the guidance message appears in chat ---
     // The MissingBranchMessage component renders with archive/delete action buttons.
-    await expect(
-      session.chat.getByText("no longer exists", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat.getByText("no longer exists", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Verify the action buttons are present
-    await expect(
-      session.chat.getByTestId("missing-branch-archive-button"),
-    ).toBeVisible({ timeout: 5_000 });
-    await expect(
-      session.chat.getByTestId("missing-branch-delete-button"),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(session.chat.getByTestId("missing-branch-archive-button")).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(session.chat.getByTestId("missing-branch-delete-button")).toBeVisible({
+      timeout: 5_000,
+    });
 
     // Verify the session state via API — should be FAILED
     const { sessions } = await apiClient.listTaskSessions(task.id);

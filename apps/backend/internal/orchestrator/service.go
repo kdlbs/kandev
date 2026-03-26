@@ -804,8 +804,10 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		},
 	}
 	s.suppressToast.Store(sessionID, true)
+	msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if err := s.messageCreator.CreateSessionMessage(
-		ctx,
+		msgCtx,
 		taskID,
 		content,
 		sessionID,

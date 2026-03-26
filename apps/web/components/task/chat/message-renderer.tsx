@@ -177,9 +177,7 @@ const adapters: MessageAdapter[] = [
       const meta = comment.metadata as Record<string, unknown> | undefined;
       return Array.isArray(meta?.actions) && (meta.actions as unknown[]).length > 0;
     },
-    render: (comment, ctx) => (
-      <ActionMessage comment={comment} sessionState={ctx.sessionState} />
-    ),
+    render: (comment, ctx) => <ActionMessage comment={comment} sessionState={ctx.sessionState} />,
   },
   {
     matches: (comment) =>

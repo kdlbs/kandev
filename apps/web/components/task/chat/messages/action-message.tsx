@@ -100,7 +100,10 @@ function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }
         </pre>
       )}
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
-        <AuthMethodsPanel methods={metadata.auth_methods} onOpenTerminal={openTerminalWithCommand} />
+        <AuthMethodsPanel
+          methods={metadata.auth_methods}
+          onOpenTerminal={openTerminalWithCommand}
+        />
       )}
       {metadata.is_auth_error && (!metadata.auth_methods || metadata.auth_methods.length === 0) && (
         <GenericAuthPanel onOpenTerminal={openBottomTerminal} />
@@ -148,7 +151,9 @@ function ActionButton({ action }: { action: MessageAction }): ReactElement {
         }
         case "ws_request": {
           const client = getWebSocketClient();
-          const params = action.params as { method: string; payload: Record<string, unknown> } | undefined;
+          const params = action.params as
+            | { method: string; payload: Record<string, unknown> }
+            | undefined;
           if (client && params) await client.request(params.method, params.payload);
           break;
         }
@@ -163,7 +168,8 @@ function ActionButton({ action }: { action: MessageAction }): ReactElement {
   const Icon = action.icon ? ICON_MAP[action.icon] : null;
   const disabled = state === "busy" || state === "done";
   const isDestructive = action.variant === "destructive";
-  const label = state === "done" && action.type === "ws_request" ? `${action.label} requested` : action.label;
+  const label =
+    state === "done" && action.type === "ws_request" ? `${action.label} requested` : action.label;
 
   const button = (
     <Button

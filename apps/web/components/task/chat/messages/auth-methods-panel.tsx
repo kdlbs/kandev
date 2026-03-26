@@ -119,7 +119,9 @@ function AuthMethodRow({
           </Tooltip>
         </div>
       ) : (
-        <div className="text-xs text-muted-foreground">{method.description || "Login required"}</div>
+        <div className="text-xs text-muted-foreground">
+          {method.description || "Login required"}
+        </div>
       )}
     </div>
   );
