@@ -12,8 +12,8 @@ import type { WorkflowTemplate } from "@/lib/types/http";
 type ImportWorkflowsDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  importJson: string;
-  onImportJsonChange: (value: string) => void;
+  importYaml: string;
+  onImportYamlChange: (value: string) => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onImport: () => void;
@@ -23,8 +23,8 @@ type ImportWorkflowsDialogProps = {
 export function ImportWorkflowsDialog({
   open,
   onOpenChange,
-  importJson,
-  onImportJsonChange,
+  importYaml,
+  onImportYamlChange,
   onFileUpload,
   fileInputRef,
   onImport,
@@ -38,21 +38,21 @@ export function ImportWorkflowsDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Upload JSON file</Label>
+            <Label>Upload YAML file</Label>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json"
+              accept=".yml,.yaml"
               onChange={onFileUpload}
               className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
             />
           </div>
           <div className="space-y-2">
-            <Label>Or paste JSON</Label>
+            <Label>Or paste YAML</Label>
             <Textarea
-              placeholder='{"version": 1, "type": "kandev_workflow", "workflows": [...]}'
-              value={importJson}
-              onChange={(e) => onImportJsonChange(e.target.value)}
+              placeholder={"version: 1\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]"}
+              value={importYaml}
+              onChange={(e) => onImportYamlChange(e.target.value)}
               className="font-mono text-xs max-h-96 overflow-y-auto"
             />
           </div>
@@ -63,7 +63,7 @@ export function ImportWorkflowsDialog({
           </Button>
           <Button
             onClick={onImport}
-            disabled={!importJson.trim() || importLoading}
+            disabled={!importYaml.trim() || importLoading}
             className="cursor-pointer"
           >
             {importLoading ? "Importing..." : "Import"}

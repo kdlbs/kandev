@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/workflow/controller"
+	"github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -233,7 +236,7 @@ func (h *Handlers) httpExportWorkflow(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflow"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	h.respondYAML(c, resp)
 }
 
 func (h *Handlers) httpExportWorkflows(c *gin.Context) {
@@ -243,16 +246,24 @@ func (h *Handlers) httpExportWorkflows(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	h.respondYAML(c, resp)
 }
 
 func (h *Handlers) httpImportWorkflows(c *gin.Context) {
-	var req controller.ImportWorkflowsRequest
-	if err := c.ShouldBindJSON(&req.Data); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
 		return
 	}
-	req.WorkspaceID = c.Param("id")
+	var data models.WorkflowExport
+	if err := yaml.Unmarshal(body, &data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML: " + err.Error()})
+		return
+	}
+	req := controller.ImportWorkflowsRequest{
+		WorkspaceID: c.Param("id"),
+		Data:        &data,
+	}
 	resp, err := h.controller.ImportWorkflows(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to import workflows", zap.Error(err))
@@ -260,6 +271,17 @@ func (h *Handlers) httpImportWorkflows(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// respondYAML marshals the value as YAML and writes it to the response.
+func (h *Handlers) respondYAML(c *gin.Context, v any) {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		h.logger.Error("failed to marshal YAML", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal response"})
+		return
+	}
+	c.Data(http.StatusOK, "application/x-yaml", data)
 }
 
 // WS handlers - Templates

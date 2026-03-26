@@ -158,7 +158,7 @@ function useStepDeleteState(): StepDeleteState {
 type WorkflowCardActionsProps = {
   isNewWorkflow: boolean;
   workflowId: string;
-  setExportJson: (json: string) => void;
+  setExportYaml: (json: string) => void;
   setExportOpen: (open: boolean) => void;
   toast: ReturnType<typeof useToast>["toast"];
   onDeleteClick: () => Promise<void>;
@@ -168,7 +168,7 @@ type WorkflowCardActionsProps = {
 function WorkflowCardActions({
   isNewWorkflow,
   workflowId,
-  setExportJson,
+  setExportYaml,
   setExportOpen,
   toast,
   onDeleteClick,
@@ -180,7 +180,7 @@ function WorkflowCardActions({
         <Button
           type="button"
           variant="outline"
-          onClick={() => handleExportWorkflow({ workflowId, setExportJson, setExportOpen, toast })}
+          onClick={() => handleExportWorkflow({ workflowId, setExportYaml, setExportOpen, toast })}
           className="cursor-pointer"
         >
           <IconDownload className="h-4 w-4 mr-2" />
@@ -212,7 +212,7 @@ type WorkflowCardDialogsProps = {
   };
   exportOpen: boolean;
   setExportOpen: (open: boolean) => void;
-  exportJson: string;
+  exportYaml: string;
   stepDel: StepDeleteState;
   stepsForStepMigration: WorkflowStep[];
   stepDeleteHandlers: {
@@ -294,7 +294,7 @@ function WorkflowCardDialogs({
   wfDeleteHandlers,
   exportOpen,
   setExportOpen,
-  exportJson,
+  exportYaml,
   stepDel,
   stepsForStepMigration,
   stepDeleteHandlers,
@@ -320,7 +320,7 @@ function WorkflowCardDialogs({
         open={exportOpen}
         onOpenChange={setExportOpen}
         title="Export Workflow"
-        json={exportJson}
+        content={exportYaml}
       />
       <StepDeleteDialog
         open={stepDel.stepDeleteOpen}
@@ -350,7 +350,7 @@ export function WorkflowCard({
 }: WorkflowCardProps) {
   const { toast } = useToast();
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportJson, setExportJson] = useState("");
+  const [exportYaml, setExportYaml] = useState("");
   const wfDel = useWorkflowDeleteState();
   const stepDel = useStepDeleteState();
   const isNewWorkflow = workflow.id.startsWith("temp-");
@@ -413,7 +413,7 @@ export function WorkflowCard({
           <WorkflowCardActions
             isNewWorkflow={isNewWorkflow}
             workflowId={workflow.id}
-            setExportJson={setExportJson}
+            setExportYaml={setExportYaml}
             setExportOpen={setExportOpen}
             toast={toast}
             onDeleteClick={wfDeleteHandlers.handleDeleteWorkflowClick}
@@ -428,7 +428,7 @@ export function WorkflowCard({
         wfDeleteHandlers={wfDeleteHandlers}
         exportOpen={exportOpen}
         setExportOpen={setExportOpen}
-        exportJson={exportJson}
+        exportYaml={exportYaml}
         stepDel={stepDel}
         stepsForStepMigration={stepsForStepMigration}
         stepDeleteHandlers={stepDeleteHandlers}

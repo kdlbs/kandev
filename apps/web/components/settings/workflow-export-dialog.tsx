@@ -10,14 +10,14 @@ type WorkflowExportDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  json: string;
+  content: string;
 };
 
 export function WorkflowExportDialog({
   open,
   onOpenChange,
   title,
-  json,
+  content,
 }: WorkflowExportDialogProps) {
   const { copied, copy } = useCopyToClipboard();
 
@@ -27,12 +27,12 @@ export function WorkflowExportDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <Textarea readOnly value={json} className="font-mono text-xs max-h-96 overflow-y-auto" />
+        <Textarea readOnly value={content} className="font-mono text-xs max-h-96 overflow-y-auto" />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Close
           </Button>
-          <Button onClick={() => copy(json)} className="cursor-pointer">
+          <Button onClick={() => copy(content)} className="cursor-pointer">
             {copied ? (
               <IconCheck className="h-4 w-4 mr-2" />
             ) : (

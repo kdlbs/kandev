@@ -18,7 +18,6 @@ import type {
   StepEvents,
   Workspace,
   WorkflowStep,
-  WorkflowExportData,
   ImportWorkflowsResult,
   ListWorkflowTemplatesResponse,
   WorkflowTemplate,
@@ -504,25 +503,30 @@ export async function moveSessionToStepAction(sessionId: string, stepId: string)
 
 // Workflow Export/Import
 
-export async function exportWorkflowAction(workflowId: string): Promise<WorkflowExportData> {
-  return fetchJson<WorkflowExportData>(`${apiBaseUrl}/api/v1/workflows/${workflowId}/export`);
+export async function exportWorkflowAction(workflowId: string): Promise<string> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/workflows/${workflowId}/export`);
+  if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
+  return response.text();
 }
 
-export async function exportAllWorkflowsAction(workspaceId: string): Promise<WorkflowExportData> {
-  return fetchJson<WorkflowExportData>(
+export async function exportAllWorkflowsAction(workspaceId: string): Promise<string> {
+  const response = await fetch(
     `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`,
   );
+  if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
+  return response.text();
 }
 
 export async function importWorkflowsAction(
   workspaceId: string,
-  data: WorkflowExportData,
+  yamlContent: string,
 ): Promise<ImportWorkflowsResult> {
   return fetchJson<ImportWorkflowsResult>(
     `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`,
     {
       method: "POST",
-      body: JSON.stringify(data),
+      headers: { "Content-Type": "application/x-yaml" },
+      body: yamlContent,
     },
   );
 }

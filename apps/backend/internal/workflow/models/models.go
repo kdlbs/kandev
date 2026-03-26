@@ -25,8 +25,8 @@ const (
 
 // OnTurnStartAction represents an action to execute when a user sends a message.
 type OnTurnStartAction struct {
-	Type   OnTurnStartActionType  `json:"type"`
-	Config map[string]interface{} `json:"config,omitempty"`
+	Type   OnTurnStartActionType  `json:"type" yaml:"type"`
+	Config map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // OnTurnCompleteActionType represents the type of action to execute when an agent turn completes.
@@ -41,14 +41,14 @@ const (
 
 // OnEnterAction represents an action to execute when entering a step.
 type OnEnterAction struct {
-	Type   OnEnterActionType      `json:"type"`
-	Config map[string]interface{} `json:"config,omitempty"`
+	Type   OnEnterActionType      `json:"type" yaml:"type"`
+	Config map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // OnTurnCompleteAction represents an action to execute when an agent turn completes.
 type OnTurnCompleteAction struct {
-	Type   OnTurnCompleteActionType `json:"type"`
-	Config map[string]interface{}   `json:"config,omitempty"`
+	Type   OnTurnCompleteActionType `json:"type" yaml:"type"`
+	Config map[string]interface{}   `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // OnExitActionType represents the type of action to execute when leaving a step.
@@ -60,16 +60,16 @@ const (
 
 // OnExitAction represents an action to execute when leaving a step.
 type OnExitAction struct {
-	Type   OnExitActionType       `json:"type"`
-	Config map[string]interface{} `json:"config,omitempty"`
+	Type   OnExitActionType       `json:"type" yaml:"type"`
+	Config map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // StepEvents contains event-driven actions for a workflow step.
 type StepEvents struct {
-	OnEnter        []OnEnterAction        `json:"on_enter,omitempty"`
-	OnTurnStart    []OnTurnStartAction    `json:"on_turn_start,omitempty"`
-	OnTurnComplete []OnTurnCompleteAction `json:"on_turn_complete,omitempty"`
-	OnExit         []OnExitAction         `json:"on_exit,omitempty"`
+	OnEnter        []OnEnterAction        `json:"on_enter,omitempty" yaml:"on_enter,omitempty"`
+	OnTurnStart    []OnTurnStartAction    `json:"on_turn_start,omitempty" yaml:"on_turn_start,omitempty"`
+	OnTurnComplete []OnTurnCompleteAction `json:"on_turn_complete,omitempty" yaml:"on_turn_complete,omitempty"`
+	OnExit         []OnExitAction         `json:"on_exit,omitempty" yaml:"on_exit,omitempty"`
 }
 
 // ReviewStatus represents the review state of a session

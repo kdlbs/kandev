@@ -24,7 +24,6 @@ import type {
   WorkflowStep,
   Workspace,
   WorkflowTemplate,
-  WorkflowExportData,
 } from "@/lib/types/http";
 import {
   CreateWorkflowDialog,
@@ -76,17 +75,17 @@ function useWorkflowImportExport(
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
-  const [exportJson, setExportJson] = useState("");
+  const [exportYaml, setExportYaml] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-  const [importJson, setImportJson] = useState("");
+  const [importYaml, setImportYaml] = useState("");
   const [importLoading, setImportLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportAll = async () => {
     if (!workspace) return;
     try {
-      const data = await exportAllWorkflowsAction(workspace.id);
-      setExportJson(JSON.stringify(data, null, 2));
+      const yamlText = await exportAllWorkflowsAction(workspace.id);
+      setExportYaml(yamlText);
       setIsExportDialogOpen(true);
     } catch (error) {
       toast({
@@ -102,18 +101,17 @@ function useWorkflowImportExport(
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      setImportJson(event.target?.result as string);
+      setImportYaml(event.target?.result as string);
     };
     reader.readAsText(file);
     e.target.value = "";
   };
 
   const handleImport = async () => {
-    if (!workspace || !importJson.trim()) return;
+    if (!workspace || !importYaml.trim()) return;
     setImportLoading(true);
     try {
-      const data = JSON.parse(importJson.trim()) as WorkflowExportData;
-      const result = await importWorkflowsAction(workspace.id, data);
+      const result = await importWorkflowsAction(workspace.id, importYaml.trim());
       const created = result.created ?? [];
       const skipped = result.skipped ?? [];
       const parts: string[] = [];
@@ -121,12 +119,12 @@ function useWorkflowImportExport(
       if (skipped.length > 0) parts.push(`Skipped (already exist): ${skipped.join(", ")}`);
       toast({ title: "Import complete", description: parts.join(". ") });
       setIsImportDialogOpen(false);
-      setImportJson("");
+      setImportYaml("");
       if (created.length > 0) router.refresh();
     } catch (error) {
       toast({
         title: "Failed to import workflows",
-        description: error instanceof Error ? error.message : "Invalid JSON",
+        description: error instanceof Error ? error.message : "Invalid YAML",
         variant: "error",
       });
     } finally {
@@ -137,11 +135,11 @@ function useWorkflowImportExport(
   return {
     isExportDialogOpen,
     setIsExportDialogOpen,
-    exportJson,
+    exportYaml,
     isImportDialogOpen,
     setIsImportDialogOpen,
-    importJson,
-    setImportJson,
+    importYaml,
+    setImportYaml,
     importLoading,
     fileInputRef,
     handleExportAll,
@@ -336,13 +334,13 @@ function WorkflowDialogs({ page }: { page: ReturnType<typeof useWorkspaceWorkflo
         open={page.isExportDialogOpen}
         onOpenChange={page.setIsExportDialogOpen}
         title="Export Workflows"
-        json={page.exportJson}
+        content={page.exportYaml}
       />
       <ImportWorkflowsDialog
         open={page.isImportDialogOpen}
         onOpenChange={page.setIsImportDialogOpen}
-        importJson={page.importJson}
-        onImportJsonChange={page.setImportJson}
+        importYaml={page.importYaml}
+        onImportYamlChange={page.setImportYaml}
         onFileUpload={page.handleFileUpload}
         fileInputRef={page.fileInputRef}
         onImport={page.handleImport}
@@ -425,11 +423,11 @@ function useWorkspaceWorkflowsPage(
   const {
     isExportDialogOpen,
     setIsExportDialogOpen,
-    exportJson,
+    exportYaml,
     isImportDialogOpen,
     setIsImportDialogOpen,
-    importJson,
-    setImportJson,
+    importYaml,
+    setImportYaml,
     importLoading,
     fileInputRef,
     handleExportAll,
@@ -469,11 +467,11 @@ function useWorkspaceWorkflowsPage(
     isWorkflowDirty,
     isExportDialogOpen,
     setIsExportDialogOpen,
-    exportJson,
+    exportYaml,
     isImportDialogOpen,
     setIsImportDialogOpen,
-    importJson,
-    setImportJson,
+    importYaml,
+    setImportYaml,
     importLoading,
     fileInputRef,
     handleExportAll,

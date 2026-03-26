@@ -495,20 +495,20 @@ export function useWorkflowSaveActions({
 
 type WorkflowExportActionsParams = {
   workflowId: string;
-  setExportJson: (json: string) => void;
+  setExportYaml: (yaml: string) => void;
   setExportOpen: (open: boolean) => void;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
 export async function handleExportWorkflow({
   workflowId,
-  setExportJson,
+  setExportYaml,
   setExportOpen,
   toast,
 }: WorkflowExportActionsParams) {
   try {
-    const data = await exportWorkflowAction(workflowId);
-    setExportJson(JSON.stringify(data, null, 2));
+    const yamlText = await exportWorkflowAction(workflowId);
+    setExportYaml(yamlText);
     setExportOpen(true);
   } catch (error) {
     toast({

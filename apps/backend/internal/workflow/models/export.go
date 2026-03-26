@@ -12,31 +12,31 @@ const (
 	ExportType    = "kandev_workflow"
 )
 
-// WorkflowExport is the portable JSON format for sharing workflows.
+// WorkflowExport is the portable format for sharing workflows.
 type WorkflowExport struct {
-	Version   int                `json:"version"`
-	Type      string             `json:"type"`
-	Workflows []WorkflowPortable `json:"workflows"`
+	Version   int                `json:"version" yaml:"version"`
+	Type      string             `json:"type" yaml:"type"`
+	Workflows []WorkflowPortable `json:"workflows" yaml:"workflows"`
 }
 
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Steps       []StepPortable `json:"steps"`
+	Name        string         `json:"name" yaml:"name"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Steps       []StepPortable `json:"steps" yaml:"steps"`
 }
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                  string     `json:"name"`
-	Position              int        `json:"position"`
-	Color                 string     `json:"color"`
-	Prompt                string     `json:"prompt,omitempty"`
-	Events                StepEvents `json:"events"`
-	IsStartStep           bool       `json:"is_start_step"`
-	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
-	AllowManualMove       bool       `json:"allow_manual_move"`
-	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
+	Name                  string     `json:"name" yaml:"name"`
+	Position              int        `json:"position" yaml:"position"`
+	Color                 string     `json:"color" yaml:"color"`
+	Prompt                string     `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                StepEvents `json:"events" yaml:"events"`
+	IsStartStep           bool       `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel    bool       `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove       bool       `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
