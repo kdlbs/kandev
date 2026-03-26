@@ -401,6 +401,10 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
+		// Propagate toast suppression flag set by failure handlers (e.g. missing branch).
+		if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
+			eventData["suppress_toast"] = true
+		}
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
 }

@@ -467,12 +467,13 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 		statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 
+		hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 		meta := map[string]interface{}{
 			"variant":          "error",
 			"recovery_actions": true,
 			"session_id":       data.SessionID,
 			"task_id":          data.TaskID,
-			"has_resume_token": s.wasResumeAttempt(ctx, data.SessionID),
+			"has_resume_token": hasResumeToken,
 			"is_auth_error":    authErr,
 		}
 
@@ -482,6 +483,9 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 				meta["auth_methods"] = methods
 			}
 		}
+
+		// Build generic actions array for the frontend ActionMessage component.
+		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr)
 
 		if err := s.messageCreator.CreateSessionMessage(
 			ctx,
@@ -531,6 +535,38 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		ErrorMessage:     err.Error(),
 	})
 	return true
+}
+
+// buildRecoveryActions creates the generic actions array for agent error recovery.
+func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError bool) []map[string]interface{} {
+	recoverPayload := func(action string) map[string]interface{} {
+		return map[string]interface{}{
+			"method":  "session.recover",
+			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": action},
+		}
+	}
+	actions := []map[string]interface{}{}
+	if hasResumeToken {
+		actions = append(actions, map[string]interface{}{
+			"type": "ws_request", "label": "Resume session", "icon": "refresh",
+			"tooltip": "Re-launch with resume flag — keeps all previous messages and context",
+			"test_id": "recovery-resume-button", "params": recoverPayload("resume"),
+		})
+	}
+	label := "Start fresh session"
+	if isAuthError {
+		label = "Restart session"
+	}
+	testID := "recovery-fresh-button"
+	if isAuthError {
+		testID = "recovery-restart-button"
+	}
+	actions = append(actions, map[string]interface{}{
+		"type": "ws_request", "label": label, "icon": "player-play",
+		"tooltip": "New agent process on the same workspace — no previous conversation context",
+		"test_id": testID, "params": recoverPayload("fresh_start"),
+	})
+	return actions
 }
 
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)

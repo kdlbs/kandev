@@ -351,7 +351,7 @@ export class SessionPage {
 
   /** Git operation error message in chat (shown when a git operation fails). */
   gitOperationErrorMessage(): Locator {
-    return this.chat.getByTestId("git-operation-error-message");
+    return this.chat.locator("div:has([data-testid='git-fix-button'])").first();
   }
 
   /** Fix button on a git operation error message. */

@@ -202,6 +202,11 @@ type Service struct {
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
 
+	// suppressToast: sessionID -> true. Set by failure handlers that create
+	// guidance messages with actions. Cleared by updateTaskSessionState which
+	// adds suppress_toast to the WS event so the frontend skips the error toast.
+	suppressToast sync.Map
+
 	// clarificationWatchdogs tracks active clarification primary-path resume watchdogs.
 	// key: "<session_id>::<pending_id>", value: *clarificationWatchdogEntry
 	clarificationWatchdogs sync.Map
@@ -776,15 +781,29 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 	if branch != "" {
 		content = "The remote PR branch \"" + branch + "\" no longer exists (likely merged and deleted)."
 	}
-	content += "\n\nOptions:\n1) Archive task — keep history and hide it from active work.\n2) Delete task — permanently remove it if no longer needed."
 	metadata := map[string]interface{}{
-		"variant":            "warning",
-		"failure_kind":       "missing_pr_branch",
-		"suggested_actions":  []string{"archive_task", "delete_task"},
-		"launch_error":       launchErr.Error(),
-		"remote_branch_gone": true,
-		"missing_branch":     branch,
+		"variant":        "warning",
+		"failure_kind":   "missing_pr_branch",
+		"missing_branch": branch,
+		"actions": []map[string]interface{}{
+			{
+				"type":    "archive_task",
+				"label":   "Archive task",
+				"tooltip": "Keep task history and hide it from active work",
+				"icon":    "archive",
+				"test_id": "missing-branch-archive-button",
+			},
+			{
+				"type":    "delete_task",
+				"label":   "Delete task",
+				"tooltip": "Permanently remove this task",
+				"variant": "destructive",
+				"icon":    "trash",
+				"test_id": "missing-branch-delete-button",
+			},
+		},
 	}
+	s.suppressToast.Store(sessionID, true)
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
 		taskID,

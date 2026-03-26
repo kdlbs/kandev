@@ -229,6 +229,8 @@ export type TaskSessionStateChangedPayload = {
   metadata?: Record<string, unknown>;
   is_passthrough?: boolean;
   error_message?: string;
+  /** When true, the frontend should not show an error toast for this state change. */
+  suppress_toast?: boolean;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
   workflow_step_id?: string;

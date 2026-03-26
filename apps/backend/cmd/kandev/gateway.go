@@ -121,6 +121,7 @@ func provideGateway(
 			})
 		}
 		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {
+			fixPrompt := fmt.Sprintf("The git %s command failed with the following error:\n\n```\n%s\n```\n\nPlease fix the issues reported above.", operation, errorOutput)
 			if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 				TaskSessionID: sessionID,
 				TaskID:        taskID,
@@ -134,6 +135,15 @@ func provideGateway(
 					"session_id":          sessionID,
 					"task_id":             taskID,
 					"variant":             "error",
+					"actions": []map[string]interface{}{{
+						"type": "ws_request", "label": "Fix", "icon": "sparkles",
+						"tooltip": "Ask the agent to fix the git error",
+						"test_id": "git-fix-button",
+						"params": map[string]interface{}{
+							"method":  "message.add",
+							"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "content": fixPrompt},
+						},
+					}},
 				},
 			}); err != nil {
 				log.Error("failed to create git operation error message",

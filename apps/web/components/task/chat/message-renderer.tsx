@@ -21,9 +21,7 @@ import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-e
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
-import { AgentErrorRecoveryMessage } from "@/components/task/chat/messages/agent-error-recovery-message";
-import { GitOperationErrorMessage } from "@/components/task/chat/messages/git-operation-error-message";
-import { MissingBranchMessage } from "@/components/task/chat/messages/missing-branch-message";
+import { ActionMessage } from "@/components/task/chat/messages/action-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -175,24 +173,12 @@ const adapters: MessageAdapter[] = [
     },
   },
   {
-    matches: (comment) =>
-      comment.type === "error" &&
-      !!(comment.metadata as Record<string, unknown> | undefined)?.git_operation_error,
-    render: (comment) => <GitOperationErrorMessage comment={comment} />,
-  },
-  {
-    matches: (comment) =>
-      comment.type === "status" &&
-      (comment.metadata as Record<string, unknown> | undefined)?.failure_kind ===
-        "missing_pr_branch",
-    render: (comment) => <MissingBranchMessage comment={comment} />,
-  },
-  {
-    matches: (comment) =>
-      (comment.type === "status" || comment.type === "error") &&
-      !!(comment.metadata as Record<string, unknown> | undefined)?.recovery_actions,
+    matches: (comment) => {
+      const meta = comment.metadata as Record<string, unknown> | undefined;
+      return Array.isArray(meta?.actions) && (meta.actions as unknown[]).length > 0;
+    },
     render: (comment, ctx) => (
-      <AgentErrorRecoveryMessage comment={comment} sessionState={ctx.sessionState} />
+      <ActionMessage comment={comment} sessionState={ctx.sessionState} />
     ),
   },
   {

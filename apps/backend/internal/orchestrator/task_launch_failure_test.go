@@ -113,19 +113,25 @@ func TestHandleSessionLaunchFailed_CreatesGuidanceMessageForMissingPRBranch(t *t
 	if msg.turnID != "" {
 		t.Fatalf("expected empty turn ID for pre-start failure, got %q", msg.turnID)
 	}
-	if !strings.Contains(strings.ToLower(msg.content), "merged") ||
-		!strings.Contains(strings.ToLower(msg.content), "archive") ||
-		!strings.Contains(strings.ToLower(msg.content), "delete") {
-		t.Fatalf("expected guidance content with merged/archive/delete options, got %q", msg.content)
-	}
-	if !strings.Contains(msg.content, "feature/foo") {
-		t.Fatalf("expected missing branch name in content, got %q", msg.content)
+	if !strings.Contains(msg.content, "feature/foo") || !strings.Contains(strings.ToLower(msg.content), "merged") {
+		t.Fatalf("expected content with branch name and merged hint, got %q", msg.content)
 	}
 	if kind, ok := msg.metadata["failure_kind"].(string); !ok || kind != "missing_pr_branch" {
 		t.Fatalf("expected failure_kind metadata, got %#v", msg.metadata["failure_kind"])
 	}
 	if branch, ok := msg.metadata["missing_branch"].(string); !ok || branch != "feature/foo" {
 		t.Fatalf("expected missing_branch metadata, got %#v", msg.metadata["missing_branch"])
+	}
+	// Verify actions array is present with archive and delete actions
+	actions, ok := msg.metadata["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 2 {
+		t.Fatalf("expected 2 actions, got %#v", msg.metadata["actions"])
+	}
+	if actions[0]["type"] != "archive_task" {
+		t.Fatalf("expected first action type archive_task, got %v", actions[0]["type"])
+	}
+	if actions[1]["type"] != "delete_task" {
+		t.Fatalf("expected second action type delete_task, got %v", actions[1]["type"])
 	}
 }
 

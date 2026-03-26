@@ -123,20 +123,14 @@ export type RecoveryMetadata = StatusMetadata & {
   auth_methods?: RecoveryAuthMethod[];
 };
 
-export type GitOperationErrorMetadata = StatusMetadata & {
-  git_operation_error: true;
-  operation: string;
-  error_output: string;
-  session_id: string;
-  task_id: string;
-};
-
-export type MissingBranchMetadata = StatusMetadata & {
-  failure_kind: "missing_pr_branch";
-  missing_branch: string;
-  suggested_actions: string[];
-  remote_branch_gone: boolean;
-  launch_error: string;
+export type MessageAction = {
+  type: "archive_task" | "delete_task" | "ws_request";
+  label: string;
+  tooltip?: string;
+  variant?: "default" | "destructive";
+  icon?: string;
+  params?: Record<string, unknown>;
+  test_id?: string;
 };
 
 export type TodoMetadata = { text: string; done?: boolean } | string;
