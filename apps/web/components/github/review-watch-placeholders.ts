@@ -45,4 +45,8 @@ export const REVIEW_WATCH_PLACEHOLDERS: ScriptPlaceholder[] = [
   },
 ];
 
-export const DEFAULT_REVIEW_WATCH_PROMPT = "Pull Request ready for review: {{pr.link}}";
+export const DEFAULT_REVIEW_WATCH_PROMPT = `Review Pull Request #{{pr.number}}: {{pr.title}}
+Repository: {{pr.repo}}
+PR: {{pr.link}}
+Author: {{pr.author}}
+Branch: {{pr.branch}} → {{pr.base_branch}}`;

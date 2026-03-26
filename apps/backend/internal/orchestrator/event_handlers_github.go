@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -519,9 +520,11 @@ func (s *Service) subscribeGitHubEvents() {
 }
 
 // interpolateReviewPrompt replaces {{pr.*}} placeholders in the prompt template with actual PR values.
+// When the prompt template is empty (user didn't configure a custom prompt), it uses the
+// embedded default that provides useful PR context to the agent.
 func interpolateReviewPrompt(promptTemplate string, pr *github.PR) string {
 	if promptTemplate == "" {
-		return fmt.Sprintf("Pull Request ready for review: %s", pr.HTMLURL)
+		promptTemplate = promptcfg.Get("pr-review-watch-default")
 	}
 	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
 	replacer := strings.NewReplacer(

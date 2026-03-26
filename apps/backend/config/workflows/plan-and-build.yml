@@ -1,0 +1,72 @@
+id: standard
+name: Plan & Build
+description: >-
+  Two-phase workflow: the agent first creates a plan for your review,
+  then implements it. Ideal for tasks that benefit from upfront design.
+
+steps:
+  - id: todo
+    name: Todo
+    position: 0
+    color: bg-neutral-400
+    allow_manual_move: true
+
+  - id: plan
+    name: Plan
+    position: 1
+    color: bg-purple-500
+    is_start_step: true
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [PLANNING PHASE]
+      Analyze this task and create a detailed implementation plan.
+      Do NOT make any code changes yet - only analyze and plan.
+
+      Before creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.
+
+      Create a plan that includes:
+      1. Understanding of the requirements
+      2. Files that need to be modified or created
+      3. Step-by-step implementation approach
+      4. Potential risks or considerations
+
+      When including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
+
+      IMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
+      After saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.
+      Do not create any other files during this phase - only use the MCP tool to save the plan.
+
+      {{task_prompt}}
+    events:
+      on_enter:
+        - type: enable_plan_mode
+        - type: auto_start_agent
+
+  - id: implementation
+    name: Implementation
+    position: 2
+    color: bg-blue-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [IMPLEMENTATION PHASE]
+      Before starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.
+      Review the plan carefully, including any edits the user may have made.
+      Acknowledge the plan and any user modifications before proceeding.
+
+      Then implement the task following the plan step-by-step.
+      You can update the plan during implementation using update_task_plan_kandev if needed.
+
+      {{task_prompt}}
+    events:
+      on_enter:
+        - type: auto_start_agent
+      on_turn_complete:
+        - type: move_to_next
+
+  - id: done
+    name: Done
+    position: 3
+    color: bg-green-500
+    allow_manual_move: true

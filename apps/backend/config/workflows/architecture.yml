@@ -1,0 +1,58 @@
+id: architecture
+name: Architecture
+description: >-
+  Focus on architecture and design. The agent creates technical designs
+  for your review before any implementation begins.
+
+steps:
+  - id: backlog
+    name: Ideas
+    position: 0
+    color: bg-neutral-400
+    allow_manual_move: true
+
+  - id: planning
+    name: Planning
+    position: 1
+    color: bg-purple-500
+    is_start_step: true
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [ARCHITECTURE PHASE]
+      Analyze and design the architecture for this task.
+
+      Before creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.
+
+      When including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
+
+      IMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
+      After saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.
+      Do not create any other files during this phase - only use the MCP tool to save the plan.
+
+      {{task_prompt}}
+    events:
+      on_enter:
+        - type: enable_plan_mode
+        - type: auto_start_agent
+      on_turn_complete:
+        - type: disable_plan_mode
+        - type: move_to_next
+
+  - id: review
+    name: Review
+    position: 2
+    color: bg-yellow-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_enter:
+        - type: enable_plan_mode
+      on_turn_start:
+        - type: move_to_previous
+
+  - id: done
+    name: Approved
+    position: 3
+    color: bg-green-500
+    allow_manual_move: true

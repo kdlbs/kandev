@@ -1,0 +1,57 @@
+id: pr-review
+name: PR Review
+description: >-
+  Track pull requests through review. PRs wait in queue, get reviewed
+  by the agent, then marked as done.
+
+steps:
+  - id: waiting
+    name: Waiting
+    position: 0
+    color: bg-neutral-400
+    is_start_step: true
+    allow_manual_move: true
+    events:
+      on_turn_start:
+        - type: move_to_next
+
+  - id: review
+    name: Review
+    position: 1
+    color: bg-yellow-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      Please review the changes in this pull request.
+
+      STEP 1: Determine what to review
+      Review ONLY the changes in this pull request.
+      - Use: git diff origin/{{pr.base_branch}}...HEAD to see the PR diff (three-dot = only changes on the PR branch)
+      - Use: git log --oneline origin/{{pr.base_branch}}..HEAD to list the PR commits
+      - Do NOT review files outside this diff
+      - Do NOT diff against origin/main if the base branch is different
+
+      STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
+
+      Rules:
+      - Each section is OPTIONAL — only include it if you have findings for that category
+      - If a section has no findings, omit it entirely
+      - Format each finding as: filename:line_number - Description
+      - Be specific and reference exact line numbers
+      - Keep descriptions concise but actionable
+
+      {{task_prompt}}
+    events:
+      on_enter:
+        - type: auto_start_agent
+      on_turn_complete:
+        - type: move_to_next
+
+  - id: done
+    name: Done
+    position: 2
+    color: bg-green-500
+    allow_manual_move: true
+    events:
+      on_turn_start:
+        - type: move_to_previous

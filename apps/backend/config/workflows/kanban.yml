@@ -1,0 +1,55 @@
+id: simple
+name: Kanban
+description: >-
+  Classic board with automated agent work. Tasks start in In Progress
+  where the agent runs automatically, then move to Review when done.
+
+steps:
+  - id: backlog
+    name: Backlog
+    position: 0
+    color: bg-neutral-400
+    allow_manual_move: true
+    events:
+      on_turn_start:
+        - type: move_to_next
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: review
+
+  - id: in-progress
+    name: In Progress
+    position: 1
+    color: bg-blue-500
+    is_start_step: true
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_enter:
+        - type: auto_start_agent
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: review
+
+  - id: review
+    name: Review
+    position: 2
+    color: bg-yellow-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_turn_start:
+        - type: move_to_previous
+
+  - id: done
+    name: Done
+    position: 3
+    color: bg-green-500
+    allow_manual_move: true
+    events:
+      on_turn_start:
+        - type: move_to_step
+          config:
+            step_id: in-progress

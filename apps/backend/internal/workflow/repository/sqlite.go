@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	workflowcfg "github.com/kandev/kandev/config/workflows"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
@@ -146,9 +147,9 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 		return err
 	}
 
-	// Use the simple template for default workflow steps
+	// Use the simple (kanban) template for default workflow steps
 	now := time.Now()
-	simpleTemplate := r.getKanbanTemplate(now)
+	simpleTemplate := getKanbanTemplate()
 
 	for _, workflowID := range workflowIDs {
 		// Build mapping from template step ID to new UUID
@@ -322,6 +323,21 @@ func repairStepIDConfig(cfg map[string]interface{}, nameToUUID map[string]string
 	return false
 }
 
+// getKanbanTemplate loads the kanban ("simple") template from embedded YAML.
+// Used by migration code to seed default workflow steps.
+func getKanbanTemplate() *models.WorkflowTemplate {
+	templates, err := workflowcfg.LoadTemplates()
+	if err != nil {
+		panic("workflows: failed to load embedded templates: " + err.Error())
+	}
+	for _, t := range templates {
+		if t.ID == "simple" {
+			return t
+		}
+	}
+	panic("workflows: kanban template (id=simple) not found in embedded YAML")
+}
+
 // seedSystemTemplates inserts the default system workflow templates.
 func (r *Repository) seedSystemTemplates() error {
 	templates := r.getSystemTemplates()
@@ -350,272 +366,14 @@ func (r *Repository) seedSystemTemplates() error {
 	return nil
 }
 
-// getSystemTemplates returns the predefined system workflow templates.
+// getSystemTemplates returns the predefined system workflow templates loaded from embedded YAML files.
 func (r *Repository) getSystemTemplates() []*models.WorkflowTemplate {
-	now := time.Now().UTC()
-	return []*models.WorkflowTemplate{
-		r.getKanbanTemplate(now),
-		r.getStandardTemplate(now),
-		r.getArchitectureTemplate(now),
-		r.getPRReviewTemplate(now),
+	templates, err := workflowcfg.LoadTemplates()
+	if err != nil {
+		// This should never happen — YAML files are embedded at compile time.
+		panic("workflows: failed to load embedded templates: " + err.Error())
 	}
-}
-
-// getStandardTemplate returns the standard 4-step workflow template with planning phase.
-// Steps: Todo → Plan → Implementation → Done
-func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate {
-	return &models.WorkflowTemplate{
-		ID:          "standard",
-		Name:        "Plan & Build",
-		Description: "Two-phase workflow: the agent first creates a plan for your review, then implements it. Ideal for tasks that benefit from upfront design.",
-		IsSystem:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Steps: []models.StepDefinition{
-			{
-				ID:              "todo",
-				Name:            "Todo",
-				Position:        0,
-				Color:           "bg-neutral-400",
-				Events:          models.StepEvents{},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "plan",
-				Name:               "Plan",
-				Position:           1,
-				Color:              "bg-purple-500",
-				IsStartStep:        true,
-				ShowInCommandPanel: true,
-				Prompt:             "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterEnablePlanMode},
-						{Type: models.OnEnterAutoStartAgent},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "implementation",
-				Name:               "Implementation",
-				Position:           2,
-				Color:              "bg-blue-500",
-				ShowInCommandPanel: true,
-				Prompt:             "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.\n\n{{task_prompt}}",
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterAutoStartAgent},
-					},
-					OnTurnComplete: []models.OnTurnCompleteAction{
-						{Type: models.OnTurnCompleteMoveToNext},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:              "done",
-				Name:            "Done",
-				Position:        3,
-				Color:           "bg-green-500",
-				Events:          models.StepEvents{},
-				AllowManualMove: true,
-			},
-		},
-	}
-}
-
-// getArchitectureTemplate returns the architecture workflow template.
-func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemplate {
-	return &models.WorkflowTemplate{
-		ID:          "architecture",
-		Name:        "Architecture",
-		Description: "Focus on architecture and design. The agent creates technical designs for your review before any implementation begins.",
-		IsSystem:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Steps: []models.StepDefinition{
-			{
-				ID:              "backlog",
-				Name:            "Ideas",
-				Position:        0,
-				Color:           "bg-neutral-400",
-				Events:          models.StepEvents{},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "planning",
-				Name:               "Planning",
-				Position:           1,
-				Color:              "bg-purple-500",
-				IsStartStep:        true,
-				ShowInCommandPanel: true,
-				Prompt:             "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterEnablePlanMode},
-						{Type: models.OnEnterAutoStartAgent},
-					},
-					OnTurnComplete: []models.OnTurnCompleteAction{
-						{Type: models.OnTurnCompleteDisablePlanMode},
-						{Type: models.OnTurnCompleteMoveToNext},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "review",
-				Name:               "Review",
-				Position:           2,
-				Color:              "bg-yellow-500",
-				ShowInCommandPanel: true,
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterEnablePlanMode},
-					},
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToPrevious},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:              "done",
-				Name:            "Approved",
-				Position:        3,
-				Color:           "bg-green-500",
-				Events:          models.StepEvents{},
-				AllowManualMove: true,
-			},
-		},
-	}
-}
-
-// getKanbanTemplate returns the kanban workflow template.
-func (r *Repository) getKanbanTemplate(now time.Time) *models.WorkflowTemplate {
-	return &models.WorkflowTemplate{
-		ID:          "simple",
-		Name:        "Kanban",
-		Description: "Classic board with automated agent work. Tasks start in In Progress where the agent runs automatically, then move to Review when done.",
-		IsSystem:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Steps: []models.StepDefinition{
-			{
-				ID:       "backlog",
-				Name:     "Backlog",
-				Position: 0,
-				Color:    "bg-neutral-400",
-				Events: models.StepEvents{
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToNext},
-					},
-					OnTurnComplete: []models.OnTurnCompleteAction{
-						{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "review"}},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "in-progress",
-				Name:               "In Progress",
-				Position:           1,
-				Color:              "bg-blue-500",
-				ShowInCommandPanel: true,
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterAutoStartAgent},
-					},
-					OnTurnComplete: []models.OnTurnCompleteAction{
-						{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "review"}},
-					},
-				},
-				AllowManualMove: true,
-				IsStartStep:     true,
-			},
-			{
-				ID:                 "review",
-				Name:               "Review",
-				Position:           2,
-				Color:              "bg-yellow-500",
-				ShowInCommandPanel: true,
-				Events: models.StepEvents{
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToPrevious},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:       "done",
-				Name:     "Done",
-				Position: 3,
-				Color:    "bg-green-500",
-				Events: models.StepEvents{
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToStep, Config: map[string]interface{}{"step_id": "in-progress"}},
-					},
-				},
-				AllowManualMove: true,
-			},
-		},
-	}
-}
-
-// getPRReviewTemplate returns the PR review workflow template.
-func (r *Repository) getPRReviewTemplate(now time.Time) *models.WorkflowTemplate {
-	return &models.WorkflowTemplate{
-		ID:          "pr-review",
-		Name:        "PR Review",
-		Description: "Track pull requests through review. PRs wait in queue, get reviewed by the agent, then marked as done.",
-		IsSystem:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Steps: []models.StepDefinition{
-			{
-				ID:          "waiting",
-				Name:        "Waiting",
-				Position:    0,
-				Color:       "bg-neutral-400",
-				IsStartStep: true,
-				Events: models.StepEvents{
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToNext},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:                 "review",
-				Name:               "Review",
-				Position:           1,
-				Color:              "bg-yellow-500",
-				ShowInCommandPanel: true,
-				Prompt:             "Please review the changed files in the current git worktree.\n\nSTEP 1: Determine what to review\n- First, check if there are any uncommitted changes (dirty working directory)\n- If there are uncommitted/staged changes: review those files\n- If the working directory is clean: review ONLY the commits from this branch\n  - Use: git log --oneline $(git merge-base origin/main HEAD)..HEAD to list the branch commits\n  - Use: git diff $(git merge-base origin/main HEAD) to see the cumulative changes\n  - Do NOT diff directly against origin/main or master — that would include unrelated changes if the branch is outdated\n\nSTEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.\n\nRules:\n- Each section is OPTIONAL — only include it if you have findings for that category\n- If a section has no findings, omit it entirely\n- Format each finding as: filename:line_number - Description\n- Be specific and reference exact line numbers\n- Keep descriptions concise but actionable\n\n{{task_prompt}}",
-				Events: models.StepEvents{
-					OnEnter: []models.OnEnterAction{
-						{Type: models.OnEnterAutoStartAgent},
-					},
-					OnTurnComplete: []models.OnTurnCompleteAction{
-						{Type: models.OnTurnCompleteMoveToNext},
-					},
-				},
-				AllowManualMove: true,
-			},
-			{
-				ID:       "done",
-				Name:     "Done",
-				Position: 2,
-				Color:    "bg-green-500",
-				Events: models.StepEvents{
-					OnTurnStart: []models.OnTurnStartAction{
-						{Type: models.OnTurnStartMoveToPrevious},
-					},
-				},
-				AllowManualMove: true,
-			},
-		},
-	}
+	return templates
 }
 
 // ============================================================================
