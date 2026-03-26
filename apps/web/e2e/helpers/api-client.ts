@@ -314,6 +314,9 @@ export class ApiClient {
     workspace_id?: string;
     workflow_filter_id?: string;
     terminal_link_behavior?: "new_tab" | "browser_panel";
+    keyboard_shortcuts?: Record<string, unknown>;
+    default_utility_agent_id?: string;
+    default_utility_model?: string;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }

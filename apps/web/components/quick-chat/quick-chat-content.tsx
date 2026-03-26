@@ -3,6 +3,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+import {
+  QueuedMessageIndicator,
+  type QueuedMessageIndicatorHandle,
+} from "@/components/task/chat/queued-message-indicator";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
 import {
@@ -20,16 +24,9 @@ type QuickChatContentProps = {
   onInitialPromptSent?: () => void;
 };
 
-export const QuickChatContent = memo(function QuickChatContent({
-  sessionId,
-  minimalToolbar,
-  placeholderOverride,
-  initialPrompt,
-  onInitialPromptSent,
-}: QuickChatContentProps) {
+function useQuickChatState(sessionId: string) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
-  const [clarificationKey, setClarificationKey] = useState(0);
-  const initialPromptSent = useRef(false);
+  const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
   useSettingsData(true);
   const panelState = useChatPanelState({
@@ -38,34 +35,52 @@ export const QuickChatContent = memo(function QuickChatContent({
     onOpenFileAtLine: undefined,
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
-  const {
-    resolvedSessionId,
-    session,
-    task,
-    taskId,
-    isWorking,
-    messagesLoading,
-    groupedItems,
-    allMessages,
-    permissionsByToolCallId,
-    childrenByParentToolCallId,
+  const { cancelQueue } = panelState;
+  const { handleCancelTurn, handleCancelQueue, handleQueueEditComplete } = useChatPanelHandlers(
+    panelState.resolvedSessionId,
     cancelQueue,
-    pendingClarification,
-  } = panelState;
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, cancelQueue, chatInputRef);
+    chatInputRef,
+  );
 
-  // Auto-focus the chat input when the component mounts
+  return {
+    chatInputRef,
+    queuedMessageRef,
+    panelState,
+    isSending,
+    handleSubmit,
+    handleCancelTurn,
+    handleCancelQueue,
+    handleQueueEditComplete,
+  };
+}
+
+export const QuickChatContent = memo(function QuickChatContent({
+  sessionId,
+  minimalToolbar,
+  placeholderOverride,
+  initialPrompt,
+  onInitialPromptSent,
+}: QuickChatContentProps) {
+  const [clarificationKey, setClarificationKey] = useState(0);
+  const initialPromptSent = useRef(false);
+  const state = useQuickChatState(sessionId);
+  const {
+    chatInputRef,
+    queuedMessageRef,
+    panelState,
+    isSending,
+    handleSubmit,
+    handleCancelTurn,
+    handleCancelQueue,
+    handleQueueEditComplete,
+  } = state;
+  const { taskId, pendingClarification, isQueued, queuedMessage, updateQueueContent } = panelState;
+
   useEffect(() => {
-    // Small delay to ensure the input is rendered
-    const timer = setTimeout(() => {
-      chatInputRef.current?.focusInput();
-    }, 50);
+    const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
     return () => clearTimeout(timer);
-  }, []);
+  }, [chatInputRef]);
 
-  // Auto-send the initial prompt once the session is ready (has taskId).
-  // This is used by config chat which creates the session first, then sends
-  // the user's prompt through normal WS message flow.
   useEffect(() => {
     if (!initialPrompt || !taskId || initialPromptSent.current) return;
     initialPromptSent.current = true;
@@ -79,17 +94,17 @@ export const QuickChatContent = memo(function QuickChatContent({
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 min-h-0 overflow-hidden">
         <MessageList
-          items={groupedItems}
-          messages={allMessages}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
+          items={panelState.groupedItems}
+          messages={panelState.allMessages}
+          permissionsByToolCallId={panelState.permissionsByToolCallId}
+          childrenByParentToolCallId={panelState.childrenByParentToolCallId}
           taskId={taskId ?? undefined}
-          sessionId={resolvedSessionId}
-          messagesLoading={messagesLoading}
-          isWorking={isWorking}
-          sessionState={session?.state}
-          taskState={task?.state}
-          worktreePath={session?.worktree_path}
+          sessionId={panelState.resolvedSessionId}
+          messagesLoading={panelState.messagesLoading}
+          isWorking={panelState.isWorking}
+          sessionState={panelState.session?.state}
+          taskState={panelState.task?.state}
+          worktreePath={panelState.session?.worktree_path}
           onOpenFile={undefined}
         />
       </div>
@@ -98,6 +113,18 @@ export const QuickChatContent = memo(function QuickChatContent({
           <ClarificationInputOverlay
             message={pendingClarification}
             onResolved={handleClarificationResolved}
+          />
+        </div>
+      )}
+      {isQueued && queuedMessage && (
+        <div className="flex-shrink-0 border-t border-blue-400/30 bg-card px-3 py-1">
+          <QueuedMessageIndicator
+            ref={queuedMessageRef}
+            content={queuedMessage.content}
+            onCancel={handleCancelQueue}
+            onUpdate={updateQueueContent}
+            isVisible={true}
+            onEditComplete={handleQueueEditComplete}
           />
         </div>
       )}
