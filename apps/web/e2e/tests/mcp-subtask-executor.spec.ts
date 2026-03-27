@@ -39,7 +39,7 @@ test.describe("MCP create_task subtask executor inheritance", () => {
     const script = [
       'e2e:thinking("Creating subtask...")',
       "e2e:delay(100)",
-      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}"})`,
+      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify executor and agent profile inheritance"})`,
       "e2e:delay(100)",
       'e2e:message("Done.")',
     ].join("\n");
