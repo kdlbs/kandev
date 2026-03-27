@@ -128,7 +128,7 @@
     "eslint-config-next": "16.1.1",
     "eslint-plugin-sonarjs": "^3.0.7",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "happy-dom": "^20.1.0",
+    "happy-dom": "^20.8.8",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",
