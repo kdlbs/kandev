@@ -70,10 +70,11 @@ func TestMCPCreateTask_SubtaskInheritsFromParent(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
-	// Create subtask with only title and parent_id — workspace/workflow/step should be inherited
+	// Create subtask with title, description, and parent_id — workspace/workflow/step should be inherited
 	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
-		"parent_id": parentTaskID,
-		"title":     "Subtask via MCP",
+		"parent_id":   parentTaskID,
+		"title":       "Subtask via MCP",
+		"description": "Implement the subtask feature",
 	})
 	require.NoError(t, err)
 
@@ -111,8 +112,9 @@ func TestMCPCreateTask_SubtaskVisibleInListTasks(t *testing.T) {
 
 	// Create subtask
 	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
-		"parent_id": parentTaskID,
-		"title":     "Visible Subtask",
+		"parent_id":   parentTaskID,
+		"title":       "Visible Subtask",
+		"description": "Implement the visible subtask feature",
 	})
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)

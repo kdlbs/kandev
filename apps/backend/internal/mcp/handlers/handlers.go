@@ -307,6 +307,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
+	if req.ParentID != "" && req.Description == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
+	}
 
 	// Inherit workspace/workflow/repositories from parent when not explicitly provided.
 	// WorkflowStepID is intentionally NOT inherited — the service layer resolves

@@ -163,7 +163,12 @@ function useNewSessionAttachments(disabled: boolean) {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const { clientX, clientY } = e;
-    if (clientX <= rect.left || clientX >= rect.right || clientY <= rect.top || clientY >= rect.bottom) {
+    if (
+      clientX <= rect.left ||
+      clientX >= rect.right ||
+      clientY <= rect.top ||
+      clientY >= rect.bottom
+    ) {
       setIsDragging(false);
     }
   }, []);
@@ -180,7 +185,15 @@ function useNewSessionAttachments(disabled: boolean) {
     [disabled, addFiles],
   );
 
-  return { attachments, isDragging, handleRemoveAttachment, handlePaste, handleDragOver, handleDragLeave, handleDrop };
+  return {
+    attachments,
+    isDragging,
+    handleRemoveAttachment,
+    handlePaste,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  };
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -213,8 +226,15 @@ function NewSessionForm({
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const { attachments, isDragging, handleRemoveAttachment, handlePaste, handleDragOver, handleDragLeave, handleDrop } =
-    useNewSessionAttachments(isCreating || isSummarizing);
+  const {
+    attachments,
+    isDragging,
+    handleRemoveAttachment,
+    handlePaste,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  } = useNewSessionAttachments(isCreating || isSummarizing);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
 

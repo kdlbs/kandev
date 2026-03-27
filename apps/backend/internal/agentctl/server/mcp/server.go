@@ -291,13 +291,13 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task",
-			mcp.WithDescription("Create a new task or subtask and auto-start an agent on it. For subtasks (parent_id='self'), the executor profile and agent profile are automatically inherited from the parent session — no need to ask. For top-level tasks, use ask_user_question first if you do not already know which executor profile and agent profile the user wants to use."),
+			mcp.WithDescription("Create a new task or subtask and auto-start an agent on it. For subtasks (parent_id='self'), the executor profile and agent profile are automatically inherited from the parent session — no need to ask. For top-level tasks, use ask_user_question first if you do not already know which executor profile and agent profile the user wants to use. IMPORTANT: 'description' is the initial prompt the sub-agent receives — it is the ONLY context the sub-agent has to start working. Always provide a detailed description for subtasks."),
 			mcp.WithString("parent_id", mcp.Description("Parent task ID for subtasks. Use 'self' to create a subtask of your current task. Omit to create a top-level task.")),
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID (required for top-level tasks, inherited from parent for subtasks)")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID (required for top-level tasks, inherited from parent for subtasks)")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
-			mcp.WithString("description", mcp.Description("The task description")),
+			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 		),
