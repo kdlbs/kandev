@@ -21,23 +21,31 @@ steps:
     prompt: |
       [PLANNING PHASE]
       Analyze this task and create a detailed implementation plan.
-      Do NOT make any code changes yet - only analyze and plan.
+      Do NOT make any code changes yet — only analyze and plan.
 
-      Before creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.
+      {{task_prompt}}
 
+      STEP 1: UNDERSTAND THE REQUIREMENTS
+      If anything is unclear or ambiguous, ask the user clarifying questions using the ask_user_question_kandev tool before proceeding.
+
+      STEP 2: EXPLORE THE CODEBASE
+      - Find similar features and understand how they are implemented.
+      - Identify the architecture and patterns in the relevant area.
+      - Map integration points and data flow.
+
+      STEP 3: CREATE THE PLAN
       Create a plan that includes:
       1. Understanding of the requirements
-      2. Files that need to be modified or created
+      2. Files that need to be modified or created, and what each is responsible for
       3. Step-by-step implementation approach
       4. Potential risks or considerations
+      5. Alternative approaches considered and why the recommended one was chosen
 
-      When including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
+      When including diagrams (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
 
       IMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
       After saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.
-      Do not create any other files during this phase - only use the MCP tool to save the plan.
-
-      {{task_prompt}}
+      Do not create any other files during this phase — only use the MCP tool to save the plan.
     events:
       on_enter:
         - type: enable_plan_mode
@@ -51,19 +59,35 @@ steps:
     allow_manual_move: true
     prompt: |
       [IMPLEMENTATION PHASE]
-      Before starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.
+      Implement the task following the approved plan.
+
+      {{task_prompt}}
+
+      STEP 1: RETRIEVE THE PLAN
+      Before starting, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.
       Review the plan carefully, including any edits the user may have made.
       Acknowledge the plan and any user modifications before proceeding.
 
-      Then implement the task following the plan step-by-step.
+      STEP 2: IMPLEMENT
+      Use a TDD strategy — for each behavior:
+      1. Write a failing test that asserts the expected behavior
+      2. Run the test — confirm it fails with the expected assertion error
+      3. Write the minimum code to make it pass
+      4. Run the test — confirm it passes
+      5. Refactor while keeping tests green
+      6. Commit the change
+
+      Build incrementally — one behavior at a time, tests passing at every step.
+      Follow existing codebase conventions (naming, patterns, file organization).
       You can update the plan during implementation using update_task_plan_kandev if needed.
 
-      {{task_prompt}}
+      STEP 3: STOP CONDITIONS
+      - If you hit a blocker (missing dependency, unclear requirement, test fails repeatedly): stop and ask the user.
+      - If a fix requires an architectural change (new DB table, new service layer, switching libraries): stop and ask.
+      - After 3 failed fix attempts on the same issue: stop, question the approach, ask the user.
     events:
       on_enter:
         - type: auto_start_agent
-      on_turn_complete:
-        - type: move_to_next
 
   - id: done
     name: Done
