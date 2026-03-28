@@ -47,7 +47,7 @@ Check every changed file for the following. Report issues with `file_path:line_n
 - Backend (Go): new or changed functions/methods should have corresponding tests
 - Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices should have tests
 - We do NOT test React components — skip those
-- Flag untested logic but don't block on it; suggest what tests to add
+- Flag untested logic but don't block on it; suggest what tests to add and recommend `/tdd` for implementation
 
 **Improvements:**
 - Suggest simplifications, better naming, or more idiomatic patterns — but only if the improvement is clear and worth the churn
