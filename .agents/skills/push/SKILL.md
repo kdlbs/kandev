@@ -3,6 +3,8 @@ name: push
 description: Commit and push to the current branch. Use --fixup to also wait for CI/CodeRabbit and fix issues.
 ---
 
+# Push
+
 ## Context
 
 - Current branch: !`git branch --show-current`
@@ -22,12 +24,14 @@ Commit any pending changes and push to the remote branch.
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
-2. **Push** the current branch:
+2. **Safety check:** Verify the current branch is NOT `main` or `master`. If it is, stop and ask the user — direct pushes to the default branch should go through a PR.
+
+3. **Push** the current branch:
    ```bash
    git push
    ```
    If the branch has no upstream, use `git push -u origin <branch>`.
 
-3. **Report** the pushed commit hash and branch.
+4. **Report** the pushed commit hash and branch.
 
-4. **If `--fixup`:** Run `/pr-fixup` to wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
+5. **If `--fixup`:** Run `/pr-fixup` to wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
