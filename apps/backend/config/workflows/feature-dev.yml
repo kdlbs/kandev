@@ -1,0 +1,266 @@
+id: feature-dev
+name: Feature Dev
+description: >-
+  Full development lifecycle: spec with user review, implementation with TDD,
+  automated code review, QA verification, draft PR, and CI fixup. Ideal for
+  features that need quality gates between phases.
+
+steps:
+  - id: todo
+    name: Todo
+    position: 0
+    color: bg-neutral-400
+    allow_manual_move: true
+
+  - id: spec
+    name: Spec
+    position: 1
+    color: bg-purple-500
+    is_start_step: true
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [SPEC PHASE]
+      Analyze this task and create a detailed implementation plan. Do NOT write any code yet.
+
+      {{task_prompt}}
+
+      STEP 1: UNDERSTAND THE PROBLEM
+      - If anything is unclear or ambiguous, ask the user clarifying questions using the ask_user_question_kandev tool before proceeding.
+      - Identify: what problem is being solved, who benefits, what are the constraints.
+
+      STEP 2: EXPLORE THE CODEBASE
+      - Find similar features and understand how they are implemented.
+      - Identify the architecture and patterns in the relevant area.
+      - Map integration points, data flow, and extension points.
+      - Check if the repo has a decision log (e.g. docs/decisions/) and read relevant decisions.
+
+      STEP 3: DESIGN THE SOLUTION
+      - Propose 2-3 approaches with trade-offs and your recommendation.
+      - Map which files will be created or modified and what each is responsible for.
+      - When including diagrams (architecture, sequence, flowcharts), use mermaid syntax in code blocks.
+
+      IMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
+      After saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.
+      Do not create any other files during this phase — only use the MCP tool to save the plan.
+    events:
+      on_enter:
+        - type: enable_plan_mode
+        - type: auto_start_agent
+      on_exit:
+        - type: disable_plan_mode
+
+  - id: work
+    name: Work
+    position: 2
+    color: bg-blue-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [WORK PHASE]
+      Implement the task following the approved plan.
+
+      {{task_prompt}}
+
+      STEP 1: RETRIEVE THE PLAN
+      Before starting, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.
+      Review the plan carefully, including any edits the user may have made.
+      Acknowledge the plan and any user modifications before proceeding.
+
+      STEP 2: IMPLEMENT
+      Use a TDD strategy — for each behavior:
+
+      1. Write a failing test that asserts the expected behavior
+      2. Run the test — confirm it fails with the expected assertion error (not a compile error)
+      3. Write the minimum code to make it pass
+      4. Run the test — confirm it passes
+      5. Refactor while keeping tests green
+      6. Commit the change
+
+      Build incrementally — one behavior at a time, tests passing at every step.
+      Follow existing codebase conventions (naming, patterns, file organization).
+      You can update the plan during implementation using update_task_plan_kandev if needed.
+
+      STEP 3: STOP CONDITIONS
+      - If you hit a blocker (missing dependency, unclear requirement, test fails repeatedly): stop and ask the user.
+      - If a fix requires an architectural change (new DB table, new service layer, switching libraries): stop and ask.
+      - After 3 failed fix attempts on the same issue: stop, question the approach, ask the user.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: review
+    name: Review
+    position: 3
+    color: bg-yellow-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [REVIEW PHASE]
+      Review the changes made in the Work phase for quality, security, and correctness.
+
+      {{task_prompt}}
+
+      STEP 1: DETERMINE WHAT TO REVIEW
+      Determine the default branch (e.g. main, master) and diff against it:
+      - Run: git remote show origin | grep 'HEAD branch' to find the default branch name
+      - Run: git diff origin/<default_branch>...HEAD --name-only to get the list of changed files
+      Read each changed file in full — understand the surrounding code, not just the diff.
+
+      STEP 2: REVIEW THE CHANGES
+      Review across these layers (skip layers that don't apply):
+
+      Security (blockers if found):
+      - No secrets, tokens, or credentials in code
+      - Input validation at system boundaries
+      - No SQL injection, XSS, command injection, or path traversal
+      - Auth and authorization checks on new endpoints
+
+      Logic & correctness:
+      - Edge cases handled (empty input, nil/null, zero, max values)
+      - Error paths covered and not silently swallowed
+      - Race conditions in concurrent code
+
+      Performance:
+      - No N+1 queries (loop with individual DB calls)
+      - No memory leaks (unclosed connections, streams, listeners)
+
+      Code quality:
+      - No dead code, unused imports, or commented-out code
+      - No speculative code (unused flags, one-off abstractions with single call site)
+      - Deep nesting (>3 levels) — suggest early returns
+
+      STEP 3: FIX OR REPORT
+      - Fix directly any issues you can resolve confidently (dead code, unused imports, missing early returns).
+      - For issues needing the author's input, report with file:line, why it matters, and how to fix.
+      - Only report findings you're >=80% confident about.
+
+      Do NOT report issues on code that was not modified in this branch.
+    events:
+      on_enter:
+        - type: reset_agent_context
+        - type: auto_start_agent
+
+  - id: qa
+    name: QA
+    position: 4
+    color: bg-orange-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [QA PHASE]
+      Verify the feature works end-to-end. Your goal is to find bugs, not confirm it works.
+
+      {{task_prompt}}
+
+      STEP 1: UNDERSTAND WHAT WAS BUILT
+      Read the task description and recent commits to understand what the feature should do.
+      Retrieve the task plan using get_task_plan_kandev if available.
+
+      STEP 2: TRACE THE WIRING
+      Before testing behavior, verify the feature is actually connected:
+      - Exports are imported and used (not just defined)
+      - API routes have consumers
+      - Data flows end-to-end: input -> handler -> storage -> response -> display
+
+      STEP 3: TEST THE HAPPY PATH
+      Run the feature as intended. For backend changes, call the API. For frontend changes, trace the UI flow.
+
+      STEP 4: TRY TO BREAK IT
+      Systematically test:
+      - Boundary values: empty input, nil/null, zero, negative, max values, very long strings
+      - Error paths: what happens when dependencies fail?
+      - Concurrency: simultaneous requests to the same resource
+      - Authorization: can the feature be accessed without proper auth?
+
+      STEP 5: VERIFY TEST COVERAGE
+      Check that the implementation has tests covering the behaviors you verified.
+      If tests are missing for critical paths, write them.
+
+      STEP 6: REPORT
+      Summarize: what was verified working, what issues were found (with file:line and how to reproduce), and what test coverage is missing.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: pr
+    name: PR
+    position: 5
+    color: bg-indigo-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [PR PHASE]
+      Create a draft pull request for the changes.
+
+      {{task_prompt}}
+
+      STEP 1: PREPARE
+      - Run formatters and linters to ensure code is clean.
+      - Stage and commit any remaining changes.
+      - Push the branch to origin.
+
+      STEP 2: CHECK FOR PR TEMPLATE
+      Look for a pull request template in the repo:
+      - .github/pull_request_template.md
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - docs/pull_request_template.md
+      If found, read it and follow its structure for the PR body.
+
+      STEP 3: CREATE DRAFT PR
+      Create the PR as a draft:
+      ```bash
+      gh pr create --draft --title "<type>: <description>" --body "<body following template or default>"
+      ```
+      - Title should follow Conventional Commits format if the repo uses it.
+      - If no PR template was found, the body should include: summary of what was built and why, validation steps, and a checklist.
+
+      STEP 4: REPORT
+      Return the PR URL.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: ci-fixup
+    name: CI Fixup
+    position: 6
+    color: bg-amber-500
+    show_in_command_panel: true
+    allow_manual_move: true
+    prompt: |
+      [CI FIXUP PHASE]
+      Wait for CI checks to complete and fix any failures.
+
+      {{task_prompt}}
+
+      STEP 1: FIND THE PR
+      Run gh pr list --head $(git branch --show-current) to find the PR number.
+
+      STEP 2: WAIT FOR CI
+      Poll CI checks until they all resolve:
+      ```bash
+      gh pr checks <number>
+      ```
+      - Poll every 30 seconds, cap at 10 minutes.
+      - Once done, note which checks passed and which failed.
+
+      STEP 3: FIX FAILURES
+      If any CI checks failed:
+      1. Identify the failed run from gh pr checks output.
+      2. Fetch failed logs: gh run view <run-id> --log-failed
+      3. Read the relevant source files at the failing lines.
+      4. Fix the issues (lint errors, test failures, type errors).
+      5. Commit and push the fix.
+      6. Go back to STEP 2 and verify the fix passes.
+
+      STEP 4: REPORT
+      When all checks pass, report the CI status and the PR URL.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: done
+    name: Done
+    position: 7
+    color: bg-green-500
+    allow_manual_move: true

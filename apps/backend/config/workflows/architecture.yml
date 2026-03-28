@@ -20,24 +20,36 @@ steps:
     allow_manual_move: true
     prompt: |
       [ARCHITECTURE PHASE]
-      Analyze and design the architecture for this task.
+      Analyze and design the architecture for this task. Do NOT write any code.
 
-      Before creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.
+      {{task_prompt}}
 
-      When including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
+      STEP 1: UNDERSTAND THE REQUIREMENTS
+      If anything is unclear or ambiguous, ask the user clarifying questions using the ask_user_question_kandev tool before proceeding.
+
+      STEP 2: EXPLORE THE CODEBASE
+      - Find similar features and understand how they are architected.
+      - Identify existing patterns, abstractions, and conventions.
+      - Map integration points, data flow, and system boundaries.
+
+      STEP 3: DESIGN THE ARCHITECTURE
+      Create a design that includes:
+      1. Component overview — what each component does and how they interact
+      2. Interfaces and contracts — how components communicate (APIs, events, shared types)
+      3. Data flow — how data moves through the system from input to output
+      4. File structure — which files will be created or modified
+      5. Trade-offs — alternative approaches considered and why the recommended one was chosen
+      6. Risks and open questions — what could go wrong, what needs further investigation
+
+      When including diagrams (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.
 
       IMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
       After saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.
-      Do not create any other files during this phase - only use the MCP tool to save the plan.
-
-      {{task_prompt}}
+      Do not create any other files during this phase — only use the MCP tool to save the plan.
     events:
       on_enter:
         - type: enable_plan_mode
         - type: auto_start_agent
-      on_turn_complete:
-        - type: disable_plan_mode
-        - type: move_to_next
 
   - id: review
     name: Review

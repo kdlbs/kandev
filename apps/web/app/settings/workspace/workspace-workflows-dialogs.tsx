@@ -138,11 +138,14 @@ export function CreateWorkflowDialog({
 }: CreateWorkflowDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:w-[900px] sm:max-w-none" data-testid="create-workflow-dialog">
+      <DialogContent
+        className="sm:w-[900px] sm:max-w-none max-h-[90vh] flex flex-col"
+        data-testid="create-workflow-dialog"
+      >
         <DialogHeader>
           <DialogTitle>Add Workflow</DialogTitle>
         </DialogHeader>
-        <div className="space-y-6">
+        <div className="space-y-6 overflow-y-auto">
           <div className="space-y-2">
             <Label htmlFor="workflowName">Name</Label>
             <Input
