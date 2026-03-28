@@ -26,7 +26,7 @@ test.describe("Workflow import/export", () => {
     await expect(dialog.getByRole("button", { name: "Copied" })).toBeVisible();
 
     // Close
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close" }).first().click();
     await expect(dialog).not.toBeVisible();
   });
 
@@ -51,7 +51,7 @@ test.describe("Workflow import/export", () => {
     expect(yamlContent).toContain("Review");
     expect(yamlContent).toContain("Done");
 
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close" }).first().click();
   });
 
   test("import via paste creates workflow and shows on page", async ({
@@ -154,7 +154,7 @@ workflows:
     const exportedYaml = await dialog.locator("textarea").inputValue();
     expect(exportedYaml).toContain("Roundtrip WF");
     expect(exportedYaml).toContain("Custom roundtrip prompt");
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close" }).first().click();
 
     // Delete the workflow via API
     await apiClient.deleteWorkflow(wf.id);
