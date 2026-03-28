@@ -152,44 +152,59 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Remove deprecated workflow_step_id column from task_sessions
+	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
+		return err
+	}
 	return nil
 }
 
-// migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
-// to allow ephemeral tasks (quick chat) to have empty workflow_id.
-// SQLite requires recreating the table to remove FK constraints.
-func (r *Repository) migrateTasksRemoveWorkflowFK() error {
-	// Check if migration is needed by looking for the FK constraint
+// recreateTable checks whether tableName's DDL contains triggerPhrase and, if so,
+// runs statements inside a transaction with FK enforcement disabled.
+// This is the standard SQLite pattern for dropping columns or FK constraints,
+// since SQLite has no ALTER TABLE DROP COLUMN / DROP CONSTRAINT.
+// Note: PRAGMA statements cannot run inside a transaction in SQLite, so FK enforcement
+// is toggled outside the transaction. The writer pool must have MaxOpenConns(1) so that
+// the PRAGMA and the subsequent transaction use the same connection.
+func (r *Repository) recreateTable(tableName, triggerPhrase string, statements []string) error {
 	var tableSql string
-	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'`).Scan(&tableSql)
+	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // Table doesn't exist yet, skip migration
+		return nil // Table doesn't exist yet; migration not applicable
 	}
 	if err != nil {
-		return fmt.Errorf("query tasks schema: %w", err)
+		return fmt.Errorf("query %s schema: %w", tableName, err)
 	}
-	if !strings.Contains(tableSql, "FOREIGN KEY (workflow_id)") {
-		return nil // No FK constraint, migration not needed
+	if !strings.Contains(tableSql, triggerPhrase) {
+		return nil // Trigger phrase absent; migration already applied or not needed
 	}
 
-	// Disable FK enforcement to prevent cascade deletes during table recreation.
-	// The writer pool has MaxOpenConns(1), so PRAGMA and subsequent operations use the same connection.
-	// Note: PRAGMA statements cannot run inside a transaction in SQLite.
 	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 		return fmt.Errorf("disable foreign keys: %w", err)
 	}
 	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
 
-	// Wrap migration in a transaction to avoid partial state on failure
 	tx, err := r.db.Beginx()
 	if err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Recreate tasks table without the workflow_id FK constraint
-	// SQLite requires executing statements one at a time
-	statements := []string{
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("migration %s failed: %w", tableName, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration transaction: %w", err)
+	}
+	return nil
+}
+
+// migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
+// to allow ephemeral tasks (quick chat) to have empty workflow_id.
+func (r *Repository) migrateTasksRemoveWorkflowFK() error {
+	return r.recreateTable("tasks", "FOREIGN KEY (workflow_id)", []string{
 		`CREATE TABLE tasks_new (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
@@ -213,20 +228,58 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
-		// Use same index names as initCoreIndexes for consistency
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)`,
-	}
-	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration transaction: %w", err)
-	}
-	return nil
+	})
+}
+
+// migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
+// from task_sessions. Workflow step is now tracked on the task, not the session.
+func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
+	return r.recreateTable("task_sessions", "workflow_step_id", []string{
+		`CREATE TABLE task_sessions_new (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			agent_execution_id TEXT NOT NULL DEFAULT '',
+			container_id TEXT NOT NULL DEFAULT '',
+			agent_profile_id TEXT NOT NULL,
+			executor_id TEXT DEFAULT '',
+			executor_profile_id TEXT DEFAULT '',
+			environment_id TEXT DEFAULT '',
+			repository_id TEXT DEFAULT '',
+			base_branch TEXT DEFAULT '',
+			agent_profile_snapshot TEXT DEFAULT '{}',
+			executor_snapshot TEXT DEFAULT '{}',
+			environment_snapshot TEXT DEFAULT '{}',
+			repository_snapshot TEXT DEFAULT '{}',
+			state TEXT NOT NULL DEFAULT 'CREATED',
+			error_message TEXT DEFAULT '',
+			metadata TEXT DEFAULT '{}',
+			started_at TIMESTAMP NOT NULL,
+			completed_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			is_primary INTEGER DEFAULT 0,
+			is_passthrough INTEGER DEFAULT 0,
+			review_status TEXT DEFAULT '',
+			base_commit_sha TEXT DEFAULT '',
+			task_environment_id TEXT DEFAULT '',
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO task_sessions_new SELECT
+			id, task_id, agent_execution_id, container_id, agent_profile_id,
+			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
+			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, is_passthrough, review_status,
+			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, '')
+		FROM task_sessions`,
+		`DROP TABLE task_sessions`,
+		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state)`,
+	})
 }
 
 type backfillRow struct {
@@ -613,9 +666,10 @@ func (r *Repository) initSessionWorktreeSchema() error {
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL,
 		is_primary INTEGER DEFAULT 0,
-		workflow_step_id TEXT DEFAULT '', -- deprecated: workflow step is now tracked on the task, not the session. Remove on next schema migration.
 		is_passthrough INTEGER DEFAULT 0,
 		review_status TEXT DEFAULT '',
+		base_commit_sha TEXT DEFAULT '',
+		task_environment_id TEXT DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
