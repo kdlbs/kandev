@@ -6,54 +6,74 @@ STEP 1: Determine what to review
 - If the working directory is clean: review ONLY the commits from this branch
   - Use: git log --oneline $(git merge-base origin/main HEAD)..HEAD to list the branch commits
   - Use: git diff $(git merge-base origin/main HEAD) to see the cumulative changes
-  - Do NOT diff directly against origin/main or master — that would include unrelated changes if the branch is outdated
+  - Do NOT diff directly against origin/main or master - that would include unrelated changes if the branch is outdated
+- Read each changed file in full — understand surrounding code, not just the diff
+- Navigate callers, interfaces, and tests to understand changes end-to-end
+- Check git blame on modified sections to understand why code was written a certain way
+- Only REPORT issues on code modified in this changeset, but USE the full codebase for context
 
-STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
+If a code review skill is available (e.g. /code-review, /review), invoke it instead of using the fallback below.
 
-Rules:
-- Each section is OPTIONAL - only include it if you have findings for that category
-- If a section has no findings, omit it entirely
-- Format each finding as: filename:line_number - Description
-- Be specific and reference exact line numbers
-- Keep descriptions concise but actionable
-- Sort findings by severity within each section
-- Focus on logic and design issues, NOT formatting or style that automated tools handle
+STEP 2: Review the changes across these layers (skip layers that don't apply):
 
-Section definitions:
+SECURITY (blockers if found):
+- No secrets, tokens, or credentials in code
+- Input validation at system boundaries (user input, API handlers, external data)
+- No SQL injection, XSS, command injection, or path traversal
+- Auth and authorization checks on new endpoints
+- No insecure crypto (MD5/SHA1 for passwords, weak random)
 
-BUG: Critical issues that will cause runtime errors, crashes, incorrect behavior, data corruption, or logic errors
-- Examples: null/nil dereference, race conditions, incorrect algorithms, type mismatches, resource leaks, deadlocks
+LOGIC & CORRECTNESS:
+- Edge cases handled (empty input, nil/null, zero, max values)
+- Error paths covered and not silently swallowed
+- Race conditions or concurrency issues (unprotected shared state, missing synchronization, goroutine leaks)
+- Broken invariants — state that can become invalid
 
-IMPROVEMENT: Code quality, architecture, security, or maintainability concerns
-- Examples: missing error handling, incorrect access modifiers (public/private/exported), SQL injection vulnerabilities, hardcoded credentials, tight coupling, missing validation, incorrect concurrency patterns
+PERFORMANCE:
+- No N+1 queries (loop with individual DB calls)
+- No memory leaks (unclosed connections, streams, listeners)
+- Algorithm complexity appropriate for data scale (O(n^2) where O(n) is possible)
+- Unnecessary allocations in loops, regex compilation in hot paths, unbounded resource growth
+- Prefer structured concurrency (errgroup, conc) over raw primitives
 
-NITPICK: Significant readability or maintainability issues that impact code understanding
-- Examples: misleading variable/function names, overly complex logic that should be refactored, missing critical comments for complex algorithms, inconsistent error handling patterns
-- EXCLUDE: formatting, whitespace, import ordering, trivial naming preferences, style issues handled by linters/formatters
+CODE QUALITY:
+- No dead code, unused imports, or commented-out code
+- Check for orphaned code: if the change refactored or removed callers, grep for functions/types/exports that lost their last consumer
+- No speculative code (unused flags, one-off abstractions with single call site)
+- No duplicated logic — extract shared helpers or constants
+- Deep nesting (>3 levels) — use early returns
 
-PERFORMANCE: Algorithmic or resource usage problems with measurable impact
-- Examples: O(n²) where O(n) or O(1) is possible, unnecessary allocations in loops, missing indexes for database queries, blocking I/O in hot paths, regex compilation in loops, unbounded resource growth
-- Concurrency-specific: unprotected shared state, missing synchronization, improper use of locks, goroutine leaks, missing context cancellation
-- Prefer structured concurrency libraries (e.g., errgroup, conc) over raw primitives for better error handling and panic recovery
+AI SLOP DETECTION:
+- Comments that restate code or narrate obvious steps
+- Unnecessary try/catch that swallow errors or return silent defaults
+- as any / as unknown casts to dodge type errors instead of fixing types
+- Redundant validation where inputs are already parsed/typed
+- Defensive checks abnormal for the area — compare with surrounding code patterns
 
-Example format:
-## BUG
-- src/handler.go:45 - Dereferencing pointer without nil check will panic when user is not found
-- lib/parser.rs:123 - Loop condition uses <= instead of < causing out-of-bounds access
+STEP 3: Output your findings.
 
-## IMPROVEMENT
-- api/db.go:67 - Database query error ignored, will silently fail and return stale data
-- services/auth.py:34 - Password comparison vulnerable to timing attacks, use constant-time comparison
-- internal/user.go:15 - Type exported but only used internally, should be unexported
+Every finding needs: file:line, what's wrong, why it matters, and how to fix it.
+Only report findings you're >=80% confident about.
 
-## NITPICK
-- components/processor.ts:12 - Function name 'doStuff' doesn't describe what it actually does (transforms user input to API format)
-- utils/cache.go:89 - Error wrapped multiple times making original cause hard to trace
+Use these sections (omit empty ones):
 
-## PERFORMANCE
-- src/repository.go:156 - Linear search through slice on every request, use map for O(1) lookup
-- handlers/api.py:45 - Compiling regex inside handler function, compile once at module level
-- workers/processor.go:78 - Launching unbounded goroutines without limit, use worker pool or semaphore pattern
-- db/queries.go:34 - N+1 query pattern, fetch all related records in single query with join
+## BLOCKER
+Must fix before merge — security holes, data loss risk, broken logic, crashes.
 
-Now review the changes.
+- file:line - Description. Why it matters. How to fix.
+
+## SUGGESTION
+Recommended but doesn't block — performance, architecture, missing tests.
+
+- file:line - Description. Why it matters. How to fix.
+
+End with a verdict: Ready to merge / Ready with suggestions / Blocked — fix blockers first
+
+NOT A FINDING (skip these):
+- Issues on lines or files the change didn't modify — even if they are real bugs
+- Pre-existing code patterns that this change didn't introduce
+- Things linters, typecheckers, or CI catch (imports, types, formatting)
+- Intentional functionality changes directly related to the task
+- Issues explicitly suppressed in code (lint-ignore, nolint comments)
+- Pedantic nitpicks a senior engineer wouldn't flag
+- General "add more tests" without specifying what logic is untested
