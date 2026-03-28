@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI checks and CodeRabbit review on a PR, fix failures and address comments, then push.
+description: Wait for CI checks and automated reviews (CodeRabbit, Greptile) on a PR, fix failures and address comments, then push.
 ---
 
 # PR Fixup
@@ -38,20 +38,28 @@ gh pr checks <number>
 - Cap at **10 minutes** (20 polls). If still running after 10 min, report which checks are stuck and proceed.
 - Once done, note which checks passed and which failed.
 
-### 3. Wait for CodeRabbit review
+### 3. Wait for automated reviews
 
-Check if CodeRabbit has posted or is generating a review. Look at comments from `coderabbitai`:
+Check if CodeRabbit and Greptile have posted or are generating reviews.
 
-**Stop waiting immediately if:**
-- A comment contains `<!-- rate limited by coderabbit.ai -->` — CodeRabbit is rate-limited and won't review this PR.
-- A comment contains `<!-- walkthrough_start -->` — the review is already complete.
+**Bot usernames:** `coderabbitai`, `greptile-apps[bot]`
+
+**CodeRabbit — stop waiting if:**
+- A comment contains `<!-- rate limited by coderabbit.ai -->` — rate-limited, won't review.
+- A comment contains `<!-- walkthrough_start -->` — review complete.
+
+**Greptile — stop waiting if:**
+- A review from `greptile-apps[bot]` exists (posts via the GitHub review API, not issue comments).
 
 **Keep polling if:**
-- No `coderabbitai` comment exists AND `gh pr checks` shows a `CodeRabbit` check that is still `pending` — the review is being generated.
+- A bot hasn't commented yet AND `gh pr checks` shows its check is still `pending`.
 
-Poll every **30 seconds**, cap at **10 minutes**. Fetch comments each poll:
+Poll every **30 seconds**, cap at **10 minutes**. Fetch both issue comments and reviews each poll:
 ```bash
-gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "coderabbitai") | .body'
+# CodeRabbit posts issue comments
+gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "coderabbitai") | {author: .author.login, body: .body}'
+# Greptile posts reviews (with inline review comments)
+gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "greptile-apps[bot]") | {user: .user.login, state: .state}'
 ```
 
 ### 4. Fix failing CI checks
@@ -68,7 +76,7 @@ If any CI checks failed:
 
 ### 5. Triage review comments
 
-Fetch all review comments — both human reviewers and CodeRabbit:
+Fetch all review comments — human reviewers, CodeRabbit, and Greptile:
 
 ```bash
 gh pr view <number> --json reviews,comments
