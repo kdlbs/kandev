@@ -277,7 +277,7 @@ type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
 	// Command is the ACP command for one-shot inference.
-	// e.g., ["npx", "-y", "@zed-industries/claude-agent-acp"]
+	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param

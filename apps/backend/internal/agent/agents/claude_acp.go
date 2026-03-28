@@ -14,7 +14,7 @@ var claudeACPLogoLight []byte
 //go:embed logos/claude_code_dark.svg
 var claudeACPLogoDark []byte
 
-const claudeACPPkg = "@zed-industries/claude-agent-acp"
+const claudeACPPkg = "@agentclientprotocol/claude-agent-acp"
 
 var (
 	_ Agent            = (*ClaudeACP)(nil)
@@ -52,7 +52,7 @@ func (a *ClaudeACP) ID() string          { return "claude-acp" }
 func (a *ClaudeACP) Name() string        { return "Claude ACP Agent" }
 func (a *ClaudeACP) DisplayName() string { return "Claude" }
 func (a *ClaudeACP) Description() string {
-	return "Anthropic Claude coding agent using the ACP protocol via the Zed Industries bridge."
+	return "Anthropic Claude coding agent using the ACP protocol via the agentclientprotocol bridge."
 }
 func (a *ClaudeACP) Enabled() bool     { return true }
 func (a *ClaudeACP) DisplayOrder() int { return 1 }

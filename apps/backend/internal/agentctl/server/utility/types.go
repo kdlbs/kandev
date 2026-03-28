@@ -25,7 +25,7 @@ type PromptRequest struct {
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
 	// Command is the ACP command for one-shot inference.
-	// e.g., ["npx", "-y", "@zed-industries/claude-agent-acp"]
+	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model.
 	ModelFlag []string `json:"model_flag,omitempty"`
