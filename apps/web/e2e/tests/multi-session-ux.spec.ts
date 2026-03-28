@@ -81,9 +81,9 @@ test.describe("Multi-session UX", () => {
       )
       .toBe(2);
 
-    // Verify tabs show numbered labels like "#1" and "#2"
-    const tab1 = session.sessionTabByText("#1");
-    const tab2 = session.sessionTabByText("#2");
+    // Verify tabs show index badge and agent label
+    const tab1 = session.sessionTabByText("1");
+    const tab2 = session.sessionTabByText("2");
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await expect(tab2).toBeVisible({ timeout: 10_000 });
   });
@@ -183,7 +183,7 @@ test.describe("Multi-session UX", () => {
       .toBe(2);
 
     // Right-click on session #1 tab and click Delete
-    const tab1 = session.sessionTabByText("#1");
+    const tab1 = session.sessionTabByText("1");
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await tab1.click({ button: "right" });
 
@@ -243,7 +243,7 @@ test.describe("Multi-session UX", () => {
     const session1Id = sorted[0].id;
 
     // Right-click on session #1 tab → Delete → Confirm
-    const tab1 = session.sessionTabByText("#1");
+    const tab1 = session.sessionTabByText("1");
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await tab1.click({ button: "right" });
 

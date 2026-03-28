@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
+import { AgentLogo } from "@/components/agent-logo";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -55,7 +56,18 @@ function useSessionTabState(sessionId: string | undefined) {
     const profile = state.agentProfiles.items.find(
       (p: { id: string }) => p.id === session.agent_profile_id,
     );
-    return profile?.label ?? null;
+    if (!profile) return null;
+    const parts = profile.label.split(" \u2022 ");
+    return parts[1] || parts[0] || profile.label;
+  });
+  const agentName = useAppStore((state) => {
+    if (!sessionId) return null;
+    const session = state.taskSessions.items[sessionId];
+    if (!session?.agent_profile_id) return null;
+    return (
+      state.agentProfiles.items.find((p: { id: string }) => p.id === session.agent_profile_id)
+        ?.agent_name ?? null
+    );
   });
   const sessionNumber = useAppStore((state) => {
     if (!sessionId) return null;
@@ -76,7 +88,7 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!activeTaskId) return 0;
     return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
   });
-  return { isPrimary, sessionState, taskId, agentLabel, sessionNumber, sessionCount };
+  return { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount };
 }
 
 function useSessionTabActions(
@@ -139,22 +151,76 @@ function useSessionTabActions(
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
 }
 
+function DeleteSessionDialog({
+  open,
+  onOpenChange,
+  isPrimary,
+  sessionCount,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isPrimary: boolean;
+  sessionCount: number;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete session?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>This will permanently delete the conversation history with this session.</p>
+                {isPrimary && sessionCount > 1 && (
+                  <p className="mt-2 font-medium">
+                    This is the primary session. Another session will be set as primary.
+                  </p>
+                )}
+                {sessionCount === 1 && (
+                  <p className="mt-2 font-medium">This is the only session for this task.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                onOpenChange(false);
+                onConfirm();
+              }}
+              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+  );
+}
+
 /**
  * Custom dockview tab for session panels.
- * Shows a star icon for primary sessions; right-click context menu for lifecycle actions.
+ * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
  */
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const { isPrimary, sessionState, taskId, agentLabel, sessionNumber, sessionCount } =
+  const { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount } =
     useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isActive, setIsActive] = useState(api.isActive);
 
   useEffect(() => {
-    const label = sessionNumber && agentLabel ? `#${sessionNumber} ${agentLabel}` : agentLabel;
-    if (label && api.title !== label) api.setTitle(label);
-  }, [agentLabel, sessionNumber, api]);
+    const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
+    return () => disposable.dispose();
+  }, [api]);
+
+  useEffect(() => {
+    if (agentLabel && api.title !== agentLabel) api.setTitle(agentLabel);
+  }, [agentLabel, api]);
 
   return (
     <>
@@ -166,6 +232,18 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           <div className="flex items-center">
             {isPrimary && (
               <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
+            )}
+            {sessionNumber != null && (
+              <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
+                {sessionNumber}
+              </span>
+            )}
+            {agentName && (
+              <AgentLogo
+                agentName={agentName}
+                size={14}
+                className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
+              />
             )}
             <DockviewDefaultTab {...props} />
           </div>
@@ -203,38 +281,13 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete session?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p>This will permanently delete the conversation history with this session.</p>
-                {isPrimary && sessionCount > 1 && (
-                  <p className="mt-2 font-medium">
-                    This is the primary session. Another session will be set as primary.
-                  </p>
-                )}
-                {sessionCount === 1 && (
-                  <p className="mt-2 font-medium">This is the only session for this task.</p>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setConfirmDelete(false);
-                actions.handleDelete();
-              }}
-              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteSessionDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        isPrimary={isPrimary}
+        sessionCount={sessionCount}
+        onConfirm={actions.handleDelete}
+      />
     </>
   );
 }

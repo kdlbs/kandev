@@ -12,14 +12,20 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
+import { AgentLogo } from "@/components/agent-logo";
 import type { TaskSession } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
-function resolveAgentLabel(session: TaskSession, labelsById: Record<string, string>): string {
-  if (session.agent_profile_id && labelsById[session.agent_profile_id]) {
-    return labelsById[session.agent_profile_id];
-  }
-  return "Unknown agent";
+type AgentInfo = { label: string; agentName: string };
+
+function resolveAgentInfo(
+  session: TaskSession,
+  profilesById: Record<string, AgentProfileOption>,
+): AgentInfo {
+  const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
+  if (!profile) return { label: "Unknown agent", agentName: "" };
+  const parts = profile.label.split(" \u2022 ");
+  return { label: parts[1] || parts[0] || profile.label, agentName: profile.agent_name };
 }
 
 /**
@@ -37,8 +43,8 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
     return task?.primarySessionId ?? null;
   });
 
-  const agentLabelsById = useMemo(
-    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p.label])),
+  const profilesById = useMemo(
+    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p])),
     [agentProfiles],
   );
 
@@ -66,18 +72,21 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
     <>
       <DropdownMenuLabel className="text-xs text-muted-foreground">Agents</DropdownMenuLabel>
       {sortedSessions.map((session, index) => {
-        const label = resolveAgentLabel(session, agentLabelsById);
+        const info = resolveAgentInfo(session, profilesById);
         const isPrimary = session.id === primarySessionId;
         const isOpen = Boolean(api?.getPanel(`session:${session.id}`));
         return (
           <DropdownMenuItem
             key={session.id}
-            onClick={() => handleClick(session.id, `#${index + 1} ${label}`, groupId)}
+            onClick={() => handleClick(session.id, info.label, groupId)}
             className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
             data-testid={`reopen-session-${session.id}`}
           >
             <span className="w-5 shrink-0 text-muted-foreground text-right">#{index + 1}</span>
-            <span className="flex-1 truncate">{label}</span>
+            {info.agentName && (
+              <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />
+            )}
+            <span className="flex-1 truncate">{info.label}</span>
             {isPrimary && <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />}
             {session.state !== "RUNNING" &&
               session.state !== "STARTING" &&

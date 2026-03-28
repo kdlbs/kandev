@@ -181,30 +181,20 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
     if (!session?.agent_profile_id) return null;
-    return (
-      state.agentProfiles.items.find((p: { id: string }) => p.id === session.agent_profile_id)
-        ?.label ?? null
+    const profile = state.agentProfiles.items.find(
+      (p: { id: string }) => p.id === session.agent_profile_id,
     );
-  });
-  const sessionNumber = useAppStore((state) => {
-    if (!sessionId || !isSessionTab) return null;
-    const taskId = state.tasks.activeTaskId;
-    const sessions = taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null;
-    if (!sessions) return null;
-    const sorted = [...sessions].sort(
-      (a: { started_at: string }, b: { started_at: string }) =>
-        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-    );
-    const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
-    return idx >= 0 ? idx + 1 : null;
+    if (!profile) return null;
+    const parts = profile.label.split(" \u2022 ");
+    return parts[1] || parts[0] || profile.label;
   });
   useEffect(() => {
     let label = "Agent";
     if (isSessionTab && agentLabel) {
-      label = sessionNumber ? `#${sessionNumber} ${agentLabel}` : agentLabel;
+      label = agentLabel;
     }
     setPanelTitle(panelId, label);
-  }, [panelId, isSessionTab, agentLabel, sessionNumber]);
+  }, [panelId, isSessionTab, agentLabel]);
 }
 
 function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {

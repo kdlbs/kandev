@@ -13,6 +13,7 @@ import {
 } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconGitBranch, IconPaperclip } from "@tabler/icons-react";
+import { AgentLogo } from "@/components/agent-logo";
 import {
   processFile,
   formatBytes,
@@ -49,7 +50,7 @@ export function EnvironmentBadges({
   );
 }
 
-export type SessionOption = { id: string; label: string };
+export type SessionOption = { id: string; label: string; index?: number; agentName?: string };
 
 /** Unified context selector: Blank, Copy prompt, and per-session summarize options. */
 export function ContextSelect({
@@ -106,7 +107,17 @@ export function ContextSelect({
                     value={`summarize:${opt.id}`}
                     className="text-xs cursor-pointer"
                   >
-                    {opt.label}
+                    <span className="inline-flex items-center gap-1.5">
+                      {opt.index != null && (
+                        <span className="text-[10px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1 py-0.5">
+                          {opt.index}
+                        </span>
+                      )}
+                      {opt.agentName && (
+                        <AgentLogo agentName={opt.agentName} size={14} className="shrink-0" />
+                      )}
+                      {opt.label}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectGroup>

@@ -95,7 +95,9 @@ function useSessionOptions(taskId: string) {
     );
     return sorted.map((s, idx) => {
       const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      return { id: s.id, label: `#${idx + 1} ${profile?.label ?? "Agent"}` };
+      const parts = profile?.label.split(" \u2022 ");
+      const name = parts?.[1] || parts?.[0] || "Agent";
+      return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
   }, [sessions, agentProfiles]);
 }
