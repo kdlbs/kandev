@@ -13,9 +13,11 @@ Review the current changes in the Kandev codebase (Go + Next.js monorepo). Every
 
 Invoke the `/verify` skill to ensure all formatters, linters, typechecks, and tests pass. Do NOT proceed with review until verify passes clean.
 
-### 2. Identify changed files
+### 2. Identify changed files and check scope
 
 Run `git diff --name-only` (and `git diff --cached --name-only` for staged changes) to get the list of modified files. Read each changed file.
+
+For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
 
 ### 3. Review for issues
 
@@ -53,8 +55,16 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Code quality:**
 - No duplicated logic — extract shared helpers or constants
 - No dead code, unused imports, or commented-out code
+- No speculative code — unused flags/options, "reserved for future" scaffolding, one-off abstractions with a single call site, options parsed but never used
 - Naming clear and consistent with project conventions
 - Deep nesting (>3 levels) — use early returns
+
+**AI slop detection:**
+- Comments that restate code or narrate obvious steps
+- Unnecessary try/catch that swallow errors or return silent defaults in trusted internal paths
+- Redundant validation where inputs are already parsed/typed
+- `as any` or `as unknown as X` casts used to dodge type errors instead of fixing types
+- Defensive checks abnormal for the area of the codebase — compare with surrounding code patterns
 
 **Testing:**
 - Backend (Go): new or changed functions/methods should have corresponding tests
@@ -98,6 +108,7 @@ Use this format:
 ---
 
 **Rules:**
+- Only report findings you're >=80% confident about — quality over quantity
 - Don't mark style preferences as blockers — linters cover formatting
 - Every criticism needs a suggested fix
 - Don't give feedback on code you didn't read
