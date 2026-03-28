@@ -51,7 +51,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Missing database indexes for new query patterns
 - Algorithm complexity appropriate for the data scale
 
-**Complexity limits** (enforced by CI — catch early):
+**Complexity limits** (CI also enforces these, but catch them early to avoid pushing and waiting):
 - Go: functions ≤80 lines, ≤50 statements, cyclomatic ≤15, cognitive ≤30, nesting ≤5
 - TS: files ≤600 lines, functions ≤100 lines, cyclomatic ≤15, cognitive ≤20, nesting ≤4
 - If too large or complex, split into smaller cohesive files/functions
@@ -121,4 +121,4 @@ Use this format:
 
 **Not a finding (skip these):**
 - Pre-existing issues on lines the change didn't modify
-- Things linters, typecheckers, or CI already catch (imports, types, formatting)
+- Things linters, typecheckers, or CI already catch (imports, types, formatting) — exception: still report complexity-limit violations since they require code changes to fix

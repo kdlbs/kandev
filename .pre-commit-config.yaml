@@ -31,14 +31,14 @@ repos:
     hooks:
       - id: prettier-format
         name: Prettier format (web/cli/packages)
-        entry: bash -c 'cd apps && printf "%s\n" "$@" | sed "s|^apps/||" | xargs pnpm exec prettier --write --ignore-unknown' --
+        entry: bash -c 'cd apps || exit 1; args=(); for f in "$@"; do args+=("${f#apps/}"); done; pnpm exec prettier --write --ignore-unknown "${args[@]}"' --
         language: system
         files: ^apps/(web|cli|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|css|scss)$
         pass_filenames: true
 
       - id: web-lint
         name: Web lint (changed files only)
-        entry: bash -c 'cd apps/web && printf "%s\n" "$@" | sed "s|^apps/web/||" | xargs pnpm exec eslint --max-warnings 0' --
+        entry: bash -c 'cd apps/web || exit 1; args=(); for f in "$@"; do args+=("${f#apps/web/}"); done; pnpm exec eslint --max-warnings 0 "${args[@]}"' --
         language: system
         files: ^apps/web/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true

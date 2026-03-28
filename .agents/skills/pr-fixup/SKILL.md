@@ -108,19 +108,29 @@ Then classify:
 
 Every comment must get a response — either a fix or a reply explaining why it was skipped.
 
+**Important: issue comments vs review comments use different APIs:**
+- **Review comments** (inline, from `gh api repos/:owner/:repo/pulls/<number>/comments`) — reply via `/pulls/<number>/comments/<comment_id>/replies`, react via `/pulls/comments/<comment_id>/reactions`
+- **Issue comments** (conversation timeline, from `gh pr view --json comments` — e.g., CodeRabbit walkthrough) — reply by posting a new comment via `gh pr comment <number> --body "..."`, react via `/issues/comments/<comment_id>/reactions`
+
 **For valid comments:**
 1. Read the file at the referenced line
 2. Implement the fix
 3. React with thumbs up:
    ```bash
+   # For review comments:
    gh api repos/:owner/:repo/pulls/comments/<comment_id>/reactions -f content="+1"
+   # For issue comments:
+   gh api repos/:owner/:repo/issues/comments/<comment_id>/reactions -f content="+1"
    ```
 4. Resolve the review thread (see below for thread ID retrieval)
 
 **For skipped comments** (already addressed, nitpick, wrong, or outdated):
 1. Reply to the comment explaining why it was skipped:
    ```bash
+   # For review comments:
    gh api repos/:owner/:repo/pulls/<number>/comments/<comment_id>/replies -f body="<explanation>"
+   # For issue comments:
+   gh pr comment <number> --body "<explanation>"
    ```
    Examples:
    - "This is already handled by X on line Y."

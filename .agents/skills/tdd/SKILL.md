@@ -21,7 +21,7 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 - **Go unit** (`apps/backend/`): test file next to source as `*_test.go`. Run:
   ```bash
-  go test -v -run TestName ./internal/path/to/package/...
+  cd apps/backend && go test -v -run TestName ./internal/path/to/package/...
   ```
 - **TypeScript unit** (`apps/web/lib/`): test file next to source as `*.test.ts`. Run:
   ```bash
@@ -32,7 +32,6 @@ Wrote code before a test? Delete it. Start over from a failing test.
   make test-e2e                                                    # all tests, headless
   cd apps && pnpm --filter @kandev/web e2e -- tests/my-test.spec.ts  # single file
   make test-e2e-headed                                             # with visible browser
-  ```
   ```
 
 Choose the right level: unit tests for isolated logic, web E2E for user-facing flows.
