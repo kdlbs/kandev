@@ -47,6 +47,8 @@ steps:
       on_enter:
         - type: enable_plan_mode
         - type: auto_start_agent
+      on_exit:
+        - type: disable_plan_mode
 
   - id: work
     name: Work
@@ -100,7 +102,9 @@ steps:
       {{task_prompt}}
 
       STEP 1: DETERMINE WHAT TO REVIEW
-      Run git diff origin/main...HEAD --name-only to get the list of changed files.
+      Determine the default branch (e.g. main, master) and diff against it:
+      - Run: git remote show origin | grep 'HEAD branch' to find the default branch name
+      - Run: git diff origin/<default_branch>...HEAD --name-only to get the list of changed files
       Read each changed file in full — understand the surrounding code, not just the diff.
 
       STEP 2: REVIEW THE CHANGES
