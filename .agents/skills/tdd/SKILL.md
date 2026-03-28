@@ -67,6 +67,25 @@ Return to step 1 for the next behavior or edge case. Continue until the feature 
 
 Run `/verify` to ensure all formatters, linters, typechecks, and tests pass across the monorepo.
 
+## Testing anti-patterns
+
+**Don't test mock behavior:**
+- If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.
+
+**Don't add test-only methods to production code:**
+- `destroy()`, `reset()`, `_testHelper()` that only tests call — put these in test utilities, not production classes.
+
+**Mock minimally and understand dependencies:**
+- Before mocking, ask: what side effects does the real method have? Does the test depend on any of them?
+- Mock the slow/external part (network, disk), not the method the test depends on.
+- If mock setup is longer than test logic, consider an integration test instead.
+
+**Don't use incomplete mocks:**
+- Mock the complete data structure as it exists in reality, not just fields your test uses. Partial mocks hide bugs when downstream code accesses omitted fields.
+
+**Never swallow errors in tests:**
+- `try/catch` that silently ignores failures in test helpers or setup — these hide real failures.
+
 ## Red flags
 
 - Writing production code before a failing test exists — delete and start over
@@ -74,3 +93,5 @@ Run `/verify` to ensure all formatters, linters, typechecks, and tests pass acro
 - Fixing a test to make it pass instead of fixing the production code
 - Large jumps — multiple behaviors implemented between test runs
 - Skipping the refactor step
+- Mock setup longer than test logic — consider integration test
+- Asserting on mock elements instead of real behavior

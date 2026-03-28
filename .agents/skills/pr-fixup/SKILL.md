@@ -83,11 +83,26 @@ gh pr view <number> --json reviews,comments
 gh api repos/:owner/:repo/pulls/<number>/comments
 ```
 
-For each comment, decide:
+**Verify before implementing.** Do not blindly accept review feedback — evaluate each comment technically:
+
+For each comment:
+1. Restate the requirement in your own words — if you can't, ask for clarification
+2. Check against the codebase: is the suggestion correct for THIS code?
+3. Check if it breaks existing functionality or conflicts with architectural decisions
+4. YAGNI check: if the suggestion adds unused features ("implement properly"), grep for actual usage first
+
+Then classify:
 - **Valid and actionable** — real issue (bug, missing edge case, naming, architecture, code quality). Fix it.
 - **Already addressed** — the code already handles what the comment suggests. Skip.
 - **Nitpick or preference** — subjective style not covered by linters. Skip unless the reviewer insists.
-- **Wrong or outdated** — misunderstands the code or refers to old state. Skip.
+- **Wrong or outdated** — misunderstands the code, refers to old state, or is technically incorrect. Push back with reasoning.
+
+**Push back when:**
+- The suggestion breaks existing functionality
+- The reviewer lacks full context (explain what they're missing)
+- It violates YAGNI (the feature is unused)
+- It's technically incorrect for this stack
+- It conflicts with architectural decisions
 
 ### 6. Address each comment
 
