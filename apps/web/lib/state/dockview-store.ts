@@ -451,14 +451,19 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
       }
       return;
     }
-    saveOutgoingSession(api, oldSessionId, preMaximizeLayout);
+    // When oldSessionId is null but there is a live layout session (e.g. the
+    // useSessionSwitchCleanup hook fires after passing through a null state),
+    // fall back to currentLayoutSessionId so we correctly save and release the
+    // outgoing session rather than silently skipping it.
+    const effectiveOld = oldSessionId ?? currentLayoutSessionId;
+    saveOutgoingSession(api, effectiveOld, preMaximizeLayout);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
       if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
       const ids = performSessionSwitch({
         api,
-        oldSessionId,
+        oldSessionId: effectiveOld,
         newSessionId,
         safeWidth: api.width,
         safeHeight: api.height,

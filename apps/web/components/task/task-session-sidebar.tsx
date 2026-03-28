@@ -274,11 +274,14 @@ async function prepareAndSwitchTask(
   setPreparingTaskId: (id: string | null) => void,
 ): Promise<boolean> {
   setPreparingTaskId(taskId);
+  // Capture before the async launch — WS events may update activeSessionId
+  // by the time launchSession resolves, causing the layout switch to use the
+  // wrong "old" session and leave stale panels (e.g. plan panel) visible.
+  const oldSessionId = store.getState().tasks.activeSessionId;
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
     if (resp.session_id) {
-      const oldSessionId = store.getState().tasks.activeSessionId;
       switchToSession(taskId, resp.session_id, oldSessionId);
       // Apply PR review layout if the task has PR metadata
       if (store.getState().taskPRs.byTaskId[taskId]) {
