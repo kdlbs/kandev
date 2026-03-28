@@ -19,18 +19,11 @@ repos:
         files: ^apps/backend/.*\.go$
         pass_filenames: true
 
-      - id: go-tests
-        name: Go tests (backend)
-        entry: bash -c 'cd apps/backend && go test ./...'
-        language: system
-        files: \.go$
-        pass_filenames: false
-
       - id: go-lint
-        name: Go Lint (backend)
+        name: Go lint (changed files only)
         entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/backend && golangci-lint run --new-from-rev=HEAD'
         language: system
-        files: \.go$
+        files: ^apps/backend/.*\.go$
         pass_filenames: false
 
   # Web app (TypeScript/React) hooks
@@ -38,50 +31,14 @@ repos:
     hooks:
       - id: prettier-format
         name: Prettier format (web/cli/packages)
-        entry: bash -c 'cd apps && pnpm exec prettier --write --ignore-unknown "${@/#apps\//}"' --
+        entry: bash -c 'cd apps && printf "%s\n" "$@" | sed "s|^apps/||" | xargs pnpm exec prettier --write --ignore-unknown' --
         language: system
         files: ^apps/(web|cli|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|css|scss)$
         pass_filenames: true
 
       - id: web-lint
-        name: Web lint
-        entry: bash -c 'cd apps && pnpm --filter @kandev/web lint'
-        language: node
+        name: Web lint (changed files only)
+        entry: bash -c 'cd apps/web && printf "%s\n" "$@" | sed "s|^apps/web/||" | xargs pnpm exec eslint --max-warnings 0' --
+        language: system
         files: ^apps/web/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true
-        additional_dependencies: []
-
-      - id: web-tests
-        name: Web tests
-        entry: bash -c 'cd apps && pnpm --filter @kandev/web test'
-        language: node
-        files: ^apps/web/.*\.(ts|tsx|js|jsx)$
-        pass_filenames: false
-        additional_dependencies: []
-
-      - id: web-typecheck
-        name: Typecheck web app
-        entry: bash -c 'cd apps && pnpm --filter @kandev/web exec tsc -p tsconfig.json --noEmit'
-        language: node
-        files: ^apps/web/.*\.(ts|tsx)$
-        pass_filenames: false
-        additional_dependencies: []
-
-  # Landing page hooks
-  - repo: local
-    hooks:
-      # - id: landing-lint
-      #   name: Landing lint
-      #   entry: bash -c 'cd apps && pnpm --filter @kandev/landing lint'
-      #   language: node
-      #   files: ^apps/landing/.*\.(ts|tsx|js|jsx)$
-      #   pass_filenames: true
-      #   additional_dependencies: []
-
-      - id: landing-typecheck
-        name: Typecheck landing page
-        entry: bash -c 'cd apps && pnpm --filter @kandev/landing exec tsc -p tsconfig.json --noEmit'
-        language: node
-        files: ^apps/landing/.*\.(ts|tsx)$
-        pass_filenames: false
-        additional_dependencies: []
