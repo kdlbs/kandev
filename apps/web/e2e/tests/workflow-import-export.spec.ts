@@ -30,10 +30,7 @@ test.describe("Workflow import/export", () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test("per-workflow export button shows that workflow's YAML", async ({
-    testPage,
-    seedData,
-  }) => {
+  test("per-workflow export button shows that workflow's YAML", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -54,10 +51,7 @@ test.describe("Workflow import/export", () => {
     await dialog.getByRole("button", { name: "Close" }).first().click();
   });
 
-  test("import via paste creates workflow and shows on page", async ({
-    testPage,
-    seedData,
-  }) => {
+  test("import via paste creates workflow and shows on page", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -99,10 +93,7 @@ workflows:
     await expect(card.getByText("Closed")).toBeVisible();
   });
 
-  test("import shows skip message for duplicate workflow name", async ({
-    testPage,
-    seedData,
-  }) => {
+  test("import shows skip message for duplicate workflow name", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
