@@ -220,6 +220,8 @@ export const createSessionSlice: StateCreator<
           (s) => s.id !== sessionId,
         );
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (draft as any).environmentIdBySessionId[sessionId];
     }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {

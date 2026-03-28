@@ -254,7 +254,7 @@ function NewSessionForm({
         if (result && promptRef.current) {
           promptRef.current.value = result;
           setHasPrompt(true);
-        } else if (result === null) {
+        } else {
           setContextValue("blank");
           toast({
             title: "Summarize failed",
@@ -283,18 +283,19 @@ function NewSessionForm({
           attachments: toMessageAttachments(attachments),
         });
         const response = await launchSession(request);
-        if (response.session_id) {
-          const profile = agentProfiles.find(
-            (p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId),
-          );
-          activateNewSession(
-            response.session_id,
-            taskId,
-            profile?.label ?? "Agent",
-            groupId,
-            setActiveSession,
-          );
+        if (!response.session_id) {
+          throw new Error("Session created but no session ID returned");
         }
+        const profile = agentProfiles.find(
+          (p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId),
+        );
+        activateNewSession(
+          response.session_id,
+          taskId,
+          profile?.label ?? "Agent",
+          groupId,
+          setActiveSession,
+        );
         onClose();
       } catch (error) {
         toast({

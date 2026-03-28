@@ -127,10 +127,10 @@ test.describe("New session dialog", () => {
     await expect(session.sessionTabByText("#1")).toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabByText("#2")).toBeVisible({ timeout: 15_000 });
 
-    // 9. Verify the new session is active (chat loads fresh context)
+    // 8. Verify the new session is active (chat loads fresh context)
     await session.waitForLoad();
 
-    // 10. Verify the backend has two sessions
+    // 9. Verify the backend has two sessions
     const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
     expect(allSessions).toHaveLength(2);
   });

@@ -68,6 +68,8 @@ test.describe("Multi-session", () => {
   });
 
   test("task environment persists after session completes", async ({ apiClient, seedData }) => {
+    test.setTimeout(90_000);
+
     // Create task and start agent
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

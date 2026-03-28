@@ -114,6 +114,7 @@ test.describe("Task environment", () => {
       .toBe(true);
 
     const env = await apiClient.getTaskEnvironment(task.id);
+    expect(env).not.toBeNull();
     const { sessions } = await apiClient.listTaskSessions(task.id);
 
     // If the session has a worktree_path, it should match the environment's worktree

@@ -7,7 +7,7 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
-  if (!layout?.panels || !layout?.grid?.root) return layout;
+  if (!layout?.panels || !layout?.grid?.root) return null;
 
   const invalidIds = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -9,7 +9,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
  * This ensures global panels (changes, files, plan) switch context.
  */
 export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
-  api.onDidActivePanelChange((panel) => {
+  return api.onDidActivePanelChange((panel) => {
     if (!panel) return;
     // Ignore panel activations during layout operations (e.g. drag-to-split,
     // layout restore) to avoid cascading layout switches.
@@ -40,7 +40,7 @@ export function setupChatPanelSafetyNet(
   api: DockviewReadyEvent["api"],
   appStore: StoreApi<AppState>,
 ) {
-  api.onDidRemovePanel((panel) => {
+  return api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isChatPanel = panel.id === "chat" || panel.id.startsWith("session:");
     if (!isChatPanel) return;

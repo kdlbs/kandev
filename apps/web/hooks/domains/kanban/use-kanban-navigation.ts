@@ -41,6 +41,8 @@ export function useKanbanNavigation({
         navigateToTask(task);
       } else if (onPreviewTask) {
         onPreviewTask(task);
+      } else {
+        navigateToTask(task);
       }
     },
     [isMobile, enablePreviewOnClick, onPreviewTask, navigateToTask],

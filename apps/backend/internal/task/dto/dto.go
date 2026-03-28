@@ -172,9 +172,10 @@ type TaskSessionDTO struct {
 	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time               `json:"updated_at"`
 	// Workflow fields
-	IsPrimary     bool    `json:"is_primary"`
-	IsPassthrough bool    `json:"is_passthrough"`
-	ReviewStatus  *string `json:"review_status,omitempty"`
+	IsPrimary         bool    `json:"is_primary"`
+	IsPassthrough     bool    `json:"is_passthrough"`
+	ReviewStatus      *string `json:"review_status,omitempty"`
+	TaskEnvironmentID string  `json:"task_environment_id,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -577,9 +578,10 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:     session.IsPrimary,
-		IsPassthrough: session.IsPassthrough,
-		ReviewStatus:  session.ReviewStatus,
+		IsPrimary:         session.IsPrimary,
+		IsPassthrough:     session.IsPassthrough,
+		ReviewStatus:      session.ReviewStatus,
+		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

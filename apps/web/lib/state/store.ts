@@ -445,6 +445,7 @@ const defaultState = {
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
   gitStatus: defaultSessionRuntimeState.gitStatus,
+  environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,

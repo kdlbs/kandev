@@ -36,13 +36,17 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   }
 }
 
-export function setupGroupTracking(api: DockviewReadyEvent["api"]): void {
-  api.onDidActiveGroupChange((group) => {
+export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
+  const d1 = api.onDidActiveGroupChange((group) => {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
   });
   useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  api.onDidLayoutChange(() => trackPinnedWidths(api));
+  const d2 = api.onDidLayoutChange(() => trackPinnedWidths(api));
   trackPinnedWidths(api);
+  return () => {
+    d1.dispose();
+    d2.dispose();
+  };
 }
 
 export function setupLayoutPersistence(

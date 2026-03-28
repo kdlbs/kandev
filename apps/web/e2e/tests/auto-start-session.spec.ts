@@ -9,8 +9,8 @@ test.describe("Auto-start session on task page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    // Create a task with NO agent — just metadata so the auto-start hook can
-    // resolve the agent profile. The description becomes the initial prompt.
+    // Create a task with an agent profile but no existing session — auto-start
+    // will launch one. The description becomes the initial prompt.
     const task = await apiClient.createTask(seedData.workspaceId, "Auto Start Session Task", {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,

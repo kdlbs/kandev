@@ -515,7 +515,9 @@ function useAutoStartSession(
     if (!agentProfileId) return;
     if (startedRef.current) return;
     startedRef.current = true;
-    void handleStartAgent(agentProfileId);
+    handleStartAgent(agentProfileId).catch(() => {
+      startedRef.current = false;
+    });
   }, [task?.id, isLoaded, sessions.length, agentProfileId, handleStartAgent]);
 }
 

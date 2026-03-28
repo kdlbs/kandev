@@ -152,11 +152,12 @@ test.describe("MCP create_task subtask", () => {
     await expect(subtaskTitleInput).toHaveValue(/Subtask Button Parent \/ Subtask \d+/);
 
     // 5. Fill the prompt and submit
+    const parentUrl = testPage.url();
     await testPage.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
     await testPage.getByRole("button", { name: "Create Subtask" }).click();
 
-    // Should navigate to the new subtask's session
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).not.toHaveURL(parentUrl);
 
     // 6. Go back to kanban — subtask card should be visible with parent badge
     await kanban.goto();

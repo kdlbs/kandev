@@ -46,7 +46,7 @@ test.describe("Subtask support", () => {
     );
 
     // Navigate to the session page
-    testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -58,7 +58,7 @@ test.describe("Subtask support", () => {
     await expect(subtaskBtn).toBeVisible({ timeout: 5_000 });
     await subtaskBtn.click();
 
-    // The compact NewSubtaskDialog should open with pre-filled title containing random hex suffix
+    // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
     await expect(titleInput).toHaveValue(/Subtask Parent \/ Subtask \d+/);
