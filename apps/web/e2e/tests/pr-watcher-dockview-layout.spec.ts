@@ -147,8 +147,8 @@ test.describe("PR watcher dockview layout stability", () => {
     // Changes panel verifies the right column rendered
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
-    // Chat may be behind a PR detail tab — click Agent tab to verify it exists
-    await session.clickTab("Agent");
+    // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
+    await session.clickSessionChatTab();
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
 
     // --- Switch to PR task 3 via sidebar ---
@@ -161,7 +161,8 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.planPanel).not.toBeVisible({ timeout: 5_000 });
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
-    await session.clickTab("Agent");
+    // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
+    await session.clickSessionChatTab();
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
   });
 });

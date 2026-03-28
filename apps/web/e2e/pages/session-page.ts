@@ -262,6 +262,15 @@ export class SessionPage {
     await tab.click();
   }
 
+  /**
+   * Click the session/chat tab regardless of its current title.
+   * Session tabs are renamed from "Agent" to "#N AgentName" by useChatSessionTitle,
+   * so this uses the stable data-testid on the ContextMenuTrigger instead.
+   */
+  async clickSessionChatTab(): Promise<void> {
+    await this.page.locator('[data-testid^="session-tab-"]').first().click();
+  }
+
   /** PR files section within the changes panel. */
   prFilesSection(): Locator {
     return this.changes.getByTestId("pr-files-section");
