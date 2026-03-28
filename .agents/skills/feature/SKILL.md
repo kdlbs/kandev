@@ -40,6 +40,13 @@ Systematic feature development: understand the problem, explore the codebase, de
 
 ## Phase 4: Implement with TDD
 
+**You are the coordinator.** Your job is to hold the big picture (requirements, design, file structure, wave progress) and delegate implementation to subagents. Protect your context:
+
+- **Prefer subagents over inline work.** Every task you implement inline fills your context with code details and tool outputs. Delegate to subagents whenever possible — they get fresh context and return only a summary.
+- **Keep coupled tasks small.** If you must implement inline (coupled tasks), keep each task focused and short. Don't read entire files unnecessarily — read only what you need to verify the subagent's work or wire things together.
+- **Don't debug in the coordinator.** If a subagent's task fails quality gates, dispatch a new subagent to fix it rather than debugging inline. Pass the failure details and let the fresh subagent investigate.
+- **Track progress, not details.** For each completed task, note: what was done, which files changed, commit hash. Don't carry the implementation details forward.
+
 ### 4a. Decompose into tasks
 
 Using the file structure map from Phase 3, break the implementation into discrete tasks. Each task should:
@@ -74,7 +81,7 @@ For each wave, follow `/tdd` strictly (RED-GREEN-REFACTOR):
 - Codebase conventions from Phase 2
 - Instruction to follow `/tdd`
 
-**Coupled tasks**: implement inline in the current session.
+**Coupled tasks** (e.g., wiring frontend to backend, integration glue): implement inline but keep it minimal — only the glue code, not full feature implementation.
 
 Wait for all tasks in the wave to complete before moving to the next wave.
 
