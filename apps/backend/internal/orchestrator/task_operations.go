@@ -534,17 +534,25 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
+	if (err != nil || running == nil) &&
+		session.State != models.TaskSessionStateCancelled &&
+		session.State != models.TaskSessionStateFailed {
+		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
+		// the record may already have been cleaned up before the user clicked Resume — allow it.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	if err := validateSessionWorktrees(session); err != nil {
 		return nil, err
 	}
 
-	// Don't resume sessions that are in a terminal state.
+	// Completed sessions cannot be restarted — they require a new session.
+	// Cancelled and failed sessions are restarted fresh: clear the stale resume token so
+	// the agent launches in the same worktree without --resume (the old process is gone).
 	switch session.State {
-	case models.TaskSessionStateFailed, models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
-		return nil, fmt.Errorf("session is in terminal state %s and cannot be resumed", session.State)
+	case models.TaskSessionStateCompleted:
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	case models.TaskSessionStateCancelled, models.TaskSessionStateFailed:
+		s.clearResumeToken(ctx, sessionID)
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
