@@ -22,21 +22,81 @@ steps:
     show_in_command_panel: true
     allow_manual_move: true
     prompt: |
-      Please review the changes in this pull request.
-
-      STEP 1: Determine what to review
-      Review ONLY the changes in this pull request. The task description below contains the PR details and the exact git commands to scope the diff — follow those instructions.
-
-      STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
-
-      Rules:
-      - Each section is OPTIONAL — only include it if you have findings for that category
-      - If a section has no findings, omit it entirely
-      - Format each finding as: filename:line_number - Description
-      - Be specific and reference exact line numbers
-      - Keep descriptions concise but actionable
+      Review the changes in this pull request.
 
       {{task_prompt}}
+
+      STEP 1: DETERMINE WHAT TO REVIEW
+
+      The PR branch is checked out and the full codebase is available. You can and should read surrounding code to understand changes in context.
+      - Extract the PR number from the task description (e.g. from the GitHub URL)
+      - Run: gh pr view <number> --json headRefName,baseRefName to confirm the branch and base
+      - Run: git diff origin/<base_branch>...HEAD --name-only to get the list of changed files
+      - Run: git diff origin/<base_branch>...HEAD to see the full diff
+      - Read each changed file in full — understand the surrounding code, not just the diff
+      - Navigate related files (callers, interfaces, tests) to understand the change end-to-end
+      - Only REPORT issues on code that was modified in this PR, but USE the full codebase for context
+
+      STEP 2: REVIEW THE CHANGES
+
+      Check if any code review skill is available (e.g. /code-review, /review, or similar).
+      If one exists, invoke it — it has project-specific rules.
+      Otherwise, use the fallback review below.
+
+      FALLBACK REVIEW (skip layers that don't apply):
+
+      Security (blockers if found):
+      - No secrets, tokens, or credentials in code
+      - Input validation at system boundaries (user input, API handlers, external data)
+      - No SQL injection, XSS, command injection, or path traversal
+      - Auth and authorization checks on new endpoints
+
+      Logic & correctness:
+      - Edge cases handled (empty input, nil/null, zero, max values)
+      - Error paths covered and not silently swallowed
+      - Race conditions in concurrent code
+
+      Performance:
+      - No N+1 queries (loop with individual DB calls)
+      - No memory leaks (unclosed connections, streams, listeners)
+      - Algorithm complexity appropriate for the data scale
+
+      Architecture:
+      - New abstractions justified — no over-engineering
+      - Concerns cleanly separated (single responsibility)
+
+      Code quality:
+      - No dead code, unused imports, or commented-out code
+      - No speculative code (unused flags, one-off abstractions with single call site)
+      - Deep nesting (>3 levels) — suggest early returns
+
+      AI slop detection:
+      - Comments that restate code or narrate obvious steps
+      - Unnecessary try/catch that swallow errors or return silent defaults
+      - as any / as unknown casts to dodge type errors instead of fixing types
+      - Redundant validation where inputs are already parsed/typed
+
+      OUTPUT FORMAT:
+
+      For each finding, provide: file:line - description, why it matters, and how to fix it.
+      Only report findings you're >=80% confident about.
+
+      Use these sections (omit empty ones):
+
+      BLOCKER (must fix before merge — security, data loss, broken logic):
+      - file:line - description
+
+      SUGGESTION (recommended, doesn't block — performance, architecture, missing tests):
+      - file:line - description
+
+      End with a verdict: Ready to merge / Ready with suggestions / Blocked
+
+      NOT A FINDING (skip these):
+      - Issues on lines or files the PR didn't modify — even if they are real bugs
+      - Pre-existing code patterns that this PR didn't introduce or change
+      - Things linters, typecheckers, or CI catch (imports, types, formatting)
+      - Intentional functionality changes directly related to the PR's purpose
+      - Issues explicitly suppressed in code (lint-ignore, nolint comments)
     events:
       on_enter:
         - type: auto_start_agent

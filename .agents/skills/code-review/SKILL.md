@@ -15,7 +15,11 @@ Invoke the `/verify` skill to ensure all formatters, linters, typechecks, and te
 
 ### 2. Identify changed files and check scope
 
-Run `git diff --name-only` (and `git diff --cached --name-only` for staged changes) to get the list of modified files. Read each changed file.
+Determine the right diff scope:
+- **Local changes**: `git diff --name-only` (unstaged) and `git diff --cached --name-only` (staged)
+- **PR review**: `git diff origin/<base_branch>...HEAD --name-only` to diff against the base branch
+
+Read each changed file in full — understand surrounding code, not just the diff. Navigate callers, interfaces, and tests to understand changes end-to-end.
 
 For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
 
@@ -55,6 +59,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Code quality:**
 - No duplicated logic — extract shared helpers or constants
 - No dead code, unused imports, or commented-out code
+- Check for orphaned code: if the PR refactored or removed callers, grep for functions/types/exports that lost their last consumer
 - No speculative code — unused flags/options, "reserved for future" scaffolding, one-off abstractions with a single call site, options parsed but never used
 - Naming clear and consistent with project conventions
 - Deep nesting (>3 levels) — use early returns
@@ -113,3 +118,7 @@ Use this format:
 - Every criticism needs a suggested fix
 - Don't give feedback on code you didn't read
 - Omit empty severity sections
+
+**Not a finding (skip these):**
+- Pre-existing issues on lines the change didn't modify
+- Things linters, typecheckers, or CI already catch (imports, types, formatting)
