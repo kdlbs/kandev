@@ -138,7 +138,7 @@ func NewMyAgent() *MyAgent {
 
 Key implementation notes:
 
-- **`BuildCommand()`** returns the CLI command for structured protocol mode (the agent communicates via stdin/stdout with a protocol adapter). Include the protocol flag here (e.g. `--experimental-acp`, `--stream-json`).
+- **`BuildCommand()`** returns the CLI command for structured protocol mode (the agent communicates via stdin/stdout with a protocol adapter). Include the protocol flag here (e.g. `--acp`, `--stream-json`).
 - **`Runtime()`** returns configuration used when running the agent in Docker or as a standalone process. Set `Protocol` to tell the adapter factory which transport to use.
 - **`IsInstalled()`** uses the `Detect()` helper with `WithFileExists()` to check for known installation paths. Set `SupportsMCP` and `MCPConfigPaths` on the result.
 - **`ListModels()`** can return a static list or dynamically query the CLI. Use `execAndParse()` from `helpers.go` for dynamic model discovery.
