@@ -40,21 +40,62 @@ Systematic feature development: understand the problem, explore the codebase, de
 
 ## Phase 4: Implement with TDD
 
-Follow `/tdd` strictly. Decide how to execute based on task independence:
+**You are the coordinator.** Your job is to hold the big picture (requirements, design, file structure, wave progress) and delegate implementation to subagents. Protect your context:
 
-**Independent tasks** (separate files/packages, no shared state): dispatch a subagent per task. Each gets a fresh context with the task description, relevant file paths from Phase 3, and codebase conventions from Phase 2. This prevents context pollution and keeps each task focused.
+- **Prefer subagents over inline work.** Every task you implement inline fills your context with code details and tool outputs. Delegate to subagents whenever possible — they get fresh context and return only a summary.
+- **Keep coupled tasks small.** If you must implement inline (coupled tasks), keep each task focused and short. Don't read entire files unnecessarily — read only what you need to verify the subagent's work or wire things together.
+- **Don't debug in the coordinator.** If a subagent's task fails quality gates, dispatch a new subagent to fix it rather than debugging inline. Pass the failure details and let the fresh subagent investigate.
+- **Track progress, not details.** For each completed task, note: what was done, which files changed, commit hash. Don't carry the implementation details forward.
 
-**Coupled tasks** (shared types, sequential data flow, integration work): implement inline in the current session to maintain shared context.
+### 4a. Decompose into tasks
 
-For each behavior or component:
-1. **RED** — write a failing test (unit, or E2E via `/e2e` for user-facing flows)
-2. **GREEN** — write the minimum code to pass
-3. **REFACTOR** — clean up while staying green
-4. Follow codebase conventions from Phase 2
-5. Build incrementally — one behavior at a time, tests passing at every step
+Using the file structure map from Phase 3, break the implementation into discrete tasks. Each task should:
+- Touch a specific set of files
+- Have a clear done condition (test passes, API works, component renders)
+- Be classifiable as independent or coupled
 
-**When things go wrong during implementation:**
-- **Bugs or missing validation discovered:** fix inline, add a test, continue
+### 4b. Group into waves
+
+Subagents share the same worktree, so parallelism is constrained by build boundaries:
+- **Backend (Go)**: packages compile independently — different packages can run in parallel subagents
+- **Frontend (Next.js)**: single build — only ONE subagent can work on frontend at a time
+- **E2E tests**: need full build — only after both backend and frontend changes are done
+- **Coupled tasks** (shared types, sequential data flow): must run sequentially regardless
+
+Group tasks into waves. Example:
+```text
+Wave 1 (parallel): [Backend API handler (subagent), Frontend component + hook (subagent)]
+Wave 2 (sequential): [Wire frontend to API, integration test]
+Wave 3: [E2E test for the full flow]
+```
+
+Max parallelism: 1 frontend subagent + 1-2 backend subagents (if working on independent packages). For small features with 1-3 tasks, skip wave grouping and implement sequentially.
+
+### 4c. Execute wave by wave
+
+For each wave, follow `/tdd` strictly (RED-GREEN-REFACTOR):
+
+**Independent tasks in the wave**: dispatch one subagent per task. Each gets fresh context with:
+- Task description and acceptance criteria
+- Relevant file paths from Phase 3
+- Codebase conventions from Phase 2
+- Instruction to follow `/tdd`
+
+**Coupled tasks** (e.g., wiring frontend to backend, integration glue): implement inline but keep it minimal — only the glue code, not full feature implementation.
+
+Wait for all tasks in the wave to complete before moving to the next wave.
+
+### 4d. Quality gate after each wave
+
+After each wave completes:
+- Backend: `cd apps/backend && go test ./internal/path/...` (changed packages only)
+- Frontend: `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web test`
+- If tests fail, fix before proceeding to the next wave
+- E2E tests only in the final wave or Phase 5 (QA)
+
+### 4e. Stop conditions
+
+- **Bugs or missing validation discovered during a subagent's task:** the subagent fixes it inline. If the bug surfaces after a wave completes (quality gate failure), dispatch a new subagent to fix it — don't debug in the coordinator.
 - **Blocker (missing dependency, unclear requirement, test fails repeatedly):** stop and ask the user
 - **Fix requires architectural change (new DB table, new service layer, switching libraries):** stop and ask — don't make structural decisions silently
 - **3 failed fix attempts on the same issue:** stop, question the approach, ask the user

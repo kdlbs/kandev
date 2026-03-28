@@ -3,6 +3,8 @@ name: pr
 description: Commit, push, and create a PR. Default is ready-for-review with auto-fixup. Use --draft to skip review/fixup.
 ---
 
+# PR
+
 ## Context
 
 - Current git status: !`git status`
@@ -31,13 +33,7 @@ Commit, push, and create a pull request.
 
 4. **Create the PR.** Use `--draft` flag if the user requested draft mode, otherwise create as ready-for-review.
 
-   **PR title** must follow Conventional Commits format (CI validates this via `pr-title.yml`, and it becomes the squash-merge commit used for release notes):
-   - Format: `type(scope): lowercase description` or `type: lowercase description`
-   - Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `chore`, `ci`, `test`
-   - Subject starts with a lowercase letter
-   - Keep under 72 characters
-   - Add `!` after type for breaking changes: `feat!: remove legacy API`
-   - Examples: `feat(ui): add task filter dialog`, `fix: prevent duplicate session on reconnect`
+   **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
    **PR body** must follow the project's pull request template:
    - **Summary** (required): 1–2 sentences of prose, no heading. Lead with the problem/goal, end with the outcome. Say WHY, not what.
