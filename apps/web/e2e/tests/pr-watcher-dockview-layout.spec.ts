@@ -15,8 +15,8 @@ test.describe("PR watcher dockview layout stability", () => {
    *   5. Switch to PR task 3 via sidebar → should have default layout
    *
    * Setup:
-   *   Review step (no auto_start — tasks sit idle after creation)
-   *   Review watch triggers initial poll → 3 tasks created (not started)
+   *   Review step with auto_start_agent on_enter — all 3 tasks get primary
+   *   sessions immediately, so sidebar navigation takes the fast (synchronous) path.
    */
   test("layout remains correct when switching between PR watcher tasks with plan mode", async ({
     testPage,
@@ -32,6 +32,15 @@ test.describe("PR watcher dockview layout stability", () => {
     );
 
     const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0);
+
+    // Configure auto-start so the review watcher immediately launches mock agents
+    // for all 3 PR tasks. By the time the test reaches the sidebar navigation
+    // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
+    // → handleSelectTask takes the fast (synchronous) path instead of the slow
+    // HTTP + WS round-trip that times out in CI.
+    await apiClient.updateWorkflowStep(reviewStep.id, {
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
 
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -141,9 +150,9 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 2 via sidebar ---
     await session.clickTaskInSidebar(prTask2Title);
-    // Wait for navigation to task 2 to complete. The breadcrumb reads from Zustand
-    // activeTaskId which updates immediately when setActiveSession(task2Id) is called.
-    // Using a 30s timeout because the WS session.launch round-trip can be slow in CI.
+    // With auto_start_agent configured, task 2 already has a primarySessionId in
+    // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
+    // and setActiveSession is called immediately.
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })
@@ -164,7 +173,7 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 3 via sidebar ---
     await session.clickTaskInSidebar(prTask3Title);
-    // Same navigation confirmation as task 2
+    // Same fast-path navigation as task 2
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })
