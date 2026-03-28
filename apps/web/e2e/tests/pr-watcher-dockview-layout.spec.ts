@@ -129,6 +129,10 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
     await expect(session.sidebar).toBeVisible();
 
+    // Wait for the mock agent to complete and the layout to be stable before toggling
+    // plan mode. Without this, an in-flight layout restore could swallow the panel add.
+    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+
     // --- Toggle plan mode on task 1 ---
     await session.togglePlanMode();
     await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
@@ -136,14 +140,21 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.sidebar).toBeVisible();
 
     // --- Switch to PR task 2 via sidebar ---
-    await session.taskInSidebar(prTask2Title).click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 30_000 });
+    await session.clickTaskInSidebar(prTask2Title);
+    // Wait for navigation to task 2 to complete. The breadcrumb reads from Zustand
+    // activeTaskId which updates immediately when setActiveSession(task2Id) is called.
+    // Using a 30s timeout because the WS session.launch round-trip can be slow in CI.
+    await expect(
+      testPage
+        .getByRole("navigation", { name: "breadcrumb" })
+        .getByText(prTask2Title, { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
 
     // Task 2: full layout intact — sidebar, chat accessible, changes panel visible,
     // plan panel must NOT leak from task 1, and layout fills the viewport
     await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
     await session.expectNoLayoutGap();
-    await expect(session.planPanel).not.toBeVisible({ timeout: 5_000 });
+    await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
     // Changes panel verifies the right column rendered
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
@@ -152,13 +163,18 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
 
     // --- Switch to PR task 3 via sidebar ---
-    await session.taskInSidebar(prTask3Title).click({ timeout: 15_000 });
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 30_000 });
+    await session.clickTaskInSidebar(prTask3Title);
+    // Same navigation confirmation as task 2
+    await expect(
+      testPage
+        .getByRole("navigation", { name: "breadcrumb" })
+        .getByText(prTask3Title, { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
 
     // Task 3: same layout checks
     await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
     await session.expectNoLayoutGap();
-    await expect(session.planPanel).not.toBeVisible({ timeout: 5_000 });
+    await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
     // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
