@@ -22,7 +22,7 @@ var (
 	_ InferenceAgent   = (*ClaudeACP)(nil)
 )
 
-// ClaudeACP implements Agent for the Zed Industries claude-agent-acp package.
+// ClaudeACP implements Agent for the agentclientprotocol claude-agent-acp package.
 // It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) and wraps the
 // Claude Agent SDK. Used for A/B comparison against the stream-json Claude Code agent.
 type ClaudeACP struct {
