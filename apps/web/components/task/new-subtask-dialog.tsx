@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
+import { Textarea } from "@kandev/ui/textarea";
 import { IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -25,7 +26,14 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { ExecutorProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { IconLoader2 } from "@tabler/icons-react";
-import { ContextSelect } from "./session-dialog-shared";
+import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
+import {
+  ContextSelect,
+  useDialogAttachments,
+  AttachButton,
+  toContextItems,
+} from "./session-dialog-shared";
+import { ContextZone } from "./chat/context-items/context-zone";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -175,6 +183,22 @@ function NewSubtaskForm({
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
   const [executorProfileId, setExecutorProfileId] = useState("");
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    attachments,
+    isDragging,
+    fileInputRef,
+    handleRemoveAttachment,
+    handlePaste,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleAttachClick,
+    handleFileInputChange,
+  } = useDialogAttachments(isCreating || isSummarizing);
+  const contextItems = useMemo(
+    () => toContextItems(attachments, handleRemoveAttachment),
+    [attachments, handleRemoveAttachment],
+  );
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);
 
@@ -227,6 +251,7 @@ function NewSubtaskForm({
         agent_profile_id: profileId,
         executor_profile_id: executorProfileId || undefined,
         parent_id: parentTaskId,
+        attachments: toMessageAttachments(attachments),
       });
 
       const newSessionId = response.session_id ?? response.primary_session_id ?? null;
@@ -249,6 +274,7 @@ function NewSubtaskForm({
       workflowId,
       executorProfileId,
       parentTaskId,
+      attachments,
       activeSessionId,
       setActiveTask,
       setActiveSession,
@@ -333,22 +359,45 @@ function NewSubtaskForm({
         sessionOptions={showSessions}
         isSummarizing={isSummarizing}
       />
-      <div className="relative">
-        <textarea
-          ref={promptRef}
-          placeholder="What should the agent work on?"
-          className="w-full min-h-[100px] max-h-[240px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y overflow-auto disabled:opacity-60"
-          autoFocus
-          disabled={isCreating || isSummarizing}
-          data-testid="subtask-prompt-input"
-          onInput={(e) => setHasPrompt((e.target as HTMLTextAreaElement).value.trim().length > 0)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-        />
+      <div
+        className="relative"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="rounded-md border border-input bg-transparent">
+          <ContextZone items={contextItems} />
+          <Textarea
+            ref={promptRef}
+            placeholder="What should the agent work on?"
+            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+            autoFocus
+            disabled={isCreating || isSummarizing}
+            data-testid="subtask-prompt-input"
+            onInput={(e) => setHasPrompt((e.target as HTMLTextAreaElement).value.trim().length > 0)}
+            onPaste={handlePaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
+          />
+          <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+            tabIndex={-1}
+          />
+        </div>
+        {isDragging && (
+          <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
+            <span className="text-sm text-primary font-medium">Drop files here</span>
+          </div>
+        )}
         {isSummarizing && (
           <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

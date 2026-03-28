@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -17,14 +18,14 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { IconLoader2 } from "@tabler/icons-react";
-import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
-import { FileAttachmentPreview } from "./chat/file-attachment-preview";
 import {
-  processFile,
-  MAX_FILES,
-  MAX_TOTAL_SIZE,
-  type FileAttachment,
-} from "./chat/file-attachment";
+  EnvironmentBadges,
+  ContextSelect,
+  useDialogAttachments,
+  AttachButton,
+  toContextItems,
+} from "./session-dialog-shared";
+import { ContextZone } from "./chat/context-items/context-zone";
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -101,101 +102,6 @@ function useSessionOptions(taskId: string) {
   }, [sessions, agentProfiles]);
 }
 
-function useNewSessionAttachments(disabled: boolean) {
-  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-
-  const addFiles = useCallback(async (files: File[]) => {
-    const processed: FileAttachment[] = [];
-    for (const file of files) {
-      const attachment = await processFile(file);
-      if (attachment) processed.push(attachment);
-    }
-    if (processed.length === 0) return;
-    setAttachments((prev) => {
-      let count = prev.length;
-      let totalSize = prev.reduce((s, a) => s + a.size, 0);
-      const accepted: FileAttachment[] = [];
-      for (const att of processed) {
-        if (count >= MAX_FILES || totalSize + att.size > MAX_TOTAL_SIZE) break;
-        accepted.push(att);
-        count += 1;
-        totalSize += att.size;
-      }
-      return accepted.length > 0 ? [...prev, ...accepted] : prev;
-    });
-  }, []);
-
-  const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  }, []);
-
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (disabled) return;
-      const files: File[] = [];
-      for (const item of e.clipboardData?.items ?? []) {
-        if (item.kind === "file") {
-          const f = item.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length > 0) {
-        e.preventDefault();
-        void addFiles(files);
-      }
-    },
-    [disabled, addFiles],
-  );
-
-  const handleDragOver = useCallback(
-    (e: React.DragEvent) => {
-      if (disabled) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(true);
-    },
-    [disabled],
-  );
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const { clientX, clientY } = e;
-    if (
-      clientX <= rect.left ||
-      clientX >= rect.right ||
-      clientY <= rect.top ||
-      clientY >= rect.bottom
-    ) {
-      setIsDragging(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
-      if (disabled) return;
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0 || f.type !== "");
-      if (files.length > 0) void addFiles(files);
-    },
-    [disabled, addFiles],
-  );
-
-  return {
-    attachments,
-    isDragging,
-    handleRemoveAttachment,
-    handlePaste,
-    handleDragOver,
-    handleDragLeave,
-    handleDrop,
-  };
-}
-
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
@@ -229,12 +135,19 @@ function NewSessionForm({
   const {
     attachments,
     isDragging,
+    fileInputRef,
     handleRemoveAttachment,
     handlePaste,
     handleDragOver,
     handleDragLeave,
     handleDrop,
-  } = useNewSessionAttachments(isCreating || isSummarizing);
+    handleAttachClick,
+    handleFileInputChange,
+  } = useDialogAttachments(isCreating || isSummarizing);
+  const contextItems = useMemo(
+    () => toContextItems(attachments, handleRemoveAttachment),
+    [attachments, handleRemoveAttachment],
+  );
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
 
@@ -353,24 +266,36 @@ function NewSessionForm({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <textarea
-          ref={promptRef}
-          placeholder="What should the agent work on?"
-          className="w-full min-h-[100px] max-h-[240px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y overflow-auto disabled:opacity-60"
-          autoFocus
-          disabled={isCreating || isSummarizing}
-          onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
-          onPaste={handlePaste}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-        />
+        <div className="rounded-md border border-input bg-transparent">
+          <ContextZone items={contextItems} />
+          <Textarea
+            ref={promptRef}
+            placeholder="What should the agent work on?"
+            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+            autoFocus
+            disabled={isCreating || isSummarizing}
+            onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
+            onPaste={handlePaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
+          />
+          <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+            tabIndex={-1}
+          />
+        </div>
         {isDragging && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-md border-2 border-dashed border-primary bg-background/80 pointer-events-none">
-            <span className="text-xs text-muted-foreground">Drop files here</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
+            <span className="text-sm text-primary font-medium">Drop files here</span>
           </div>
         )}
         {isSummarizing && (
@@ -382,13 +307,6 @@ function NewSessionForm({
           </div>
         )}
       </div>
-      {attachments.length > 0 && (
-        <FileAttachmentPreview
-          attachments={attachments}
-          onRemove={handleRemoveAttachment}
-          disabled={isCreating || isSummarizing}
-        />
-      )}
       <DialogFooter>
         <Button
           type="button"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import {
   Select,
@@ -11,7 +11,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
-import { IconGitBranch } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconGitBranch, IconPaperclip } from "@tabler/icons-react";
+import {
+  processFile,
+  formatBytes,
+  MAX_FILES,
+  MAX_TOTAL_SIZE,
+  type FileAttachment,
+} from "./chat/file-attachment";
+import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 
 export function EnvironmentBadges({
   executorLabel,
@@ -106,5 +115,159 @@ export function ContextSelect({
         </Select>
       </div>
     </div>
+  );
+}
+
+export function useDialogAttachments(disabled: boolean) {
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = useCallback(async (files: File[]) => {
+    const processed: FileAttachment[] = [];
+    for (const file of files) {
+      const attachment = await processFile(file);
+      if (attachment) processed.push(attachment);
+    }
+    if (processed.length === 0) return;
+    setAttachments((prev) => {
+      let count = prev.length;
+      let totalSize = prev.reduce((s, a) => s + a.size, 0);
+      const accepted: FileAttachment[] = [];
+      for (const att of processed) {
+        if (count >= MAX_FILES || totalSize + att.size > MAX_TOTAL_SIZE) break;
+        accepted.push(att);
+        count += 1;
+        totalSize += att.size;
+      }
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  }, []);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const files: File[] = [];
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.kind === "file") {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        void addFiles(files);
+      }
+    },
+    [disabled, addFiles],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    },
+    [disabled],
+  );
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const { clientX, clientY } = e;
+    if (
+      clientX <= rect.left ||
+      clientX >= rect.right ||
+      clientY <= rect.top ||
+      clientY >= rect.bottom
+    ) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      if (disabled) return;
+      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0 || f.type !== "");
+      if (files.length > 0) void addFiles(files);
+    },
+    [disabled, addFiles],
+  );
+
+  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) void addFiles(Array.from(files));
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+
+  return {
+    attachments,
+    isDragging,
+    fileInputRef,
+    handleRemoveAttachment,
+    handlePaste,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleAttachClick,
+    handleFileInputChange,
+  };
+}
+
+export function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <div className="flex items-center px-1 pb-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Attach files"
+            className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            onClick={onClick}
+            disabled={disabled}
+          >
+            <IconPaperclip className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Attach files</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+export function toContextItems(
+  attachments: FileAttachment[],
+  onRemove: (id: string) => void,
+): ContextItem[] {
+  return attachments.map((att) =>
+    att.isImage
+      ? ({
+          kind: "image" as const,
+          id: `image:${att.id}`,
+          label: `Image (${formatBytes(att.size)})`,
+          attachment: att,
+          onRemove: () => onRemove(att.id),
+        } as ImageContextItem)
+      : ({
+          kind: "file-attachment" as const,
+          id: `file:${att.id}`,
+          label: att.fileName,
+          attachment: att,
+          onRemove: () => onRemove(att.id),
+        } as FileAttachmentContextItem),
   );
 }
