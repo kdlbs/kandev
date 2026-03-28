@@ -63,7 +63,7 @@ Subagents share the same worktree, so parallelism is constrained by build bounda
 - **Coupled tasks** (shared types, sequential data flow): must run sequentially regardless
 
 Group tasks into waves. Example:
-```
+```text
 Wave 1 (parallel): [Backend API handler (subagent), Frontend component + hook (subagent)]
 Wave 2 (sequential): [Wire frontend to API, integration test]
 Wave 3: [E2E test for the full flow]
@@ -95,7 +95,7 @@ After each wave completes:
 
 ### 4e. Stop conditions
 
-- **Bugs or missing validation discovered:** fix inline, add a test, continue
+- **Bugs or missing validation discovered during a subagent's task:** the subagent fixes it inline. If the bug surfaces after a wave completes (quality gate failure), dispatch a new subagent to fix it — don't debug in the coordinator.
 - **Blocker (missing dependency, unclear requirement, test fails repeatedly):** stop and ask the user
 - **Fix requires architectural change (new DB table, new service layer, switching libraries):** stop and ask — don't make structural decisions silently
 - **3 failed fix attempts on the same issue:** stop, question the approach, ask the user
