@@ -23,7 +23,8 @@ Systematic feature development: understand the problem, explore the codebase, de
    - Architecture and abstractions in the relevant area
    - Integration points, data flow, and extension points
 2. Read all key files the agents identify
-3. Present a summary of existing patterns and conventions to reuse
+3. Check `docs/decisions/INDEX.md` for relevant architectural decisions in this area
+4. Present a summary of existing patterns and conventions to reuse
 
 ## Phase 3: Design
 
@@ -73,3 +74,5 @@ Run `/qa` as a subagent (keeps the main context clean) to verify the feature wor
 3. Run `/code-review` as a subagent on the changes
 4. Fix any blockers, present suggestions to the user
 5. Summarize: what was built, key decisions, files modified, suggested next steps
+6. If significant architectural decisions were made, record them via `/record decision`
+7. Save the feature design to `docs/plans/` via `/record plan` for permanent reference

@@ -287,6 +287,10 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 
 **When you hit a limit:** extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+### Knowledge
+- **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
+- **Plans:** Implementation plans are stored in `docs/plans/`. Save completed feature designs via `/record plan`.
+
 ### Backend
 - Provider pattern for DI; stderr for logs, stdout for ACP only
 - Pass context through chains; event bus for cross-component comm
