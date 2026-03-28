@@ -120,7 +120,7 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Click PR task 1 to enter session view ---
     await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -137,7 +137,7 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 2 via sidebar ---
     await session.taskInSidebar(prTask2Title).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 30_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 30_000 });
 
     // Task 2: full layout intact — sidebar, chat accessible, changes panel visible,
     // plan panel must NOT leak from task 1, and layout fills the viewport
@@ -153,7 +153,7 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // --- Switch to PR task 3 via sidebar ---
     await session.taskInSidebar(prTask3Title).click({ timeout: 15_000 });
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 30_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 30_000 });
 
     // Task 3: same layout checks
     await expect(session.sidebar).toBeVisible({ timeout: 15_000 });

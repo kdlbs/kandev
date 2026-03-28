@@ -27,15 +27,13 @@ async function seedSimpleTask(
     },
   );
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-  return { session, sessionId: task.session_id };
+  return { session, sessionId: task.session_id ?? task.id };
 }
 
 /**
@@ -60,9 +58,7 @@ async function seedSymlinkDiffTask(
     },
   );
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();

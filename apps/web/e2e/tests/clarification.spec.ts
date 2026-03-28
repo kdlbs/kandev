@@ -137,7 +137,7 @@ test.describe("Clarification flow", () => {
     await testPage.getByTestId("submit-plan-mode").click();
 
     // Wait for navigation to session page
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

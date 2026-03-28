@@ -11,7 +11,7 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   const card = kanban.taskCardByTitle(title);
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.click();
-  await expect(page).toHaveURL(/\/s\//, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(page);
   await session.waitForLoad();
