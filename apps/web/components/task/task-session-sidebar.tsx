@@ -157,6 +157,8 @@ type TaskSessionSidebarProps = {
   workflowId: string | null;
 };
 
+type StepInfo = { id: string; title: string; color: string; position: number };
+
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -177,21 +179,17 @@ function useSidebarData(workspaceId: string | null) {
 
   const isLoadingWorkflow = isMultiLoading && Object.keys(snapshots).length === 0;
 
-  const { allTasks, allSteps } = useMemo(() => {
+  const { allTasks, allSteps, stepsByWorkflowId } = useMemo(() => {
     const tasks: Array<KanbanState["tasks"][number] & { _workflowId: string }> = [];
-    const stepMap = new Map<
-      string,
-      { id: string; title: string; color: string; position: number }
-    >();
+    const stepMap = new Map<string, StepInfo>();
+    const wfSteps: Record<string, StepInfo[]> = {};
     for (const [wfId, snapshot] of Object.entries(snapshots)) {
-      for (const step of snapshot.steps) {
-        if (!stepMap.has(step.id)) stepMap.set(step.id, step);
-      }
-      // Ephemeral tasks are already filtered out by useAllWorkflowSnapshots
+      for (const step of snapshot.steps) if (!stepMap.has(step.id)) stepMap.set(step.id, step);
+      wfSteps[wfId] = [...snapshot.steps].sort((a, b) => a.position - b.position);
       tasks.push(...snapshot.tasks.map((t) => ({ ...t, _workflowId: wfId })));
     }
     const sortedSteps = [...stepMap.values()].sort((a, b) => a.position - b.position);
-    return { allTasks: tasks, allSteps: sortedSteps };
+    return { allTasks: tasks, allSteps: sortedSteps, stepsByWorkflowId: wfSteps };
   }, [snapshots]);
 
   const tasksWithRepositories = useMemo(() => {
@@ -257,7 +255,14 @@ function useSidebarData(workspaceId: string | null) {
     archivedState,
   ]);
 
-  return { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories };
+  return {
+    activeTaskId,
+    selectedTaskId,
+    allSteps,
+    stepsByWorkflowId,
+    isLoadingWorkflow,
+    tasksWithRepositories,
+  };
 }
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
@@ -469,8 +474,14 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const store = useAppStoreApi();
   useAllWorkflowSnapshots(workspaceId);
 
-  const { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories } =
-    useSidebarData(workspaceId);
+  const {
+    activeTaskId,
+    selectedTaskId,
+    allSteps,
+    stepsByWorkflowId,
+    isLoadingWorkflow,
+    tasksWithRepositories,
+  } = useSidebarData(workspaceId);
   const {
     deletingTaskId,
     preparingTaskId,
@@ -500,6 +511,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         <TaskSwitcher
           tasks={displayTasks}
           steps={allSteps.map((step) => ({ id: step.id, title: step.title, color: step.color }))}
+          stepsByWorkflowId={stepsByWorkflowId}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
           onSelectTask={handleSelectTask}

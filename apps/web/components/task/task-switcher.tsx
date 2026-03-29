@@ -61,9 +61,12 @@ type TaskSwitcherItem = {
   parentTaskTitle?: string;
 };
 
+type StepDef = { id: string; title: string; color?: string };
+
 type TaskSwitcherProps = {
   tasks: TaskSwitcherItem[];
-  steps: Array<{ id: string; title: string; color?: string }>;
+  steps: StepDef[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
@@ -139,7 +142,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
 
 function TaskSwitcherSection({
   section,
-  steps,
+  stepsByWorkflowId,
   stepNameById,
   activeTaskId,
   selectedTaskId,
@@ -151,7 +154,7 @@ function TaskSwitcherSection({
   deletingTaskId,
 }: {
   section: Section;
-  steps: Array<{ id: string; title: string; color?: string }>;
+  stepsByWorkflowId?: Record<string, StepDef[]>;
   stepNameById: Map<string, string>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -175,7 +178,7 @@ function TaskSwitcherSection({
           <TaskItemWithContextMenu
             key={task.id}
             task={task}
-            steps={steps}
+            steps={task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined}
             onRenameTask={onRenameTask}
             onArchiveTask={onArchiveTask}
             onDeleteTask={onDeleteTask}
@@ -222,7 +225,7 @@ function TaskItemWithContextMenu({
   isDeleting,
 }: {
   task: TaskSwitcherItem;
-  steps: Array<{ id: string; title: string; color?: string }>;
+  steps?: StepDef[];
   children: React.ReactNode;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
@@ -246,7 +249,7 @@ function TaskItemWithContextMenu({
             Archive
           </ContextMenuItem>
         )}
-        {onMoveToStep && task.workflowId && (
+        {onMoveToStep && task.workflowId && steps && steps.length > 0 && (
           <>
             <ContextMenuSeparator />
             <ContextMenuSub>
@@ -301,6 +304,7 @@ function TaskItemWithContextMenu({
 export const TaskSwitcher = memo(function TaskSwitcher({
   tasks,
   steps,
+  stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
   onSelectTask,
@@ -355,7 +359,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
         <TaskSwitcherSection
           key={section.label}
           section={section}
-          steps={steps}
+          stepsByWorkflowId={stepsByWorkflowId}
           stepNameById={stepNameById}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
