@@ -7,7 +7,7 @@ import {
   IconCircleCheck,
   IconClock,
   IconLoader2,
-  IconPlayerStop,
+  IconPlayerPause,
   IconX,
 } from "@tabler/icons-react";
 import type { TaskSessionState, TaskState } from "@/lib/types/http";
@@ -43,7 +43,7 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   WAITING_FOR_INPUT: { Icon: IconClock, className: STYLE_MUTED },
   COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
   FAILED: { Icon: IconAlertTriangle, className: STYLE_ERROR },
-  CANCELLED: { Icon: IconPlayerStop, className: STYLE_MUTED },
+  CANCELLED: { Icon: IconPlayerPause, className: STYLE_MUTED },
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {

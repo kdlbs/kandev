@@ -252,7 +252,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           <ContextMenuItem
             className="cursor-pointer"
             onSelect={actions.handleSetPrimary}
-            disabled={isPrimary}
+            disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
           >
             Set as Primary
           </ContextMenuItem>

@@ -5,7 +5,6 @@ import {
   IconStack2,
   IconPlus,
   IconStar,
-  IconPlayerStopFilled,
   IconPlayerPlayFilled,
   IconTrash,
 } from "@tabler/icons-react";
@@ -127,19 +126,6 @@ function useSessionLifecycleActions(
   taskId: string | null,
   loadSessions: (force?: boolean) => void,
 ) {
-  const handleStopSession = useCallback(
-    async (sessionId: string) => {
-      const client = getWebSocketClient();
-      if (!client) return;
-      try {
-        await client.request("session.stop", { session_id: sessionId }, 15000);
-        loadSessions(true);
-      } catch (error) {
-        console.error("Failed to stop session:", error);
-      }
-    },
-    [loadSessions],
-  );
 
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
@@ -188,7 +174,7 @@ function useSessionLifecycleActions(
     [loadSessions],
   );
 
-  return { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary };
+  return { handleResumeSession, handleDeleteSession, handleSetPrimary };
 }
 
 function useSessionsDropdownState(taskId: string | null) {
@@ -234,7 +220,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
-  const { handleStopSession, handleResumeSession, handleDeleteSession, handleSetPrimary } =
+  const { handleResumeSession, handleDeleteSession, handleSetPrimary } =
     useSessionLifecycleActions(taskId, loadSessions);
 
   const handleOpenChange = useCallback(
@@ -270,7 +256,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
           onSetPrimary={onSetPrimary ?? handleSetPrimary}
           onNewSession={() => setShowNewSessionDialog(true)}
-          onStopSession={handleStopSession}
           onResumeSession={handleResumeSession}
           onDeleteSession={handleDeleteSession}
         />
@@ -291,7 +276,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 });
 
 type SessionLifecycleCallbacks = {
-  onStopSession: (sessionId: string) => void;
   onResumeSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
 };
@@ -306,7 +290,7 @@ function SessionDropdownContent({
   onSelectSession,
   onSetPrimary,
   onNewSession,
-  onStopSession,
+  
   onResumeSession,
   onDeleteSession,
 }: {
@@ -341,7 +325,6 @@ function SessionDropdownContent({
         resolveAgentLabel={resolveAgentLabel}
         onSelectSession={onSelectSession}
         onSetPrimary={onSetPrimary}
-        onStopSession={onStopSession}
         onResumeSession={onResumeSession}
         onDeleteSession={onDeleteSession}
       />
@@ -358,7 +341,6 @@ function SessionDropdownList({
   resolveAgentLabel,
   onSelectSession,
   onSetPrimary,
-  onStopSession,
   onResumeSession,
   onDeleteSession,
 }: {
@@ -391,7 +373,6 @@ function SessionDropdownList({
             agentLabel={resolveAgentLabel(session)}
             onSelect={onSelectSession}
             onSetPrimary={onSetPrimary}
-            onStop={onStopSession}
             onResume={onResumeSession}
             onDelete={onDeleteSession}
           />
@@ -423,7 +404,6 @@ function SessionRow({
   agentLabel,
   onSelect,
   onSetPrimary,
-  onStop,
   onResume,
   onDelete,
 }: {
@@ -435,7 +415,6 @@ function SessionRow({
   agentLabel: string;
   onSelect: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
-  onStop: (sessionId: string) => void;
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }) {
@@ -460,7 +439,6 @@ function SessionRow({
         session={session}
         isPrimary={isPrimary}
         onSetPrimary={onSetPrimary}
-        onStop={onStop}
         onResume={onResume}
         onDelete={onDelete}
       />
@@ -481,21 +459,15 @@ function SessionRowActions({
   session,
   isPrimary,
   onSetPrimary,
-  onStop,
   onResume,
   onDelete,
 }: {
   session: TaskSession;
   isPrimary: boolean;
   onSetPrimary?: (sessionId: string) => void;
-  onStop: (sessionId: string) => void;
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }) {
-  const stopAction = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onStop(session.id);
-  };
   const resumeAction = (e: React.MouseEvent) => {
     e.stopPropagation();
     onResume(session.id);
@@ -511,7 +483,7 @@ function SessionRowActions({
 
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      {!isPrimary && onSetPrimary && (
+      {!isPrimary && onSetPrimary && isSessionStoppable(session.state) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -523,20 +495,6 @@ function SessionRowActions({
             </button>
           </TooltipTrigger>
           <TooltipContent side="left">Set as Primary</TooltipContent>
-        </Tooltip>
-      )}
-      {isSessionStoppable(session.state) && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={stopAction}
-              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-            >
-              <IconPlayerStopFilled className="h-3 w-3" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left">Stop agent</TooltipContent>
         </Tooltip>
       )}
       {isSessionResumable(session.state) && (
