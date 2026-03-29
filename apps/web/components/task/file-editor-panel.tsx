@@ -9,7 +9,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
@@ -102,9 +101,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
 
-  // Use environment-stable sessionId so the editor doesn't reload when
-  // switching between session tabs in the same environment.
-  const activeSessionId = useEnvironmentSessionId();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
