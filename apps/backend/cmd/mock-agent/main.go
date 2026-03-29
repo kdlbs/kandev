@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -73,7 +74,7 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
 	a.sessions[sid] = true
@@ -83,19 +84,21 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
 
-	a.emitAvailableCommands(ctx, sid)
+	// Emit available commands after the response is sent to avoid writing
+	// a notification to stdout before the JSON-RPC response.
+	a.scheduleAvailableCommands(sid)
 
 	return acp.NewSessionResponse{SessionId: sid}, nil
 }
 
 // LoadSession restores a previous session for resume.
-func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
 	a.mu.Unlock()
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
-	a.emitAvailableCommands(ctx, req.SessionId)
+	a.scheduleAvailableCommands(req.SessionId)
 
 	return acp.LoadSessionResponse{}, nil
 }
@@ -125,16 +128,20 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionCo
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
-// emitAvailableCommands sends the list of mock agent slash commands to the client.
-func (a *mockAgent) emitAvailableCommands(ctx context.Context, sid acp.SessionId) {
-	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
-		SessionId: sid,
-		Update: acp.SessionUpdate{
-			AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
-				AvailableCommands: mockAvailableCommands(),
+// scheduleAvailableCommands emits available commands shortly after the session
+// response is sent, avoiding writing a notification before the JSON-RPC response.
+func (a *mockAgent) scheduleAvailableCommands(sid acp.SessionId) {
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+			SessionId: sid,
+			Update: acp.SessionUpdate{
+				AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+					AvailableCommands: mockAvailableCommands(),
+				},
 			},
-		},
-	})
+		})
+	}()
 }
 
 // mockAvailableCommands returns the slash commands supported by the mock agent.
