@@ -16,15 +16,13 @@ class GitHelper {
   ) {}
 
   exec(cmd: string): string {
-    const lockPath = path.join(this.repoDir, ".git", "index.lock");
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
       try {
         return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
       } catch (err) {
         const msg = (err as Error).message ?? "";
         if (msg.includes("index.lock") && attempt < 2) {
-          execSync("sleep 0.2");
+          execSync("sleep 0.3");
           continue;
         }
         throw err;
