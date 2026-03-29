@@ -18,6 +18,11 @@ type GitEventHandlers = {
   branch_switched: (store: StoreApi<AppState>, event: GitBranchSwitchedEvent) => void;
 };
 
+/** Resolve sessionId → environmentId for cache keying. */
+function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
+  return store.getState().environmentIdBySessionId[sessionId] ?? sessionId;
+}
+
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
     store.getState().setGitStatus(event.session_id, {
@@ -34,7 +39,7 @@ const gitEventHandlers: GitEventHandlers = {
       timestamp: event.timestamp,
     });
     // Invalidate cumulative diff cache when files change
-    invalidateCumulativeDiffCache(event.session_id);
+    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   commit_created: (store, event) => {
@@ -53,21 +58,21 @@ const gitEventHandlers: GitEventHandlers = {
       created_at: event.commit.created_at ?? event.timestamp,
     });
     // Invalidate cumulative diff cache when new commit is created
-    invalidateCumulativeDiffCache(event.session_id);
+    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   commits_reset: (store, event) => {
     // Clear commits to trigger refetch in useSessionCommits hook
     store.getState().clearSessionCommits(event.session_id);
     // Invalidate cumulative diff cache when commits are reset
-    invalidateCumulativeDiffCache(event.session_id);
+    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
     // Clear commits to trigger refetch with new base commit
     store.getState().clearSessionCommits(event.session_id);
     // Invalidate cumulative diff cache when branch switches
-    invalidateCumulativeDiffCache(event.session_id);
+    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 };
 

@@ -22,6 +22,7 @@ import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
@@ -76,7 +77,6 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
  * state that can't be swapped by simply reading a new `activeSessionId` from
  * the store:
  *
- *  - terminal      — holds a live xterm WebSocket to a shell in the session's container
  *  - file-editor   — editing a file in the session's worktree
  *  - browser       — iframe preview of the session's dev server URL
  *  - vscode        — VS Code Server iframe running in the session's container
@@ -89,12 +89,12 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
  *
  *  - sidebar  — workspace/task navigation, not session-specific
  *  - chat     — subscribes to `activeSessionId`, re-renders for new session
- *  - changes  — reads session git status via `useSessionGitStatus(activeSessionId)`
- *  - files    — reads the active session's file tree reactively
+ *  - terminal — uses `useEnvironmentSessionId()`, reconnects only on env change
+ *  - changes  — uses `useEnvironmentSessionId()` for stable git state
+ *  - files    — uses `useEnvironmentSessionId()` for stable file tree
  *  - plan     — reads `activeTaskId` from the store
  */
 const SESSION_SCOPED_COMPONENTS = new Set([
-  "terminal",
   "file-editor",
   "browser",
   "vscode",
@@ -263,10 +263,11 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
   const { openFile } = useFileEditors();
 
-  // Dynamic title with file count
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  // Dynamic title with file count — use environment-stable sessionId so the
+  // tab title doesn't re-fetch on same-environment session tab switches.
+  const activeSessionId = useEnvironmentSessionId();
   const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId ?? null);
+  const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
