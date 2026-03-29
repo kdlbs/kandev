@@ -576,4 +576,48 @@ export class SessionPage {
     const taskRow = this.sidebar.locator("[role='button']").filter({ hasText: title });
     await taskRow.click();
   }
+
+  // --- File tree multi-select helpers ---
+
+  /** Find a tree node by its data-path attribute. */
+  fileTreeNode(nodePath: string): Locator {
+    return this.files.locator(`[data-testid="file-tree-node"][data-path="${nodePath}"]`);
+  }
+
+  /** All file tree nodes with data-selected="true". */
+  fileTreeSelectedNodes(): Locator {
+    return this.files.locator("[data-selected='true']");
+  }
+
+  // --- Changes panel multi-select helpers ---
+
+  /** Find a file row in the changes panel by path. */
+  changesFileRow(path: string): Locator {
+    return this.changes.getByTestId(`changes-file-${path}`);
+  }
+
+  /** All selected file rows in the changes panel. */
+  changesSelectedRows(): Locator {
+    return this.changes.locator("[data-selected='true']");
+  }
+
+  /** Bulk action bar for a variant (unstaged/staged). */
+  changesBulkActionBar(variant: "unstaged" | "staged"): Locator {
+    return this.changes.getByTestId(`bulk-actions-${variant}`);
+  }
+
+  /** Bulk stage button. */
+  changesBulkStageButton(): Locator {
+    return this.changes.getByTestId("bulk-stage");
+  }
+
+  /** Bulk unstage button. */
+  changesBulkUnstageButton(): Locator {
+    return this.changes.getByTestId("bulk-unstage");
+  }
+
+  /** Bulk discard button. */
+  changesBulkDiscardButton(): Locator {
+    return this.changes.getByTestId("bulk-discard");
+  }
 }

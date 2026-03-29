@@ -87,3 +87,60 @@ export function renameNodeInTree(
   const nextChildren = root.children.map((c) => renameNodeInTree(c, oldPath, newPath));
   return { ...root, children: nextChildren.sort(compareTreeNodes) };
 }
+
+/** Collect visible (expanded) node paths in DFS order for multi-select range computation. */
+export function getVisiblePaths(tree: FileTreeNode, expandedPaths: Set<string>): string[] {
+  const result: string[] = [];
+  function walk(node: FileTreeNode) {
+    // Skip the root node itself (it represents the workspace root)
+    if (node !== tree) result.push(node.path);
+    if (node.is_dir && (node === tree || expandedPaths.has(node.path)) && node.children) {
+      const sorted = [...node.children].sort(compareTreeNodes);
+      for (const child of sorted) walk(child);
+    }
+  }
+  walk(tree);
+  return result;
+}
+
+/** Find a node in the tree by path. */
+export function findNodeByPath(root: FileTreeNode, targetPath: string): FileTreeNode | null {
+  if (root.path === targetPath) return root;
+  if (!root.children) return null;
+  for (const child of root.children) {
+    const found = findNodeByPath(child, targetPath);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Move nodes from their current locations into a target directory. Returns the updated tree. */
+export function moveNodesInTree(
+  root: FileTreeNode,
+  sourcePaths: string[],
+  targetDirPath: string,
+): FileTreeNode {
+  // Collect the nodes to move before removing them
+  const nodesToMove: FileTreeNode[] = [];
+  for (const path of sourcePaths) {
+    const node = findNodeByPath(root, path);
+    if (node) {
+      const name = node.name;
+      const newPath = targetDirPath ? `${targetDirPath}/${name}` : name;
+      nodesToMove.push(renameSubtree(node, path, newPath));
+    }
+  }
+
+  // Remove source nodes from tree
+  let updated = root;
+  for (const path of sourcePaths) {
+    updated = removeNodeFromTree(updated, path);
+  }
+
+  // Insert into target directory
+  for (const node of nodesToMove) {
+    updated = insertNodeInTree(updated, targetDirPath, node);
+  }
+
+  return updated;
+}

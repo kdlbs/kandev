@@ -9,6 +9,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
+import { useMultiSelect } from "@/hooks/use-multi-select";
 import { FileBrowserSearchHeader } from "./file-browser-search-header";
 import {
   insertNodeInTree,
@@ -23,6 +24,7 @@ import {
   loadNodeChildren,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
+import { getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
 
 type FileBrowserHeaderProps = {
   treeLoaded: boolean;
@@ -52,7 +54,6 @@ function FileBrowserHeader({
   showCreateButton,
 }: FileBrowserHeaderProps) {
   if (!treeLoaded) return null;
-
   if (search.isSearchActive) {
     return (
       <FileBrowserSearchHeader
@@ -64,7 +65,6 @@ function FileBrowserHeader({
       />
     );
   }
-
   return (
     <FileBrowserToolbar
       displayPath={displayPath}
@@ -145,9 +145,7 @@ function useFileBrowserHandlers(
     (path: string) => fetchAndOpenFile(sessionId, path, onOpenFile, toast),
     [sessionId, onOpenFile, toast],
   );
-  const handleCancelCreate = useCallback(() => {
-    setCreatingInPath(null);
-  }, []);
+  const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
 
   return {
     creatingInPath,
@@ -158,6 +156,157 @@ function useFileBrowserHandlers(
     openFileByPath,
     handleCancelCreate,
   };
+}
+
+function isDropInvalid(sources: string[], targetPath: string): boolean {
+  return sources.some((s) => s === targetPath || targetPath.startsWith(`${s}/`));
+}
+
+type MoveFilesParams = {
+  sources: string[];
+  targetPath: string;
+  treeState: ReturnType<typeof useFileBrowserTree>;
+  setSelectedPaths: (paths: Set<string>) => void;
+  onRenameFile: (oldPath: string, newPath: string) => Promise<boolean>;
+};
+
+function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useToast>["toast"]) {
+  const { sources, targetPath, treeState, setSelectedPaths, onRenameFile } = params;
+  const snapshot = treeState.tree;
+  treeState.setTree((prev) => (prev ? moveNodesInTree(prev, sources, targetPath) : prev));
+  setSelectedPaths(new Set());
+
+  const movePromises = sources.map((sourcePath) => {
+    const name = sourcePath.split("/").pop() || sourcePath;
+    const newPath = targetPath ? `${targetPath}/${name}` : name;
+    return onRenameFile(sourcePath, newPath);
+  });
+
+  Promise.all(movePromises)
+    .then((results) => {
+      if (results.some((ok) => !ok)) {
+        treeState.setTree(snapshot);
+        toast({ title: "Move failed", description: "Some files could not be moved", variant: "error" });
+      }
+    })
+    .catch(() => {
+      treeState.setTree(snapshot);
+      toast({ title: "Move failed", description: "An error occurred while moving files", variant: "error" });
+    });
+}
+
+function useDragAndDrop(
+  treeState: ReturnType<typeof useFileBrowserTree>,
+  selectedPaths: Set<string>,
+  setSelectedPaths: (paths: Set<string>) => void,
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
+) {
+  const { toast } = useToast();
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const dragPathsRef = useRef<string[]>([]);
+
+  const handleDragStart = useCallback(
+    (path: string, e: React.DragEvent) => {
+      const paths = selectedPaths.has(path) ? [...selectedPaths] : [path];
+      if (!selectedPaths.has(path)) setSelectedPaths(new Set([path]));
+      dragPathsRef.current = paths;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify(paths));
+      setIsDragging(true);
+    },
+    [selectedPaths, setSelectedPaths],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setIsDragging(false);
+    setDragOverPath(null);
+    dragPathsRef.current = [];
+  }, []);
+
+  const handleDragOver = useCallback((targetPath: string, e: React.DragEvent) => {
+    const sources = dragPathsRef.current;
+    if (isDropInvalid(sources, targetPath)) return;
+    const allSameParent = sources.every((s) => {
+      const parent = s.includes("/") ? s.substring(0, s.lastIndexOf("/")) : "";
+      return parent === targetPath;
+    });
+    if (allSameParent) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverPath(targetPath);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    const related = e.relatedTarget as Node | null;
+    if (related && (e.currentTarget as Node).contains(related)) return;
+    setDragOverPath(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (targetPath: string, e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOverPath(null);
+      setIsDragging(false);
+      if (!onRenameFile) return;
+      const sources = dragPathsRef.current;
+      if (sources.length === 0 || isDropInvalid(sources, targetPath)) return;
+      executeMoveFiles({ sources, targetPath, treeState, setSelectedPaths, onRenameFile }, toast);
+    },
+    [onRenameFile, treeState, setSelectedPaths, toast],
+  );
+
+  return {
+    isDragging,
+    dragOverPath,
+    handleDragStart,
+    handleDragEnd,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  };
+}
+
+function useAutoExpandAncestors(
+  activeFilePath: string | null | undefined,
+  setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>,
+) {
+  useEffect(() => {
+    if (!activeFilePath) return;
+    const parts = activeFilePath.split("/");
+    if (parts.length <= 1) return;
+    const ancestors: string[] = [];
+    for (let i = 1; i < parts.length; i++) {
+      ancestors.push(parts.slice(0, i).join("/"));
+    }
+    setExpandedPaths((prev) => {
+      if (ancestors.every((p) => prev.has(p))) return prev;
+      const next = new Set(prev);
+      for (const p of ancestors) next.add(p);
+      return next;
+    });
+  }, [activeFilePath, setExpandedPaths]);
+}
+
+function useKeyboardShortcuts(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  multiSelect: ReturnType<typeof useMultiSelect>,
+) {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!container.contains(document.activeElement) && document.activeElement !== container) return;
+      if (e.key === "Escape") {
+        multiSelect.clearSelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        multiSelect.selectAll();
+      }
+    };
+    container.addEventListener("keydown", handleKeyDown);
+    return () => container.removeEventListener("keydown", handleKeyDown);
+  }, [containerRef, multiSelect]);
 }
 
 export function FileBrowser({
@@ -175,6 +324,7 @@ export function FileBrowser({
   const { open: openFolder } = useOpenSessionFolder(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const search = useFileBrowserSearch(sessionId);
   const treeState = useFileBrowserTree(sessionId, environmentId ?? undefined);
@@ -182,43 +332,26 @@ export function FileBrowser({
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
 
   const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    () => new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
     [gitStatus?.files],
   );
   const fullPath = session?.worktree_path || repository?.local_path || "";
   const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
-  const {
-    creatingInPath,
-    activeFolderPath,
-    handleStartCreate,
-    handleCreateFileSubmit,
-    toggleExpand,
-    openFileByPath,
-    handleCancelCreate,
-  } = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
+  const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
 
-  // Auto-expand ancestor directories when the active file changes
-  useEffect(() => {
-    if (!activeFilePath) return;
-    const parts = activeFilePath.split("/");
-    if (parts.length <= 1) return;
-    const ancestors: string[] = [];
-    for (let i = 1; i < parts.length; i++) {
-      ancestors.push(parts.slice(0, i).join("/"));
-    }
-    treeState.setExpandedPaths((prev) => {
-      const allExpanded = ancestors.every((p) => prev.has(p));
-      if (allExpanded) return prev;
-      const next = new Set(prev);
-      for (const p of ancestors) next.add(p);
-      return next;
-    });
-  }, [activeFilePath, treeState]);
+  const visiblePaths = useMemo(
+    () => (treeState.tree ? getVisiblePaths(treeState.tree, treeState.expandedPaths) : []),
+    [treeState.tree, treeState.expandedPaths],
+  );
+  const multiSelect = useMultiSelect({ items: visiblePaths });
+  const dnd = useDragAndDrop(treeState, multiSelect.selectedPaths, multiSelect.setSelectedPaths, onRenameFile);
+
+  useKeyboardShortcuts(containerRef, multiSelect);
+  useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" ref={containerRef} tabIndex={-1}>
       <FileBrowserHeader
         treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
         search={search}
@@ -227,7 +360,7 @@ export function FileBrowser({
         copied={copied}
         expandedPathsSize={treeState.expandedPaths.size}
         onCopyPath={copyPath}
-        onStartCreate={onCreateFile ? handleStartCreate : undefined}
+        onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
         onOpenFolder={openFolder}
         onCollapseAll={treeState.collapseAll}
         showCreateButton={Boolean(onCreateFile)}
@@ -242,20 +375,30 @@ export function FileBrowser({
           isLoadingTree={treeState.isLoadingTree}
           tree={treeState.tree}
           loadError={treeState.loadError}
-          creatingInPath={creatingInPath}
+          creatingInPath={handlers.creatingInPath}
           fileStatuses={fileStatuses}
           expandedPaths={treeState.expandedPaths}
-          activeFolderPath={activeFolderPath}
+          activeFolderPath={handlers.activeFolderPath}
           activeFilePath={activeFilePath}
           visibleLoadingPaths={treeState.visibleLoadingPaths}
-          onOpenFile={openFileByPath}
-          onToggleExpand={toggleExpand}
+          onOpenFile={handlers.openFileByPath}
+          onToggleExpand={handlers.toggleExpand}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
-          onCreateFileSubmit={handleCreateFileSubmit}
-          onCancelCreate={handleCancelCreate}
+          onCreateFileSubmit={handlers.handleCreateFileSubmit}
+          onCancelCreate={handlers.handleCancelCreate}
           onRetry={() => void treeState.loadTree({ resetRetry: true })}
           setTree={treeState.setTree}
+          isSelected={multiSelect.isSelected}
+          onSelect={multiSelect.handleClick}
+          isDragging={dnd.isDragging}
+          dragOverPath={dnd.dragOverPath}
+          onDragStart={dnd.handleDragStart}
+          onDragEnd={dnd.handleDragEnd}
+          onDragOver={dnd.handleDragOver}
+          onDragLeave={dnd.handleDragLeave}
+          onDrop={dnd.handleDrop}
+          selectedCount={multiSelect.selectedPaths.size}
         />
       </ScrollArea>
     </div>
