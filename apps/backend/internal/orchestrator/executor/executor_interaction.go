@@ -37,10 +37,10 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	// Mark the session CANCELLED in the database immediately so the WS response
-	// is sent to the client without waiting for the agent process to exit.
-	if dbErr := e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-		e.logger.Error("failed to update agent session status in database",
+	// Mark the session CANCELLED and publish a WS event immediately so the
+	// frontend updates without waiting for the agent process to exit.
+	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
 			zap.Error(dbErr))
 	}
