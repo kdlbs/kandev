@@ -18,6 +18,7 @@ export function buildStartRequest(
     priority?: number;
     autoStart?: boolean;
     attachments?: MessageAttachment[];
+    freshEnvironment?: boolean;
   },
 ): BuildResult {
   return {
@@ -32,6 +33,7 @@ export function buildStartRequest(
       priority: opts?.priority,
       auto_start: opts?.autoStart,
       attachments: opts?.attachments,
+      fresh_environment: opts?.freshEnvironment,
     },
     layout: opts?.planMode ? "plan" : "default",
   };

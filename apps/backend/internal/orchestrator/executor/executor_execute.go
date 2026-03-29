@@ -368,14 +368,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.Attachments = opts.Attachments
 	}
 
-	// Check for an existing task environment to reuse its worktree
+	// Check for an existing task environment to reuse worktree, container, or sandbox
 	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
-	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
-		req.WorktreeID = existingEnv.WorktreeID
-		e.logger.Info("reusing existing task environment worktree",
-			zap.String("task_id", task.ID),
-			zap.String("worktree_id", existingEnv.WorktreeID))
-	}
+	e.applyExistingEnvironment(req, existingEnv, opts)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -749,6 +744,13 @@ func (e *Executor) persistTaskEnvironment(
 		// Update the existing environment with new execution info
 		existingEnv.AgentExecutionID = resp.AgentExecutionID
 		existingEnv.Status = models.TaskEnvironmentStatusReady
+		// Refresh container/sandbox IDs in case a fallback created a new one
+		if resp.ContainerID != "" {
+			existingEnv.ContainerID = resp.ContainerID
+		}
+		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
+			existingEnv.SandboxID = sandboxID
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),
@@ -781,6 +783,7 @@ func (e *Executor) persistTaskEnvironment(
 		WorktreeBranch:    resp.WorktreeBranch,
 		WorkspacePath:     workspacePath,
 		ContainerID:       resp.ContainerID,
+		SandboxID:         extractSandboxID(resp.Metadata),
 	}
 	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
 		e.logger.Warn("failed to create task environment",
@@ -789,4 +792,50 @@ func (e *Executor) persistTaskEnvironment(
 		return
 	}
 	session.TaskEnvironmentID = env.ID
+}
+
+// applyExistingEnvironment propagates worktree, container, and sandbox IDs from
+// an existing TaskEnvironment into the launch request so that executor backends
+// can reuse the existing execution environment.
+func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models.TaskEnvironment, opts LaunchOptions) {
+	if env == nil {
+		return
+	}
+	if opts.FreshEnvironment {
+		return
+	}
+
+	// Worktree reuse
+	if env.WorktreeID != "" && req.UseWorktree {
+		req.WorktreeID = env.WorktreeID
+		e.logger.Info("reusing existing task environment worktree",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_id", env.WorktreeID))
+	}
+
+	// Container/sandbox reuse
+	if env.ContainerID != "" || env.SandboxID != "" {
+		req.PreviousExecutionID = env.AgentExecutionID
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		if env.ContainerID != "" {
+			req.Metadata["container_id"] = env.ContainerID
+		}
+		if env.SandboxID != "" {
+			req.Metadata["sandbox_id"] = env.SandboxID
+		}
+	}
+}
+
+// extractSandboxID extracts the sandbox identifier from launch response metadata.
+// For Sprites executors, this is the sprite_name.
+func extractSandboxID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	if name, ok := metadata["sprite_name"].(string); ok {
+		return name
+	}
+	return ""
 }
