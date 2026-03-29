@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useRef, useState, useCallback, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode } from "react";
 import {
   IconArrowUp,
   IconChevronsLeft,
@@ -12,25 +12,13 @@ import {
   IconPlugConnectedX,
   IconPaperclip,
   IconRocket,
-  IconRotateClockwise2,
   IconSparkles,
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
@@ -38,6 +26,7 @@ import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
 import { ContextPopover } from "./context-popover";
+import { ResetContextButton } from "./reset-context-button";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
@@ -50,6 +39,8 @@ export type ChatInputToolbarProps = {
   taskTitle?: string;
   taskDescription: string;
   isAgentBusy: boolean;
+  /** Whether the input has content to send (text, comments, or context) */
+  hasContent?: boolean;
   isDisabled: boolean;
   isSending: boolean;
   onCancel: () => void;
@@ -81,6 +72,7 @@ export type ChatInputToolbarProps = {
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
+  hasContent: boolean;
   isDisabled: boolean;
   isSending: boolean;
   planModeEnabled: boolean;
@@ -89,8 +81,15 @@ type SubmitButtonProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
 };
 
+function submitTooltipDescription(isAgentBusy: boolean, planModeEnabled: boolean) {
+  if (isAgentBusy) return "Queue message";
+  if (planModeEnabled) return "Request plan changes";
+  return undefined;
+}
+
 function SubmitButton({
   isAgentBusy,
+  hasContent,
   isDisabled,
   isSending,
   planModeEnabled,
@@ -98,40 +97,53 @@ function SubmitButton({
   onSubmit,
   submitShortcut,
 }: SubmitButtonProps) {
+  // When agent is busy and there's nothing to send, show only the cancel button.
+  // When there's content to queue, show both cancel and send buttons side-by-side.
+  const showSendButton = !isAgentBusy || hasContent;
   return (
-    <KeyboardShortcutTooltip
-      shortcut={submitShortcut}
-      description={planModeEnabled ? "Request plan changes" : undefined}
-      enabled={!isAgentBusy && !isDisabled}
-    >
-      {isAgentBusy ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-          onClick={onCancel}
-        >
-          <IconPlayerPauseFilled className="h-3.5 w-3.5" />
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          variant="default"
-          size="icon"
-          className={cn(
-            "h-7 w-7 rounded-full cursor-pointer",
-            planModeEnabled && "bg-violet-600 hover:bg-violet-500",
-          )}
-          disabled={isDisabled}
-          onClick={onSubmit}
-        >
-          {isSending && <GridSpinner className="text-primary-foreground" />}
-          {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
-          {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
-        </Button>
+    <div className="flex items-center gap-1">
+      {isAgentBusy && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
+              onClick={onCancel}
+              data-testid="cancel-agent-button"
+            >
+              <IconPlayerPauseFilled className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Cancel agent</TooltipContent>
+        </Tooltip>
       )}
-    </KeyboardShortcutTooltip>
+      {showSendButton && (
+        <KeyboardShortcutTooltip
+          shortcut={submitShortcut}
+          description={submitTooltipDescription(isAgentBusy, planModeEnabled)}
+          enabled={!isDisabled}
+        >
+          <Button
+            type="button"
+            variant="default"
+            size="icon"
+            className={cn(
+              "h-7 w-7 rounded-full cursor-pointer",
+              planModeEnabled && "bg-violet-600 hover:bg-violet-500",
+            )}
+            disabled={isDisabled}
+            onClick={onSubmit}
+            data-testid="submit-message-button"
+          >
+            {isSending && <GridSpinner className="text-primary-foreground" />}
+            {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
+            {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
+          </Button>
+        </KeyboardShortcutTooltip>
+      )}
+    </div>
   );
 }
 
@@ -251,74 +263,6 @@ function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
   );
 }
 
-function ResetContextButton({ sessionId }: { sessionId: string }) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
-
-  const handleReset = useCallback(async () => {
-    setIsResetting(true);
-    try {
-      const client = getWebSocketClient();
-      if (!client) return;
-      await client.request("session.reset_context", { session_id: sessionId }, 30000);
-    } catch (error) {
-      console.error("Failed to reset agent context:", error);
-    } finally {
-      setIsResetting(false);
-      setConfirmOpen(false);
-    }
-  }, [sessionId]);
-
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-muted-foreground"
-            onClick={() => setConfirmOpen(true)}
-            disabled={isResetting}
-            data-testid="reset-context-button"
-          >
-            {isResetting ? (
-              <GridSpinner className="h-4 w-4" />
-            ) : (
-              <IconRotateClockwise2 className="h-4 w-4" />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          Reset agent context — clears conversation history, preserves workspace
-        </TooltipContent>
-      </Tooltip>
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reset agent context?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will clear the agent&apos;s conversation history and start a fresh context. Your
-              workspace, files, and git state will be preserved.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleReset}
-              disabled={isResetting}
-              className="cursor-pointer"
-              data-testid="reset-context-confirm"
-            >
-              {isResetting ? "Resetting..." : "Reset Context"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
-
 type ToolbarItemConfig = {
   id: string;
   collapsible: boolean;
@@ -360,6 +304,7 @@ function ToolbarRightSection({
   sessionId,
   planModeEnabled,
   isAgentBusy,
+  hasContent,
   onImplementPlan,
   isDisabled,
   isSending,
@@ -372,6 +317,7 @@ function ToolbarRightSection({
   sessionId: string | null;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
+  hasContent: boolean;
   onImplementPlan?: () => void;
   isDisabled: boolean;
   isSending: boolean;
@@ -389,6 +335,7 @@ function ToolbarRightSection({
       <div className="ml-1">
         <SubmitButton
           isAgentBusy={isAgentBusy}
+          hasContent={hasContent}
           isDisabled={isDisabled}
           isSending={isSending}
           planModeEnabled={planModeEnabled}
@@ -503,6 +450,7 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
 
 function MinimalToolbar({
   isAgentBusy,
+  hasContent,
   isDisabled,
   isSending,
   onCancel,
@@ -510,13 +458,14 @@ function MinimalToolbar({
   submitKey = "cmd_enter",
 }: Pick<
   ChatInputToolbarProps,
-  "isAgentBusy" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
+  "isAgentBusy" | "hasContent" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
 >) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
   return (
     <div className="flex items-center justify-end gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <SubmitButton
         isAgentBusy={isAgentBusy}
+        hasContent={hasContent ?? false}
         isDisabled={isDisabled}
         isSending={isSending}
         planModeEnabled={false}
@@ -553,6 +502,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     return (
       <MinimalToolbar
         isAgentBusy={props.isAgentBusy}
+        hasContent={props.hasContent}
         isDisabled={props.isDisabled}
         isSending={props.isSending}
         onCancel={props.onCancel}
@@ -621,6 +571,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         sessionId={props.sessionId}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
+        hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
         isDisabled={props.isDisabled}
         isSending={props.isSending}

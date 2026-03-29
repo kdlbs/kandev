@@ -53,6 +53,63 @@ func TestParseModelFromArgs(t *testing.T) {
 	}
 }
 
+func TestStripKandevSystem(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "no tags",
+			input: "/slow 10s",
+			want:  "/slow 10s",
+		},
+		{
+			name:  "tags appended after user text (plan mode)",
+			input: "/slow 10s\n\n<kandev-system>\nACTIVE DOCUMENT: editing plan\n</kandev-system>",
+			want:  "/slow 10s",
+		},
+		{
+			name:  "multiple tag blocks appended",
+			input: "/slow 5s\n\n<kandev-system>\nDOC context\n</kandev-system>\n\n<kandev-system>\nFILE context\n</kandev-system>",
+			want:  "/slow 5s",
+		},
+		{
+			name:  "tags prepended before user text (backend system context)",
+			input: "<kandev-system>\nKANDEV CONTEXT\n</kandev-system>\n\ne2e:delay(3000)\ne2e:message(\"hello\")",
+			want:  "e2e:delay(3000)\ne2e:message(\"hello\")",
+		},
+		{
+			name:  "tags both prepended and appended",
+			input: "<kandev-system>\nSYS\n</kandev-system>\n\n/slow 5s\n\n<kandev-system>\nPLAN\n</kandev-system>",
+			want:  "/slow 5s",
+		},
+		{
+			name:  "only tags, no user text",
+			input: "<kandev-system>\nsome context\n</kandev-system>",
+			want:  "",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "whitespace before tags",
+			input: "  hello world  \n\n<kandev-system>ctx</kandev-system>",
+			want:  "hello world",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripKandevSystem(tt.input)
+			if got != tt.want {
+				t.Errorf("stripKandevSystem(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDelayRange(t *testing.T) {
 	tests := []struct {
 		model     string
