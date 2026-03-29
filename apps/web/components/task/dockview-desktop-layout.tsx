@@ -469,7 +469,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
-      setupPortalCleanup(api);
+      setupPortalCleanup(api, appStore);
     },
     [setApi, buildDefaultLayout, initialLayout, appStore],
   );

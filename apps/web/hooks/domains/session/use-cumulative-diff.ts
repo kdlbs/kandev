@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
@@ -24,6 +24,9 @@ export function useCumulativeDiff(sessionId: string | null) {
     return state.environmentIdBySessionId[sessionId] ?? sessionId;
   });
 
+  // Guard against stale responses after an environment switch.
+  const requestVersionRef = useRef(0);
+
   const [diff, setDiff] = useState<CumulativeDiff | null>(
     envKey ? (cumulativeDiffCache[envKey] ?? null) : null,
   );
@@ -38,6 +41,8 @@ export function useCumulativeDiff(sessionId: string | null) {
     const client = getWebSocketClient();
     if (!client) return;
 
+    const version = ++requestVersionRef.current;
+
     setLoading(true);
     loadingState[envKey] = true;
     setError(null);
@@ -49,15 +54,21 @@ export function useCumulativeDiff(sessionId: string | null) {
         { session_id: sessionId },
       );
 
+      // Discard if the environment changed while the request was in flight
+      if (version !== requestVersionRef.current) return;
+
       if (response?.cumulative_diff) {
         cumulativeDiffCache[envKey] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
       }
     } catch (err) {
+      if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch cumulative diff");
     } finally {
-      setLoading(false);
+      if (version === requestVersionRef.current) {
+        setLoading(false);
+      }
       loadingState[envKey] = false;
     }
   }, [sessionId, envKey]);
