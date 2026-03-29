@@ -44,11 +44,7 @@ type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useSwimlaneKanbanDnd({
-  tasks,
-  workflowId,
-  onMoveError,
-}: SwimlaneKanbanDndOptions) {
+function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);

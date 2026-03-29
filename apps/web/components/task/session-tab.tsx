@@ -166,37 +166,37 @@ function DeleteSessionDialog({
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete session?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p>This will permanently delete the conversation history with this session.</p>
-                {isPrimary && sessionCount > 1 && (
-                  <p className="mt-2 font-medium">
-                    This is the primary session. Another session will be set as primary.
-                  </p>
-                )}
-                {sessionCount === 1 && (
-                  <p className="mt-2 font-medium">This is the only session for this task.</p>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                onOpenChange(false);
-                onConfirm();
-              }}
-              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete session?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>
+              <p>This will permanently delete the conversation history with this session.</p>
+              {isPrimary && sessionCount > 1 && (
+                <p className="mt-2 font-medium">
+                  This is the primary session. Another session will be set as primary.
+                </p>
+              )}
+              {sessionCount === 1 && (
+                <p className="mt-2 font-medium">This is the only session for this task.</p>
+              )}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              onOpenChange(false);
+              onConfirm();
+            }}
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

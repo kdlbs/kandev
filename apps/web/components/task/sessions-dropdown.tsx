@@ -126,7 +126,6 @@ function useSessionLifecycleActions(
   taskId: string | null,
   loadSessions: (force?: boolean) => void,
 ) {
-
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
       if (!taskId) return;
@@ -220,8 +219,10 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
-  const { handleResumeSession, handleDeleteSession, handleSetPrimary } =
-    useSessionLifecycleActions(taskId, loadSessions);
+  const { handleResumeSession, handleDeleteSession, handleSetPrimary } = useSessionLifecycleActions(
+    taskId,
+    loadSessions,
+  );
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
@@ -290,7 +291,7 @@ function SessionDropdownContent({
   onSelectSession,
   onSetPrimary,
   onNewSession,
-  
+
   onResumeSession,
   onDeleteSession,
 }: {
