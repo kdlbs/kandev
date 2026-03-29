@@ -92,15 +92,15 @@ test.describe("Changes Panel Multi-Select", () => {
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
     // Create task and navigate first, then create files so WS picks up changes
-    const profile = await createStandardProfile(apiClient, "changes-select");
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Select Test", profile.id, {
+    const profile = await createStandardProfile(apiClient, "git-multi-select");
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Multi-Select Test", profile.id, {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const session = await openTaskSession(testPage, "Changes Select Test");
+    const session = await openTaskSession(testPage, "Git Multi-Select Test");
     await session.clickTab("Changes");
 
     // Create files AFTER session is open so WS detects the changes
@@ -139,20 +139,15 @@ test.describe("Changes Panel Multi-Select", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    const profile = await createStandardProfile(apiClient, "changes-bulk-stage");
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Changes Bulk Stage Test",
-      profile.id,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    const profile = await createStandardProfile(apiClient, "git-bulk-stage");
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Bulk Stage Test", profile.id, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
 
-    const session = await openTaskSession(testPage, "Changes Bulk Stage Test");
+    const session = await openTaskSession(testPage, "Git Bulk Stage Test");
     await session.clickTab("Changes");
 
     // Create files after session is open
@@ -188,15 +183,15 @@ test.describe("Changes Panel Multi-Select", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    const profile = await createStandardProfile(apiClient, "changes-escape");
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Escape Test", profile.id, {
+    const profile = await createStandardProfile(apiClient, "git-escape");
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Escape Test", profile.id, {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const session = await openTaskSession(testPage, "Changes Escape Test");
+    const session = await openTaskSession(testPage, "Git Escape Test");
     await session.clickTab("Changes");
 
     // Create files after session is open
