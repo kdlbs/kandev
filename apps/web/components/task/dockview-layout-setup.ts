@@ -102,13 +102,13 @@ export function setupPortalCleanup(
       });
     }
     const entry = panelPortalManager.get(panel.id);
-    // For session-scoped panels, entry.sessionId is set by the PortalSlot.
-    // For global panels (like terminal), fall back to the store's activeSessionId.
-    const ownerSessionId = entry?.sessionId ?? appStore.getState().tasks.activeSessionId;
-    if (entry?.component === "vscode" && ownerSessionId) stopVscode(ownerSessionId);
-    if (entry?.component === "terminal" && ownerSessionId) {
+    // vscode is session-scoped so entry.sessionId is always set by PortalSlot.
+    if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
+    // terminal is global (no entry.sessionId) — fall back to the active session.
+    if (entry?.component === "terminal") {
+      const terminalSessionId = entry.sessionId ?? appStore.getState().tasks.activeSessionId;
       const terminalId = entry.params.terminalId as string | undefined;
-      if (terminalId) stopUserShell(ownerSessionId, terminalId);
+      if (terminalId && terminalSessionId) stopUserShell(terminalSessionId, terminalId);
     }
     panelPortalManager.release(panel.id);
   });
