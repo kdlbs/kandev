@@ -62,6 +62,7 @@ async function typeWhileBusy(page: Page, editor: import("@playwright/test").Loca
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(200);
   }
+  throw new Error(`Failed to type "${text}" into editor after 3 attempts`);
 }
 
 test.describe("Task session queue", () => {

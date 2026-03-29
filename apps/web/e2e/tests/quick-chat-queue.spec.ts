@@ -57,6 +57,7 @@ async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(200);
   }
+  throw new Error(`Failed to type "${text}" into editor after 3 attempts`);
 }
 
 // Allow 1 retry: the test can be flaky when a previous test cycle's agent process hasn't
