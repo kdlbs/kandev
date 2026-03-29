@@ -36,6 +36,7 @@ type ShellTerminalInitOptions = {
   sessionId: string | null | undefined;
   linkHandler?: (event: MouseEvent, uri: string) => void;
   fontFamily?: string;
+  fontSize?: number;
 };
 
 function useTerminalInit({
@@ -45,6 +46,7 @@ function useTerminalInit({
   sessionId,
   linkHandler,
   fontFamily,
+  fontSize,
 }: ShellTerminalInitOptions) {
   const { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef } = refs;
 
@@ -54,7 +56,7 @@ function useTerminalInit({
       cursorBlink: !isReadOnlyMode,
       disableStdin: isReadOnlyMode,
       convertEol: isReadOnlyMode,
-      fontSize: isReadOnlyMode ? 12 : 13,
+      fontSize: fontSize ?? (isReadOnlyMode ? 12 : 13),
       fontFamily: fontFamily || 'Menlo, Monaco, "Courier New", monospace',
       macOptionIsMeta: true,
       theme: getTerminalTheme(terminalRef.current),
@@ -110,6 +112,7 @@ function useTerminalInit({
     isReadOnlyMode,
     linkHandler,
     fontFamily,
+    fontSize,
     terminalRef,
     xtermRef,
     fitAddonRef,
@@ -317,6 +320,24 @@ function useShellInputHandler(opts: {
   }, [taskId, sessionId, send, isReadOnlyMode, xtermRef, onDataDisposableRef]);
 }
 
+function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode: boolean) {
+  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const sessionId = propSessionId ?? storeSessionId;
+  const { session, isActive, isFailed, errorMessage } = useSession(
+    isReadOnlyMode ? null : sessionId,
+  );
+  useSessionAgentctl(isReadOnlyMode ? null : sessionId);
+  const taskId = session?.task_id ?? null;
+  const isSessionFailed = !isReadOnlyMode && isFailed;
+  const shellOutput = useAppStore((state) => {
+    if (!sessionId || isReadOnlyMode) return "";
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.shell.outputs[envKey] || "";
+  });
+  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
+  return { sessionId, taskId, isSessionFailed, errorMessage, shellOutput, canSubscribe };
+}
+
 export function ShellTerminal({
   sessionId: propSessionId,
   processOutput,
@@ -333,21 +354,8 @@ export function ShellTerminal({
   const storeApi = useAppStoreApi();
 
   const isReadOnlyMode = processOutput !== undefined;
-  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const sessionId = propSessionId ?? storeSessionId;
-
-  const { session, isActive, isFailed, errorMessage } = useSession(
-    isReadOnlyMode ? null : sessionId,
-  );
-  useSessionAgentctl(isReadOnlyMode ? null : sessionId);
-  const taskId = session?.task_id ?? null;
-  const isSessionFailed = !isReadOnlyMode && isFailed;
-  const shellOutput = useAppStore((state) => {
-    if (!sessionId || isReadOnlyMode) return "";
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.shell.outputs[envKey] || "";
-  });
-  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
+  const { sessionId, taskId, isSessionFailed, errorMessage, shellOutput, canSubscribe } =
+    useShellSessionState(propSessionId, isReadOnlyMode);
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,
@@ -365,6 +373,7 @@ export function ShellTerminal({
 
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
+  const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const refs: TerminalRefs = { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef };
   useTerminalInit({
     refs,
@@ -373,6 +382,7 @@ export function ShellTerminal({
     sessionId,
     linkHandler,
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
+    fontSize: terminalFontSize ?? undefined,
   });
 
   useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send });

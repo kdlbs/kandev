@@ -98,6 +98,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
+  const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
     xtermRef: refs.xtermRef,
@@ -121,6 +122,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     onReady: onTerminalReady,
     linkHandler,
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
+    fontSize: terminalFontSize ?? undefined,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
   });

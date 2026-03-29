@@ -211,6 +211,74 @@ function FontGroupOptions() {
   ));
 }
 
+function TerminalFontSizeCard() {
+  const storeApi = useAppStoreApi();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [fontSize, setFontSize] = useState(() => userSettings.terminalFontSize ?? 13);
+
+  const saveFontSize = async (value: number) => {
+    if (isSaving) return;
+    if (value < 8 || value > 24) return;
+    setIsSaving(true);
+    const current = storeApi.getState().userSettings;
+    const previous = current.terminalFontSize;
+    try {
+      setUserSettings({ ...current, terminalFontSize: value });
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        terminal_font_size: value,
+      });
+    } catch {
+      setUserSettings({ ...storeApi.getState().userSettings, terminalFontSize: previous });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleFontSizeBlur = () => {
+    const v = Math.min(24, Math.max(8, fontSize));
+    setFontSize(v);
+    saveFontSize(v);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Terminal Font Size</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="terminal-font-size">Font Size</Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="terminal-font-size"
+              type="number"
+              min={8}
+              max={24}
+              value={fontSize}
+              onChange={(e) => setFontSize(Number(e.target.value))}
+              onBlur={handleFontSizeBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleFontSizeBlur();
+              }}
+              className="w-20"
+              disabled={isSaving}
+              data-testid="terminal-font-size-input"
+            />
+            <span className="text-xs text-muted-foreground">px (8-24)</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Set the font size for the terminal. Default is 13px.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function TerminalFontCard() {
   const storeApi = useAppStoreApi();
   const userSettings = useAppStore((state) => state.userSettings);
@@ -366,6 +434,7 @@ export function GeneralSettings() {
         description="Configure terminal appearance and behavior"
       >
         <TerminalFontCard />
+        <TerminalFontSizeCard />
         <TerminalLinksCard />
       </SettingsSection>
 

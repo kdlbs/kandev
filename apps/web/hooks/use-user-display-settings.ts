@@ -26,6 +26,16 @@ type CommitPayload = {
   kanbanViewMode?: string | null;
 };
 
+function carryForwardTerminalSettings(current: DisplaySettings) {
+  return {
+    terminalLinkBehavior: (current.terminalLinkBehavior ?? "new_tab") as
+      | "new_tab"
+      | "browser_panel",
+    terminalFontFamily: current.terminalFontFamily ?? null,
+    terminalFontSize: current.terminalFontSize ?? null,
+  };
+}
+
 function carryForwardSettings(current: DisplaySettings) {
   return {
     shellOptions: current.shellOptions ?? [],
@@ -40,10 +50,7 @@ function carryForwardSettings(current: DisplaySettings) {
     savedLayouts: current.savedLayouts ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
-    terminalLinkBehavior: (current.terminalLinkBehavior ?? "new_tab") as
-      | "new_tab"
-      | "browser_panel",
-    terminalFontFamily: current.terminalFontFamily ?? null,
+    ...carryForwardTerminalSettings(current),
   };
 }
 

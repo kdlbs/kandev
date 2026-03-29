@@ -58,6 +58,12 @@ test.describe("my feature", () => {
 });
 ```
 
+## Test quality guidelines
+
+- **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
+- **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and SSR/client mismatches.
+- **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
+
 ## Debugging failures
 
 ```bash

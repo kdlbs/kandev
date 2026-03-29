@@ -371,6 +371,7 @@ export class ApiClient {
     settings: {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
+      terminal_font_size?: number;
       [key: string]: unknown;
     };
   }> {
@@ -383,6 +384,7 @@ export class ApiClient {
     workflow_filter_id?: string;
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
+    terminal_font_size?: number;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;

@@ -55,6 +55,30 @@ describe("buildCoreFields", () => {
   });
 });
 
+describe("buildTerminalFields via buildCoreFields", () => {
+  it("maps terminal_font_size to terminalFontSize", () => {
+    const settings = {
+      terminal_font_size: 16,
+      terminal_font_family: "",
+      terminal_link_behavior: "new_tab",
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.terminalFontSize).toBe(16);
+  });
+
+  it("returns null when terminal_font_size is 0", () => {
+    const settings = {
+      terminal_font_size: 0,
+      terminal_font_family: "",
+      terminal_link_behavior: "new_tab",
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.terminalFontSize).toBeNull();
+  });
+});
+
 describe("mapUserSettingsResponse", () => {
   it("returns null terminalFontFamily when response is null", () => {
     const result = mapUserSettingsResponse(null);

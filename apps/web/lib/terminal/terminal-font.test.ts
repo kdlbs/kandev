@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTerminalFontFamily, TERMINAL_FONT_PRESETS } from "./terminal-font";
+import { buildTerminalFontFamily, TERMINAL_FONT_PRESETS, DEFAULT_FONT_SIZE } from "./terminal-font";
 
 const DEFAULT_FONT = 'Menlo, Monaco, "Courier New", monospace';
 
@@ -12,18 +12,14 @@ describe("buildTerminalFontFamily", () => {
     expect(buildTerminalFontFamily("")).toBe(DEFAULT_FONT);
   });
 
-  it("prepends selected preset font with fallback", () => {
-    expect(buildTerminalFontFamily("JetBrains Mono")).toBe(`"JetBrains Mono", ${DEFAULT_FONT}`);
+  it("returns preset value as-is without wrapping", () => {
+    const preset = '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace';
+    expect(buildTerminalFontFamily(preset)).toBe(preset);
   });
 
-  it("prepends selected nerd font with fallback", () => {
-    expect(buildTerminalFontFamily("JetBrainsMono Nerd Font")).toBe(
-      `"JetBrainsMono Nerd Font", ${DEFAULT_FONT}`,
-    );
-  });
-
-  it("handles custom font family string", () => {
-    expect(buildTerminalFontFamily("My Custom Font")).toBe(`"My Custom Font", ${DEFAULT_FONT}`);
+  it("returns custom string as-is without wrapping", () => {
+    const custom = "My Custom Font, monospace";
+    expect(buildTerminalFontFamily(custom)).toBe(custom);
   });
 });
 
@@ -35,11 +31,23 @@ describe("TERMINAL_FONT_PRESETS", () => {
     expect(categories).toContain("system");
   });
 
+  it("each preset value contains monospace as a fallback", () => {
+    for (const preset of TERMINAL_FONT_PRESETS) {
+      expect(preset.value).toContain("monospace");
+    }
+  });
+
   it("each preset has value, label, and category", () => {
     for (const preset of TERMINAL_FONT_PRESETS) {
       expect(preset.value).toBeTruthy();
       expect(preset.label).toBeTruthy();
       expect(preset.category).toBeTruthy();
     }
+  });
+});
+
+describe("DEFAULT_FONT_SIZE", () => {
+  it("equals 13", () => {
+    expect(DEFAULT_FONT_SIZE).toBe(13);
   });
 });

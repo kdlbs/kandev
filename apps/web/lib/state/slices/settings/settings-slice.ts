@@ -40,6 +40,7 @@ export const defaultSettingsState: SettingsSliceState = {
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalFontFamily: null,
+    terminalFontSize: null,
     loaded: false,
   },
 };

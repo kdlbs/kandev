@@ -3,6 +3,7 @@ import type { Terminal } from "@xterm/xterm";
 type TerminalContainerWithBuffer = HTMLDivElement & {
   __xtermReadBuffer?: () => string;
   __xtermGetFontFamily?: () => string;
+  __xtermGetFontSize?: () => number;
 };
 
 /** Expose buffer reader on the container for e2e tests (xterm renders to canvas). */
@@ -17,6 +18,7 @@ export function exposeBufferReader(container: HTMLDivElement, terminal: Terminal
     return lines.join("\n");
   };
   c.__xtermGetFontFamily = () => terminal.options.fontFamily ?? "";
+  c.__xtermGetFontSize = () => terminal.options.fontSize ?? 13;
 }
 
 export function clearBufferReader(container: HTMLDivElement) {

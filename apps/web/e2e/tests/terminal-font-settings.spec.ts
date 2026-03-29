@@ -4,6 +4,9 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
 
+// The full font stack value for "JetBrains Mono" preset
+const JB_MONO_STACK = '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -34,60 +37,98 @@ async function seedTaskWithSession(
   return session;
 }
 
+/** Read the xterm font family from the terminal panel via the exposed helper. */
+async function readTerminalFontFamily(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="terminal-panel"]');
+    if (!panel) return "";
+    const xtermEl = panel.querySelector(".xterm");
+    type XC = HTMLElement & { __xtermGetFontFamily?: () => string };
+    const container = xtermEl?.parentElement as XC | null | undefined;
+    return container?.__xtermGetFontFamily?.() ?? "";
+  });
+}
+
+/** Read the xterm font size from the terminal panel via the exposed helper. */
+async function readTerminalFontSize(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="terminal-panel"]');
+    if (!panel) return 0;
+    const xtermEl = panel.querySelector(".xterm");
+    type XC = HTMLElement & { __xtermGetFontSize?: () => number };
+    const container = xtermEl?.parentElement as XC | null | undefined;
+    return container?.__xtermGetFontSize?.() ?? 0;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test.describe("Terminal font settings", () => {
-  // Standalone executor can fail on cold start; retry once for transient failures.
   test.describe.configure({ retries: 1 });
 
-  test("font setting persists via API", async ({ apiClient }) => {
-    await apiClient.saveUserSettings({ terminal_font_family: "JetBrains Mono" });
+  test("font family persists after page reload", async ({ testPage, apiClient, seedData }) => {
+    // Seed font via API, then verify through UI
+    await apiClient.saveUserSettings({ terminal_font_family: JB_MONO_STACK });
 
-    const { settings } = await apiClient.getUserSettings();
-    expect(settings.terminal_font_family).toBe("JetBrains Mono");
-
-    // Clean up
-    await apiClient.saveUserSettings({ terminal_font_family: "" });
-  });
-
-  test("terminal uses custom font after page load", async ({ testPage, apiClient, seedData }) => {
-    await apiClient.saveUserSettings({ terminal_font_family: "JetBrains Mono" });
-
-    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Font Check");
-
+    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Font Persist");
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
 
-    // xterm.js applies fontFamily via canvas rendering, not CSS.
-    // Read the terminal options directly via the exposed __xtermGetFontFamily helper.
-    const fontFamily = await testPage.evaluate(() => {
-      const panel = document.querySelector('[data-testid="terminal-panel"]');
-      if (!panel) return "";
-      const xtermEl = panel.querySelector(".xterm");
-      type XC = HTMLElement & { __xtermGetFontFamily?: () => string };
-      const container = xtermEl?.parentElement as XC | null | undefined;
-      return container?.__xtermGetFontFamily?.() ?? "";
-    });
+    // Verify font is applied
+    const fontBefore = await readTerminalFontFamily(testPage);
+    expect(fontBefore).toContain("JetBrains Mono");
 
-    expect(fontFamily).toContain("JetBrains Mono");
+    // Reload and verify persistence
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+
+    const fontAfter = await readTerminalFontFamily(testPage);
+    expect(fontAfter).toContain("JetBrains Mono");
 
     // Clean up
     await apiClient.saveUserSettings({ terminal_font_family: "" });
   });
 
-  test("settings page shows font selector", async ({ testPage }) => {
+  test("font size persists after page reload", async ({ testPage, apiClient, seedData }) => {
+    await apiClient.saveUserSettings({ terminal_font_size: 18 });
+
+    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Size Persist");
+    await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+
+    const sizeBefore = await readTerminalFontSize(testPage);
+    expect(sizeBefore).toBe(18);
+
+    // Reload and verify persistence
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+
+    const sizeAfter = await readTerminalFontSize(testPage);
+    expect(sizeAfter).toBe(18);
+
+    // Clean up
+    await apiClient.saveUserSettings({ terminal_font_size: 0 });
+  });
+
+  test("settings page shows font and size controls", async ({ testPage }) => {
     await testPage.goto("/settings/general");
 
+    // Font family selector
     const fontSelect = testPage.getByTestId("terminal-font-select");
     await expect(fontSelect).toBeVisible({ timeout: 10_000 });
-
-    // Open the dropdown
     await fontSelect.click();
 
-    // Verify JetBrains Mono is listed as an option (exact match to avoid
-    // matching "JetBrains Mono Nerd Font" as well)
+    // Verify a preset is listed (exact match to avoid matching Nerd Font variant)
     const option = testPage.getByRole("option", { name: "JetBrains Mono", exact: true });
     await expect(option).toBeVisible({ timeout: 5_000 });
+
+    // Close dropdown by pressing Escape
+    await testPage.keyboard.press("Escape");
+
+    // Font size input
+    const fontSizeInput = testPage.getByTestId("terminal-font-size-input");
+    await expect(fontSizeInput).toBeVisible();
   });
 });

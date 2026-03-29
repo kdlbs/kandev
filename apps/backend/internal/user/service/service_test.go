@@ -134,6 +134,57 @@ func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
+	t.Run("nil leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{TerminalFontSize: 14}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontSize != 14 {
+			t.Fatalf("expected TerminalFontSize=14, got %d", settings.TerminalFontSize)
+		}
+	})
+
+	t.Run("sets value when provided", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TerminalFontSize: ptr(16)}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontSize != 16 {
+			t.Fatalf("expected TerminalFontSize=16, got %d", settings.TerminalFontSize)
+		}
+	})
+
+	t.Run("value below 8 returns error", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TerminalFontSize: ptr(7)}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected error for font size 7, got nil")
+		}
+	})
+
+	t.Run("value above 24 returns error", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TerminalFontSize: ptr(25)}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected error for font size 25, got nil")
+		}
+	})
+
+	t.Run("resets to 0 when 0 is provided", func(t *testing.T) {
+		settings := &models.UserSettings{TerminalFontSize: 14}
+		req := &UpdateUserSettingsRequest{TerminalFontSize: ptr(0)}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontSize != 0 {
+			t.Fatalf("expected TerminalFontSize=0, got %d", settings.TerminalFontSize)
+		}
+	})
+}
+
 func TestApplySavedLayouts(t *testing.T) {
 	tests := []struct {
 		name        string

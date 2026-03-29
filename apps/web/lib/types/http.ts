@@ -378,6 +378,7 @@ export type UserSettings = {
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   terminal_font_family?: string;
+  terminal_font_size?: number;
   updated_at: string;
 };
 

@@ -155,6 +155,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"keyboard_shortcuts":              keyboardShortcuts,
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
+		"terminal_font_size":              settings.TerminalFontSize,
 	})
 	if err != nil {
 		return err
@@ -223,6 +224,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`
 		TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
 		TerminalFontFamily          string                            `json:"terminal_font_family"`
+		TerminalFontSize            int                               `json:"terminal_font_size"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -277,5 +279,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.TerminalLinkBehavior = "new_tab"
 	}
 	settings.TerminalFontFamily = payload.TerminalFontFamily
+	settings.TerminalFontSize = payload.TerminalFontSize
 	return settings, nil
 }

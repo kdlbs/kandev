@@ -10,6 +10,7 @@ function buildTerminalFields(s: UserSettingsData) {
   return {
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     terminalFontFamily: s.terminal_font_family || null,
+    terminalFontSize: s.terminal_font_size || null,
   };
 }
 
@@ -67,6 +68,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
       terminalLinkBehavior: "new_tab" as const,
       terminalFontFamily: null,
+      terminalFontSize: null,
       ...buildLspFields(undefined),
       loaded: false,
     };
