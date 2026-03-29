@@ -43,11 +43,7 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (messages) {
         for (const msg of messages) {
           const meta = msg.metadata as Record<string, unknown> | undefined;
-          if (
-            meta?.tool_call_id &&
-            meta?.status !== "complete" &&
-            meta?.status !== "error"
-          ) {
+          if (meta?.tool_call_id && meta?.status !== "complete" && meta?.status !== "error") {
             store.getState().updateMessage({
               ...msg,
               metadata: { ...meta, status: "complete" },
