@@ -59,6 +59,7 @@ type TreeNodeItemProps = {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (targetPath: string, e: React.DragEvent) => void;
   selectedCount?: number;
+  selectedPaths?: Set<string>;
 };
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
@@ -265,6 +266,7 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
         onRenameFile={onRenameFile}
         onStartRename={rename.handleStartRename}
         selectedCount={props.selectedCount}
+        selectedPaths={props.selectedPaths}
       >
         <TreeNodeRow
           node={node}
@@ -380,6 +382,7 @@ type FileBrowserContentAreaProps = {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (targetPath: string, e: React.DragEvent) => void;
   selectedCount?: number;
+  selectedPaths?: Set<string>;
 };
 
 function FileTreeView(props: FileBrowserContentAreaProps) {
@@ -426,6 +429,7 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
               onDragLeave={props.onDragLeave}
               onDrop={props.onDrop}
               selectedCount={props.selectedCount}
+              selectedPaths={props.selectedPaths}
             />
           ))}
     </div>

@@ -414,6 +414,7 @@ export function FileBrowser({
           onDragLeave={dnd.handleDragLeave}
           onDrop={dnd.handleDrop}
           selectedCount={multiSelect.selectedPaths.size}
+          selectedPaths={multiSelect.selectedPaths}
         />
       </ScrollArea>
     </div>

@@ -98,6 +98,7 @@ export function FileContextMenu({
   onRenameFile,
   onStartRename,
   selectedCount = 0,
+  selectedPaths,
 }: {
   children: React.ReactNode;
   node: FileTreeNode;
@@ -107,6 +108,7 @@ export function FileContextMenu({
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onStartRename: () => void;
   selectedCount?: number;
+  selectedPaths?: Set<string>;
 }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const isBulk = selectedCount > 1;
@@ -114,8 +116,15 @@ export function FileContextMenu({
 
   const handleConfirmDelete = useCallback(() => {
     setDeleteDialogOpen(false);
-    if (onDeleteFile) deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
-  }, [tree, setTree, node.path, onDeleteFile]);
+    if (!onDeleteFile) return;
+    if (isBulk && selectedPaths) {
+      for (const p of selectedPaths) {
+        deleteNodeOptimistically(tree, setTree, p, onDeleteFile);
+      }
+    } else {
+      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
+    }
+  }, [tree, setTree, node.path, onDeleteFile, isBulk, selectedPaths]);
 
   const handleDelete = useCallback(() => {
     if (!onDeleteFile) return;
