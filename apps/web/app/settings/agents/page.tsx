@@ -29,7 +29,6 @@ import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery"
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
-import { UtilityAgentsSection } from "@/components/settings/utility-agents-section";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   AgentDiscovery,
@@ -565,8 +564,6 @@ export default function AgentsSettingsPage() {
       <AgentProfilesSection savedAgents={savedAgents} />
 
       <ConfigChatAgentSection />
-
-      <UtilityAgentsSection />
 
       <AddTUIAgentDialog
         open={tuiDialogOpen}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Separator } from "@kandev/ui/separator";
 import {
   listUtilityAgents,
   listInferenceAgents,
@@ -108,9 +107,8 @@ export function UtilityAgentsSection() {
   return (
     <>
       <div className="space-y-4">
-        <Separator />
         <div>
-          <h3 className="text-lg font-semibold">Utility Agents</h3>
+          <h2 className="text-2xl font-bold">Utility Agents</h2>
           <p className="text-sm text-muted-foreground">
             One-shot AI helpers for commits, PRs, and prompts.
           </p>

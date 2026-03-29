@@ -14,6 +14,7 @@ import {
   IconMessageCircle,
   IconBrandGithub,
   IconSparkles,
+  IconWand,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -294,6 +295,16 @@ export function SettingsAppSidebar() {
                     <Link href="/settings/prompts">
                       <IconMessageCircle className="h-4 w-4" />
                       <span>Prompts</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                {/* Utility Agents */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/settings/utility-agents"}>
+                    <Link href="/settings/utility-agents">
+                      <IconWand className="h-4 w-4" />
+                      <span>Utility Agents</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
