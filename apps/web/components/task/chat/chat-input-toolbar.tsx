@@ -99,22 +99,31 @@ function SubmitButton({
   submitShortcut,
 }: SubmitButtonProps) {
   return (
-    <KeyboardShortcutTooltip
-      shortcut={submitShortcut}
-      description={planModeEnabled ? "Request plan changes" : undefined}
-      enabled={!isAgentBusy && !isDisabled}
-    >
-      {isAgentBusy ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-          onClick={onCancel}
-        >
-          <IconPlayerPauseFilled className="h-3.5 w-3.5" />
-        </Button>
-      ) : (
+    <div className="flex items-center gap-1">
+      {isAgentBusy && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
+              onClick={onCancel}
+              data-testid="cancel-agent-button"
+            >
+              <IconPlayerPauseFilled className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Cancel agent</TooltipContent>
+        </Tooltip>
+      )}
+      <KeyboardShortcutTooltip
+        shortcut={submitShortcut}
+        description={
+          isAgentBusy ? "Queue message" : planModeEnabled ? "Request plan changes" : undefined
+        }
+        enabled={!isDisabled}
+      >
         <Button
           type="button"
           variant="default"
@@ -125,13 +134,14 @@ function SubmitButton({
           )}
           disabled={isDisabled}
           onClick={onSubmit}
+          data-testid="submit-message-button"
         >
           {isSending && <GridSpinner className="text-primary-foreground" />}
           {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
           {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
         </Button>
-      )}
-    </KeyboardShortcutTooltip>
+      </KeyboardShortcutTooltip>
+    </div>
   );
 }
 
