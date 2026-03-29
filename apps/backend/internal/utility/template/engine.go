@@ -26,6 +26,9 @@ type Context struct {
 	// User input
 	UserPrompt string // User's original prompt text (for enhance-prompt)
 
+	// Conversation
+	ConversationHistory string // Formatted conversation transcript (for summarize-session)
+
 	// Custom key-value pairs for extensibility
 	Custom map[string]string
 }
@@ -65,17 +68,18 @@ func (e *Engine) Resolve(promptTemplate string, ctx *Context) (string, error) {
 // buildTemplateData creates the data map for template execution.
 func (e *Engine) buildTemplateData(ctx *Context) map[string]string {
 	data := map[string]string{
-		"GitDiff":         ctx.GitDiff,
-		"CommitLog":       ctx.CommitLog,
-		"ChangedFiles":    ctx.ChangedFiles,
-		"DiffSummary":     ctx.DiffSummary,
-		"BranchName":      ctx.BranchName,
-		"BaseBranch":      ctx.BaseBranch,
-		"TaskTitle":       ctx.TaskTitle,
-		"TaskDescription": ctx.TaskDescription,
-		"SessionID":       ctx.SessionID,
-		"WorkspacePath":   ctx.WorkspacePath,
-		"UserPrompt":      ctx.UserPrompt,
+		"GitDiff":             ctx.GitDiff,
+		"CommitLog":           ctx.CommitLog,
+		"ChangedFiles":        ctx.ChangedFiles,
+		"DiffSummary":         ctx.DiffSummary,
+		"BranchName":          ctx.BranchName,
+		"BaseBranch":          ctx.BaseBranch,
+		"TaskTitle":           ctx.TaskTitle,
+		"TaskDescription":     ctx.TaskDescription,
+		"SessionID":           ctx.SessionID,
+		"WorkspacePath":       ctx.WorkspacePath,
+		"UserPrompt":          ctx.UserPrompt,
+		"ConversationHistory": ctx.ConversationHistory,
 	}
 
 	// Add custom key-value pairs
@@ -100,6 +104,7 @@ func (e *Engine) AvailableVariables() []VariableInfo {
 		{Name: "SessionID", Description: "Current session ID", Example: "sess_abc123", Category: "session"},
 		{Name: "WorkspacePath", Description: "Path to the workspace/worktree", Example: "/home/user/project", Category: "session"},
 		{Name: "UserPrompt", Description: "User's original prompt text", Example: "Fix the login bug", Category: "input"},
+		{Name: "ConversationHistory", Description: "Formatted conversation transcript", Example: "User: Fix the bug\nAgent: I'll look into...", Category: "session"},
 	}
 }
 

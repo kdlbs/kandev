@@ -84,7 +84,7 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   const card = kanban.taskCardByTitle(title);
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.click();
-  await expect(page).toHaveURL(/\/s\//, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(page);
   await session.waitForLoad();
@@ -812,6 +812,12 @@ test.describe("Git Changes Panel", () => {
     // Helper to clean up branch - ensures cleanup runs even if test fails
     const cleanupBranch = () => {
       try {
+        // Abort any in-progress rebase before switching branches
+        try {
+          git.exec("git rebase --abort");
+        } catch {
+          /* not in a rebase */
+        }
         git.exec("git checkout -f main");
         git.exec("git clean -fd");
         git.exec("git branch -D feature-rebase");
@@ -821,8 +827,20 @@ test.describe("Git Changes Panel", () => {
     };
 
     try {
-      // Clean any leftover state from prior tests
+      // Clean any leftover state from prior tests (including interrupted rebases)
+      try {
+        git.exec("git rebase --abort");
+      } catch {
+        /* not in a rebase */
+      }
       git.exec("git clean -fd");
+      // Remove feature-rebase branch if it already exists from a previous run
+      try {
+        git.exec("git checkout -f main");
+        git.exec("git branch -D feature-rebase");
+      } catch {
+        /* branch doesn't exist yet */
+      }
 
       // Create a commit on a feature branch
       git.exec("git checkout -b feature-rebase");

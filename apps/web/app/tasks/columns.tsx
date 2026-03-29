@@ -32,7 +32,6 @@ function TitleCell({
   repoMap: Map<string, string>;
 }) {
   const task = row.original;
-  const sessionId = task.primary_session_id;
   const isArchived = !!task.archived_at;
   const repoName = task.repositories?.[0]
     ? repoMap.get(task.repositories[0].repository_id)
@@ -40,13 +39,9 @@ function TitleCell({
   return (
     <div className="flex flex-col gap-0.5 py-0.5">
       <div className="flex items-center gap-2">
-        {sessionId ? (
-          <Link href={`/s/${sessionId}`} className="text-primary font-medium text-sm">
-            {task.title}
-          </Link>
-        ) : (
-          <span className="font-medium text-sm">{task.title}</span>
-        )}
+        <Link href={`/t/${task.id}`} className="text-primary font-medium text-sm">
+          {task.title}
+        </Link>
         {isArchived && (
           <Badge
             variant="outline"

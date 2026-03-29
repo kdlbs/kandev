@@ -91,6 +91,7 @@ export const test = backendFixture.extend<
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
+      enable_preview_on_click: false,
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,

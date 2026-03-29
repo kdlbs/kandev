@@ -267,12 +267,17 @@ type LaunchRequest struct {
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+
+	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
+	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
+	RepoName    string // Repository name used as subdirectory inside the task directory
 }
 
 // MessageAttachment represents an image or file attachment for agent prompts.

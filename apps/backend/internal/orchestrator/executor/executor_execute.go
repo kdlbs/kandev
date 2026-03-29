@@ -3,13 +3,16 @@ package executor
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -216,6 +219,19 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	// Resolve agent profile to get model and other settings for snapshot
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
+	// Determine if this new session should become primary.
+	// Only the first session for a task is primary by default; subsequent sessions
+	// leave the existing primary unchanged so the user's explicit choice is preserved.
+	existingSessions, _ := e.repo.ListTaskSessions(ctx, task.ID)
+	hasPrimary := false
+	for _, s := range existingSessions {
+		if s.IsPrimary {
+			hasPrimary = true
+			break
+		}
+	}
+	isFirstSession := !hasPrimary
+
 	// Create agent session in database
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
@@ -229,13 +245,11 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            true,
+		IsPrimary:            isFirstSession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
-	if workflowStepID != "" {
-		session.WorkflowStepID = &workflowStepID
-	}
+	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session
 	if executorProfileID != "" {
@@ -259,12 +273,15 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		return "", err
 	}
 
-	// Clear primary flag on any other sessions for this task
-	if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
-		e.logger.Warn("failed to update primary session flag",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+	// Set primary flag only for the first session (no existing primary).
+	// Subsequent sessions do not override the established primary.
+	if isFirstSession {
+		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+			e.logger.Warn("failed to update primary session flag",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("session entry created",
@@ -319,6 +336,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 
+	// Inject session handover context if there are previous sessions for this task.
+	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
+
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
 	if session.AgentExecutionID != "" {
@@ -345,6 +365,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.Attachments = opts.Attachments
 	}
 
+	// Check for an existing task environment to reuse its worktree
+	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
+		req.WorktreeID = existingEnv.WorktreeID
+		e.logger.Info("reusing existing task environment worktree",
+			zap.String("task_id", task.ID),
+			zap.String("worktree_id", existingEnv.WorktreeID))
+	}
+
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
@@ -359,6 +388,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, err)
 	}
+
+	// Create or update the task environment with launch results
+	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
 	// This allows us to filter git log to only show commits made during the session.
@@ -478,6 +510,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		// Task directory mode: place worktree inside per-task directory
+		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
+			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+			req.RepoName = repoInfo.Repository.Name
+		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {
 				metadata = make(map[string]interface{})
@@ -653,4 +690,99 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 		zap.String("session_id", sessionID),
 		zap.String("base_commit", baseCommit),
 		zap.String("head_commit", status.HeadCommit))
+}
+
+// injectHandoverIfNeeded prepends session handover context to the prompt when the task
+// already has previous sessions. The context includes the session count and the task plan
+// (if one exists) so the new agent avoids repeating already-completed work.
+func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSessionID, prompt string) string {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list sessions for handover context",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return prompt
+	}
+
+	// Count previous sessions (exclude the current one being launched).
+	var previousCount int
+	for _, s := range sessions {
+		if s.ID != currentSessionID {
+			previousCount++
+		}
+	}
+	if previousCount == 0 {
+		return prompt
+	}
+
+	// Build the plan section if a plan exists.
+	var planSection string
+	plan, err := e.repo.GetTaskPlan(ctx, taskID)
+	if err == nil && plan != nil && plan.Content != "" {
+		planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", plan.Content)
+	}
+
+	e.logger.Info("injecting session handover context",
+		zap.String("task_id", taskID),
+		zap.String("session_id", currentSessionID),
+		zap.Int("previous_sessions", previousCount))
+
+	return sysprompt.InjectSessionHandover(previousCount, planSection, prompt)
+}
+
+// persistTaskEnvironment creates or updates the task environment record after a successful launch.
+// It also links the session to the environment via TaskEnvironmentID.
+func (e *Executor) persistTaskEnvironment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	execCfg executorConfig,
+) {
+	if existingEnv != nil {
+		// Update the existing environment with new execution info
+		existingEnv.AgentExecutionID = resp.AgentExecutionID
+		existingEnv.Status = models.TaskEnvironmentStatusReady
+		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+			e.logger.Warn("failed to update task environment",
+				zap.String("task_id", taskID),
+				zap.String("env_id", existingEnv.ID),
+				zap.Error(err))
+		}
+		session.TaskEnvironmentID = existingEnv.ID
+		return
+	}
+
+	// Create a new task environment
+	workspacePath := resp.WorktreePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	// Task directory mode: WorkspacePath = task root, WorktreePath = repo subdir
+	if req.TaskDirName != "" && resp.WorktreePath != "" {
+		workspacePath = filepath.Dir(resp.WorktreePath)
+	}
+	env := &models.TaskEnvironment{
+		TaskID:            taskID,
+		RepositoryID:      req.RepositoryID,
+		ExecutorType:      req.ExecutorType,
+		ExecutorID:        execCfg.ExecutorID,
+		ExecutorProfileID: session.ExecutorProfileID,
+		AgentExecutionID:  resp.AgentExecutionID,
+		Status:            models.TaskEnvironmentStatusReady,
+		WorktreeID:        resp.WorktreeID,
+		WorktreePath:      resp.WorktreePath,
+		WorktreeBranch:    resp.WorktreeBranch,
+		WorkspacePath:     workspacePath,
+		ContainerID:       resp.ContainerID,
+	}
+	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
+		e.logger.Warn("failed to create task environment",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	session.TaskEnvironmentID = env.ID
 }

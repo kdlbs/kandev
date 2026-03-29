@@ -205,13 +205,37 @@ export const createSessionSlice: StateCreator<
         const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
         if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
       }
+      // Eagerly populate session→environment mapping (cross-slice access to session-runtime)
+      if (mergedSession.task_environment_id) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (draft as any).environmentIdBySessionId[session.id] = mergedSession.task_environment_id;
+      }
+    }),
+  removeTaskSession: (taskId, sessionId) =>
+    set((draft) => {
+      delete draft.taskSessions.items[sessionId];
+      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+      if (sessionsByTask) {
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
+          (s) => s.id !== sessionId,
+        );
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (draft as any).environmentIdBySessionId[sessionId];
     }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {
       draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
       draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
       draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-      for (const session of sessions) draft.taskSessions.items[session.id] = session;
+      for (const session of sessions) {
+        draft.taskSessions.items[session.id] = session;
+        // Eagerly populate session→environment mapping (cross-slice access to session-runtime)
+        if (session.task_environment_id) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (draft as any).environmentIdBySessionId[session.id] = session.task_environment_id;
+        }
+      }
     }),
   setTaskSessionsLoading: (taskId, loading) =>
     set((draft) => {

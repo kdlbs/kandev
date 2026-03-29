@@ -283,12 +283,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Apply workflow step prompt wrapping and plan mode injection.
 	// Called unconditionally so workflow-step prompt composition (prefix/suffix)
 	// applies even when plan mode is not requested.
+	// Re-read the task after on_turn_start may have changed the workflow step.
 	// Ephemeral tasks skip workflow step processing since they have no workflow.
-	stepID := ""
-	if session.WorkflowStepID != nil {
-		stepID = *session.WorkflowStepID
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, stepID, planMode, task.IsEphemeral)
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
@@ -533,17 +534,26 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
+	if (err != nil || running == nil) &&
+		session.State != models.TaskSessionStateCancelled &&
+		session.State != models.TaskSessionStateFailed {
+		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
+		// the record may already have been cleaned up before the user clicked Resume — allow it.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	if err := validateSessionWorktrees(session); err != nil {
 		return nil, err
 	}
 
-	// Don't resume sessions that are in a terminal state.
+	// Completed sessions cannot be restarted — they require a new session.
+	// Failed sessions clear the resume token so the agent starts fresh (the old
+	// process crashed). Cancelled sessions keep the token so --resume restores
+	// the conversation when the user re-starts a manually stopped session.
 	switch session.State {
-	case models.TaskSessionStateFailed, models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
-		return nil, fmt.Errorf("session is in terminal state %s and cannot be resumed", session.State)
+	case models.TaskSessionStateCompleted:
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	case models.TaskSessionStateFailed:
+		s.clearResumeToken(ctx, sessionID)
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
@@ -610,7 +620,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("session does not belong to task")
 	}
 
-	task, err := s.scheduler.GetTask(ctx, taskID)
+	dbTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task: %w", err)
 	}
@@ -619,9 +629,9 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
 
-	s.advanceSessionWorkflowStep(ctx, sessionID, workflowStepID, session)
+	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
-	effectivePrompt := s.buildWorkflowPrompt(task.Description, step, taskID, sessionID)
+	effectivePrompt := s.buildWorkflowPrompt(dbTask.Description, step, taskID, sessionID)
 
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err
@@ -643,21 +653,23 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	return nil
 }
 
-// advanceSessionWorkflowStep updates the session's workflow step and clears review status if the step changed.
-func (s *Service) advanceSessionWorkflowStep(ctx context.Context, sessionID, workflowStepID string, session *models.TaskSession) {
-	if session.WorkflowStepID != nil && *session.WorkflowStepID == workflowStepID {
+// advanceTaskWorkflowStep updates the task's workflow step and clears session review status if the step changed.
+func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task, workflowStepID string, session *models.TaskSession) {
+	if task.WorkflowStepID == workflowStepID {
 		return
 	}
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, workflowStepID); err != nil {
-		s.logger.Warn("failed to update session workflow step",
-			zap.String("session_id", sessionID),
+	task.WorkflowStepID = workflowStepID
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.logger.Warn("failed to update task workflow step",
+			zap.String("task_id", task.ID),
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
 	}
 	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, session.ID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
-				zap.String("session_id", sessionID),
+				zap.String("session_id", session.ID),
 				zap.Error(err))
 		}
 	}
@@ -1020,6 +1032,102 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	return s.executor.Stop(ctx, sessionID, reason, force)
+}
+
+// DeleteSession deletes a session that is not currently running.
+func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Prevent deleting active sessions
+	switch session.State {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return fmt.Errorf("cannot delete session in %s state — stop it first", session.State)
+	}
+
+	taskID := session.TaskID
+	wasPrimary := session.IsPrimary
+
+	s.logger.Info("deleting session",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("state", string(session.State)),
+		zap.Bool("was_primary", wasPrimary))
+
+	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	// Auto-promote another session if we deleted the primary
+	if wasPrimary {
+		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
+	}
+
+	return nil
+}
+
+// promoteNextPrimaryAfterRemoval picks the best remaining session as primary
+// after a session is deleted. Prefers RUNNING > active > any remaining.
+func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil || len(sessions) == 0 {
+		return
+	}
+	var candidate string
+	for _, sess := range sessions {
+		if sess.ID == deletedSessionID {
+			continue
+		}
+		if sess.State == models.TaskSessionStateRunning {
+			candidate = sess.ID
+			break
+		}
+		if candidate == "" {
+			candidate = sess.ID
+		} else if isActiveSessionState(sess.State) {
+			// Prefer active over terminal
+			candidate = sess.ID
+		}
+	}
+	if candidate != "" {
+		if err := s.SetPrimarySession(ctx, candidate); err != nil {
+			s.logger.Warn("failed to auto-promote primary after delete",
+				zap.String("task_id", taskID),
+				zap.String("candidate", candidate),
+				zap.Error(err))
+		}
+	}
+}
+
+// SetPrimarySession marks a session as the primary session for its task
+// and broadcasts a task.updated event so the frontend reflects the change.
+func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
+	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to set session as primary: %w", err)
+	}
+
+	// Broadcast task.updated so frontend updates the primary star indicator.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
+		return nil
+	}
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
+		return nil
+	}
+	if s.eventBus != nil {
+		payload := buildTaskEventPayload(task)
+		payload["primary_session_id"] = sessionID
+		payload["primary_session_state"] = string(session.State)
+		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
+			events.TaskUpdated, "orchestrator", payload,
+		))
+	}
+	return nil
 }
 
 // StopExecution stops agent execution for a specific execution ID.

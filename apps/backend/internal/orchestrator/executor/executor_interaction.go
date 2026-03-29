@@ -22,6 +22,9 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 }
 
 // stopWithSession stops an active execution using an already-loaded session.
+// It marks the session CANCELLED in the database immediately so the WebSocket
+// caller can return quickly, then terminates the agent process asynchronously
+// to avoid blocking the caller on agentctl's blocking stop HTTP call.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
 	if session.AgentExecutionID == "" {
 		return ErrExecutionNotFound
@@ -34,21 +37,26 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	err := e.agentManager.StopAgentWithReason(ctx, session.AgentExecutionID, reason, force)
-	if err != nil {
-		// Log the error but continue to clean up execution state
-		// The agent instance may already be gone (container stopped externally)
-		e.logger.Warn("failed to stop agent (may already be stopped)",
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-
-	// Update database
-	if dbErr := e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-		e.logger.Error("failed to update agent session status in database",
+	// Mark the session CANCELLED and publish a WS event immediately so the
+	// frontend updates without waiting for the agent process to exit.
+	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
 			zap.Error(dbErr))
 	}
+
+	// Terminate the agent process in the background — agentctl's stop endpoint
+	// blocks until the process exits, which can exceed the WS request timeout.
+	stopCtx := context.WithoutCancel(ctx)
+	executionID := session.AgentExecutionID
+	go func() {
+		if err := e.agentManager.StopAgentWithReason(stopCtx, executionID, reason, force); err != nil {
+			// Log the error; the agent instance may already be gone
+			e.logger.Warn("failed to stop agent (may already be stopped)",
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
+	}()
 
 	return nil
 }

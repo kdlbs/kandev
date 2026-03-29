@@ -389,12 +389,9 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
 			"is_passthrough":         session.IsPassthrough,
 		}
-		// Include review_status and workflow_step_id if present to ensure frontend state consistency
+		// Include review_status if present to ensure frontend state consistency
 		if session.ReviewStatus != nil {
 			eventData["review_status"] = *session.ReviewStatus
-		}
-		if session.WorkflowStepID != nil {
-			eventData["workflow_step_id"] = *session.WorkflowStepID
 		}
 		// Include session metadata (e.g. plan_mode set by workflow events).
 		// Key is "session_metadata" to avoid conflict with message-level "metadata".
@@ -405,8 +402,72 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
 			eventData["suppress_toast"] = true
 		}
+		if session.TaskEnvironmentID != "" {
+			eventData["task_environment_id"] = session.TaskEnvironmentID
+		}
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
+
+	// Auto-promote another session to primary when the current primary enters a terminal state
+	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+}
+
+// maybePromotePrimary promotes the next best active session to primary when the
+// current primary session enters a terminal state (COMPLETED, FAILED, CANCELLED).
+func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState) {
+	if !isTerminalSessionState(newState) {
+		return
+	}
+
+	// Check whether the stopped session is actually the primary
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return
+	}
+	var stoppedIsPrimary bool
+	for _, sess := range sessions {
+		if sess.ID == sessionID && sess.IsPrimary {
+			stoppedIsPrimary = true
+			break
+		}
+	}
+	if !stoppedIsPrimary {
+		return
+	}
+
+	// Pick the best candidate: prefer RUNNING, then STARTING, then WAITING_FOR_INPUT
+	var candidate string
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			continue
+		}
+		if sess.State == models.TaskSessionStateRunning {
+			candidate = sess.ID
+			break
+		}
+		if candidate == "" && isActiveSessionState(sess.State) {
+			candidate = sess.ID
+		}
+	}
+	if candidate != "" {
+		if err := s.SetPrimarySession(ctx, candidate); err != nil {
+			s.logger.Warn("failed to auto-promote primary session",
+				zap.String("task_id", taskID),
+				zap.String("candidate", candidate),
+				zap.Error(err))
+		} else {
+			s.logger.Info("auto-promoted primary session",
+				zap.String("task_id", taskID),
+				zap.String("old_primary", sessionID),
+				zap.String("new_primary", candidate))
+		}
+	}
+}
+
+func isTerminalSessionState(s models.TaskSessionState) bool {
+	return s == models.TaskSessionStateCompleted ||
+		s == models.TaskSessionStateFailed ||
+		s == models.TaskSessionStateCancelled
 }
 
 func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {

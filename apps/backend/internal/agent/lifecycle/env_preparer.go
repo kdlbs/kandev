@@ -39,6 +39,9 @@ type EnvPrepareRequest struct {
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 
+	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
+	RepoName    string // Repository slug used with TaskDirName to locate checkouts
+
 	Env map[string]string
 }
 

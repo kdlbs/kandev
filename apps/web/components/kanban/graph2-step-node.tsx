@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 
@@ -94,7 +94,6 @@ export function Graph2StepNode({
   hasPrev,
   hasNext,
   onMoveTask,
-  onPreviewTask,
   prevStepId,
   nextStepId,
   isMoving,
@@ -109,11 +108,7 @@ export function Graph2StepNode({
   const running = isRunningState(task.state);
 
   const handleClick = () => {
-    if (task.primarySessionId) {
-      router.push(linkToSession(task.primarySessionId));
-    } else {
-      onPreviewTask(task);
-    }
+    router.push(linkToTask(task.id));
   };
 
   return (

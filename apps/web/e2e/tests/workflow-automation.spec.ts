@@ -75,7 +75,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to the session page
     await cardInDone.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -163,8 +163,11 @@ test.describe("Workflow automation", () => {
 
     const agentProfileId = seedData.agentProfileId;
 
-    // Create task in Todo without starting an agent.
+    // Create task in Todo without starting an agent. The session page's
+    // useAutoStartSession hook will fire and send task.description as the
+    // initial prompt when the user navigates to the task page.
     const task = await apiClient.createTask(seedData.workspaceId, "Lifecycle Workflow Task", {
+      description: "/e2e:simple-message",
       workflow_id: workflow.id,
       workflow_step_id: todoStep.id,
       agent_profile_id: agentProfileId,
@@ -178,26 +181,19 @@ test.describe("Workflow automation", () => {
     const cardInTodo = kanban.taskCardInColumn("Lifecycle Workflow Task", todoStep.id);
     await expect(cardInTodo).toBeVisible({ timeout: 10_000 });
 
-    // Click the card — creates a session (with workflow_step_id from the task)
-    // and navigates to the session page.
+    // Click the card — navigates to the session page.
     await cardInTodo.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Stepper initially shows Todo
-    await expect(session.stepperStep("Todo")).toHaveAttribute("aria-current", "step", {
-      timeout: 10_000,
-    });
-
-    // --- Send a message: agent responds → on_turn_complete fires → cascade ---
+    // --- Auto-start fires: useAutoStartSession sends task.description as prompt ---
     // Todo on_turn_complete: move_to_next → In Progress
     // In Progress on_enter: auto_start_agent queues /e2e:multi-turn step prompt
     // Step prompt runs → on_turn_complete: move_to_next → Review
-    await session.sendMessage("/e2e:simple-message");
 
-    // Wait for the first mock response (from user's /e2e:simple-message on Todo step)
+    // Wait for the first mock response (from auto-started /e2e:simple-message on Todo step)
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
@@ -301,7 +297,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to session page
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -415,7 +411,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to the session page to verify per-step responses
     await cardInDeploy.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -533,7 +529,7 @@ test.describe("Workflow automation", () => {
 
     // Navigate to session to verify agent completed successfully
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

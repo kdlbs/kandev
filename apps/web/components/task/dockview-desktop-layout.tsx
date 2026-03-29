@@ -7,13 +7,16 @@ import {
   type IDockviewPanelProps,
   type IDockviewPanelHeaderProps,
   type DockviewReadyEvent,
-  type SerializedDockview,
 } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
-import { applyLayoutFixups, getRootSplitview } from "@/lib/state/dockview-layout-builders";
-import { getSessionLayout, setSessionLayout, getSessionMaximizeState } from "@/lib/local-storage";
-import { useAppStore } from "@/components/state-provider";
+import { tryRestoreLayout } from "./dockview-layout-restore";
+import {
+  setupGroupTracking,
+  setupLayoutPersistence,
+  setupPortalCleanup,
+} from "./dockview-layout-setup";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
@@ -34,6 +37,12 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
+import { SessionTab } from "./session-tab";
+import {
+  setupSessionTabSync,
+  setupChatPanelSafetyNet,
+  useAutoSessionTab,
+} from "./dockview-session-tabs";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -42,8 +51,6 @@ import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
-import { stopVscode } from "@/lib/api/domains/vscode-api";
-import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { useReviewDialog } from "./use-review-dialog";
 
 import type { Repository, RepositoryScript } from "@/lib/types/http";
@@ -52,9 +59,6 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 // Portal system
 import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
-
-// --- STORAGE KEY ---
-const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -147,6 +151,7 @@ function PermanentTab(props: IDockviewPanelHeaderProps) {
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
+  sessionTab: SessionTab,
 };
 
 // ---------------------------------------------------------------------------
@@ -171,18 +176,36 @@ function SidebarContent({ panelId }: { panelId: string }) {
   return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
 }
 
-function ChatContent({ panelId }: { panelId: string }) {
-  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { openFile } = useFileEditors();
-
-  const isPassthrough = useAppStore((state) => {
-    if (!sessionId) return false;
-    return state.taskSessions.items[sessionId]?.is_passthrough === true;
+function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
+  const agentLabel = useAppStore((state) => {
+    if (!sessionId) return null;
+    const session = state.taskSessions.items[sessionId];
+    if (!session?.agent_profile_id) return null;
+    const profile = state.agentProfiles.items.find(
+      (p: { id: string }) => p.id === session.agent_profile_id,
+    );
+    if (!profile) return null;
+    const parts = profile.label.split(" \u2022 ");
+    return parts[1] || parts[0] || profile.label;
   });
-
   useEffect(() => {
-    setPanelTitle(panelId, "Agent");
-  }, [panelId]);
+    let label = "Agent";
+    if (isSessionTab && agentLabel) {
+      label = agentLabel;
+    }
+    setPanelTitle(panelId, label);
+  }, [panelId, isSessionTab, agentLabel]);
+}
+
+function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
+  const paramSessionId = params?.sessionId as string | undefined;
+  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const sessionId = paramSessionId ?? storeSessionId;
+  const { openFile } = useFileEditors();
+  const isPassthrough = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
+  );
+  useChatSessionTitle(panelId, sessionId, !!paramSessionId);
 
   if (isPassthrough) {
     return (
@@ -193,8 +216,14 @@ function ChatContent({ panelId }: { panelId: string }) {
       </PanelRoot>
     );
   }
-
-  return <TaskChatPanel sessionId={sessionId} onOpenFile={openFile} onOpenFileAtLine={openFile} />;
+  return (
+    <TaskChatPanel
+      sessionId={sessionId}
+      onOpenFile={openFile}
+      onOpenFileAtLine={openFile}
+      hideSessionsDropdown
+    />
+  );
 }
 
 function DiffViewerContent({
@@ -310,7 +339,7 @@ function renderPanel(
     case "sidebar":
       return <SidebarContent panelId={panelId} />;
     case "chat":
-      return <ChatContent panelId={panelId} />;
+      return <ChatContent panelId={panelId} params={params} />;
     case "diff-viewer":
       return <DiffViewerContent panelId={panelId} params={params} />;
     case "file-editor":
@@ -341,254 +370,6 @@ function renderPanel(
 // ---------------------------------------------------------------------------
 
 const VALID_COMPONENTS = new Set(Object.keys(components));
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function sanitizeLayout(layout: any): any {
-  if (!layout?.panels || !layout?.grid?.root) return layout;
-
-  const invalidIds = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const validPanels: Record<string, any> = {};
-  for (const [id, panel] of Object.entries(layout.panels)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const comp = (panel as any).contentComponent;
-    if (comp && VALID_COMPONENTS.has(comp)) {
-      validPanels[id] = panel;
-    } else {
-      invalidIds.add(id);
-    }
-  }
-
-  if (invalidIds.size === 0) return layout;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function cleanNode(node: any): any {
-    if (node.type === "leaf") {
-      const views = (node.data.views as string[]).filter((v) => !invalidIds.has(v));
-      if (views.length === 0) return null;
-      const activeView = views.includes(node.data.activeView) ? node.data.activeView : views[0];
-      return { ...node, data: { ...node.data, views, activeView } };
-    }
-    if (node.type === "branch") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const children = (node.data as any[]).map(cleanNode).filter(Boolean);
-      if (children.length === 0) return null;
-      return { ...node, data: children };
-    }
-    return node;
-  }
-
-  const cleanedRoot = cleanNode(layout.grid.root);
-  if (!cleanedRoot) return null;
-
-  return {
-    ...layout,
-    grid: { ...layout.grid, root: cleanedRoot },
-    panels: validPanels,
-  };
-}
-
-/** Restore maximize store state alongside layout fixups if saved maximize data exists. */
-function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], sessionId: string | null): void {
-  const savedMax = sessionId ? getSessionMaximizeState(sessionId) : null;
-  if (savedMax) {
-    // Restore the actual maximized dockview layout (2-panel: sidebar + maximized content),
-    // not just the store state. Without this, the store thinks it's maximized but dockview
-    // still shows the normal 5-panel layout.
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-    });
-  } else {
-    const ids = applyLayoutFixups(api);
-    useDockviewStore.setState(ids);
-  }
-}
-
-/** Try restoring maximize-only state (no full session layout saved). */
-function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], sessionId: string): boolean {
-  const savedMax = getSessionMaximizeState(sessionId);
-  if (!savedMax) return false;
-  try {
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function tryRestoreLayout(
-  api: DockviewReadyEvent["api"],
-  currentSessionId: string | null,
-): boolean {
-  if (currentSessionId) {
-    try {
-      const sessionLayout = getSessionLayout(currentSessionId);
-      if (sessionLayout) {
-        const sanitized = sanitizeLayout(sessionLayout);
-        if (!sanitized) return false;
-        api.fromJSON(sanitized as SerializedDockview);
-        applyFixupsWithMaximize(api, currentSessionId);
-        return true;
-      }
-    } catch {
-      // Per-session restore failed, try global
-    }
-    // No saved session layout, but maximize state may exist
-    // (maximize is saved synchronously, layout persistence is debounced and may not
-    // have fired before refresh). Restore the maximized dockview layout directly.
-    if (tryRestoreMaximizeOnly(api, currentSessionId)) return true;
-  }
-
-  if (!currentSessionId) {
-    try {
-      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved) {
-        const layout = sanitizeLayout(JSON.parse(saved));
-        if (!layout) return false;
-        api.fromJSON(layout);
-        useDockviewStore.setState(applyLayoutFixups(api));
-        return true;
-      }
-    } catch {
-      // Global restore failed, build default
-    }
-  }
-
-  return false;
-}
-
-function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
-  if (useDockviewStore.getState().isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || useDockviewStore.getState().preMaximizeLayout !== null) return;
-  const sv = getRootSplitview(api);
-  if (!sv || sv.length < 2) return;
-  try {
-    const sidebarW = sv.getViewSize(0);
-    if (sidebarW > 50) {
-      const current = useDockviewStore.getState().pinnedWidths.get("sidebar");
-      if (current !== sidebarW) {
-        useDockviewStore.getState().setPinnedWidth("sidebar", sidebarW);
-      }
-    }
-    if (sv.length >= 3) {
-      const rightIdx = sv.length - 1;
-      const rightW = sv.getViewSize(rightIdx);
-      if (rightW > 50) {
-        const current = useDockviewStore.getState().pinnedWidths.get("right");
-        if (current !== rightW) {
-          useDockviewStore.getState().setPinnedWidth("right", rightW);
-        }
-      }
-    }
-  } catch {
-    /* noop */
-  }
-}
-
-function setupChatPanelSafetyNet(api: DockviewReadyEvent["api"]) {
-  api.onDidRemovePanel((panel) => {
-    if (panel.id !== "chat") return;
-    if (useDockviewStore.getState().isRestoringLayout) return;
-    requestAnimationFrame(() => {
-      if (api.getPanel("chat")) return;
-      const sb = api.getPanel("sidebar");
-      api.addPanel({
-        id: "chat",
-        component: "chat",
-        tabComponent: "permanentTab",
-        title: "Agent",
-        position: sb ? { direction: "right", referencePanel: "sidebar" } : undefined,
-      });
-      const nc = api.getPanel("chat");
-      if (nc) {
-        useDockviewStore.setState({ centerGroupId: nc.group.id });
-      }
-    });
-  });
-}
-
-function setupLayoutPersistence(
-  api: DockviewReadyEvent["api"],
-  saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
-  sessionIdRef: React.MutableRefObject<string | null>,
-) {
-  api.onDidLayoutChange(() => {
-    if (useDockviewStore.getState().isRestoringLayout) return;
-
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      try {
-        const json = api.toJSON();
-        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
-        const sid = sessionIdRef.current;
-        if (sid) {
-          setSessionLayout(sid, json);
-        }
-      } catch {
-        // Ignore serialization errors
-      }
-    }, 300);
-  });
-}
-
-/**
- * Clean up portal entries for panels that were permanently removed (user
- * closed a tab), but NOT during layout restores where fromJSON temporarily
- * removes all panels.
- */
-function setupGroupTracking(api: DockviewReadyEvent["api"]) {
-  api.onDidActiveGroupChange((group) => {
-    useDockviewStore.setState({ activeGroupId: group?.id ?? null });
-  });
-  useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  api.onDidLayoutChange(() => trackPinnedWidths(api));
-  trackPinnedWidths(api);
-}
-
-function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
-  api.onDidRemovePanel((panel) => {
-    if (useDockviewStore.getState().isRestoringLayout) return;
-    const isMax = useDockviewStore.getState().preMaximizeLayout !== null;
-    const remaining = api.panels.filter((p) => p.id !== panel.id);
-    const nonSidebar = remaining.filter((p) => p.api.component !== "sidebar");
-    // If we're in maximize mode and the last non-sidebar panel was just closed,
-    // exit maximize to restore the pre-maximize layout (avoids empty view).
-    // Then remove the closed panel from the restored layout so it doesn't reappear.
-    if (isMax && nonSidebar.length === 0) {
-      const removedId = panel.id;
-      requestAnimationFrame(() => {
-        useDockviewStore.getState().exitMaximizedLayout();
-        // exitMaximizedLayout schedules a rAF to finalize — wait for that, then
-        // remove the panel that was closed (it was re-created from preMaximizeLayout).
-        requestAnimationFrame(() => {
-          const restoredPanel = api.getPanel(removedId);
-          if (restoredPanel) {
-            restoredPanel.api.close();
-          }
-        });
-      });
-    }
-    const entry = panelPortalManager.get(panel.id);
-    if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
-    if (entry?.component === "terminal" && entry.sessionId) {
-      const terminalId = entry.params.terminalId as string | undefined;
-      if (terminalId) stopUserShell(entry.sessionId, terminalId);
-    }
-    panelPortalManager.release(panel.id);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // useSessionSwitchCleanup — backup layout switch for external session changes
@@ -638,6 +419,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appStore = useAppStoreApi();
 
   const effectiveSessionId =
     useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
@@ -675,7 +457,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
       const currentSessionId = sessionIdRef.current;
       // If a layout intent was passed via URL, skip saved layout restoration
-      const restored = !initialLayout && tryRestoreLayout(api, currentSessionId);
+      const restored = !initialLayout && tryRestoreLayout(api, currentSessionId, VALID_COMPONENTS);
       if (!restored) {
         buildDefaultLayout(api, initialLayout ?? undefined);
       }
@@ -683,15 +465,22 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       useDockviewStore.setState({ currentLayoutSessionId: currentSessionId });
 
       setupGroupTracking(api);
-      setupChatPanelSafetyNet(api);
+      setupSessionTabSync(api, appStore);
+      setupChatPanelSafetyNet(api, appStore);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
       setupPortalCleanup(api);
     },
-    [setApi, buildDefaultLayout, initialLayout],
+    [setApi, buildDefaultLayout, initialLayout, appStore],
   );
 
-  // Release session-scoped portals + trigger layout switch on session change
+  // Release session-scoped portals + trigger layout switch on session change.
+  // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
+  // saved before a new session tab is created — otherwise the new session's
+  // panel could leak into the old session's persisted layout.
   useSessionSwitchCleanup(effectiveSessionId);
+
+  // Auto-create a session tab when a session becomes active
+  useAutoSessionTab(effectiveSessionId);
 
   // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {

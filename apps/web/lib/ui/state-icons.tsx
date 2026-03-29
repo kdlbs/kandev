@@ -1,5 +1,15 @@
 import type { ComponentType } from "react";
-import { IconAlertCircle, IconCheck, IconLoader2, IconX } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCheck,
+  IconCircleFilled,
+  IconCircleCheck,
+  IconClock,
+  IconLoader2,
+  IconPlayerPause,
+  IconX,
+} from "@tabler/icons-react";
 import type { TaskSessionState, TaskState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 
@@ -29,11 +39,11 @@ const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
 const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
   STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
-  RUNNING: { Icon: IconLoader2, className: STYLE_LOADING },
-  WAITING_FOR_INPUT: { Icon: IconCheck, className: STYLE_WARNING },
-  COMPLETED: { Icon: IconCheck, className: "text-green-500" },
-  FAILED: { Icon: IconX, className: STYLE_ERROR },
-  CANCELLED: { Icon: IconX, className: STYLE_ERROR },
+  RUNNING: { Icon: IconCircleFilled, className: "text-emerald-500" },
+  WAITING_FOR_INPUT: { Icon: IconClock, className: STYLE_MUTED },
+  COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
+  FAILED: { Icon: IconAlertTriangle, className: STYLE_ERROR },
+  CANCELLED: { Icon: IconPlayerPause, className: STYLE_MUTED },
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {

@@ -12,9 +12,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -53,6 +55,11 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
+// SessionLauncher provides session launch capability for auto-starting tasks.
+type SessionLauncher interface {
+	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	taskSvc          *service.Service
@@ -63,6 +70,7 @@ type Handlers struct {
 	taskRepo         TaskRepository
 	eventBus         EventBus
 	planService      *service.PlanService
+	sessionLauncher  SessionLauncher
 	logger           *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
@@ -81,6 +89,7 @@ func NewHandlers(
 	taskRepo TaskRepository,
 	eventBus EventBus,
 	planService *service.PlanService,
+	sessionLauncher SessionLauncher,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
@@ -92,6 +101,7 @@ func NewHandlers(
 		taskRepo:         taskRepo,
 		eventBus:         eventBus,
 		planService:      planService,
+		sessionLauncher:  sessionLauncher,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }
@@ -145,6 +155,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
 		count += 6
 	}
+	// list_executor_profiles is always available (read-only, used in task mode for create_task)
+	if h.taskSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
+		count++
+	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
@@ -157,14 +172,12 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
 		count += 4
 
-		// Executor config handlers (gated on config-mode via workflowSvc)
+		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
-			d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
-			d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 5
+			count += 3
 		}
 	}
 
@@ -275,45 +288,152 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		})
 }
 
-// handleCreateTask creates a new task.
+// handleCreateTask creates a new task and auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
-		WorkspaceID    string `json:"workspace_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Title          string `json:"title"`
-		Description    string `json:"description"`
+		ParentID          string `json:"parent_id"`
+		WorkspaceID       string `json:"workspace_id"`
+		WorkflowID        string `json:"workflow_id"`
+		WorkflowStepID    string `json:"workflow_step_id"`
+		Title             string `json:"title"`
+		Description       string `json:"description"`
+		AgentProfileID    string `json:"agent_profile_id"`
+		ExecutorProfileID string `json:"executor_profile_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.Title == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+	if req.ParentID != "" && req.Description == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
+	}
+
+	// Inherit workspace/workflow/repositories from parent when not explicitly provided.
+	// WorkflowStepID is intentionally NOT inherited — the service layer resolves
+	// the start step so subtasks always begin at the first workflow step, not the
+	// parent's current (potentially advanced) step.
+	var inheritedRepos []service.TaskRepositoryInput
+	if req.ParentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid parent_id: "+err.Error(), nil)
+		}
+		if req.WorkspaceID == "" {
+			req.WorkspaceID = parent.WorkspaceID
+		}
+		if req.WorkflowID == "" {
+			req.WorkflowID = parent.WorkflowID
+		}
+		for _, r := range parent.Repositories {
+			inheritedRepos = append(inheritedRepos, service.TaskRepositoryInput{
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+			})
+		}
+	}
+
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	if req.WorkflowStepID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
-	}
-	if req.Title == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
-	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+		ParentID:       req.ParentID,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
+		Repositories:   inheritedRepos,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	// Auto-start agent session asynchronously
+	h.autoStartTask(task, req.AgentProfileID, req.ExecutorProfileID)
+
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+// autoStartTask launches an agent session for a newly created task in the background.
+// It resolves the agent profile: explicit > parent's session > workspace default.
+// It resolves the executor: explicit executor_profile_id > parent's executor_profile_id >
+// parent's executor_id (fallback for sessions that have no profile).
+func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID string) {
+	if h.sessionLauncher == nil {
+		return
+	}
+
+	executorID := h.inheritFromParentSession(task.ParentID, &agentProfileID, &executorProfileID)
+	if agentProfileID == "" {
+		workspace, err := h.taskSvc.GetWorkspace(context.Background(), task.WorkspaceID)
+		if err == nil && workspace.DefaultAgentProfileID != nil {
+			agentProfileID = *workspace.DefaultAgentProfileID
+		}
+	}
+
+	if agentProfileID == "" {
+		h.logger.Warn("no agent profile available, skipping auto-start",
+			zap.String("task_id", task.ID))
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		defer cancel()
+
+		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+			TaskID:            task.ID,
+			Intent:            orchestrator.IntentStart,
+			AgentProfileID:    agentProfileID,
+			ExecutorID:        executorID,
+			ExecutorProfileID: executorProfileID,
+			Prompt:            task.Description,
+		})
+		if err != nil {
+			h.logger.Error("failed to auto-start task",
+				zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
+		h.logger.Info("auto-started agent for MCP-created task",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", resp.SessionID))
+	}()
+}
+
+// inheritFromParentSession fills agentProfileID and executorProfileID from the parent
+// task's primary session when not explicitly provided. It returns the parent's ExecutorID
+// as a fallback for when the parent session has no executor profile (common for
+// UI-created sessions). If ExecutorProfileID is resolved, ExecutorID is redundant
+// since the profile already encodes the executor reference.
+func (h *Handlers) inheritFromParentSession(parentID string, agentProfileID, executorProfileID *string) string {
+	if parentID == "" {
+		return ""
+	}
+	parent, err := h.taskSvc.GetPrimarySession(context.Background(), parentID)
+	if err != nil || parent == nil {
+		return ""
+	}
+	if *agentProfileID == "" {
+		*agentProfileID = parent.AgentProfileID
+	}
+	if *executorProfileID == "" {
+		*executorProfileID = parent.ExecutorProfileID
+	}
+	// Only return ExecutorID as fallback when no profile was resolved.
+	// An executor profile already encodes its executor reference.
+	if *executorProfileID == "" {
+		return parent.ExecutorID
+	}
+	return ""
 }
 
 // handleUpdateTask updates an existing task.

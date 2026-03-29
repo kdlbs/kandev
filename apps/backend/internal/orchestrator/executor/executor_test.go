@@ -566,6 +566,17 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 	return nil, nil
 }
 
+// Task environment operations
+func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+func (m *mockRepository) CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return nil
+}
+func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return nil
+}
+
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
 func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {

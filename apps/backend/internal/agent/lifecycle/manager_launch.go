@@ -319,11 +319,14 @@ func (m *Manager) runEnvironmentPreparer(
 		RepositoryPath:       req.RepositoryPath,
 		RepositoryID:         req.RepositoryID,
 		UseWorktree:          req.UseWorktree,
+		WorktreeID:           req.WorktreeID,
 		SetupScript:          req.SetupScript,
 		BaseBranch:           req.BaseBranch,
 		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
+		TaskDirName:          req.TaskDirName,
+		RepoName:             req.RepoName,
 		Env:                  req.Env,
 	}
 

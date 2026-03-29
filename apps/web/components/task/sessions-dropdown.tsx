@@ -1,7 +1,13 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { IconStack2, IconPlus, IconStar } from "@tabler/icons-react";
+import {
+  IconStack2,
+  IconPlus,
+  IconStar,
+  IconPlayerPlayFilled,
+  IconTrash,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -13,12 +19,13 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceSessionUrl } from "@/lib/links";
+
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -50,20 +57,13 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number): str
   return `${seconds}s`;
 }
 
-function getStatusLabel(status: SessionStatus) {
-  switch (status) {
-    case "running":
-      return "Running";
-    case "complete":
-      return "Complete";
-    case "waiting_input":
-      return "Waiting for input";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-  }
-}
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  running: "Running",
+  complete: "Complete",
+  waiting_input: "Waiting for input",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
   switch (state) {
@@ -87,7 +87,6 @@ type SessionsDropdownProps = {
   taskId: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  taskDescription?: string;
   primarySessionId?: string | null;
   onSetPrimary?: (sessionId: string) => void;
 };
@@ -116,7 +115,6 @@ function useSessionSelectionHandlers(taskId: string | null) {
       const oldSessionId = appStore.getState().tasks.activeSessionId;
       setActiveSession(taskId, sessionId);
       performLayoutSwitch(oldSessionId, sessionId);
-      replaceSessionUrl(sessionId);
       close();
     },
     [appStore, setActiveSession, taskId],
@@ -124,26 +122,107 @@ function useSessionSelectionHandlers(taskId: string | null) {
   return { handleSelectSession };
 }
 
+function useSessionLifecycleActions(
+  taskId: string | null,
+  loadSessions: (force?: boolean) => void,
+) {
+  const handleResumeSession = useCallback(
+    async (sessionId: string) => {
+      if (!taskId) return;
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request(
+          "session.launch",
+          { task_id: taskId, intent: "resume", session_id: sessionId },
+          30000,
+        );
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to resume session:", error);
+      }
+    },
+    [taskId, loadSessions],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request("session.delete", { session_id: sessionId }, 15000);
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to delete session:", error);
+      }
+    },
+    [loadSessions],
+  );
+
+  const handleSetPrimary = useCallback(
+    async (sessionId: string) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request("session.set_primary", { session_id: sessionId }, 15000);
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to set primary session:", error);
+      }
+    },
+    [loadSessions],
+  );
+
+  return { handleResumeSession, handleDeleteSession, handleSetPrimary };
+}
+
+function useSessionsDropdownState(taskId: string | null) {
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { sessions, loadSessions } = useTaskSessions(taskId);
+  const currentTime = useRunningSessionsClock(sessions);
+
+  const agentLabelsById = useMemo(
+    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p.label])),
+    [agentProfiles],
+  );
+  const sortedSessions = useMemo(() => {
+    const visible = taskId ? sessions : [];
+    return [...visible].sort((a: TaskSession, b: TaskSession) => {
+      const d = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
+      return d !== 0 ? d : new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    });
+  }, [sessions, taskId]);
+  const resolveAgentLabel = useCallback(
+    (s: TaskSession) =>
+      (s.agent_profile_id && agentLabelsById[s.agent_profile_id]) || "Unknown agent",
+    [agentLabelsById],
+  );
+  return { sortedSessions, currentTime, loadSessions, resolveAgentLabel };
+}
+
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
   taskTitle = "",
-  taskDescription = "",
-  primarySessionId = null,
+  primarySessionId: primarySessionIdProp = null,
   onSetPrimary,
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const { sessions, loadSessions } = useTaskSessions(taskId);
+  const storePrimarySessionId = useAppStore((state) => {
+    const activeTaskId = state.tasks.activeTaskId;
+    if (!activeTaskId) return null;
+    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
+    return task?.primarySessionId ?? null;
+  });
+  const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
+  const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
+    useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
-  const currentTime = useRunningSessionsClock(sessions);
-
-  const agentLabelsById = useMemo(() => {
-    return Object.fromEntries(
-      agentProfiles.map((profile: AgentProfileOption) => [profile.id, profile.label]),
-    );
-  }, [agentProfiles]);
+  const { handleResumeSession, handleDeleteSession, handleSetPrimary } = useSessionLifecycleActions(
+    taskId,
+    loadSessions,
+  );
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
@@ -152,25 +231,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
       loadSessions(true);
     },
     [loadSessions, taskId],
-  );
-
-  const sortedSessions = useMemo(() => {
-    const visibleSessions = taskId ? sessions : [];
-    return [...visibleSessions].sort((a: TaskSession, b: TaskSession) => {
-      const orderDelta = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
-      if (orderDelta !== 0) return orderDelta;
-      return new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
-    });
-  }, [sessions, taskId]);
-
-  const resolveAgentLabel = useCallback(
-    (session: TaskSession) => {
-      if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
-        return agentLabelsById[session.agent_profile_id];
-      }
-      return "Unknown agent";
-    },
-    [agentLabelsById],
   );
 
   return (
@@ -195,20 +255,31 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           currentTime={currentTime}
           resolveAgentLabel={resolveAgentLabel}
           onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
-          onSetPrimary={onSetPrimary}
+          onSetPrimary={onSetPrimary ?? handleSetPrimary}
           onNewSession={() => setShowNewSessionDialog(true)}
+          onResumeSession={handleResumeSession}
+          onDeleteSession={handleDeleteSession}
         />
       </DropdownMenu>
-      <NewSessionDialog
+      <TaskCreateDialog
         open={showNewSessionDialog}
         onOpenChange={setShowNewSessionDialog}
+        mode="session"
+        workspaceId={null}
+        workflowId={null}
+        defaultStepId={null}
+        steps={[]}
         taskId={taskId}
-        taskTitle={taskTitle}
-        taskDescription={taskDescription}
+        initialValues={{ title: taskTitle, description: "" }}
       />
     </>
   );
 });
+
+type SessionLifecycleCallbacks = {
+  onResumeSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+};
 
 /** Dropdown content with header and session list */
 function SessionDropdownContent({
@@ -220,6 +291,9 @@ function SessionDropdownContent({
   onSelectSession,
   onSetPrimary,
   onNewSession,
+
+  onResumeSession,
+  onDeleteSession,
 }: {
   sortedSessions: TaskSession[];
   activeSessionId: string | null;
@@ -229,11 +303,11 @@ function SessionDropdownContent({
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
-}) {
+} & SessionLifecycleCallbacks) {
   return (
     <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
       <div className="flex items-center justify-between px-2 py-0">
-        <span className="text-xs font-medium text-muted-foreground">Sessions</span>
+        <span className="text-xs font-medium text-muted-foreground">Agents</span>
         <button
           type="button"
           onClick={onNewSession}
@@ -252,37 +326,10 @@ function SessionDropdownContent({
         resolveAgentLabel={resolveAgentLabel}
         onSelectSession={onSelectSession}
         onSetPrimary={onSetPrimary}
+        onResumeSession={onResumeSession}
+        onDeleteSession={onDeleteSession}
       />
     </DropdownMenuContent>
-  );
-}
-
-/** New session dialog wrapper */
-function NewSessionDialog({
-  open,
-  onOpenChange,
-  taskId,
-  taskTitle,
-  taskDescription,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  taskId: string | null;
-  taskTitle: string;
-  taskDescription: string;
-}) {
-  return (
-    <TaskCreateDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      mode="session"
-      workspaceId={null}
-      workflowId={null}
-      defaultStepId={null}
-      steps={[]}
-      taskId={taskId}
-      initialValues={{ title: taskTitle, description: taskDescription }}
-    />
   );
 }
 
@@ -295,6 +342,8 @@ function SessionDropdownList({
   resolveAgentLabel,
   onSelectSession,
   onSetPrimary,
+  onResumeSession,
+  onDeleteSession,
 }: {
   sessions: TaskSession[];
   activeSessionId: string | null;
@@ -303,11 +352,11 @@ function SessionDropdownList({
   resolveAgentLabel: (session: TaskSession) => string;
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
-}) {
+} & SessionLifecycleCallbacks) {
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
-        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No sessions yet</div>
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No agents yet</div>
       </div>
     );
   }
@@ -325,11 +374,25 @@ function SessionDropdownList({
             agentLabel={resolveAgentLabel(session)}
             onSelect={onSelectSession}
             onSetPrimary={onSetPrimary}
+            onResume={onResumeSession}
+            onDelete={onDeleteSession}
           />
         ))}
       </div>
     </div>
   );
+}
+
+function isSessionStoppable(state: TaskSessionState): boolean {
+  return state === "RUNNING" || state === "STARTING" || state === "WAITING_FOR_INPUT";
+}
+
+function isSessionResumable(state: TaskSessionState): boolean {
+  return state === "COMPLETED" || state === "FAILED" || state === "CANCELLED";
+}
+
+function isSessionDeletable(state: TaskSessionState): boolean {
+  return state !== "RUNNING" && state !== "STARTING";
 }
 
 /** Individual session row in the dropdown */
@@ -342,6 +405,8 @@ function SessionRow({
   agentLabel,
   onSelect,
   onSetPrimary,
+  onResume,
+  onDelete,
 }: {
   session: TaskSession;
   number: number;
@@ -351,6 +416,8 @@ function SessionRow({
   agentLabel: string;
   onSelect: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
 }) {
   const status = mapSessionStatus(session.state);
   const duration = formatDuration(session.started_at, status === "running", currentTime);
@@ -369,16 +436,61 @@ function SessionRow({
       {showDuration && (
         <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{duration}</span>
       )}
-      {!isPrimary && onSetPrimary && (
+      <SessionRowActions
+        session={session}
+        isPrimary={isPrimary}
+        onSetPrimary={onSetPrimary}
+        onResume={onResume}
+        onDelete={onDelete}
+      />
+      <div className="w-5 shrink-0 flex items-center justify-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
+          </TooltipTrigger>
+          <TooltipContent side="left">{STATUS_LABELS[status]}</TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+/** Inline action buttons for a session row */
+function SessionRowActions({
+  session,
+  isPrimary,
+  onSetPrimary,
+  onResume,
+  onDelete,
+}: {
+  session: TaskSession;
+  isPrimary: boolean;
+  onSetPrimary?: (sessionId: string) => void;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
+}) {
+  const resumeAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onResume(session.id);
+  };
+  const deleteAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete(session.id);
+  };
+  const primaryAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSetPrimary?.(session.id);
+  };
+
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {!isPrimary && onSetPrimary && isSessionStoppable(session.state) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSetPrimary(session.id);
-              }}
-              className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
+              onClick={primaryAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors cursor-pointer"
             >
               <IconStar className="h-3.5 w-3.5" />
             </button>
@@ -386,14 +498,34 @@ function SessionRow({
           <TooltipContent side="left">Set as Primary</TooltipContent>
         </Tooltip>
       )}
-      <div className="w-5 shrink-0 flex items-center justify-center">
+      {isSessionResumable(session.state) && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
+            <button
+              type="button"
+              onClick={resumeAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-green-500 transition-colors cursor-pointer"
+            >
+              <IconPlayerPlayFilled className="h-3 w-3" />
+            </button>
           </TooltipTrigger>
-          <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
+          <TooltipContent side="left">Resume agent</TooltipContent>
         </Tooltip>
-      </div>
+      )}
+      {isSessionDeletable(session.state) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={deleteAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <IconTrash className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Delete agent</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }

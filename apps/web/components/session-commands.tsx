@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   IconPlayerStop,
   IconFileTextSpark,
@@ -15,15 +15,20 @@ import {
   IconFileText,
   IconFileDiff,
   IconFilePlus,
+  IconMessagePlus,
+  IconSubtask,
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
+import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import type { CommandItem } from "@/lib/commands/types";
 
 type SessionCommandsProps = {
@@ -52,7 +57,7 @@ function buildSessionCommands(
     items.push({
       id: "session-cancel",
       label: "Cancel Turn",
-      group: "Session",
+      group: "Agent",
       icon: <IconPlayerStop className="size-3.5" />,
       keywords: ["cancel", "stop", "turn"],
       action: cancelTurn,
@@ -61,7 +66,7 @@ function buildSessionCommands(
     items.push({
       id: "session-plan-mode",
       label: "Toggle Plan Mode",
-      group: "Session",
+      group: "Agent",
       icon: <IconFileTextSpark className="size-3.5" />,
       keywords: ["plan", "mode", "toggle"],
       action: () => panels.addPlan(),
@@ -161,6 +166,32 @@ function buildWorkspaceCommands(sessionId: string): CommandItem[] {
   ];
 }
 
+function buildTaskCommands(
+  activeTaskId: string | null,
+  openNewAgent: () => void,
+  openSubtask: () => void,
+): CommandItem[] {
+  if (!activeTaskId) return [];
+  return [
+    {
+      id: "agent-new",
+      label: "New Agent",
+      group: "Agent",
+      icon: <IconMessagePlus className="size-3.5" />,
+      keywords: ["new", "agent", "session", "start"],
+      action: openNewAgent,
+    },
+    {
+      id: "subtask-create",
+      label: "Create Subtask",
+      group: "Tasks",
+      icon: <IconSubtask className="size-3.5" />,
+      keywords: ["subtask", "create", "new", "child"],
+      action: openSubtask,
+    },
+  ];
+}
+
 function buildPanelCommands(
   panels: PanelActions,
   isPassthrough: boolean | undefined,
@@ -215,6 +246,18 @@ export function SessionCommands({
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const gitWithFeedback = useGitWithFeedback();
 
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const activeTaskTitle = useAppStore((s) => {
+    const id = s.tasks.activeTaskId;
+    if (!id) return "";
+    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
+  });
+
+  const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
+  const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
+  const openNewAgent = useCallback(() => setShowNewAgentDialog(true), []);
+  const openSubtask = useCallback(() => setShowSubtaskDialog(true), []);
+
   const cancelTurn = useCallback(async () => {
     if (!sessionId) return;
     const client = getWebSocketClient();
@@ -246,10 +289,12 @@ export function SessionCommands({
         : []),
       ...(hasWorktree ? buildWorkspaceCommands(sessionId) : []),
       ...buildPanelCommands(panels, isPassthrough),
+      ...buildTaskCommands(activeTaskId, openNewAgent, openSubtask),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
   }, [
     sessionId,
+    activeTaskId,
     git,
     panels,
     cancelTurn,
@@ -260,9 +305,29 @@ export function SessionCommands({
     openCommitDialog,
     openPRDialog,
     runGitWithFeedback,
+    openNewAgent,
+    openSubtask,
   ]);
 
   useRegisterCommands(commands);
 
-  return null;
+  return (
+    <>
+      {activeTaskId && (
+        <NewSessionDialog
+          open={showNewAgentDialog}
+          onOpenChange={setShowNewAgentDialog}
+          taskId={activeTaskId}
+        />
+      )}
+      {activeTaskId && (
+        <NewSubtaskDialog
+          open={showSubtaskDialog}
+          onOpenChange={setShowSubtaskDialog}
+          parentTaskId={activeTaskId}
+          parentTaskTitle={activeTaskTitle}
+        />
+      )}
+    </>
+  );
 }

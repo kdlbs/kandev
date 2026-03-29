@@ -296,12 +296,11 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 
 	// Create session
 	session := &models.TaskSession{
-		ID:             sessionID,
-		TaskID:         taskID,
-		State:          models.TaskSessionStateRunning,
-		WorkflowStepID: strPtr(workflowStepID),
-		StartedAt:      now,
-		UpdatedAt:      now,
+		ID:        sessionID,
+		TaskID:    taskID,
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now,
+		UpdatedAt: now,
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create task session: %v", err)
@@ -447,9 +446,9 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 
 		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
 		}
 		status := svc.messageQueue.GetStatus(ctx, "s1")
 		if !status.IsQueued {
@@ -507,9 +506,9 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 
 		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
 		}
 	})
 
@@ -541,9 +540,9 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 			AgentExecutionID: "exec-stale",
 		})
 
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
 		}
 	})
 }
@@ -645,17 +644,13 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 
 	svc.executeQueuedMessage("s1", queuedMsg)
 
-	// Verify on_turn_start moved the session from step1 to step2.
-	updated, err := repo.GetTaskSession(ctx, "s1")
+	// Verify on_turn_start moved the task from step1 to step2.
+	updatedTask, err := repo.GetTask(ctx, "t1")
 	if err != nil {
-		t.Fatalf("failed to get session: %v", err)
+		t.Fatalf("failed to get task: %v", err)
 	}
-	if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
-		got := "<nil>"
-		if updated.WorkflowStepID != nil {
-			got = *updated.WorkflowStepID
-		}
-		t.Errorf("expected session workflow step to be 'step2', got %s", got)
+	if updatedTask.WorkflowStepID != "step2" {
+		t.Errorf("expected task workflow step to be 'step2', got %q", updatedTask.WorkflowStepID)
 	}
 }
 
@@ -703,17 +698,13 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 
 	svc.executeQueuedMessage("s1", queuedMsg)
 
-	// Verify session stayed on step1 (no on_turn_start actions).
-	updated, err := repo.GetTaskSession(ctx, "s1")
+	// Verify task stayed on step1 (no on_turn_start actions).
+	updatedTask, err := repo.GetTask(ctx, "t1")
 	if err != nil {
-		t.Fatalf("failed to get session: %v", err)
+		t.Fatalf("failed to get task: %v", err)
 	}
-	if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-		got := "<nil>"
-		if updated.WorkflowStepID != nil {
-			got = *updated.WorkflowStepID
-		}
-		t.Errorf("expected session workflow step to remain 'step1', got %s", got)
+	if updatedTask.WorkflowStepID != "step1" {
+		t.Errorf("expected task workflow step to remain 'step1', got %q", updatedTask.WorkflowStepID)
 	}
 }
 
@@ -737,11 +728,6 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "")
-
-	// Clear WorkflowStepID so processOnTurnComplete skips workflow evaluation
-	session, _ := repo.GetTaskSession(ctx, "s1")
-	session.WorkflowStepID = nil
-	_ = repo.UpdateTaskSession(ctx, session)
 
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{}
@@ -771,11 +757,6 @@ func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "")
-
-	// Clear WorkflowStepID so workflow evaluation is skipped
-	session, _ := repo.GetTaskSession(ctx, "s1")
-	session.WorkflowStepID = nil
-	_ = repo.UpdateTaskSession(ctx, session)
 
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{}
@@ -841,16 +822,12 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 
 		// Workflow step must remain step1 because on_turn_start is skipped for ACP sessions.
-		updated, err := repo.GetTaskSession(ctx, "s1")
+		updatedTask, err := repo.GetTask(ctx, "t1")
 		if err != nil {
-			t.Fatalf("failed to get session: %v", err)
+			t.Fatalf("failed to get task: %v", err)
 		}
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
-			got := "<nil>"
-			if updated.WorkflowStepID != nil {
-				got = *updated.WorkflowStepID
-			}
-			t.Errorf("expected session workflow step to remain 'step1', got %s", got)
+		if updatedTask.WorkflowStepID != "step1" {
+			t.Errorf("expected task workflow step to remain 'step1', got %q", updatedTask.WorkflowStepID)
 		}
 	})
 
@@ -878,16 +855,12 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 
 		// Workflow step must move to step2 because passthrough sessions fire on_turn_start.
-		updated, err := repo.GetTaskSession(ctx, "s1")
+		updatedTask, err := repo.GetTask(ctx, "t1")
 		if err != nil {
-			t.Fatalf("failed to get session: %v", err)
+			t.Fatalf("failed to get task: %v", err)
 		}
-		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
-			got := "<nil>"
-			if updated.WorkflowStepID != nil {
-				got = *updated.WorkflowStepID
-			}
-			t.Errorf("expected session workflow step to be 'step2', got %s", got)
+		if updatedTask.WorkflowStepID != "step2" {
+			t.Errorf("expected task workflow step to be 'step2', got %q", updatedTask.WorkflowStepID)
 		}
 	})
 

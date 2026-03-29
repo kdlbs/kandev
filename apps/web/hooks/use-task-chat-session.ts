@@ -15,9 +15,10 @@ export function useTaskChatSession(taskId: string | null): UseTaskChatSessionRet
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
 
-  // Get the first (most recent) session for this task from the store
+  // Prefer the primary session, fall back to the first (most recent)
   const currentSession = useMemo(() => {
-    return sessionsForTask[0] ?? null;
+    if (sessionsForTask.length === 0) return null;
+    return sessionsForTask.find((s) => s.is_primary) ?? sessionsForTask[0] ?? null;
   }, [sessionsForTask]);
 
   const taskSessionId = currentSession?.id ?? null;

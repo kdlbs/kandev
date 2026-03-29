@@ -127,6 +127,7 @@ export type SessionSliceActions = {
   completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   setTaskSession: (session: TaskSession) => void;
+  removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;

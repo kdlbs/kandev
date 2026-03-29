@@ -69,6 +69,7 @@ interface TaskCreateDialogProps {
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   initialValues?: TaskCreateDialogInitialValues;
   taskId?: string | null;
+  parentTaskId?: string;
 }
 
 function getRepositoryPlaceholder(
@@ -360,7 +361,14 @@ function DialogFormBody({
 
 function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { open, onOpenChange, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const { editingTask, onSuccess, onCreateSession, initialValues, taskId = null } = props;
+  const {
+    editingTask,
+    onSuccess,
+    onCreateSession,
+    initialValues,
+    taskId = null,
+    parentTaskId,
+  } = props;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isCreateMode = mode === "create";
@@ -415,6 +423,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     onCreateSession,
     onOpenChange,
     taskId,
+    parentTaskId,
     descriptionInputRef: fs.descriptionInputRef,
     setIsCreatingSession: fs.setIsCreatingSession,
     setIsCreatingTask: fs.setIsCreatingTask,

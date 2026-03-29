@@ -41,16 +41,10 @@ export type SwimlaneKanbanContentProps = {
 type SwimlaneKanbanDndOptions = {
   tasks: Task[];
   workflowId: string;
-  useTouchSensors: boolean;
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useSwimlaneKanbanDnd({
-  tasks,
-  workflowId,
-  useTouchSensors,
-  onMoveError,
-}: SwimlaneKanbanDndOptions) {
+function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -136,15 +130,8 @@ function useSwimlaneKanbanDnd({
     [tasks, activeTaskId],
   );
 
-  // Touch-only sensors for mobile/tablet (PointerSensor conflicts with touch scroll)
-  const touchSensors = useSensors(
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 250, tolerance: 5 },
-    }),
-  );
-
   return {
-    sensors: useTouchSensors ? touchSensors : sensors,
+    sensors,
     handleDragStart,
     handleDragEnd,
     handleDragCancel,
@@ -375,7 +362,7 @@ export function SwimlaneKanbanContent({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks, workflowId, useTouchSensors: isMobile || isTablet, onMoveError });
+    useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
 
   if (steps.length === 0) return null;
 

@@ -56,7 +56,13 @@ export class SessionPage {
   }
 
   async waitForLoad(timeout = 15_000) {
-    await this.chat.waitFor({ state: "visible", timeout });
+    // When multiple session tabs are open, multiple session-chat panels exist in
+    // the DOM but only the active one is visible. Use :visible to avoid matching
+    // a hidden background panel (which would cause the wait to time out).
+    await this.page
+      .locator("[data-testid='session-chat']:visible")
+      .first()
+      .waitFor({ state: "visible", timeout });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -256,6 +262,15 @@ export class SessionPage {
     await tab.click();
   }
 
+  /**
+   * Click the session/chat tab regardless of its current title.
+   * Session tabs are renamed from "Agent" to "#N AgentName" by useChatSessionTitle,
+   * so this uses the stable data-testid on the ContextMenuTrigger instead.
+   */
+  async clickSessionChatTab(): Promise<void> {
+    await this.page.locator('[data-testid^="session-tab-"]').first().click();
+  }
+
   /** PR files section within the changes panel. */
   prFilesSection(): Locator {
     return this.changes.getByTestId("pr-files-section");
@@ -279,11 +294,11 @@ export class SessionPage {
     await editor.press(`${modifier}+Enter`);
   }
 
-  /** Toggle plan mode on/off via Shift+Tab in the TipTap editor. */
+  /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar. */
   async togglePlanMode() {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
-    await editor.click();
-    await editor.press("Shift+Tab");
+    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await btn.click();
   }
 
   /**
@@ -399,5 +414,103 @@ export class SessionPage {
   /** Locator for the VS Code code-server iframe. */
   vscodeIframe(): Locator {
     return this.page.locator('iframe[title="VS Code"]');
+  }
+
+  // --- New Session Dialog ---
+
+  /** "+" button in the dockview header to open the add-panel dropdown. */
+  addPanelButton(): Locator {
+    return this.page.getByTestId("dockview-add-panel-btn").first();
+  }
+
+  /** "New Session" menu item in the dockview + dropdown. */
+  newSessionMenuButton(): Locator {
+    return this.page.getByTestId("new-session-button");
+  }
+
+  /** Open the new session dialog via the + menu. */
+  async openNewSessionDialog(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.newSessionMenuButton().click();
+  }
+
+  /** The new session dialog container. */
+  newSessionDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: "New agent in" });
+  }
+
+  /** Prompt textarea inside the new session dialog. */
+  newSessionPromptInput(): Locator {
+    return this.newSessionDialog().locator("textarea");
+  }
+
+  /** Start Agent button inside the new session dialog. */
+  newSessionStartButton(): Locator {
+    return this.newSessionDialog().getByRole("button", { name: "Start Agent" });
+  }
+
+  /** Environment info badges inside the new session dialog. */
+  newSessionEnvironmentInfo(): Locator {
+    return this.newSessionDialog().getByText("Same environment as current session");
+  }
+
+  /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */
+  sessionTab(label: string): Locator {
+    return this.page.locator(`.dv-default-tab:has-text('${label}')`);
+  }
+
+  /** Session item in the + dropdown's reopen list by session ID. */
+  sessionReopenItem(sessionId: string): Locator {
+    return this.page.getByTestId(`reopen-session-${sessionId}`);
+  }
+
+  /** All session reopen items in the + dropdown. */
+  sessionReopenItems(): Locator {
+    return this.page.locator("[data-testid^='reopen-session-']");
+  }
+
+  /** All session tabs in dockview (panels using the sessionTab tab component). */
+  sessionTabs(): Locator {
+    return this.page.locator(".dv-default-tab").filter({
+      has: this.page.locator("[data-testid^='reopen-session-'], .tabler-icon-star").first(),
+    });
+  }
+
+  /** Dockview session tab matched by partial text (e.g., "Mock Agent" or index "1"). */
+  sessionTabByText(text: string): Locator {
+    return this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+  }
+
+  /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
+  sessionTabBySessionId(sessionId: string): Locator {
+    return this.page.getByTestId(`session-tab-${sessionId}`);
+  }
+
+  /** Context menu on a dockview tab — right-click the tab to trigger it. */
+  async rightClickTab(text: string): Promise<void> {
+    const tab = this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    await tab.click({ button: "right" });
+  }
+
+  /** Context menu item by visible label. */
+  contextMenuItem(label: string): Locator {
+    return this.page.getByRole("menuitem", { name: label });
+  }
+
+  /** Alert dialog (e.g., delete confirmation). */
+  alertDialog(): Locator {
+    return this.page.getByRole("alertdialog");
+  }
+
+  /** Primary star icon inside a dockview tab. */
+  primaryStarInTab(text: string): Locator {
+    const tab = this.page.locator(`.dv-default-tab:has-text('${text}')`);
+    return tab.locator(".tabler-icon-star").first();
+  }
+
+  /** Click a task in the sidebar by title. */
+  async clickTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator("[role='button']").filter({ hasText: title });
+    await taskRow.click();
   }
 }

@@ -99,7 +99,30 @@ function buildCreateTaskBody(
     opts?.repositories ?? opts?.repository_ids?.map((id) => ({ repository_id: id })),
   );
   if (opts?.plan_mode) body.plan_mode = true;
+  setIf(body, "parent_id", opts?.parent_id);
   return body;
+}
+
+/** Build the optional fields object for createTaskWithAgent requests. */
+function buildOptionalAgentTaskFields(opts?: {
+  workflow_id?: string;
+  workflow_step_id?: string;
+  repository_ids?: string[];
+  executor_id?: string;
+  executor_profile_id?: string;
+  metadata?: Record<string, unknown>;
+  parent_id?: string;
+}): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (opts?.workflow_id) fields.workflow_id = opts.workflow_id;
+  if (opts?.workflow_step_id) fields.workflow_step_id = opts.workflow_step_id;
+  if (opts?.repository_ids)
+    fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
+  if (opts?.executor_id) fields.executor_id = opts.executor_id;
+  if (opts?.executor_profile_id) fields.executor_profile_id = opts.executor_profile_id;
+  if (opts?.metadata) fields.metadata = opts.metadata;
+  if (opts?.parent_id) fields.parent_id = opts.parent_id;
+  return fields;
 }
 
 /**
@@ -167,6 +190,8 @@ export class ApiClient {
       plan_mode?: boolean;
       /** Extra metadata to store on the task. */
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -220,7 +245,10 @@ export class ApiClient {
       workflow_step_id?: string;
       repository_ids?: string[];
       executor_id?: string;
+      executor_profile_id?: string;
       metadata?: Record<string, unknown>;
+      /** Parent task ID for subtasks. */
+      parent_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -229,13 +257,7 @@ export class ApiClient {
       description: opts?.description ?? "",
       start_agent: true,
       agent_profile_id: agentProfileId,
-      ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
-      ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
-      ...(opts?.repository_ids
-        ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
-        : {}),
-      ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
-      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
+      ...buildOptionalAgentTaskFields(opts),
     });
   }
 
@@ -587,10 +609,51 @@ export class ApiClient {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 
-  async listTaskSessions(
-    taskId: string,
-  ): Promise<{ sessions: Array<{ id: string; state: string }> }> {
+  async listTaskSessions(taskId: string): Promise<{
+    sessions: Array<{
+      id: string;
+      task_id: string;
+      state: string;
+      started_at: string;
+      task_environment_id?: string;
+      worktree_path?: string;
+      worktree_branch?: string;
+    }>;
+    total: number;
+  }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async setPrimarySession(sessionId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+  }
+
+  async getTask(taskId: string): Promise<{
+    id: string;
+    title: string;
+    primary_session_id?: string | null;
+    state?: string;
+  }> {
+    return this.request("GET", `/api/v1/tasks/${taskId}`);
+  }
+
+  async getTaskEnvironment(taskId: string): Promise<{
+    id: string;
+    task_id: string;
+    worktree_id?: string;
+    worktree_path?: string;
+    status: string;
+  } | null> {
+    const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`getTaskEnvironment failed (${res.status}): ${await res.text()}`);
+    }
+    return res.json();
   }
 
   // --- GitHub Review Watch ---

@@ -38,7 +38,7 @@ export class MobileKanbanPage {
 
   taskCardByTitle(title: string): Locator {
     return this.board.locator(`[data-testid^="task-card-"]`, {
-      hasText: title,
+      has: this.page.locator('[data-testid="task-card-title"]', { hasText: title }),
     });
   }
 

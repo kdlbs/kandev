@@ -76,30 +76,35 @@ func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 
 func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		workspaceID, err := req.RequireString("workspace_id")
-		if err != nil {
-			return mcp.NewToolResultError("workspace_id is required"), nil
-		}
-		workflowID, err := req.RequireString("workflow_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_id is required"), nil
-		}
-		workflowStepID, err := req.RequireString("workflow_step_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_step_id is required"), nil
-		}
 		title, err := req.RequireString("title")
 		if err != nil {
 			return mcp.NewToolResultError("title is required"), nil
 		}
-		description := req.GetString("description", "")
+
+		parentID := req.GetString("parent_id", "")
+		if parentID == "self" {
+			if s.taskID == "" {
+				return mcp.NewToolResultError("cannot use 'self' as parent_id: no current task context"), nil
+			}
+			parentID = s.taskID
+		}
+		workspaceID := req.GetString("workspace_id", "")
+		workflowID := req.GetString("workflow_id", "")
+		workflowStepID := req.GetString("workflow_step_id", "")
+
+		if parentID == "" && (workspaceID == "" || workflowID == "") {
+			return mcp.NewToolResultError("workspace_id and workflow_id are required when creating a top-level task (no parent_id)"), nil
+		}
 
 		payload := map[string]string{
-			"workspace_id":     workspaceID,
-			"workflow_id":      workflowID,
-			"workflow_step_id": workflowStepID,
-			"title":            title,
-			"description":      description,
+			"parent_id":           parentID,
+			"workspace_id":        workspaceID,
+			"workflow_id":         workflowID,
+			"workflow_step_id":    workflowStepID,
+			"title":               title,
+			"description":         req.GetString("description", ""),
+			"agent_profile_id":    req.GetString("agent_profile_id", ""),
+			"executor_profile_id": req.GetString("executor_profile_id", ""),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {

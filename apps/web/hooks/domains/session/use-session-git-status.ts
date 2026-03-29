@@ -5,13 +5,15 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 
 /**
  * Hook to get the current git status for a session.
- * Git status is populated via WebSocket from workspace stream updates.
- * The workspace stream sends current status immediately on subscription.
+ * Git status is keyed by environment ID so sessions sharing an environment share git state.
  */
 export function useSessionGitStatus(sessionId: string | null) {
-  // Use shallow comparison to prevent re-renders when object reference changes but values are the same
   const gitStatus = useAppStore(
-    useShallow((state) => (sessionId ? state.gitStatus.bySessionId[sessionId] : undefined)),
+    useShallow((state) => {
+      if (!sessionId) return undefined;
+      const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+      return state.gitStatus.byEnvironmentId[envKey];
+    }),
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
 

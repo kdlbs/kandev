@@ -1,8 +1,5 @@
-import { StateHydrator } from "@/components/state-hydrator";
-import { readLayoutDefaults } from "@/lib/layout/read-layout-defaults";
 import {
   fetchWorkflowSnapshot,
-  fetchTaskSession,
   fetchTask,
   fetchUserSettings,
   listAgents,
@@ -25,7 +22,6 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import { TaskPageContent } from "@/components/task/task-page-content";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -54,7 +50,7 @@ function buildWorktreeState(allSessions: TaskSession[]) {
 
 type BuildSessionPageStateParams = {
   task: Task;
-  sessionId: string;
+  sessionId: string | null;
   snapshot: Awaited<ReturnType<typeof fetchWorkflowSnapshot>>;
   agents: Awaited<ReturnType<typeof listAgents>>;
   repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
@@ -149,13 +145,18 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       loadingByTaskId: { [task.id]: false },
       loadedByTaskId: { [task.id]: true },
     },
-    turns: {
-      bySession: { [sessionId]: turns },
-      activeBySession: {
-        [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
-      },
-    },
+    turns: sessionId
+      ? {
+          bySession: { [sessionId]: turns },
+          activeBySession: {
+            [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
+          },
+        }
+      : { bySession: {}, activeBySession: {} },
     ...buildWorktreeState(allSessions),
+    environmentIdBySessionId: Object.fromEntries(
+      allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
+    ),
     settingsAgents: { items: agents.agents },
     settingsData: {
       agentsLoaded: true,
@@ -165,26 +166,96 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
   };
 }
 
-type FetchedSessionData = {
+export type FetchedSessionData = {
   task: Task;
-  sessionId: string;
+  sessionId: string | null;
   initialState: ReturnType<typeof taskToState>;
   initialTerminals: Terminal[];
 };
 
-async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionData> {
-  const sessionResponse = await fetchTaskSession(paramSessionId, { cache: "no-store" });
-  const session = sessionResponse.session;
-  if (!session?.task_id) {
-    throw new Error("No task_id found for session");
+export async function fetchSessionData(sessionId: string): Promise<FetchedSessionData> {
+  const [allSessionsResponse, task] = await (async () => {
+    // We need task + sessions; caller provides sessionId
+    const { fetchTaskSession } = await import("@/lib/api");
+    const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
+    const session = sessionResponse.session;
+    if (!session?.task_id) throw new Error("No task_id found for session");
+    const t = await fetchTask(session.task_id, { cache: "no-store" });
+    const sessResp = await listTaskSessions(session.task_id, { cache: "no-store" });
+    return [sessResp, t] as const;
+  })();
+
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+}
+
+export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
+  const task = await fetchTask(taskId, { cache: "no-store" });
+  const allSessionsResponse = await listTaskSessions(taskId, { cache: "no-store" });
+  const sessions = allSessionsResponse.sessions ?? [];
+
+  const sessionId = task.primary_session_id ?? sessions[0]?.id;
+  if (!sessionId) {
+    // No sessions yet — fetch task/workspace data so the store is seeded and
+    // the auto-start hook can fire immediately without a client-side crash.
+    return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  const task = await fetchTask(session.task_id, { cache: "no-store" });
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+}
+
+async function fetchTaskDataOnly(
+  task: Task,
+  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+): Promise<FetchedSessionData> {
   const [
     snapshot,
     agents,
     repositoriesResponse,
-    allSessionsResponse,
+    workspacesResponse,
+    workflowsResponse,
+    userSettingsResponse,
+  ] = await Promise.all([
+    task.workflow_id
+      ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
+      : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
+    listAgents({ cache: "no-store" }),
+    listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
+    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+    listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+    fetchUserSettings({ cache: "no-store" }).catch(() => null),
+  ]);
+
+  const allSessions = allSessionsResponse.sessions ?? [];
+  const repositories = repositoriesResponse.repositories ?? [];
+  const workspaces = workspacesResponse.workspaces ?? [];
+  const workflows = workflowsResponse.workflows ?? [];
+
+  const initialState = buildSessionPageState({
+    task,
+    sessionId: null,
+    snapshot,
+    agents,
+    repositories,
+    allSessions,
+    workspaces,
+    workflows,
+    turns: [],
+    userSettingsResponse,
+    messagesResponse: null,
+  });
+
+  return { task, sessionId: null, initialState, initialTerminals: [] };
+}
+
+async function fetchSessionDataFromTask(
+  task: Task,
+  sessionId: string,
+  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+): Promise<FetchedSessionData> {
+  const [
+    snapshot,
+    agents,
+    repositoriesResponse,
     workspacesResponse,
     workflowsResponse,
     turnsResponse,
@@ -192,27 +263,23 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     terminalsResponse,
     messagesResponse,
   ] = await Promise.all([
-    // Ephemeral tasks (quick chat) have empty workflow_id - skip snapshot fetch
     task.workflow_id
       ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
       : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     listAgents({ cache: "no-store" }),
     listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
-    listTaskSessions(session.task_id, { cache: "no-store" }),
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
-    listSessionTurns(paramSessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
+    listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    fetchTerminals(paramSessionId).catch(() => []),
-    listTaskSessionMessages(
-      paramSessionId,
-      { limit: 50, sort: "desc" },
-      { cache: "no-store" },
-    ).catch(() => null as ListMessagesResponse | null),
+    fetchTerminals(sessionId).catch(() => []),
+    listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
+      () => null as ListMessagesResponse | null,
+    ),
   ]);
 
+  const allSessions = allSessionsResponse.sessions ?? [];
   const repositories = repositoriesResponse.repositories ?? [];
-  const allSessions = allSessionsResponse.sessions ?? [session];
   const workspaces = workspacesResponse.workspaces ?? [];
   const workflows = workflowsResponse.workflows ?? [];
   const turns = turnsResponse.turns ?? [];
@@ -226,7 +293,7 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
 
   const initialState = buildSessionPageState({
     task,
-    sessionId: paramSessionId,
+    sessionId,
     snapshot,
     agents,
     repositories,
@@ -238,66 +305,20 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     messagesResponse,
   });
 
-  return { task, sessionId: paramSessionId, initialState, initialTerminals };
+  return { task, sessionId, initialState, initialTerminals };
 }
 
-function extractInitialRepositories(
+export function extractInitialRepositories(
   initialState: FetchedSessionData["initialState"] | null,
   task: Task | null,
 ) {
   return initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ""] ?? [];
 }
 
-function extractInitialScripts(
+export function extractInitialScripts(
   initialState: FetchedSessionData["initialState"] | null,
   task: Task | null,
 ) {
   const repoId = task?.repositories?.[0]?.repository_id ?? "";
   return initialState?.repositoryScripts?.itemsByRepositoryId?.[repoId] ?? [];
-}
-
-export default async function SessionPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ sessionId: string }>;
-  searchParams: Promise<{ layout?: string }>;
-}) {
-  let fetchedData: FetchedSessionData | null = null;
-  const defaultLayouts = await readLayoutDefaults();
-  const { layout: initialLayout } = await searchParams;
-
-  try {
-    const { sessionId: paramSessionId } = await params;
-    fetchedData = await fetchSessionData(paramSessionId);
-  } catch (error) {
-    console.warn(
-      "Could not SSR session (client will load via WebSocket):",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  const { task, sessionId, initialState, initialTerminals } = fetchedData ?? {
-    task: null,
-    sessionId: null,
-    initialState: null,
-    initialTerminals: [],
-  };
-
-  return (
-    <>
-      {initialState ? (
-        <StateHydrator initialState={initialState} sessionId={sessionId ?? undefined} />
-      ) : null}
-      <TaskPageContent
-        task={task}
-        sessionId={sessionId}
-        initialRepositories={extractInitialRepositories(initialState, task)}
-        initialScripts={extractInitialScripts(initialState, task)}
-        initialTerminals={initialTerminals}
-        defaultLayouts={defaultLayouts}
-        initialLayout={initialLayout}
-      />
-    </>
-  );
 }

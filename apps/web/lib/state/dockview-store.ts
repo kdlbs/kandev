@@ -136,6 +136,9 @@ type DockviewStore = {
   maximizedGroupId: string | null;
   maximizeGroup: (groupId: string) => void;
   exitMaximizedLayout: () => void;
+  /** One-shot flag: skip the next layout switch for this specific session ID.
+   *  Used when adding a panel within the same task to prevent a full rebuild. */
+  _skipLayoutSwitchForSession: string | null;
 };
 
 type StoreGet = () => DockviewStore;
@@ -395,10 +398,47 @@ function restoreMaximizeFromStorage(api: DockviewApi, sessionId: string, set: St
   return true;
 }
 
+/** Consume the one-shot skip flag. Returns true if the switch should be skipped. */
+function consumeSkipFlag(set: StoreSet, get: StoreGet, newSessionId: string): boolean {
+  const flag = get()._skipLayoutSwitchForSession;
+  if (!flag) return false;
+  set({ _skipLayoutSwitchForSession: null });
+  if (flag === newSessionId) {
+    set({ currentLayoutSessionId: newSessionId });
+    return true;
+  }
+  return false;
+}
+
+/** Save the outgoing session's layout & maximize state, then release its portals. */
+function saveOutgoingSession(
+  api: DockviewApi,
+  oldSessionId: string | null,
+  preMaximizeLayout: LayoutState | null,
+): void {
+  if (!oldSessionId) return;
+  if (preMaximizeLayout) {
+    setSessionMaximizeState(oldSessionId, {
+      preMaximizeLayout: preMaximizeLayout as unknown as object,
+      maximizedDockviewJson: api.toJSON(),
+    });
+  } else {
+    removeSessionMaximizeState(oldSessionId);
+  }
+  try {
+    setSessionLayout(oldSessionId, api.toJSON());
+  } catch {
+    /* ignore */
+  }
+  panelPortalManager.releaseBySession(oldSessionId);
+}
+
 function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldSessionId: string | null, newSessionId: string) => {
     const { api, currentLayoutSessionId, preMaximizeLayout } = get();
-    if (!api || currentLayoutSessionId === newSessionId) return;
+    if (!api) return;
+    if (consumeSkipFlag(set, get, newSessionId)) return;
+    if (currentLayoutSessionId === newSessionId) return;
     // First session adoption — onReady already built the layout; just adopt it.
     if (!oldSessionId && !currentLayoutSessionId) {
       set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
@@ -411,34 +451,19 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
       }
       return;
     }
-    // When maximized, save native dockview JSON so we can restore via api.fromJSON().
-    if (oldSessionId && preMaximizeLayout) {
-      setSessionMaximizeState(oldSessionId, {
-        preMaximizeLayout: preMaximizeLayout as unknown as object,
-        maximizedDockviewJson: api.toJSON(),
-      });
-    } else if (oldSessionId) {
-      removeSessionMaximizeState(oldSessionId);
-    }
-    // Clear maximize state before switching — the new session has its own.
+    // When oldSessionId is null but there is a live layout session (e.g. the
+    // useSessionSwitchCleanup hook fires after passing through a null state),
+    // fall back to currentLayoutSessionId so we correctly save and release the
+    // outgoing session rather than silently skipping it.
+    const effectiveOld = oldSessionId ?? currentLayoutSessionId;
+    saveOutgoingSession(api, effectiveOld, preMaximizeLayout);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
-    if (oldSessionId)
-      try {
-        setSessionLayout(oldSessionId, api.toJSON());
-      } catch {
-        /* ignore */
-      }
-    // Release session-scoped portals (terminals, editors, etc.) synchronously
-    // BEFORE rebuilding the layout so stale content doesn't flash in the new layout.
-    if (oldSessionId) {
-      panelPortalManager.releaseBySession(oldSessionId);
-    }
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
       if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
       const ids = performSessionSwitch({
         api,
-        oldSessionId,
+        oldSessionId: effectiveOld,
         newSessionId,
         safeWidth: api.width,
         safeHeight: api.height,
@@ -619,6 +644,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
   preMaximizeLayout: null,
   maximizedGroupId: null,
+  _skipLayoutSwitchForSession: null,
   ...buildMaximizeActions(set, get),
   ...buildPanelActions(set, get),
   ...buildExtraPanelActions(get),

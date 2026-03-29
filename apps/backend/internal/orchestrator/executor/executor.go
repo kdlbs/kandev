@@ -43,6 +43,13 @@ type executorStore interface {
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+	// Task environment
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Session history + plan (for context handover)
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
 // Common errors
@@ -232,12 +239,17 @@ type LaunchAgentRequest struct {
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+
+	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
+	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
+	RepoName    string // Repository name used as subdirectory inside the task directory
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

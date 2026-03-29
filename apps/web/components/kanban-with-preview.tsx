@@ -12,7 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 
@@ -123,6 +123,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
       description: task.description,
       position: task.position,
       repositoryId: task.repositoryId,
+      primarySessionId: task.primarySessionId,
     };
   }, [selectedTaskId, kanbanTasks]);
 
@@ -147,8 +148,8 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   }, [isOpen, selectedTaskId, selectedTaskSessionId, isLoading]);
 
   const handleNavigateToTask = useCallback(
-    (task: Task, sessionId: string) => {
-      router.push(linkToSession(sessionId));
+    (task: Task) => {
+      router.push(linkToTask(task.id));
     },
     [router],
   );
@@ -170,7 +171,9 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
-  const activeSessionId = selectedTaskId ? selectedTaskSessionId : null;
+  const activeSessionId = selectedTaskId
+    ? (selectedTask?.primarySessionId ?? selectedTaskSessionId)
+    : null;
 
   // On mobile, skip the preview panel entirely — card clicks navigate directly
   if (isMobile) {
@@ -229,7 +232,7 @@ type PreviewLayoutProps = {
   selectedTask: Task | null;
   activeSessionId: string | null;
   onPreviewTask: (task: Task) => void;
-  onNavigateToTask: (task: Task, sessionId: string) => void;
+  onNavigateToTask: (task: Task) => void;
   onClose: () => void;
   onResizeMouseDown: (e: React.MouseEvent) => void;
 };
@@ -267,9 +270,7 @@ function FloatingPreviewLayout({
             task={selectedTask}
             sessionId={activeSessionId}
             onClose={onClose}
-            onMaximize={
-              activeSessionId ? (task) => onNavigateToTask(task, activeSessionId) : undefined
-            }
+            onMaximize={(task) => onNavigateToTask(task)}
           />
         </div>
       </div>
@@ -304,9 +305,7 @@ function InlinePreviewLayout({
               task={selectedTask}
               sessionId={activeSessionId}
               onClose={onClose}
-              onMaximize={
-                activeSessionId ? (task) => onNavigateToTask(task, activeSessionId) : undefined
-              }
+              onMaximize={(task) => onNavigateToTask(task)}
             />
           </div>
         </div>

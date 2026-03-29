@@ -1,12 +1,13 @@
 "use client";
 
-import { forwardRef, useCallback } from "react";
-import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
+import { forwardRef, useCallback, useState } from "react";
+import { IconAlertTriangle, IconPlus, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { useChatInputContainer } from "./use-chat-input-container";
 import {
   ChatInputBody,
@@ -83,45 +84,65 @@ function FailedSessionBanner({
   showDialog,
   onShowDialog,
   taskId,
-  taskTitle,
-  taskDescription,
+  sessionId,
 }: {
   showDialog: boolean;
   onShowDialog: (open: boolean) => void;
   taskId: string | null;
-  taskTitle?: string;
-  taskDescription: string;
+  sessionId: string | null;
 }) {
+  const [isResuming, setIsResuming] = useState(false);
+
+  const handleResume = useCallback(async () => {
+    if (!sessionId || !taskId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    setIsResuming(true);
+    try {
+      await client.request(
+        "session.launch",
+        { task_id: taskId, intent: "resume", session_id: sessionId },
+        30000,
+      );
+    } catch {
+      setIsResuming(false);
+    }
+  }, [sessionId, taskId]);
+
   return (
     <>
       <div className="rounded border border-border overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-            <span>This session has ended. Start a new session to continue.</span>
+            <span>This agent has stopped.</span>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5 cursor-pointer"
-            onClick={() => onShowDialog(true)}
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-            New Session
-          </Button>
+          <div className="flex items-center gap-2">
+            {sessionId && taskId && (
+              <Button
+                variant="default"
+                size="sm"
+                className="shrink-0 gap-1.5 cursor-pointer"
+                onClick={handleResume}
+                disabled={isResuming}
+              >
+                <IconPlayerPlay className="h-3.5 w-3.5" />
+                {isResuming ? "Resuming..." : "Resume"}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5 cursor-pointer"
+              onClick={() => onShowDialog(true)}
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              New Agent
+            </Button>
+          </div>
         </div>
       </div>
-      <TaskCreateDialog
-        open={showDialog}
-        onOpenChange={onShowDialog}
-        mode="session"
-        workspaceId={null}
-        workflowId={null}
-        defaultStepId={null}
-        steps={[]}
-        taskId={taskId}
-        initialValues={{ title: taskTitle ?? "", description: taskDescription }}
-      />
+      {taskId && <NewSessionDialog open={showDialog} onOpenChange={onShowDialog} taskId={taskId} />}
     </>
   );
 }
@@ -259,8 +280,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           showDialog={s.showNewSessionDialog}
           onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
+          sessionId={sessionId}
         />
       );
     }

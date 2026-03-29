@@ -11,7 +11,7 @@ interface TaskPreviewPanelProps {
   task: Task | null;
   sessionId?: string | null;
   onClose: () => void;
-  onMaximize?: (task: Task, sessionId: string) => void;
+  onMaximize?: (task: Task) => void;
 }
 
 export function TaskPreviewPanel({
@@ -46,17 +46,20 @@ export function TaskPreviewPanel({
   };
 
   return (
-    <div className="flex h-full w-full flex-col border-l bg-background">
+    <div
+      data-testid="task-preview-panel"
+      className="flex h-full w-full flex-col border-l bg-background"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold truncate">{task?.title ?? "Task Chat"}</h2>
         <div className="flex items-center gap-1">
-          {onMaximize && activeSessionId && task && (
+          {onMaximize && task && (
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8 cursor-pointer"
-              onClick={() => onMaximize(task, activeSessionId)}
+              onClick={() => onMaximize(task)}
               title="Open full page"
             >
               <IconArrowsMaximize className="h-4 w-4" />

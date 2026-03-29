@@ -161,8 +161,8 @@ function hydrateSessionRuntime(
   if (state.processes) deepMerge(draft.processes, state.processes);
   if (state.gitStatus) {
     mergeSessionMap(
-      draft.gitStatus.bySessionId,
-      state.gitStatus?.bySessionId,
+      draft.gitStatus.byEnvironmentId,
+      state.gitStatus?.byEnvironmentId,
       activeSessionId,
       forceMergeSessionId,
     );
@@ -174,6 +174,9 @@ function hydrateSessionRuntime(
       activeSessionId,
       forceMergeSessionId,
     );
+  }
+  if (state.environmentIdBySessionId) {
+    Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   if (state.agents) deepMerge(draft.agents, state.agents);
 }

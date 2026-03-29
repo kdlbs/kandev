@@ -406,7 +406,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
         <ChatTabContent
           activeTaskId={activeTaskId}
           isPassthroughMode={isPassthroughMode}
-          activeSessionId={activeSessionId}
           sessionId={sessionId}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
@@ -481,7 +480,6 @@ function ApproveButtonGroup({
 function ChatTabContent({
   activeTaskId,
   isPassthroughMode,
-  activeSessionId,
   sessionId,
   showRequestChangesTooltip,
   onDismissTooltip,
@@ -489,7 +487,6 @@ function ChatTabContent({
 }: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
-  activeSessionId: string | null;
   sessionId: string | null | undefined;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
@@ -516,7 +513,7 @@ function ChatTabContent({
         style={{ minHeight: "200px" }}
       >
         <div className="flex-1 min-h-0 h-full" style={{ minHeight: "150px" }}>
-          <PassthroughTerminal key={activeSessionId} sessionId={sessionId} mode="agent" />
+          <PassthroughTerminal key={activeTaskId} sessionId={sessionId} mode="agent" />
         </div>
       </TabsContent>
     );

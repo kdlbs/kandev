@@ -36,8 +36,7 @@ async function seedTaskWithSession(
       repository_ids: [seedData.repositoryId],
     },
   );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });

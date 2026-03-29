@@ -17,7 +17,7 @@ import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/do
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
-import { linkToSession } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -99,8 +99,8 @@ function useMoveErrorState(router: ReturnType<typeof useRouter>) {
   }, []);
 
   const handleGoToTask = useCallback(() => {
-    if (moveError?.sessionId) {
-      router.push(linkToSession(moveError.sessionId));
+    if (moveError?.taskId) {
+      router.push(linkToTask(moveError.taskId));
     }
     setMoveError(null);
   }, [moveError, router]);
@@ -134,7 +134,7 @@ function useKanbanBoardStore() {
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
-  onOpenTask?: (task: Task, sessionId: string) => void;
+  onOpenTask?: (task: Task) => void;
 }
 
 function useKanbanBoardHooks(
@@ -158,18 +158,12 @@ function useKanbanBoardHooks(
     deletingTaskId,
     archivingTaskId,
   } = useKanbanActions({ workspaceState, workflowsState });
-  const {
-    enablePreviewOnClick,
-    userSettings,
-    commitSettings,
-    activeSteps,
-    isMounted,
-    setTaskSessionAvailability,
-  } = useKanbanData({
-    onWorkspaceChange: handleWorkspaceChange,
-    onWorkflowChange: handleWorkflowChange,
-    searchQuery,
-  });
+  const { enablePreviewOnClick, userSettings, commitSettings, activeSteps, isMounted } =
+    useKanbanData({
+      onWorkspaceChange: handleWorkspaceChange,
+      onWorkflowChange: handleWorkflowChange,
+      searchQuery,
+    });
   return {
     isDialogOpen,
     editingTask,
@@ -188,7 +182,6 @@ function useKanbanBoardHooks(
     commitSettings,
     activeSteps,
     isMounted,
-    setTaskSessionAvailability,
   };
 }
 
@@ -217,9 +210,6 @@ function useKanbanBoardSetup(
     isMobile,
     onPreviewTask,
     onOpenTask,
-    setEditingTask: hooks.setEditingTask,
-    setIsDialogOpen: hooks.setIsDialogOpen,
-    setTaskSessionAvailability: hooks.setTaskSessionAvailability,
   });
 
   // Mobile bottom sheet: intercept card clicks to show task info first
@@ -434,7 +424,7 @@ function ApprovalWarningDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Dismiss</AlertDialogCancel>
-          {moveError?.sessionId && (
+          {moveError?.taskId && (
             <AlertDialogAction onClick={handleGoToTask}>Go to Task</AlertDialogAction>
           )}
         </AlertDialogFooter>

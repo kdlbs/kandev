@@ -195,7 +195,7 @@ test.describe("Workflow start step placement", () => {
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
     // Navigates to session page with plan layout
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -283,7 +283,7 @@ test.describe("Workflow start step placement", () => {
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
     // Navigates to session page with plan layout
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

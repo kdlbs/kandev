@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2, IconSubtask } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
@@ -35,6 +35,7 @@ type TaskItemProps = {
   isDeleting?: boolean;
   taskId?: string;
   primarySessionId?: string | null;
+  parentTaskTitle?: string;
 };
 
 // Helper to format relative time
@@ -64,10 +65,12 @@ function TaskItemTitle({
   title,
   description,
   taskId,
+  parentTaskTitle,
 }: {
   title: string;
   description?: string;
   taskId?: string;
+  parentTaskTitle?: string;
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -75,6 +78,12 @@ function TaskItemTitle({
         {title}
         {taskId && <PRTaskIcon taskId={taskId} />}
       </span>
+      {parentTaskTitle && (
+        <span className="text-[10px] text-muted-foreground/60 truncate flex items-center gap-0.5">
+          <IconSubtask className="h-2.5 w-2.5 shrink-0" />
+          {parentTaskTitle}
+        </span>
+      )}
       {description && (
         <span className="text-[11px] text-muted-foreground/60 truncate">{description}</span>
       )}
@@ -152,6 +161,7 @@ export const TaskItem = memo(function TaskItem({
   isDeleting,
   taskId,
   primarySessionId,
+  parentTaskTitle,
 }: TaskItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -185,7 +195,12 @@ export const TaskItem = memo(function TaskItem({
       />
 
       {/* Content */}
-      <TaskItemTitle title={title} description={description} taskId={taskId} />
+      <TaskItemTitle
+        title={title}
+        description={description}
+        taskId={taskId}
+        parentTaskTitle={parentTaskTitle}
+      />
 
       {/* Right side: step name + meta, or action buttons on hover */}
       <div className="relative flex items-center shrink-0">

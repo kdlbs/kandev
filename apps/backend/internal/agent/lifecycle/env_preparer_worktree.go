@@ -88,6 +88,8 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		WorktreeID:           req.WorktreeID,
+		TaskDirName:          req.TaskDirName,
+		RepoName:             req.RepoName,
 	}
 	if syncStep != nil {
 		createReq.OnSyncProgress = func(event worktree.SyncProgressEvent) {

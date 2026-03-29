@@ -1,3 +1,4 @@
+// Routing: /t/{taskId} (task-keyed, not /s/{sessionId})
 import { type Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
@@ -27,9 +28,7 @@ async function seedTaskWithSession(
     },
   );
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
@@ -69,6 +68,7 @@ async function readTerminalBuffer(page: Page): Promise<string> {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Routing: uses /t/{taskId} (task-keyed routing) instead of /s/{sessionId}
 test.describe("Terminal keyboard navigation", () => {
   // Standalone executor can fail on cold start; retry once for transient failures.
   test.describe.configure({ retries: 1 });

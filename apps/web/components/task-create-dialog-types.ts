@@ -183,6 +183,7 @@ export type SubmitHandlersDeps = {
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
+  parentTaskId?: string;
   descriptionInputRef: React.RefObject<TaskFormInputsHandle | null>;
   setIsCreatingSession: (v: boolean) => void;
   setIsCreatingTask: (v: boolean) => void;

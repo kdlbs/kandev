@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -14,6 +14,7 @@ import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -28,8 +29,15 @@ import {
   resolveTaskProps,
 } from "@/components/task/task-page-content-helpers";
 
+// Stable empty array used as the fallback in useAppStore selectors that return
+// arrays — avoids creating a new reference on every call, which would cause
+// React's useSyncExternalStore (getServerSnapshot) to throw an infinite-loop
+// error during SSR / hydration.
+const EMPTY_SESSIONS: never[] = [];
+
 type TaskPageContentProps = {
   task: Task | null;
+  taskId?: string | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
   initialScripts?: RepositoryScript[];
@@ -121,11 +129,16 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
       ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true
       : false,
   );
-  const sessionWorkflowStepId = useAppStore((state) =>
-    effectiveSessionId
-      ? (state.taskSessions.items[effectiveSessionId]?.workflow_step_id ?? null)
-      : null,
-  );
+  // Use the task-level workflow step for the top-bar stepper. Individual sessions
+  // may lag behind (e.g. a completed session stays at its old step), but the
+  // task's step reflects the current workflow position and stays stable across
+  // tab switches within the same task.
+  const sessionWorkflowStepId = useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return null;
+    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
+    return (task?.workflowStepId as string) ?? null;
+  });
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
   );
@@ -433,14 +446,15 @@ function TaskPageInner({
 
 function syncActiveTaskSession(params: {
   initialTaskId: string | undefined;
+  fallbackTaskId: string | null | undefined;
   initialSessionId: string | null;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
 }) {
-  if (!params.initialTaskId) return;
-  if (params.initialSessionId)
-    params.setActiveSession(params.initialTaskId, params.initialSessionId);
-  else params.setActiveTask(params.initialTaskId);
+  const taskId = params.initialTaskId ?? params.fallbackTaskId;
+  if (!taskId) return;
+  if (params.initialSessionId) params.setActiveSession(taskId, params.initialSessionId);
+  else params.setActiveTask(taskId);
 }
 
 function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
@@ -476,8 +490,40 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   return { task, kanbanTask };
 }
 
+function useAutoStartSession(
+  task: Task | null,
+  handleStartAgent: (agentProfileId: string, prompt?: string) => Promise<void>,
+) {
+  const { isLoaded } = useTaskSessions(task?.id ?? null);
+  const sessions = useAppStore((state) =>
+    task?.id ? (state.taskSessionsByTask.itemsByTaskId[task.id] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
+  );
+  const workspaceDefaultProfileId = useAppStore((state) => {
+    const activeId = state.workspaces.activeId;
+    if (!activeId) return null;
+    return state.workspaces.items.find((w) => w.id === activeId)?.default_agent_profile_id ?? null;
+  });
+  const taskMetaProfileId = (task?.metadata as Record<string, unknown> | null)?.agent_profile_id;
+  const agentProfileId =
+    typeof taskMetaProfileId === "string" ? taskMetaProfileId : (workspaceDefaultProfileId ?? null);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (!task?.id) return;
+    if (!isLoaded) return;
+    if (sessions.length > 0) return;
+    if (!agentProfileId) return;
+    if (startedRef.current) return;
+    startedRef.current = true;
+    handleStartAgent(agentProfileId).catch(() => {
+      startedRef.current = false;
+    });
+  }, [task?.id, isLoaded, sessions.length, agentProfileId, handleStartAgent]);
+}
+
 function useTaskPageData(
   initialTask: Task | null,
+  fallbackTaskId: string | null | undefined,
   sessionId: string | null,
   initialRepositories: Repository[],
 ) {
@@ -489,17 +535,19 @@ function useTaskPageData(
   const { task } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
+  useAutoStartSession(task, agent.handleStartAgent);
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = activeSessionId ?? initialSessionId;
 
   useEffect(() => {
     syncActiveTaskSession({
       initialTaskId: initialTask?.id,
+      fallbackTaskId,
       initialSessionId,
       setActiveSession,
       setActiveTask,
     });
-  }, [initialTask?.id, initialSessionId, setActiveSession, setActiveTask]);
+  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSession, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
@@ -516,6 +564,7 @@ function useTaskPageData(
 
 export function TaskPageContent({
   task: initialTask,
+  taskId: initialTaskId = null,
   sessionId = null,
   initialRepositories = [],
   initialScripts = [],
@@ -530,6 +579,7 @@ export function TaskPageContent({
 
   const { task, agent, effectiveSessionId, repository } = useTaskPageData(
     initialTask,
+    initialTaskId,
     sessionId,
     initialRepositories,
   );

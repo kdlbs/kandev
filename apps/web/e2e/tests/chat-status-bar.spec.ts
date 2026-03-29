@@ -32,7 +32,7 @@ test.describe("Chat status bar", () => {
     const card = kanban.taskCardByTitle("Todo Only Task");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -86,7 +86,7 @@ test.describe("Chat status bar", () => {
     const card = kanban.taskCardByTitle("PR Banner Only Task");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -146,7 +146,7 @@ test.describe("Chat status bar", () => {
     const card = kanban.taskCardByTitle("Both Indicators Task");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -211,7 +211,7 @@ test.describe("Chat status bar", () => {
     const cardA = kanban.taskCardByTitle("Archive Banner Task A");
     await expect(cardA).toBeVisible({ timeout: 30_000 });
     await cardA.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -237,7 +237,7 @@ test.describe("Chat status bar", () => {
       timeout: 15_000,
     });
 
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 10_000 });
     expect(testPage.url()).not.toBe(urlBeforeArchive);
   });
 });

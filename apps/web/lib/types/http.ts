@@ -240,6 +240,7 @@ export type Task = {
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  parent_id?: string;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -288,6 +289,7 @@ export type TaskSession = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  task_environment_id?: string;
   state: TaskSessionState;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
@@ -301,7 +303,6 @@ export type TaskSession = {
   // Workflow fields
   is_primary?: boolean;
   is_passthrough?: boolean;
-  workflow_step_id?: string;
   review_status?: WorkflowReviewStatus;
 };
 

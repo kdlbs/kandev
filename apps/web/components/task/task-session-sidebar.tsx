@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
-import type { TaskState, TaskSessionState, Repository, Task } from "@/lib/types/http";
+import type { TaskState, TaskSession, TaskSessionState, Repository, Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { TaskSwitcher } from "./task-switcher";
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { Button } from "@kandev/ui/button";
@@ -13,7 +14,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { CommandItem } from "@/lib/commands/types";
-import { replaceSessionUrl } from "@/lib/links";
+import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
@@ -106,6 +107,47 @@ export const NewTaskButton = memo(function NewTaskButton({
   );
 });
 
+/** Map a kanban task to a sidebar item with session info and repository metadata. */
+function toSidebarItem(
+  task: KanbanState["tasks"][number],
+  ctx: {
+    sessionsByTaskId: Record<string, TaskSession[]>;
+    gitStatusByEnvId: Record<string, GitStatusEntry>;
+    envIdBySessionId: Record<string, string>;
+    repositorySlugById: Map<string, string | undefined>;
+    taskPRsByTaskId: Record<string, { owner: string; repo: string } | undefined>;
+    titleById: Map<string, string>;
+  },
+) {
+  const sessionInfo = getSessionInfoForTask(
+    task.id,
+    ctx.sessionsByTaskId,
+    ctx.gitStatusByEnvId,
+    ctx.envIdBySessionId,
+  );
+  const resolvedSessionState =
+    sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
+  const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
+  const pr = ctx.taskPRsByTaskId[task.id];
+  return {
+    id: task.id,
+    title: task.title,
+    state: task.state as TaskState | undefined,
+    sessionState: resolvedSessionState,
+    description: task.description,
+    workflowStepId: task.workflowStepId as string | undefined,
+    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
+    diffStats: sessionInfo.diffStats,
+    isRemoteExecutor: task.isRemoteExecutor,
+    remoteExecutorType: task.primaryExecutorType ?? undefined,
+    remoteExecutorName: task.primaryExecutorName ?? undefined,
+    primarySessionId: task.primarySessionId ?? null,
+    updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+    isArchived: false as boolean,
+    parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
+  };
+}
+
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -116,7 +158,8 @@ function useSidebarData(workspaceId: string | null) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusBySessionId = useAppStore((state) => state.gitStatus.bySessionId);
+  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -157,29 +200,19 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
-    const items = allTasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
-      const resolvedSessionState =
-        sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
-      const repoSlug = task.repositoryId ? repositorySlugById.get(task.repositoryId) : undefined;
-      const pr = taskPRsByTaskId[task.id];
-      return {
-        id: task.id,
-        title: task.title,
-        state: task.state as TaskState | undefined,
-        sessionState: resolvedSessionState,
-        description: task.description,
-        workflowStepId: task.workflowStepId as string | undefined,
-        repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
-        diffStats: sessionInfo.diffStats,
-        isRemoteExecutor: task.isRemoteExecutor,
-        remoteExecutorType: task.primaryExecutorType ?? undefined,
-        remoteExecutorName: task.primaryExecutorName ?? undefined,
-        primarySessionId: task.primarySessionId ?? null,
-        updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
-        isArchived: false as boolean,
-      };
-    });
+    const titleById = new Map(allTasks.map((t: KanbanState["tasks"][number]) => [t.id, t.title]));
+    const mapCtx = {
+      sessionsByTaskId,
+      gitStatusByEnvId,
+      envIdBySessionId,
+      repositorySlugById,
+      taskPRsByTaskId: taskPRsByTaskId as Record<
+        string,
+        { owner: string; repo: string } | undefined
+      >,
+      titleById,
+    };
+    const items = allTasks.map((task: KanbanState["tasks"][number]) => toSidebarItem(task, mapCtx));
     if (
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
@@ -200,6 +233,7 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
         isArchived: true,
+        parentTaskTitle: undefined,
       });
     }
     return items;
@@ -208,7 +242,8 @@ function useSidebarData(workspaceId: string | null) {
     allTasks,
     workspaceId,
     sessionsByTaskId,
-    gitStatusBySessionId,
+    gitStatusByEnvId,
+    envIdBySessionId,
     taskPRsByTaskId,
     archivedState,
   ]);
@@ -216,12 +251,21 @@ function useSidebarData(workspaceId: string | null) {
   return { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories };
 }
 
+type StoreApi = ReturnType<typeof useAppStoreApi>;
 type SwitchFn = (
   taskId: string,
   sessionId: string,
   oldSessionId: string | null | undefined,
 ) => void;
-type StoreApi = ReturnType<typeof useAppStoreApi>;
+
+function buildSwitchToSession(
+  setActiveSession: (taskId: string, sessionId: string) => void,
+): SwitchFn {
+  return (taskId, sessionId, oldSessionId) => {
+    setActiveSession(taskId, sessionId);
+    performLayoutSwitch(oldSessionId ?? null, sessionId);
+  };
+}
 
 async function prepareAndSwitchTask(
   taskId: string,
@@ -230,11 +274,14 @@ async function prepareAndSwitchTask(
   setPreparingTaskId: (id: string | null) => void,
 ): Promise<boolean> {
   setPreparingTaskId(taskId);
+  // Capture before the async launch — WS events may update activeSessionId
+  // by the time launchSession resolves, causing the layout switch to use the
+  // wrong "old" session and leave stale panels (e.g. plan panel) visible.
+  const oldSessionId = store.getState().tasks.activeSessionId;
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
     if (resp.session_id) {
-      const oldSessionId = store.getState().tasks.activeSessionId;
       switchToSession(taskId, resp.session_id, oldSessionId);
       // Apply PR review layout if the task has PR metadata
       if (store.getState().taskPRs.byTaskId[taskId]) {
@@ -263,14 +310,7 @@ function useSidebarActions(store: StoreApi) {
     useLayoutSwitch: true,
   });
 
-  const switchToSession = useCallback(
-    (taskId: string, sessionId: string, oldSessionId: string | null | undefined) => {
-      setActiveSession(taskId, sessionId);
-      performLayoutSwitch(oldSessionId ?? null, sessionId);
-      replaceSessionUrl(sessionId);
-    },
-    [setActiveSession],
-  );
+  const switchToSession = useMemo(() => buildSwitchToSession(setActiveSession), [setActiveSession]);
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -279,13 +319,16 @@ function useSidebarActions(store: StoreApi) {
       if (task?.primarySessionId) {
         switchToSession(taskId, task.primarySessionId, oldSessionId);
         loadTaskSessionsForTask(taskId);
+        replaceTaskUrl(taskId);
         return;
       }
       loadTaskSessionsForTask(taskId).then(async (sessions) => {
         const currentOldSessionId = store.getState().tasks.activeSessionId;
-        const sessionId = sessions[0]?.id ?? null;
+        const primary = sessions.find((s: { is_primary?: boolean }) => s.is_primary);
+        const sessionId = primary?.id ?? sessions[0]?.id ?? null;
         if (sessionId) {
           switchToSession(taskId, sessionId, currentOldSessionId);
+          replaceTaskUrl(taskId);
           return;
         }
         // No session — prepare workspace and switch to it
@@ -296,6 +339,7 @@ function useSidebarActions(store: StoreApi) {
           setPreparingTaskId,
         );
         if (!switched) setActiveTask(taskId);
+        replaceTaskUrl(taskId);
       });
     },
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],

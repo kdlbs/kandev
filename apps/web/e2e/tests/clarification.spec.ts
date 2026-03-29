@@ -30,7 +30,7 @@ async function seedClarificationTask(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-  await testPage.goto(`/s/${task.session_id}`);
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -137,7 +137,7 @@ test.describe("Clarification flow", () => {
     await testPage.getByTestId("submit-plan-mode").click();
 
     // Wait for navigation to session page
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

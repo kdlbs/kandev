@@ -67,7 +67,7 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Click the card to navigate to the session
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -156,7 +156,7 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
 
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -326,7 +326,7 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Navigate to Task B session and verify agent completes
     await kanban.taskCardByTitle("Task B").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
@@ -470,7 +470,7 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Navigate to the session and verify the agent completes
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -593,7 +593,7 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
 
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -707,7 +707,7 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
 
     await card.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -841,7 +841,7 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Wait for Task A agent to complete before creating Task B
     await kanban.taskCardByTitle("Shared PR Task A").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionA = new SessionPage(testPage);
     await sessionA.waitForLoad();
     await expect(sessionA.chat.getByText("simple mock response", { exact: false })).toBeVisible({
@@ -880,7 +880,7 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(kanban.taskCardByTitle("Shared PR Task B")).toBeVisible({ timeout: 10_000 });
 
     await kanban.taskCardByTitle("Shared PR Task B").click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();
     await expect(sessionB.chat.getByText("simple mock response", { exact: false })).toBeVisible({

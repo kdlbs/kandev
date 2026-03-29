@@ -86,7 +86,7 @@ test.describe("Task switcher sidebar status", () => {
     await expect(alphaInDone).toBeVisible({ timeout: 45_000 });
 
     await alphaInDone.click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

@@ -48,6 +48,16 @@ function QueuedMessageOverlay({
   );
 }
 
+function useClarificationKey(agentMessageCount: number) {
+  const lastCountRef = useRef(agentMessageCount);
+  const [clarificationKey, setClarificationKey] = useState(0);
+  useEffect(() => {
+    lastCountRef.current = agentMessageCount;
+  }, [agentMessageCount]);
+  const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
+  return { clarificationKey, handleClarificationResolved };
+}
+
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
@@ -56,6 +66,8 @@ type TaskChatPanelProps = {
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
   onOpenFileAtLine?: (filePath: string) => void;
+  /** Hide the sessions dropdown (session tabs in dockview replace it) */
+  hideSessionsDropdown?: boolean;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -65,12 +77,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
+  hideSessionsDropdown,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
-  const lastAgentMessageCountRef = useRef(0);
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
-  const [clarificationKey, setClarificationKey] = useState(0);
 
   useSettingsData(true);
   const panelState = useChatPanelState({ sessionId, onOpenFile, onOpenFileAtLine });
@@ -99,12 +110,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     cancelQueue,
     chatInputRef,
   );
-
-  useEffect(() => {
-    lastAgentMessageCountRef.current = agentMessageCount;
-  }, [agentMessageCount]);
-
-  const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
+  const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   return (
     <PanelRoot data-testid="session-chat">
@@ -157,6 +163,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           panelState={panelState}
           isSending={isSending}
+          hideSessionsDropdown={hideSessionsDropdown}
         />
       )}
     </PanelRoot>

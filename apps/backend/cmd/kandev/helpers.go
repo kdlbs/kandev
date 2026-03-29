@@ -81,9 +81,6 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
 		payload["review_status"] = *session.ReviewStatus
 	}
-	if session.WorkflowStepID != nil && *session.WorkflowStepID != "" {
-		payload["workflow_step_id"] = *session.WorkflowStepID
-	}
 	if session.Metadata != nil {
 		payload["session_metadata"] = session.Metadata
 	}
@@ -580,7 +577,7 @@ func registerMCPAndDebugRoutes(
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.log,
+		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)

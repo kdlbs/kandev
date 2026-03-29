@@ -155,6 +155,7 @@ function PlanToggleButton({
           type="button"
           variant="ghost"
           size="sm"
+          data-testid="plan-mode-toggle-button"
           className={cn(
             "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
@@ -442,7 +443,6 @@ function buildCollapsibleItems(props: {
           taskId={props.taskId}
           activeSessionId={props.sessionId}
           taskTitle={props.taskTitle}
-          taskDescription={props.taskDescription}
         />
       ),
     },

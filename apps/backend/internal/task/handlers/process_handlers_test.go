@@ -330,6 +330,26 @@ func (m *mockRepository) Close() error {
 	return nil
 }
 
+// Task environment operations
+func (m *mockRepository) CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return nil
+}
+func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskEnvironment(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error {
+	return nil
+}
+
 // Git Snapshot operations
 func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	return nil
@@ -442,7 +462,8 @@ func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript)
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: repo, Environments: repo, Reviews: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 }
 
@@ -594,7 +615,8 @@ func TestStopProcessRejectsDifferentSession(t *testing.T) {
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: repo, Environments: repo, Reviews: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)
@@ -658,7 +680,8 @@ func TestStopProcessAgentctlUnavailable(t *testing.T) {
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: repo, Environments: repo, Reviews: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)

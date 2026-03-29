@@ -83,6 +83,7 @@ function FileBrowserHeader({
 
 type FileBrowserProps = {
   sessionId: string;
+  environmentId?: string | null;
   onOpenFile: (file: OpenFileTab) => void;
   onCreateFile?: (path: string) => Promise<boolean>;
   onDeleteFile?: (path: string) => Promise<boolean>;
@@ -161,6 +162,7 @@ function useFileBrowserHandlers(
 
 export function FileBrowser({
   sessionId,
+  environmentId,
   onOpenFile,
   onCreateFile,
   onDeleteFile,
@@ -175,7 +177,7 @@ export function FileBrowser({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const search = useFileBrowserSearch(sessionId);
-  const treeState = useFileBrowserTree(sessionId);
+  const treeState = useFileBrowserTree(sessionId, environmentId ?? undefined);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
 
