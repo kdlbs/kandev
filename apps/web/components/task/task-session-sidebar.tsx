@@ -321,12 +321,13 @@ function useMoveToStep(store: StoreApi) {
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
+      const originalTask = snapshot.tasks.find((t) => t.id === taskId);
+      if (!originalTask) return;
+
       const targetTasks = snapshot.tasks
         .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
         .sort((a, b) => a.position - b.position);
       const nextPosition = targetTasks.length;
-
-      const originalTasks = snapshot.tasks;
 
       // Optimistic update
       state.setWorkflowSnapshot(workflowId, {
@@ -343,12 +344,21 @@ function useMoveToStep(store: StoreApi) {
           position: nextPosition,
         });
       } catch (error) {
-        // Rollback
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
+        // Rollback only the moved task, and only if it still has the optimistic values
+        const cur = store.getState().kanbanMulti.snapshots[workflowId];
+        const curTask = cur?.tasks.find((t) => t.id === taskId);
+        if (cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition) {
           store.getState().setWorkflowSnapshot(workflowId, {
-            ...currentSnapshot,
-            tasks: originalTasks,
+            ...cur,
+            tasks: cur.tasks.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    workflowStepId: originalTask.workflowStepId,
+                    position: originalTask.position,
+                  }
+                : t,
+            ),
           });
         }
         console.error("Failed to move task:", error);
