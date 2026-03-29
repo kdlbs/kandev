@@ -533,13 +533,7 @@ function MinimalToolbar({
   submitKey = "cmd_enter",
 }: Pick<
   ChatInputToolbarProps,
-  | "isAgentBusy"
-  | "hasContent"
-  | "isDisabled"
-  | "isSending"
-  | "onCancel"
-  | "onSubmit"
-  | "submitKey"
+  "isAgentBusy" | "hasContent" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
 >) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
   return (
