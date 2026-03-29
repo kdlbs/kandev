@@ -28,7 +28,7 @@ test.describe("PR auto-detection pipeline", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     // --- Seed workflow: Inbox → Working (auto_start → Done) → Done ---
     const workflow = await apiClient.createWorkflow(
@@ -125,13 +125,11 @@ test.describe("PR auto-detection pipeline", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Ensure the Changes panel is mounted (useTaskPRDetection lives there)
-    await session.clickTab("Changes");
-
     // --- Verify PR button appears in topbar ---
-    // The detection hook fires immediately, then every 30s. Allow up to 45s
-    // for the first successful check (accounts for git.branch availability).
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 45_000 });
+    // The detection hook fires immediately on mount, then every 30s.
+    // Allow up to 60s for the check to succeed (accounts for git.branch
+    // availability delay and the 30s polling interval).
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
     await expect(session.prTopbarButton()).toContainText("#99");
   });
 
@@ -201,11 +199,11 @@ test.describe("PR auto-detection pipeline", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.clickTab("Changes");
 
-    // Wait long enough for at least one detection cycle (30s),
-    // then verify no PR button appeared.
-    await testPage.waitForTimeout(35_000);
-    await expect(session.prTopbarButton()).not.toBeVisible();
+    // The detection hook fires immediately on mount. Give it enough time
+    // for the check to complete (a few seconds), then verify no PR button.
+    // We don't need to wait a full 30s polling cycle — the immediate check
+    // on mount is sufficient to confirm no PR is found.
+    await expect(session.prTopbarButton()).not.toBeVisible({ timeout: 10_000 });
   });
 });

@@ -11,17 +11,19 @@ import (
 
 // mockGitHubService implements GitHubService for testing.
 type mockGitHubService struct {
-	client            github.Client
-	taskPR            *github.TaskPR
-	taskPRErr         error
-	prWatch           *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls  int
-	createWatchCalls  int
-	associateCalls    int
-	updateBranchCalls int
-	ensureWatchBranch string
-	createWatchBranch string
-	updatedBranch     string
+	client              github.Client
+	taskPR              *github.TaskPR
+	taskPRErr           error
+	prWatch             *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
+	ensureWatchCalls    int
+	createWatchCalls    int
+	associateCalls      int
+	updateBranchCalls   int
+	updatePRNumberCalls int
+	ensureWatchBranch   string
+	createWatchBranch   string
+	updatedBranch       string
+	updatedPRNumber     int
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -48,6 +50,11 @@ func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _ string, _ *
 func (m *mockGitHubService) UpdatePRWatchBranch(_ context.Context, _, branch string) error {
 	m.updateBranchCalls++
 	m.updatedBranch = branch
+	return nil
+}
+func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
+	m.updatePRNumberCalls++
+	m.updatedPRNumber = prNumber
 	return nil
 }
 func (m *mockGitHubService) RecordReviewPRTask(context.Context, string, string, string, int, string, string) error {
@@ -422,6 +429,13 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 
 		if ghSvc.associateCalls != 1 {
 			t.Errorf("expected 1 AssociatePRWithTask call when pr_number=0, got %d", ghSvc.associateCalls)
+		}
+		// Should update existing watch's PR number, not create a new watch
+		if ghSvc.updatePRNumberCalls != 1 {
+			t.Errorf("expected 1 UpdatePRWatchPRNumber call, got %d", ghSvc.updatePRNumberCalls)
+		}
+		if ghSvc.createWatchCalls != 0 {
+			t.Errorf("expected no CreatePRWatch calls (watch already exists), got %d", ghSvc.createWatchCalls)
 		}
 	})
 
