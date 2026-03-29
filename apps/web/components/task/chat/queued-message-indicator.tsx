@@ -7,6 +7,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@kandev/ui/textarea";
 
+/** Strip internal <kandev-system>...</kandev-system> blocks from display text. */
+function stripSystemTags(text: string): string {
+  return text.replace(/<kandev-system>[\s\S]*?<\/kandev-system>/g, "").trim();
+}
+
 export type QueuedMessageIndicatorHandle = {
   startEdit: () => void;
 };
@@ -192,7 +197,9 @@ export const QueuedMessageIndicator = forwardRef<
 
   if (!isVisible) return null;
 
-  const displayContent = content.length > 80 ? content.substring(0, 80) + "..." : content;
+  const visibleContent = stripSystemTags(content);
+  const displayContent =
+    visibleContent.length > 80 ? visibleContent.substring(0, 80) + "..." : visibleContent;
 
   return (
     <div
