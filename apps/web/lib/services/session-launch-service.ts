@@ -29,6 +29,7 @@ export type LaunchSessionRequest = {
   launch_workspace?: boolean;
   skip_message_record?: boolean;
   attachments?: MessageAttachment[];
+  fresh_environment?: boolean;
 };
 
 export type LaunchSessionResponse = {

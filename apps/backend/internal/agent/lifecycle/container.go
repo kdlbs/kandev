@@ -155,6 +155,91 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 	return fmt.Errorf("agentctl not healthy after %d retries", maxRetries)
 }
 
+// ReconnectContainer reconnects to an existing Docker container.
+// If the container is stopped/exited, it is restarted. A new agentctl
+// instance is created inside the running container.
+// Returns an error if the container no longer exists (caller should fall through to fresh creation).
+func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID string, config ContainerConfig) (*agentctl.Client, error) {
+	// Check if container exists and get its state
+	info, err := cm.dockerClient.GetContainerInfo(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("container not found or inaccessible: %w", err)
+	}
+
+	// Start the container if it's not running
+	if info.State != "running" {
+		cm.logger.Info("restarting stopped container for reuse",
+			zap.String("container_id", containerID),
+			zap.String("state", info.State))
+		if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
+			return nil, fmt.Errorf("failed to restart container: %w", err)
+		}
+	} else {
+		cm.logger.Info("reconnecting to running container",
+			zap.String("container_id", containerID))
+	}
+
+	// Get container IP for agentctl communication
+	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
+	if err != nil {
+		cm.logger.Warn("failed to get container IP, trying localhost",
+			zap.String("container_id", containerID),
+			zap.Error(err))
+		containerIP = "127.0.0.1"
+	}
+
+	// Create ControlClient and wait for agentctl health
+	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
+	if err := cm.waitForHealth(ctx, ctl); err != nil {
+		return nil, fmt.Errorf("agentctl health check failed after reconnect: %w", err)
+	}
+
+	// Create a new instance via the control API (same flow as LaunchContainer)
+	agentType := ""
+	if config.AgentConfig != nil {
+		agentType = config.AgentConfig.ID()
+	}
+	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
+	assumeMcpSse := false
+	if config.AgentConfig != nil {
+		if rt := config.AgentConfig.Runtime(); rt != nil {
+			assumeMcpSse = rt.AssumeMcpSse
+		}
+	}
+
+	createReq := &agentctl.CreateInstanceRequest{
+		ID:                 config.InstanceID,
+		WorkspacePath:      "/workspace",
+		AgentCommand:       "",
+		AgentType:          agentType,
+		Env:                config.Credentials,
+		AutoStart:          false,
+		McpServers:         config.McpServers,
+		SessionID:          config.SessionID,
+		DisableAskQuestion: disableAskQuestion,
+		AssumeMcpSse:       assumeMcpSse,
+		McpMode:            config.McpMode,
+	}
+
+	resp, err := ctl.CreateInstance(ctx, createReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create instance in reconnected container: %w", err)
+	}
+
+	// Create agentctl client pointing to the instance port
+	agentctlClient := agentctl.NewClient(containerIP, resp.Port, cm.logger,
+		agentctl.WithExecutionID(config.InstanceID),
+		agentctl.WithSessionID(config.SessionID))
+
+	cm.logger.Info("reconnected to existing container",
+		zap.String("container_id", containerID),
+		zap.String("container_ip", containerIP),
+		zap.String("instance_id", config.InstanceID),
+		zap.Int("instance_port", resp.Port))
+
+	return agentctlClient, nil
+}
+
 // StopContainer stops and removes a Docker container
 func (cm *ContainerManager) StopContainer(ctx context.Context, containerID string, timeout time.Duration) error {
 	if containerID == "" {

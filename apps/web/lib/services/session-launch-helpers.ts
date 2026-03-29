@@ -17,6 +17,7 @@ export function buildStartRequest(
     planMode?: boolean;
     priority?: number;
     attachments?: MessageAttachment[];
+    freshEnvironment?: boolean;
   },
 ): BuildResult {
   return {
@@ -30,6 +31,7 @@ export function buildStartRequest(
       plan_mode: opts?.planMode,
       priority: opts?.priority,
       attachments: opts?.attachments,
+      fresh_environment: opts?.freshEnvironment,
     },
     layout: opts?.planMode ? "plan" : "default",
   };
