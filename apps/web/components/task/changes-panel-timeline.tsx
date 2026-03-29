@@ -332,8 +332,13 @@ export function FileListSection(props: FileListSectionProps) {
       data-testid={`${variant}-files-section`}
     >
       {files.length > 0 && (
-        <div onKeyDown={handleKeyDown}>
-          <ul data-testid={`${variant}-file-list`} className="space-y-0.5">
+        <div>
+          <ul
+            data-testid={`${variant}-file-list`}
+            className="space-y-0.5"
+            tabIndex={-1}
+            onKeyDown={handleKeyDown}
+          >
             {files.map((file) => (
               <FileRow
                 key={file.path}

@@ -210,8 +210,10 @@ test.describe("Changes Panel Multi-Select", () => {
     const bulkBar = session.changesBulkActionBar("unstaged");
     await expect(bulkBar).toBeVisible({ timeout: 5_000 });
 
-    // Press Escape — click on the file row first to ensure the changes panel has focus
-    await fileA.press("Escape");
+    // Focus the file list wrapper (has tabIndex=-1) and press Escape
+    const fileList = testPage.getByTestId("unstaged-file-list");
+    await fileList.focus();
+    await testPage.keyboard.press("Escape");
 
     // Selection should be cleared
     await expect(session.changesSelectedRows()).toHaveCount(0, { timeout: 5_000 });
