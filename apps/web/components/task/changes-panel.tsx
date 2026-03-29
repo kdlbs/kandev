@@ -157,8 +157,10 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
   prCommits: { sha: string }[],
 ): T[] {
   if (prCommits.length === 0) return localCommits;
-  const prShas = new Set(prCommits.map((c) => c.sha.slice(0, 7)));
-  return localCommits.filter((c) => !prShas.has(c.commit_sha.slice(0, 7)));
+  return localCommits.filter(
+    (c) =>
+      !prCommits.some((pr) => pr.sha.startsWith(c.commit_sha) || c.commit_sha.startsWith(pr.sha)),
+  );
 }
 
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
@@ -373,7 +375,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
 
   const unpushedCommits = filterUnpushedCommits(props.commits, props.prCommits);
   const hasUnpushedCommits = unpushedCommits.length > 0;
-  const hasLocalChanges = props.hasUnstaged || props.hasStaged || props.hasCommits;
+  const hasLocalChanges = props.hasUnstaged || props.hasStaged || hasUnpushedCommits;
 
   return (
     <div className="flex flex-col">
