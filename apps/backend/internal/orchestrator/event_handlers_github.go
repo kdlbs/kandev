@@ -281,31 +281,15 @@ func (s *Service) detectPushAndAssociatePR(
 
 	// Check if we already have a watch for this session.
 	// If the watch already has a PR number, the PR was found — nothing to do.
-	// If the watch has pr_number=0, it's still searching — we do an immediate
-	// search here (faster than waiting for the 1-minute poller) and update the
+	// If the watch has pr_number=0, it's still searching — do an immediate
+	// search (faster than waiting for the 1-minute poller) and update the
 	// watch branch if the agent pushed from a different branch.
 	existing, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
 	if err == nil && existing != nil {
 		if existing.PRNumber > 0 {
 			return // PR already found and being monitored
 		}
-		// Watch exists but PR not yet found. Update branch if the agent
-		// switched branches since the watch was created.
-		if existing.Branch != branch {
-			if updateErr := s.githubService.UpdatePRWatchBranch(ctx, existing.ID, branch); updateErr != nil {
-				s.logger.Warn("failed to update PR watch branch",
-					zap.String("watch_id", existing.ID),
-					zap.String("old_branch", existing.Branch),
-					zap.String("new_branch", branch),
-					zap.Error(updateErr))
-			}
-		}
-		// Do a single immediate search — if found, associate right away
-		// instead of waiting for the next poller cycle.
-		owner, repoName := existing.Owner, existing.Repo
-		if foundPR, findErr := client.FindPRByBranch(ctx, owner, repoName, branch); findErr == nil && foundPR != nil {
-			s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
-		}
+		s.searchPRForExistingWatch(ctx, client, existing, sessionID, taskID, branch)
 		return
 	}
 
@@ -338,6 +322,30 @@ func (s *Service) detectPushAndAssociatePR(
 		}
 		s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
 		return
+	}
+}
+
+// searchPRForExistingWatch handles the case where a PR watch exists with pr_number=0
+// (still searching). It updates the watch branch if the agent pushed from a different
+// branch, then does a single immediate search so we don't wait for the 1-minute poller.
+func (s *Service) searchPRForExistingWatch(
+	ctx context.Context, client github.Client, watch *github.PRWatch,
+	sessionID, taskID, branch string,
+) {
+	// Update branch if the agent switched branches since the watch was created.
+	if watch.Branch != branch {
+		if err := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, branch); err != nil {
+			s.logger.Warn("failed to update PR watch branch",
+				zap.String("watch_id", watch.ID),
+				zap.String("old_branch", watch.Branch),
+				zap.String("new_branch", branch),
+				zap.Error(err))
+		}
+	}
+	// Immediate search — if found, associate right away.
+	foundPR, findErr := client.FindPRByBranch(ctx, watch.Owner, watch.Repo, branch)
+	if findErr == nil && foundPR != nil {
+		s.associatePRFromPush(ctx, sessionID, taskID, watch.Owner, watch.Repo, branch, foundPR)
 	}
 }
 
