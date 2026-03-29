@@ -83,7 +83,7 @@ test.describe("Task session queue", () => {
     );
 
     // Send a slow command to keep the agent busy.
-    await session.sendMessage("/slow 10s");
+    await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(500);
 
@@ -125,7 +125,7 @@ test.describe("Task session queue", () => {
     await session.togglePlanMode();
 
     // Send a slow command to keep the agent busy.
-    await session.sendMessage("/slow 10s");
+    await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(500);
 
