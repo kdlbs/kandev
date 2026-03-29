@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconGitMerge, IconX } from "@tabler/icons-react";
+import { IconArrowRight, IconGitMerge, IconX } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -20,6 +21,7 @@ import {
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { setChatDraftContent } from "@/lib/local-storage";
+import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-next-workflow-step";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -306,11 +308,20 @@ type TodoDisplayItem = {
 function ChatStatusBar({
   todoItems,
   taskId,
+  nextStepName,
+  onProceed,
+  isAgentBusy,
+  isMoving,
 }: {
   todoItems: TodoDisplayItem[];
   taskId: string | null;
+  nextStepName: string | null;
+  onProceed: () => void;
+  isAgentBusy: boolean;
+  isMoving: boolean;
 }) {
   const showTodos = todoItems.length > 0;
+  const showProceed = !!nextStepName && !isAgentBusy;
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -319,6 +330,20 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
+      {showProceed && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-6 gap-1 px-2 text-xs cursor-pointer hover:bg-muted/40"
+          onClick={onProceed}
+          disabled={isMoving}
+          data-testid="proceed-next-step"
+        >
+          <span className="text-muted-foreground">{nextStepName}</span>
+          <IconArrowRight className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -389,6 +414,19 @@ export function ChatInputArea({
     chatInputRef,
   );
 
+  const { proceedStepName, nextStepIsWorkStep, proceed, isMoving } = useNextWorkflowStep(taskId);
+  const { toast } = useToast();
+  const implementPlanHandler =
+    planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;
+
+  const handleProceed = useCallback(async () => {
+    try {
+      await proceed();
+    } catch {
+      toast({ description: "Failed to proceed to next step", variant: "error" });
+    }
+  }, [proceed, toast]);
+
   const hasClarification = !!panelState.pendingClarification;
   const placeholder =
     placeholderOverride ??
@@ -401,7 +439,14 @@ export function ChatInputArea({
     );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      <ChatStatusBar todoItems={todoItems} taskId={taskId} />
+      <ChatStatusBar
+        todoItems={todoItems}
+        taskId={taskId}
+        nextStepName={proceedStepName}
+        onProceed={handleProceed}
+        isAgentBusy={isAgentBusy}
+        isMoving={isMoving}
+      />
       <ChatInputContainer
         ref={chatInputRef}
         key={clarificationKey}
@@ -436,7 +481,7 @@ export function ChatInputArea({
         contextFiles={contextFiles}
         onToggleContextFile={handleToggleContextFile}
         onAddContextFile={handleAddContextFile}
-        onImplementPlan={handleImplementPlan}
+        onImplementPlan={implementPlanHandler}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
         hidePlanMode={hidePlanMode}
