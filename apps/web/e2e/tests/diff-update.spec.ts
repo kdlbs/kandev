@@ -122,7 +122,7 @@ test.describe("Diff update on file change", () => {
     });
 
     // Click on the session tab to make the chat input visible again
-    await session.clickTab("#1");
+    await session.sessionTabByText("1").click();
 
     // Send another message to trigger the second modification
     await session.sendMessage("/e2e:diff-update-modify");
@@ -180,7 +180,7 @@ test.describe("Untracked file diff update", () => {
     });
 
     // Click on the session tab to make the chat input visible again
-    await session.clickTab("#1");
+    await session.sessionTabByText("1").click();
 
     // Send another message to trigger the modification
     await session.sendMessage("/e2e:untracked-file-modify");
