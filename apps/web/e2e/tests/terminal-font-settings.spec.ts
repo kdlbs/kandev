@@ -59,13 +59,15 @@ test.describe("Terminal font settings", () => {
 
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
 
-    // Wait for xterm to render and read its computed font-family
+    // xterm.js applies fontFamily via canvas rendering, not CSS.
+    // The .xterm-helper-textarea gets the font for measuring, so read from there.
     const fontFamily = await testPage.evaluate(() => {
       const panel = document.querySelector('[data-testid="terminal-panel"]');
       if (!panel) return "";
-      const xtermEl = panel.querySelector(".xterm");
-      if (!xtermEl) return "";
-      return window.getComputedStyle(xtermEl).fontFamily;
+      const textarea = panel.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      if (textarea)
+        return textarea.style.fontFamily || window.getComputedStyle(textarea).fontFamily;
+      return "";
     });
 
     expect(fontFamily).toContain("JetBrains Mono");
@@ -83,8 +85,9 @@ test.describe("Terminal font settings", () => {
     // Open the dropdown
     await fontSelect.click();
 
-    // Verify JetBrains Mono is listed as an option
-    const option = testPage.getByRole("option", { name: /JetBrains Mono/ });
+    // Verify JetBrains Mono is listed as an option (exact match to avoid
+    // matching "JetBrains Mono Nerd Font" as well)
+    const option = testPage.getByRole("option", { name: "JetBrains Mono", exact: true });
     await expect(option).toBeVisible({ timeout: 5_000 });
   });
 });

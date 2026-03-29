@@ -182,7 +182,13 @@ const CATEGORY_BADGES: Partial<Record<FontCategory, string>> = {
   icons: "Icons",
   ligatures: "Ligatures",
 };
-const FONT_GROUPS = Object.groupBy(TERMINAL_FONT_PRESETS, (p) => p.category);
+const FONT_GROUPS: Record<string, typeof TERMINAL_FONT_PRESETS> = TERMINAL_FONT_PRESETS.reduce(
+  (acc, p) => {
+    (acc[p.category] ??= []).push(p);
+    return acc;
+  },
+  {} as Record<string, typeof TERMINAL_FONT_PRESETS>,
+);
 const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
 
 function FontGroupOptions() {
