@@ -19,7 +19,6 @@ import {
   IconBrandVscode,
   IconArrowsMaximize,
   IconArrowsMinimize,
-  IconSubtask,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -40,9 +39,8 @@ import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-s
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
-import { NewTaskButton } from "./task-session-sidebar";
 import { NewSessionDialog } from "./new-session-dialog";
-import { NewSubtaskDialog } from "./new-subtask-dialog";
+import { NewTaskDropdown } from "./new-task-dropdown";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
@@ -359,7 +357,6 @@ function SidebarRightActions() {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
   const steps = (kanban?.steps ?? []).map(
     (s: {
       id: string;
@@ -392,32 +389,14 @@ function SidebarRightActions() {
 
   return (
     <div className="flex items-center gap-1 pr-2">
-      <NewTaskButton
+      <NewTaskDropdown
         workspaceId={workspaceId}
         workflowId={workflowId}
         steps={steps}
-        onSuccess={handleTaskCreated}
+        activeTaskId={activeTaskId}
+        activeTaskTitle={activeTaskTitle}
+        onTaskCreated={handleTaskCreated}
       />
-      {activeTaskId && (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 gap-1 cursor-pointer"
-            onClick={() => setShowSubtaskDialog(true)}
-            data-testid="new-subtask-button"
-          >
-            <IconSubtask className="h-3.5 w-3.5" />
-            Subtask
-          </Button>
-          <NewSubtaskDialog
-            open={showSubtaskDialog}
-            onOpenChange={setShowSubtaskDialog}
-            parentTaskId={activeTaskId}
-            parentTaskTitle={activeTaskTitle}
-          />
-        </>
-      )}
     </div>
   );
 }

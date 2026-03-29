@@ -143,7 +143,8 @@ test.describe("MCP create_task subtask", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Click the "New Subtask" button in the sidebar
+    // 4. Open the Task split-button chevron and click "New Subtask"
+    await testPage.getByTestId("new-task-chevron").click();
     await testPage.getByTestId("new-subtask-button").click();
     const subtaskTitleInput = testPage.getByTestId("subtask-title-input");
     await expect(subtaskTitleInput).toBeVisible();

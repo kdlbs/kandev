@@ -53,10 +53,11 @@ test.describe("Subtask support", () => {
     // Wait for agent to complete
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // Click the "+ Subtask" button in the dockview sidebar header
-    const subtaskBtn = testPage.getByTestId("new-subtask-button");
-    await expect(subtaskBtn).toBeVisible({ timeout: 5_000 });
-    await subtaskBtn.click();
+    // Open the Task split-button chevron and click "New Subtask"
+    const chevron = testPage.getByTestId("new-task-chevron");
+    await expect(chevron).toBeVisible({ timeout: 5_000 });
+    await chevron.click();
+    await testPage.getByTestId("new-subtask-button").click();
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
