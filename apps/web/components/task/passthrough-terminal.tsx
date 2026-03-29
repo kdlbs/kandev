@@ -12,6 +12,7 @@ import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { getBackendConfig } from "@/lib/config";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
+import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
 import {
   MIN_WIDTH,
   MIN_HEIGHT,
@@ -42,18 +43,37 @@ type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
  * - Unicode11Addon enables proper unicode character support
  * - Resize commands sent via binary protocol: [0x01][JSON {cols, rows}]
  */
+function useTerminalRefs() {
+  return {
+    terminalRef: useRef<HTMLDivElement>(null),
+    xtermRef: useRef<Terminal | null>(null),
+    fitAddonRef: useRef<FitAddon | null>(null),
+    wsRef: useRef<WebSocket | null>(null),
+    attachAddonRef: useRef<AttachAddon | null>(null),
+    isInitializedRef: useRef(false),
+    lastDimensionsRef: useRef({ cols: 0, rows: 0 }),
+    resizeTimeoutRef: useRef<ReturnType<typeof setTimeout> | null>(null),
+    webglAddonRef: useRef<WebglAddon | null>(null),
+  };
+}
+
+const WS_BASE_URL_FALLBACK = "ws://localhost:8080";
+function useWsBaseUrl() {
+  return useMemo(() => {
+    try {
+      const url = new URL(getBackendConfig().apiBaseUrl);
+      return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
+    } catch {
+      return WS_BASE_URL_FALLBACK;
+    }
+  }, []);
+}
+
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { sessionId: propSessionId, mode, label, autoFocus, pendingCommand, onCommandSent } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const attachAddonRef = useRef<AttachAddon | null>(null);
-  const isInitializedRef = useRef(false);
-  const lastDimensionsRef = useRef({ cols: 0, rows: 0 });
-  const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const webglAddonRef = useRef<WebglAddon | null>(null);
+  const refs = useTerminalRefs();
+  const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
 
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = propSessionId ?? storeSessionId;
@@ -62,15 +82,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   useSessionAgentctl(sessionId);
   const taskId = session?.task_id ?? null;
   const canConnect = Boolean(sessionId && isActive);
-
-  const wsBaseUrl = useMemo(() => {
-    try {
-      const url = new URL(getBackendConfig().apiBaseUrl);
-      return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
-    } catch {
-      return "ws://localhost:8080";
-    }
-  }, []);
+  const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
@@ -81,32 +93,34 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const isConnected = sessionId != null && connectedSessionId === sessionId;
   const onConnected = useCallback(() => {
     setConnectedSessionId(sessionId ?? null);
-    if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
-  }, [sessionId, autoFocus]);
+    if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
+  }, [sessionId, autoFocus, refs.xtermRef]);
 
   const linkHandler = useTerminalLinkHandler();
+  const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
-    xtermRef,
-    fitAddonRef,
-    terminalRef,
-    lastDimensionsRef,
+    xtermRef: refs.xtermRef,
+    fitAddonRef: refs.fitAddonRef,
+    terminalRef: refs.terminalRef,
+    lastDimensionsRef: refs.lastDimensionsRef,
     sendResize,
   });
 
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   useTerminalInit({
-    terminalRef,
-    xtermRef,
-    fitAddonRef,
-    isInitializedRef,
-    lastDimensionsRef,
-    resizeTimeoutRef,
-    webglAddonRef,
+    terminalRef: refs.terminalRef,
+    xtermRef: refs.xtermRef,
+    fitAddonRef: refs.fitAddonRef,
+    isInitializedRef: refs.isInitializedRef,
+    lastDimensionsRef: refs.lastDimensionsRef,
+    resizeTimeoutRef: refs.resizeTimeoutRef,
+    webglAddonRef: refs.webglAddonRef,
     fitAndResize,
     onReady: onTerminalReady,
     linkHandler,
+    fontFamily: buildTerminalFontFamily(terminalFontFamily),
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
   });
@@ -136,7 +150,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
       className="relative h-full w-full overflow-hidden bg-background"
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     >
-      <div ref={terminalRef} className="h-full w-full p-2" />
+      <div className="h-full w-full p-2 pb-3">
+        <div ref={terminalRef} className="h-full w-full" />
+      </div>
       {!isConnected && (
         <div
           data-testid="passthrough-loading"

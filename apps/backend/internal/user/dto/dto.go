@@ -35,6 +35,7 @@ type UserSettingsDTO struct {
 	DefaultUtilityModel         string                            `json:"default_utility_model"`
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
+	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -74,6 +75,7 @@ type UpdateUserSettingsRequest struct {
 	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior        *string                            `json:"terminal_link_behavior,omitempty"`
+	TerminalFontFamily          *string                            `json:"terminal_font_family,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -108,6 +110,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
 		KeyboardShortcuts:           settings.KeyboardShortcuts,
 		TerminalLinkBehavior:        settings.TerminalLinkBehavior,
+		TerminalFontFamily:          settings.TerminalFontFamily,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

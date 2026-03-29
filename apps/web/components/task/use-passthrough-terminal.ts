@@ -79,7 +79,10 @@ function initTerminalInstance(
     | "resizeTimeoutRef"
   >,
   fitAndResize: (force?: boolean) => void,
-  options: { linkHandler?: (event: MouseEvent, uri: string) => void } & TerminalKeyHandlerOptions,
+  options: {
+    linkHandler?: (event: MouseEvent, uri: string) => void;
+    fontFamily?: string;
+  } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
@@ -92,7 +95,7 @@ function initTerminalInstance(
     scrollOnUserInput: true,
     scrollback: 5000,
     fontSize: 13,
-    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    fontFamily: options.fontFamily || 'Menlo, Monaco, "Courier New", monospace',
     macOptionIsMeta: true,
     theme: getTerminalTheme(termContainer),
   });
@@ -167,6 +170,7 @@ function initTerminalInstance(
 type TerminalInitHookOptions = TerminalInitOptions &
   TerminalKeyHandlerOptions & {
     linkHandler?: (event: MouseEvent, uri: string) => void;
+    fontFamily?: string;
   };
 
 export function useTerminalInit({
@@ -180,6 +184,7 @@ export function useTerminalInit({
   fitAndResize,
   onReady,
   linkHandler,
+  fontFamily,
   onToggleBottomTerminal,
   sendInput,
 }: TerminalInitHookOptions) {
@@ -210,6 +215,7 @@ export function useTerminalInit({
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
         initTerminalInstance(container, refs, fitAndResize, {
           linkHandler,
+          fontFamily,
           onToggleBottomTerminal,
           sendInput,
         });

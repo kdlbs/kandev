@@ -43,6 +43,7 @@ function carryForwardSettings(current: DisplaySettings) {
     terminalLinkBehavior: (current.terminalLinkBehavior ?? "new_tab") as
       | "new_tab"
       | "browser_panel",
+    terminalFontFamily: current.terminalFontFamily ?? null,
   };
 }
 

@@ -368,7 +368,11 @@ export class ApiClient {
   }
 
   async getUserSettings(): Promise<{
-    settings: { terminal_link_behavior?: string; [key: string]: unknown };
+    settings: {
+      terminal_link_behavior?: string;
+      terminal_font_family?: string;
+      [key: string]: unknown;
+    };
   }> {
     return this.request("GET", "/api/v1/user/settings");
   }
@@ -378,6 +382,7 @@ export class ApiClient {
     workspace_id?: string;
     workflow_filter_id?: string;
     terminal_link_behavior?: "new_tab" | "browser_panel";
+    terminal_font_family?: string;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;

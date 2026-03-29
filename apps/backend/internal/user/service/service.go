@@ -49,6 +49,7 @@ type UpdateUserSettingsRequest struct {
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
 	TerminalLinkBehavior        *string
+	TerminalFontFamily          *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -168,6 +169,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
 		return err
 	}
+	if req.TerminalFontFamily != nil {
+		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
+	}
 	return nil
 }
 
@@ -263,6 +267,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
+		"terminal_font_family":            settings.TerminalFontFamily,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

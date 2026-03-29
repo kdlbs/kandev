@@ -94,8 +94,8 @@ export function BottomTerminalPanel({ sessionId }: Props) {
           <IconMinus className="h-3 w-3" />
         </Button>
       </div>
-      {/* Terminal content - pb-2 prevents last line from being cut off */}
-      <div className="flex-1 min-h-0 overflow-hidden pb-2">
+      {/* Terminal content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
         <PassthroughTerminal
           sessionId={sessionId}
           mode="shell"

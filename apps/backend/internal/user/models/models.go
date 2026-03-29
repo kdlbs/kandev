@@ -34,6 +34,7 @@ type UserSettings struct {
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
+	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
 }

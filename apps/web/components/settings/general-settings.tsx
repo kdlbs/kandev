@@ -2,11 +2,27 @@
 
 import { useState } from "react";
 import { useTheme } from "next-themes";
-import { IconCommand, IconLink, IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
+import {
+  IconCommand,
+  IconPalette,
+  IconServer,
+  IconKeyboard,
+  IconTerminal2,
+} from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
@@ -14,6 +30,8 @@ import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-
 import { getBackendConfig } from "@/lib/config";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
+import type { FontCategory } from "@/lib/terminal/terminal-font";
 import type { Theme } from "@/lib/settings/types";
 
 function ThemeSettingsCard() {
@@ -154,6 +172,132 @@ function TerminalLinksCard() {
   );
 }
 
+const CUSTOM_VALUE = "__custom__";
+const CATEGORY_LABELS: Record<FontCategory, string> = {
+  icons: "Nerd Fonts",
+  ligatures: "Programming",
+  system: "System",
+};
+const CATEGORY_BADGES: Partial<Record<FontCategory, string>> = {
+  icons: "Icons",
+  ligatures: "Ligatures",
+};
+const FONT_GROUPS = Object.groupBy(TERMINAL_FONT_PRESETS, (p) => p.category);
+const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
+
+function FontGroupOptions() {
+  return FONT_CATEGORIES.map((category) => (
+    <SelectGroup key={category}>
+      <SelectLabel className="flex items-center gap-2">
+        {CATEGORY_LABELS[category]}
+        {CATEGORY_BADGES[category] && (
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            {CATEGORY_BADGES[category]}
+          </Badge>
+        )}
+      </SelectLabel>
+      {(FONT_GROUPS[category] ?? []).map((preset) => (
+        <SelectItem key={preset.value} value={preset.value}>
+          {preset.label}
+        </SelectItem>
+      ))}
+    </SelectGroup>
+  ));
+}
+
+function TerminalFontCard() {
+  const storeApi = useAppStoreApi();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCustom, setIsCustom] = useState(() => {
+    const current = userSettings.terminalFontFamily;
+    if (!current) return false;
+    return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
+  });
+  const [customValue, setCustomValue] = useState(
+    () => (isCustom ? userSettings.terminalFontFamily : "") ?? "",
+  );
+
+  const saveFontFamily = async (value: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    const current = storeApi.getState().userSettings;
+    const previous = current.terminalFontFamily;
+    try {
+      setUserSettings({ ...current, terminalFontFamily: value || null });
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        terminal_font_family: value,
+      });
+    } catch {
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        terminalFontFamily: previous,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSelectChange = (value: string) => {
+    if (value === CUSTOM_VALUE) {
+      setIsCustom(true);
+      return;
+    }
+    setIsCustom(false);
+    setCustomValue("");
+    saveFontFamily(value === "default" ? "" : value);
+  };
+
+  const handleCustomBlur = () => {
+    const trimmed = customValue.trim();
+    if (trimmed) saveFontFamily(trimmed);
+  };
+
+  const selectValue = isCustom ? CUSTOM_VALUE : userSettings.terminalFontFamily || "default";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Terminal Font</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <Label htmlFor="terminal-font">Font Family</Label>
+          <Select value={selectValue} onValueChange={handleSelectChange} disabled={isSaving}>
+            <SelectTrigger id="terminal-font" data-testid="terminal-font-select">
+              <SelectValue placeholder="Default" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Default (Menlo / Monaco)</SelectItem>
+              <FontGroupOptions />
+              <SelectSeparator />
+              <SelectItem value={CUSTOM_VALUE}>Custom...</SelectItem>
+            </SelectContent>
+          </Select>
+          {isCustom && (
+            <Input
+              placeholder='e.g. "My Custom Font"'
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              onBlur={handleCustomBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCustomBlur();
+              }}
+              data-testid="terminal-font-custom-input"
+            />
+          )}
+          <p className="text-xs text-muted-foreground">
+            Choose a monospace font for the terminal. Nerd Fonts include icons for CLI tools.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function BackendConnectionCard() {
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
   const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -211,10 +355,11 @@ export function GeneralSettings() {
       <Separator />
 
       <SettingsSection
-        icon={<IconLink className="h-5 w-5" />}
-        title="Terminal Links"
-        description="Configure how clickable URLs in the terminal are opened"
+        icon={<IconTerminal2 className="h-5 w-5" />}
+        title="Terminal"
+        description="Configure terminal appearance and behavior"
       >
+        <TerminalFontCard />
         <TerminalLinksCard />
       </SettingsSection>
 

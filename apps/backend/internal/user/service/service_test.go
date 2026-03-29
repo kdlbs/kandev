@@ -88,6 +88,52 @@ func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
+	t.Run("nil leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{TerminalFontFamily: "Fira Code"}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontFamily != "Fira Code" {
+			t.Fatalf("expected TerminalFontFamily=Fira Code, got %s", settings.TerminalFontFamily)
+		}
+	})
+
+	t.Run("sets value when provided", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TerminalFontFamily: ptr("JetBrains Mono")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontFamily != "JetBrains Mono" {
+			t.Fatalf("expected TerminalFontFamily=JetBrains Mono, got %s", settings.TerminalFontFamily)
+		}
+	})
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TerminalFontFamily: ptr("  Fira Code  ")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontFamily != "Fira Code" {
+			t.Fatalf("expected TerminalFontFamily=Fira Code, got %q", settings.TerminalFontFamily)
+		}
+	})
+
+	t.Run("clears with empty string", func(t *testing.T) {
+		settings := &models.UserSettings{TerminalFontFamily: "Fira Code"}
+		req := &UpdateUserSettingsRequest{TerminalFontFamily: ptr("")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TerminalFontFamily != "" {
+			t.Fatalf("expected empty TerminalFontFamily, got %s", settings.TerminalFontFamily)
+		}
+	})
+}
+
 func TestApplySavedLayouts(t *testing.T) {
 	tests := []struct {
 		name        string
