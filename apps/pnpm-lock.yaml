@@ -48,7 +48,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.28)(happy-dom@20.8.8)(lightningcss@1.30.2)
+        version: 1.6.1(@types/node@20.19.28)(happy-dom@20.8.9)(lightningcss@1.30.2)
 
   packages/theme:
     dependencies:
@@ -502,8 +502,8 @@ importers:
         specifier: ^4.4.1
         version: 4.4.1(@typescript-eslint/eslint-plugin@8.53.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))
       happy-dom:
-        specifier: ^20.8.8
-        version: 20.8.8
+        specifier: ^20.8.9
+        version: 20.8.9
       tailwindcss:
         specifier: ^4
         version: 4.1.18
@@ -515,7 +515,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.28)(happy-dom@20.8.8)(lightningcss@1.30.2)
+        version: 1.6.1(@types/node@20.19.28)(happy-dom@20.8.9)(lightningcss@1.30.2)
 
 packages:
 
@@ -4553,8 +4553,8 @@ packages:
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
 
-  happy-dom@20.8.8:
-    resolution: {integrity: sha512-5/F8wxkNxYtsN0bXfMwIyNLZ9WYsoOYPbmoluqVJqv8KBUbcyKZawJ7uYK4WTX8IHBLYv+VXIwfeNDPy1oKMwQ==}
+  happy-dom@20.8.9:
+    resolution: {integrity: sha512-Tz23LR9T9jOGVZm2x1EPdXqwA37G/owYMxRwU0E4miurAtFsPMQ1d2Jc2okUaSjZqAFz2oEn3FLXC5a0a+siyA==}
     engines: {node: '>=20.0.0'}
 
   has-bigints@1.1.0:
@@ -11153,7 +11153,7 @@ snapshots:
 
   hachure-fill@0.5.2: {}
 
-  happy-dom@20.8.8:
+  happy-dom@20.8.9:
     dependencies:
       '@types/node': 20.19.28
       '@types/whatwg-mimetype': 3.0.2
@@ -13751,7 +13751,7 @@ snapshots:
       fsevents: 2.3.3
       lightningcss: 1.30.2
 
-  vitest@1.6.1(@types/node@20.19.28)(happy-dom@20.8.8)(lightningcss@1.30.2):
+  vitest@1.6.1(@types/node@20.19.28)(happy-dom@20.8.9)(lightningcss@1.30.2):
     dependencies:
       '@vitest/expect': 1.6.1
       '@vitest/runner': 1.6.1
@@ -13775,7 +13775,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.28
-      happy-dom: 20.8.8
+      happy-dom: 20.8.9
     transitivePeerDependencies:
       - less
       - lightningcss
