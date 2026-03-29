@@ -64,6 +64,7 @@ export function useMultiSelect({
           const currentIndex = items.indexOf(path);
           if (anchorIndex === -1 || currentIndex === -1) {
             next = new Set([path]);
+            lastClickedRef.current = path;
           } else {
             const start = Math.min(anchorIndex, currentIndex);
             const end = Math.max(anchorIndex, currentIndex);
