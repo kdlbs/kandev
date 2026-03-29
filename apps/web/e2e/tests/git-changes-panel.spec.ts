@@ -1123,4 +1123,176 @@ test.describe("Git Changes Panel", () => {
     // Clean up
     git.deleteFile("collapse-unstaged.txt");
   });
+
+  /**
+   * Verifies that local commits section is hidden when all commits are already
+   * in the PR. Only unpushed commits should be shown in the local section.
+   */
+  test("hides local commits section when all commits are in PR", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git PR Dedup Profile");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR Dedup Test",
+      profile.id,
+      {
+        description: "Testing PR commit deduplication",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git PR Dedup Test");
+
+    // Set up git helper
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Create a commit
+    git.createFile("pr-dedup.txt", "dedup content");
+    git.stageFile("pr-dedup.txt");
+    const sha = git.commit("Commit in PR");
+
+    // Click the Changes tab and verify commit appears locally
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("Commit in PR")).toBeVisible({ timeout: 10_000 });
+
+    // Mock a PR that contains the same commit
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 1,
+      pr_url: "https://github.com/test-org/test-repo/pull/1",
+      pr_title: "Test PR",
+      head_branch: "feature",
+      base_branch: "main",
+      author_login: "e2e-test",
+    });
+    await apiClient.mockGitHubAddPRCommits("test-org", "test-repo", 1, [
+      {
+        sha,
+        message: "Commit in PR",
+        author_login: "e2e-test",
+        author_date: new Date().toISOString(),
+      },
+    ]);
+
+    // Reload to pick up the PR association
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+
+    // PR commits section should be visible
+    await expect(session.prCommitsSection()).toBeVisible({ timeout: 15_000 });
+
+    // Local commits section should be hidden (all commits are in the PR)
+    await expect(testPage.getByTestId("commits-section")).not.toBeVisible({ timeout: 10_000 });
+  });
+
+  /**
+   * Verifies that only unpushed commits appear in the local section
+   * when some commits are already in the PR.
+   */
+  test("shows only unpushed commits when some commits are in PR", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git PR Partial Profile");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR Partial Test",
+      profile.id,
+      {
+        description: "Testing partial PR commit deduplication",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git PR Partial Test");
+
+    // Set up git helper
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Create two commits
+    git.createFile("pushed.txt", "pushed content");
+    git.stageFile("pushed.txt");
+    const pushedSha = git.commit("Pushed commit");
+
+    git.createFile("unpushed.txt", "unpushed content");
+    git.stageFile("unpushed.txt");
+    const unpushedSha = git.commit("Unpushed commit");
+
+    // Mock a PR that only contains the first commit
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 2,
+      pr_url: "https://github.com/test-org/test-repo/pull/2",
+      pr_title: "Partial PR",
+      head_branch: "feature",
+      base_branch: "main",
+      author_login: "e2e-test",
+    });
+    await apiClient.mockGitHubAddPRCommits("test-org", "test-repo", 2, [
+      {
+        sha: pushedSha,
+        message: "Pushed commit",
+        author_login: "e2e-test",
+        author_date: new Date().toISOString(),
+      },
+    ]);
+
+    // Reload to pick up the PR association
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+
+    // PR commits section should show
+    await expect(session.prCommitsSection()).toBeVisible({ timeout: 15_000 });
+
+    // Local commits section should show only the unpushed commit
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("Unpushed commit")).toBeVisible({ timeout: 10_000 });
+    await expect(session.changes.getByText(unpushedSha.slice(0, 7))).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // The local commits section should only contain the unpushed commit
+    const commitsList = testPage.getByTestId("commits-list");
+    await expect(commitsList.locator("li")).toHaveCount(1, { timeout: 5_000 });
+  });
 });
