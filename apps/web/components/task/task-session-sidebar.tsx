@@ -111,7 +111,7 @@ export const NewTaskButton = memo(function NewTaskButton({
 
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
-  task: KanbanState["tasks"][number],
+  task: KanbanState["tasks"][number] & { _workflowId: string },
   ctx: {
     sessionsByTaskId: Record<string, TaskSession[]>;
     gitStatusByEnvId: Record<string, GitStatusEntry>;
@@ -137,6 +137,7 @@ function toSidebarItem(
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
     description: task.description,
+    workflowId: task._workflowId,
     workflowStepId: task.workflowStepId as string | undefined,
     repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
     diffStats: sessionInfo.diffStats,
@@ -177,17 +178,17 @@ function useSidebarData(workspaceId: string | null) {
   const isLoadingWorkflow = isMultiLoading && Object.keys(snapshots).length === 0;
 
   const { allTasks, allSteps } = useMemo(() => {
-    const tasks: KanbanState["tasks"] = [];
+    const tasks: Array<KanbanState["tasks"][number] & { _workflowId: string }> = [];
     const stepMap = new Map<
       string,
       { id: string; title: string; color: string; position: number }
     >();
-    for (const snapshot of Object.values(snapshots)) {
+    for (const [wfId, snapshot] of Object.entries(snapshots)) {
       for (const step of snapshot.steps) {
         if (!stepMap.has(step.id)) stepMap.set(step.id, step);
       }
       // Ephemeral tasks are already filtered out by useAllWorkflowSnapshots
-      tasks.push(...snapshot.tasks);
+      tasks.push(...snapshot.tasks.map((t) => ({ ...t, _workflowId: wfId })));
     }
     const sortedSteps = [...stepMap.values()].sort((a, b) => a.position - b.position);
     return { allTasks: tasks, allSteps: sortedSteps };
@@ -203,7 +204,7 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
-    const titleById = new Map(allTasks.map((t: KanbanState["tasks"][number]) => [t.id, t.title]));
+    const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const mapCtx = {
       sessionsByTaskId,
       gitStatusByEnvId,
@@ -215,7 +216,10 @@ function useSidebarData(workspaceId: string | null) {
       >,
       titleById,
     };
-    const items = allTasks.map((task: KanbanState["tasks"][number]) => toSidebarItem(task, mapCtx));
+    type SidebarItem = Omit<ReturnType<typeof toSidebarItem>, "workflowId"> & {
+      workflowId?: string;
+    };
+    const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
@@ -227,6 +231,7 @@ function useSidebarData(workspaceId: string | null) {
         state: undefined,
         sessionState: undefined,
         description: undefined,
+        workflowId: undefined,
         workflowStepId: undefined,
         repositoryPath: archivedState.archivedTaskRepositoryPath,
         diffStats: undefined,
@@ -300,6 +305,52 @@ async function prepareAndSwitchTask(
   } finally {
     setPreparingTaskId(null);
   }
+}
+
+function useMoveToStep(store: StoreApi) {
+  const { moveTaskById } = useTaskActions();
+
+  return useCallback(
+    async (taskId: string, workflowId: string, targetStepId: string) => {
+      const state = store.getState();
+      const snapshot = state.kanbanMulti.snapshots[workflowId];
+      if (!snapshot) return;
+
+      const targetTasks = snapshot.tasks
+        .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
+        .sort((a, b) => a.position - b.position);
+      const nextPosition = targetTasks.length;
+
+      const originalTasks = snapshot.tasks;
+
+      // Optimistic update
+      state.setWorkflowSnapshot(workflowId, {
+        ...snapshot,
+        tasks: snapshot.tasks.map((t) =>
+          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
+        ),
+      });
+
+      try {
+        await moveTaskById(taskId, {
+          workflow_id: workflowId,
+          workflow_step_id: targetStepId,
+          position: nextPosition,
+        });
+      } catch (error) {
+        // Rollback
+        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
+        if (currentSnapshot) {
+          store.getState().setWorkflowSnapshot(workflowId, {
+            ...currentSnapshot,
+            tasks: originalTasks,
+          });
+        }
+        console.error("Failed to move task:", error);
+      }
+    },
+    [store, moveTaskById],
+  );
 }
 
 function useSidebarActions(store: StoreApi) {
@@ -396,12 +447,15 @@ function useSidebarActions(store: StoreApi) {
     [renamingTask, renameTaskById],
   );
 
+  const handleMoveToStep = useMoveToStep(store);
+
   return {
     deletingTaskId,
     preparingTaskId,
     handleSelectTask,
     handleArchiveTask,
     handleDeleteTask,
+    handleMoveToStep,
     renamingTask,
     setRenamingTask,
     handleRenameTask,
@@ -423,6 +477,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleSelectTask,
     handleArchiveTask,
     handleDeleteTask,
+    handleMoveToStep,
     renamingTask,
     setRenamingTask,
     handleRenameTask,
@@ -451,6 +506,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}
           onDeleteTask={handleDeleteTask}
+          onMoveToStep={handleMoveToStep}
           deletingTaskId={deletingTaskId}
           isLoading={isLoadingWorkflow}
         />
