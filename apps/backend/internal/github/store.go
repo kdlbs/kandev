@@ -164,6 +164,14 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 	return err
 }
 
+// UpdatePRWatchBranch updates a PR watch's branch after the agent switches branches.
+func (s *Store) UpdatePRWatchBranch(ctx context.Context, id, branch string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ?`,
+		branch, time.Now().UTC(), id)
+	return err
+}
+
 // --- TaskPR operations ---
 
 // CreateTaskPR associates a PR with a task.

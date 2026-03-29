@@ -185,6 +185,11 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 	return s.store.DeletePRWatch(ctx, id)
 }
 
+// UpdatePRWatchBranch updates a PR watch's branch (e.g. after the agent switches branches).
+func (s *Service) UpdatePRWatchBranch(ctx context.Context, id, branch string) error {
+	return s.store.UpdatePRWatchBranch(ctx, id, branch)
+}
+
 // CheckPRWatch fetches latest feedback for a PR watch and determines if there are changes.
 func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRFeedback, bool, error) {
 	if s.client == nil {

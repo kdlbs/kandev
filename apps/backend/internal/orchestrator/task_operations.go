@@ -307,6 +307,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
 	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, attachments)
 
+	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
+	// PrepareTaskSession may have already created one, but if that goroutine failed
+	// or hadn't completed, this guarantees coverage.
+	if execution.WorktreeBranch != "" {
+		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
+	}
+
 	return execution, nil
 }
 

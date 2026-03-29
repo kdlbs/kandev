@@ -23,6 +23,7 @@ type GitHubService interface {
 	CreatePRWatch(ctx context.Context, sessionID, taskID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
 	EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, repo, branch string) (*github.PRWatch, error)
 	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
+	UpdatePRWatchBranch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error
@@ -278,10 +279,34 @@ func (s *Service) detectPushAndAssociatePR(
 		return
 	}
 
-	// Check if we already have a watch for this session
+	// Check if we already have a watch for this session.
+	// If the watch already has a PR number, the PR was found — nothing to do.
+	// If the watch has pr_number=0, it's still searching — we do an immediate
+	// search here (faster than waiting for the 1-minute poller) and update the
+	// watch branch if the agent pushed from a different branch.
 	existing, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
 	if err == nil && existing != nil {
-		return // already watching
+		if existing.PRNumber > 0 {
+			return // PR already found and being monitored
+		}
+		// Watch exists but PR not yet found. Update branch if the agent
+		// switched branches since the watch was created.
+		if existing.Branch != branch {
+			if updateErr := s.githubService.UpdatePRWatchBranch(ctx, existing.ID, branch); updateErr != nil {
+				s.logger.Warn("failed to update PR watch branch",
+					zap.String("watch_id", existing.ID),
+					zap.String("old_branch", existing.Branch),
+					zap.String("new_branch", branch),
+					zap.Error(updateErr))
+			}
+		}
+		// Do a single immediate search — if found, associate right away
+		// instead of waiting for the next poller cycle.
+		owner, repoName := existing.Owner, existing.Repo
+		if foundPR, findErr := client.FindPRByBranch(ctx, owner, repoName, branch); findErr == nil && foundPR != nil {
+			s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
+		}
+		return
 	}
 
 	owner, repoName := s.resolveSessionRepo(ctx, sessionID)

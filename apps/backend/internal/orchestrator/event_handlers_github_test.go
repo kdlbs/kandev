@@ -9,16 +9,19 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// mockGitHubService implements GitHubService for testing CheckSessionPR.
+// mockGitHubService implements GitHubService for testing.
 type mockGitHubService struct {
 	client            github.Client
 	taskPR            *github.TaskPR
 	taskPRErr         error
+	prWatch           *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
 	ensureWatchCalls  int
 	createWatchCalls  int
 	associateCalls    int
+	updateBranchCalls int
 	ensureWatchBranch string
 	createWatchBranch string
+	updatedBranch     string
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -31,7 +34,7 @@ func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, branch 
 	return &github.PRWatch{}, nil
 }
 func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
-	return nil, nil
+	return m.prWatch, nil
 }
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
@@ -41,6 +44,11 @@ func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _ string, 
 func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _ string, _ *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	return &github.TaskPR{}, nil
+}
+func (m *mockGitHubService) UpdatePRWatchBranch(_ context.Context, _, branch string) error {
+	m.updateBranchCalls++
+	m.updatedBranch = branch
+	return nil
 }
 func (m *mockGitHubService) RecordReviewPRTask(context.Context, string, string, string, int, string, string) error {
 	return nil
@@ -315,6 +323,160 @@ func TestCheckSessionPR(t *testing.T) {
 		}
 		if ghSvc.ensureWatchBranch != "feature-branch" {
 			t.Errorf("expected EnsurePRWatch branch %q, got %q", "feature-branch", ghSvc.ensureWatchBranch)
+		}
+	})
+}
+
+// TestDetectPushAndAssociatePR tests the push detection flow for PR association.
+func TestDetectPushAndAssociatePR(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	testPR := &github.PR{
+		Number:      10,
+		Title:       "Test PR",
+		HTMLURL:     "https://github.com/myorg/myrepo/pull/10",
+		AuthorLogin: "alice",
+		RepoOwner:   "myorg",
+		RepoName:    "myrepo",
+		HeadBranch:  "feature-branch",
+		BaseBranch:  "main",
+	}
+
+	// seedSessionWithRepo creates a session linked to a GitHub repository
+	// for testing detectPushAndAssociatePR which uses resolveSessionRepo.
+	seedSessionWithRepo := func(t *testing.T) *Service {
+		t.Helper()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		repoObj := &models.Repository{
+			ID: "repo1", WorkspaceID: "ws1", Name: "myrepo",
+			SourceType: "provider", Provider: "github",
+			ProviderOwner: "myorg", ProviderName: "myrepo",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := repo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("failed to create repository: %v", err)
+		}
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.RepositoryID = "repo1"
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("failed to update session: %v", err)
+		}
+
+		return createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	}
+
+	t.Run("searches and finds PR when no watch exists", func(t *testing.T) {
+		svc := seedSessionWithRepo(t)
+		mockClient := github.NewMockClient()
+		mockClient.AddPR(testPR)
+		ghSvc := &mockGitHubService{client: mockClient}
+		svc.SetGitHubService(ghSvc)
+
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+
+		if ghSvc.associateCalls != 1 {
+			t.Errorf("expected 1 AssociatePRWithTask call, got %d", ghSvc.associateCalls)
+		}
+		if ghSvc.createWatchCalls != 1 {
+			t.Errorf("expected 1 CreatePRWatch call, got %d", ghSvc.createWatchCalls)
+		}
+	})
+
+	t.Run("skips when watch has pr_number > 0", func(t *testing.T) {
+		svc := seedSessionWithRepo(t)
+		ghSvc := &mockGitHubService{
+			prWatch: &github.PRWatch{
+				ID: "w1", SessionID: "s1", TaskID: "t1",
+				Owner: "myorg", Repo: "myrepo",
+				PRNumber: 10, Branch: "feature-branch",
+			},
+		}
+		svc.SetGitHubService(ghSvc)
+
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+
+		if ghSvc.associateCalls != 0 {
+			t.Errorf("expected no AssociatePRWithTask calls when PR already found, got %d", ghSvc.associateCalls)
+		}
+	})
+
+	t.Run("searches immediately when watch has pr_number=0", func(t *testing.T) {
+		svc := seedSessionWithRepo(t)
+		mockClient := github.NewMockClient()
+		mockClient.AddPR(testPR)
+		ghSvc := &mockGitHubService{
+			client: mockClient,
+			prWatch: &github.PRWatch{
+				ID: "w1", SessionID: "s1", TaskID: "t1",
+				Owner: "myorg", Repo: "myrepo",
+				PRNumber: 0, Branch: "feature-branch",
+			},
+		}
+		svc.SetGitHubService(ghSvc)
+
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+
+		if ghSvc.associateCalls != 1 {
+			t.Errorf("expected 1 AssociatePRWithTask call when pr_number=0, got %d", ghSvc.associateCalls)
+		}
+	})
+
+	t.Run("updates watch branch when agent pushes from different branch", func(t *testing.T) {
+		svc := seedSessionWithRepo(t)
+		mockClient := github.NewMockClient()
+		// PR is on the NEW branch, not the old one
+		prOnNewBranch := &github.PR{
+			Number: 10, Title: "Test PR",
+			HTMLURL:     "https://github.com/myorg/myrepo/pull/10",
+			AuthorLogin: "alice", RepoOwner: "myorg", RepoName: "myrepo",
+			HeadBranch: "new-branch", BaseBranch: "main",
+		}
+		mockClient.AddPR(prOnNewBranch)
+		ghSvc := &mockGitHubService{
+			client: mockClient,
+			prWatch: &github.PRWatch{
+				ID: "w1", SessionID: "s1", TaskID: "t1",
+				Owner: "myorg", Repo: "myrepo",
+				PRNumber: 0, Branch: "old-branch", // watch created with original branch
+			},
+		}
+		svc.SetGitHubService(ghSvc)
+
+		// Agent pushed from "new-branch" (different from watch's "old-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "new-branch")
+
+		if ghSvc.updateBranchCalls != 1 {
+			t.Errorf("expected 1 UpdatePRWatchBranch call, got %d", ghSvc.updateBranchCalls)
+		}
+		if ghSvc.updatedBranch != "new-branch" {
+			t.Errorf("expected updated branch %q, got %q", "new-branch", ghSvc.updatedBranch)
+		}
+		if ghSvc.associateCalls != 1 {
+			t.Errorf("expected 1 AssociatePRWithTask call, got %d", ghSvc.associateCalls)
+		}
+	})
+
+	t.Run("does not update branch when same as watch", func(t *testing.T) {
+		svc := seedSessionWithRepo(t)
+		mockClient := github.NewMockClient()
+		ghSvc := &mockGitHubService{
+			client: mockClient,
+			prWatch: &github.PRWatch{
+				ID: "w1", SessionID: "s1", TaskID: "t1",
+				Owner: "myorg", Repo: "myrepo",
+				PRNumber: 0, Branch: "feature-branch",
+			},
+		}
+		svc.SetGitHubService(ghSvc)
+
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+
+		if ghSvc.updateBranchCalls != 0 {
+			t.Errorf("expected no UpdatePRWatchBranch calls when branch matches, got %d", ghSvc.updateBranchCalls)
 		}
 	})
 }
