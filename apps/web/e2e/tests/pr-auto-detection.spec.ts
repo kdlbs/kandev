@@ -120,7 +120,7 @@ test.describe("PR auto-detection pipeline", () => {
     // The backend's CheckSessionPR resolves the repo (testorg/testrepo)
     // and branch ("main"), searches mock GitHub, and associates the PR.
     await kanban.taskCardInColumn("Auto-Detect PR Task", doneStep.id).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -195,7 +195,7 @@ test.describe("PR auto-detection pipeline", () => {
 
     // Open the session
     await kanban.taskCardInColumn("No PR Task", doneStep.id).click();
-    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
