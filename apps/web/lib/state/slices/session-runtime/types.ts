@@ -99,7 +99,7 @@ export type CumulativeDiff = {
 };
 
 export type SessionCommitsState = {
-  bySessionId: Record<string, SessionCommit[]>;
+  byEnvironmentId: Record<string, SessionCommit[]>;
   loading: Record<string, boolean>;
 };
 

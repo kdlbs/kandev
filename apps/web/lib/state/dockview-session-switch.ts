@@ -80,7 +80,7 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
 
   // Fast path: keep the grid structure, clean up ephemeral panels and any
   // session chat tabs that belong to a different session (cross-task switch).
-  // Session-scoped portals (terminal, browser, etc.) will be re-acquired
+  // Session-scoped portals (browser, vscode, etc.) will be re-acquired
   // via usePortalSlot's sessionId dependency change.
   removeEphemeralPanels(api, newSessionId);
   api.layout(params.safeWidth, params.safeHeight);

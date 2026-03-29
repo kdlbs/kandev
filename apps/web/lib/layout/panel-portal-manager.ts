@@ -20,15 +20,16 @@
  * - **Global** (`sessionId` is `undefined`) — the portal persists across session
  *   switches. Used for panels that read `activeSessionId` reactively from the
  *   store and automatically show the correct data for whichever session is active.
- *   Examples: sidebar, chat, changes, files, plan.
+ *   Examples: sidebar, chat, terminal, changes, files, plan.
+ *   Note: terminal, changes, and files use `useEnvironmentSessionId()` to stay
+ *   stable across same-environment session switches.
  *
  * - **Session-scoped** (`sessionId` is set) — the portal is bound to the session
  *   that created it and is destroyed via `releaseBySession()` when the user
  *   switches away. Used for panels whose content is intrinsically tied to a
  *   specific session's runtime state (container processes, worktree files, etc.)
  *   and cannot simply re-read a store selector to switch context.
- *   Examples: terminal, file-editor, browser, vscode, commit-detail, diff-viewer,
- *   pr-detail.
+ *   Examples: file-editor, browser, vscode, commit-detail, diff-viewer, pr-detail.
  *
  * See `SESSION_SCOPED_COMPONENTS` in `dockview-desktop-layout.tsx` for the
  * authoritative list and per-component rationale.

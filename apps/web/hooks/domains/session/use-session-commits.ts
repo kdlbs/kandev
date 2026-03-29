@@ -5,15 +5,20 @@ import type { SessionCommit } from "@/lib/state/slices/session-runtime/types";
 
 /**
  * Hook to fetch and manage commits for a session.
- * Session commits track all commits made during a task session.
+ * Commits are keyed by environmentId so sessions sharing the same environment
+ * share the same commit list and don't duplicate fetches.
  */
 export function useSessionCommits(sessionId: string | null) {
-  const commits = useAppStore((state) =>
-    sessionId ? state.sessionCommits.bySessionId[sessionId] : undefined,
-  );
-  const loading = useAppStore((state) =>
-    sessionId ? state.sessionCommits.loading[sessionId] : false,
-  );
+  const commits = useAppStore((state) => {
+    if (!sessionId) return undefined;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.byEnvironmentId[envKey];
+  });
+  const loading = useAppStore((state) => {
+    if (!sessionId) return false;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.loading[envKey] ?? false;
+  });
   const setSessionCommits = useAppStore((state) => state.setSessionCommits);
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
