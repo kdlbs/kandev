@@ -121,6 +121,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
   const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
+  const hasContent = value.trim().length > 0 || contextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
@@ -162,6 +163,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         taskTitle={taskTitle}
         taskDescription={taskDescription}
         isAgentBusy={isAgentBusy}
+        hasContent={hasContent}
         isDisabled={isDisabled}
         isSending={isSending}
         onCancel={onCancel}

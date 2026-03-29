@@ -103,7 +103,7 @@ test("quick chat queued message indicator appears and message executes after age
 });
 
 test("quick chat queue message via submit button click", async ({ testPage }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
 
   const dialog = await openQuickChatWithAgent(testPage);
 
@@ -120,12 +120,16 @@ test("quick chat queue message via submit button click", async ({ testPage }) =>
   });
   await testPage.waitForTimeout(500);
 
-  // Type a queued message.
+  // Before typing, only the cancel button should be visible (no send button).
+  const submitBtn = dialog.getByTestId("submit-message-button");
+  await expect(submitBtn).not.toBeVisible();
+  await expect(dialog.getByTestId("cancel-agent-button")).toBeVisible();
+
+  // Type a queued message — the submit button should appear.
   await typeWhileBusy(testPage, editor, "queued via button");
+  await expect(submitBtn).toBeVisible({ timeout: 5_000 });
 
   // Click the submit button (not keyboard shortcut) to queue the message.
-  const submitBtn = dialog.getByTestId("submit-message-button");
-  await expect(submitBtn).toBeVisible({ timeout: 5_000 });
   await submitBtn.click();
 
   // Verify the queued message indicator with cancel button appears.
@@ -137,7 +141,8 @@ test("quick chat queue message via submit button click", async ({ testPage }) =>
   await expect(cancelAgentBtn).toBeVisible();
 
   // Wait for the first (slow) response to complete and queued message to auto-execute.
+  // Allow extra time: 10s slow + agent turn overhead + queue execution.
   await expect(dialog.locator('[data-placeholder="Continue working on the task..."]')).toBeVisible({
-    timeout: 30_000,
+    timeout: 60_000,
   });
 });

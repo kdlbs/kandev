@@ -50,6 +50,8 @@ export type ChatInputToolbarProps = {
   taskTitle?: string;
   taskDescription: string;
   isAgentBusy: boolean;
+  /** Whether the input has content to send (text, comments, or context) */
+  hasContent?: boolean;
   isDisabled: boolean;
   isSending: boolean;
   onCancel: () => void;
@@ -81,6 +83,7 @@ export type ChatInputToolbarProps = {
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
+  hasContent: boolean;
   isDisabled: boolean;
   isSending: boolean;
   planModeEnabled: boolean;
@@ -91,6 +94,7 @@ type SubmitButtonProps = {
 
 function SubmitButton({
   isAgentBusy,
+  hasContent,
   isDisabled,
   isSending,
   planModeEnabled,
@@ -98,6 +102,9 @@ function SubmitButton({
   onSubmit,
   submitShortcut,
 }: SubmitButtonProps) {
+  // When agent is busy and there's nothing to send, show only the cancel button.
+  // When there's content to queue, show both cancel and send buttons side-by-side.
+  const showSendButton = !isAgentBusy || hasContent;
   return (
     <div className="flex items-center gap-1">
       {isAgentBusy && (
@@ -117,30 +124,32 @@ function SubmitButton({
           <TooltipContent>Cancel agent</TooltipContent>
         </Tooltip>
       )}
-      <KeyboardShortcutTooltip
-        shortcut={submitShortcut}
-        description={
-          isAgentBusy ? "Queue message" : planModeEnabled ? "Request plan changes" : undefined
-        }
-        enabled={!isDisabled}
-      >
-        <Button
-          type="button"
-          variant="default"
-          size="icon"
-          className={cn(
-            "h-7 w-7 rounded-full cursor-pointer",
-            planModeEnabled && "bg-violet-600 hover:bg-violet-500",
-          )}
-          disabled={isDisabled}
-          onClick={onSubmit}
-          data-testid="submit-message-button"
+      {showSendButton && (
+        <KeyboardShortcutTooltip
+          shortcut={submitShortcut}
+          description={
+            isAgentBusy ? "Queue message" : planModeEnabled ? "Request plan changes" : undefined
+          }
+          enabled={!isDisabled}
         >
-          {isSending && <GridSpinner className="text-primary-foreground" />}
-          {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
-          {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
-        </Button>
-      </KeyboardShortcutTooltip>
+          <Button
+            type="button"
+            variant="default"
+            size="icon"
+            className={cn(
+              "h-7 w-7 rounded-full cursor-pointer",
+              planModeEnabled && "bg-violet-600 hover:bg-violet-500",
+            )}
+            disabled={isDisabled}
+            onClick={onSubmit}
+            data-testid="submit-message-button"
+          >
+            {isSending && <GridSpinner className="text-primary-foreground" />}
+            {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
+            {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
+          </Button>
+        </KeyboardShortcutTooltip>
+      )}
     </div>
   );
 }
@@ -370,6 +379,7 @@ function ToolbarRightSection({
   sessionId,
   planModeEnabled,
   isAgentBusy,
+  hasContent,
   onImplementPlan,
   isDisabled,
   isSending,
@@ -382,6 +392,7 @@ function ToolbarRightSection({
   sessionId: string | null;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
+  hasContent: boolean;
   onImplementPlan?: () => void;
   isDisabled: boolean;
   isSending: boolean;
@@ -399,6 +410,7 @@ function ToolbarRightSection({
       <div className="ml-1">
         <SubmitButton
           isAgentBusy={isAgentBusy}
+          hasContent={hasContent}
           isDisabled={isDisabled}
           isSending={isSending}
           planModeEnabled={planModeEnabled}
@@ -513,6 +525,7 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
 
 function MinimalToolbar({
   isAgentBusy,
+  hasContent,
   isDisabled,
   isSending,
   onCancel,
@@ -520,13 +533,20 @@ function MinimalToolbar({
   submitKey = "cmd_enter",
 }: Pick<
   ChatInputToolbarProps,
-  "isAgentBusy" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
+  | "isAgentBusy"
+  | "hasContent"
+  | "isDisabled"
+  | "isSending"
+  | "onCancel"
+  | "onSubmit"
+  | "submitKey"
 >) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
   return (
     <div className="flex items-center justify-end gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <SubmitButton
         isAgentBusy={isAgentBusy}
+        hasContent={hasContent ?? false}
         isDisabled={isDisabled}
         isSending={isSending}
         planModeEnabled={false}
@@ -563,6 +583,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     return (
       <MinimalToolbar
         isAgentBusy={props.isAgentBusy}
+        hasContent={props.hasContent}
         isDisabled={props.isDisabled}
         isSending={props.isSending}
         onCancel={props.onCancel}
@@ -631,6 +652,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         sessionId={props.sessionId}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
+        hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
         isDisabled={props.isDisabled}
         isSending={props.isSending}
