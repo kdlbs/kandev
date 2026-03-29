@@ -37,10 +37,6 @@ class GitHelper {
     fs.writeFileSync(filePath, content);
   }
 
-  stageFile(name: string) {
-    this.exec(`git add "${name}"`);
-  }
-
   stageAll() {
     this.exec("git add -A");
   }
@@ -49,6 +45,17 @@ class GitHelper {
     this.exec(`git commit -m "${message}"`);
     return this.exec("git rev-parse HEAD").trim();
   }
+}
+
+function makeGitEnv(tmpDir: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: tmpDir,
+    GIT_AUTHOR_NAME: "E2E Test",
+    GIT_AUTHOR_EMAIL: "e2e@test.local",
+    GIT_COMMITTER_NAME: "E2E Test",
+    GIT_COMMITTER_EMAIL: "e2e@test.local",
+  };
 }
 
 async function openTaskSession(page: Page, title: string): Promise<SessionPage> {
@@ -82,13 +89,9 @@ test.describe("Changes Panel Multi-Select", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    // Create files that will show as untracked/unstaged
-    git.createFile("file-a.ts", "a");
-    git.createFile("file-b.ts", "b");
-
+    // Create task and navigate first, then create files so WS picks up changes
     const profile = await createStandardProfile(apiClient, "changes-select");
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Select Test", profile.id, {
       description: "/e2e:simple-message",
@@ -100,7 +103,12 @@ test.describe("Changes Panel Multi-Select", () => {
     const session = await openTaskSession(testPage, "Changes Select Test");
     await session.clickTab("Changes");
 
+    // Create files AFTER session is open so WS detects the changes
+    git.createFile("file-a.ts", "a");
+    git.createFile("file-b.ts", "b");
+
     // Wait for files to appear in unstaged section
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     const fileA = session.changesFileRow("file-a.ts");
     const fileB = session.changesFileRow("file-b.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
@@ -129,11 +137,7 @@ test.describe("Changes Panel Multi-Select", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
-
-    git.createFile("stage-a.ts", "a");
-    git.createFile("stage-b.ts", "b");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
     const profile = await createStandardProfile(apiClient, "changes-bulk-stage");
     await apiClient.createTaskWithAgent(
@@ -151,7 +155,12 @@ test.describe("Changes Panel Multi-Select", () => {
     const session = await openTaskSession(testPage, "Changes Bulk Stage Test");
     await session.clickTab("Changes");
 
+    // Create files after session is open
+    git.createFile("stage-a.ts", "a");
+    git.createFile("stage-b.ts", "b");
+
     // Wait for files
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     const fileA = session.changesFileRow("stage-a.ts");
     const fileB = session.changesFileRow("stage-b.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
@@ -177,11 +186,7 @@ test.describe("Changes Panel Multi-Select", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
-
-    git.createFile("esc-a.ts", "a");
-    git.createFile("esc-b.ts", "b");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
     const profile = await createStandardProfile(apiClient, "changes-escape");
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Escape Test", profile.id, {
@@ -194,10 +199,15 @@ test.describe("Changes Panel Multi-Select", () => {
     const session = await openTaskSession(testPage, "Changes Escape Test");
     await session.clickTab("Changes");
 
+    // Create files after session is open
+    git.createFile("esc-a.ts", "a");
+    git.createFile("esc-b.ts", "b");
+
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     const fileA = session.changesFileRow("esc-a.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
 
-    // Select file
+    // Select file via ctrl-click
     await fileA.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
 
@@ -205,8 +215,8 @@ test.describe("Changes Panel Multi-Select", () => {
     const bulkBar = session.changesBulkActionBar("unstaged");
     await expect(bulkBar).toBeVisible({ timeout: 5_000 });
 
-    // Press Escape
-    await testPage.keyboard.press("Escape");
+    // Press Escape — click on the file row first to ensure the changes panel has focus
+    await fileA.press("Escape");
 
     // Selection should be cleared
     await expect(session.changesSelectedRows()).toHaveCount(0, { timeout: 5_000 });
