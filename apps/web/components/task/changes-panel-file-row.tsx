@@ -74,7 +74,8 @@ export function FileRow({
 
   return (
     <li
-      data-testid={`changes-file-${file.path}`}
+      data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
+      data-changes-file={file.path}
       data-selected={isSelected ? "true" : "false"}
       className={cn(
         "group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 cursor-pointer",
@@ -254,7 +255,6 @@ export function BulkActionBar({
   onBulkStage,
   onBulkUnstage,
   onBulkDiscard,
-  onClearSelection,
 }: {
   variant: "unstaged" | "staged";
   selectionCount: number;
@@ -262,7 +262,6 @@ export function BulkActionBar({
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[]) => void;
-  onClearSelection: () => void;
 }) {
   const paths = useMemo(() => [...selectedPaths], [selectedPaths]);
 
@@ -275,38 +274,29 @@ export function BulkActionBar({
           size="sm"
           variant="outline"
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => {
-            onBulkStage(paths);
-            onClearSelection();
-          }}
+          onClick={() => onBulkStage(paths)}
         >
           Stage {selectionCount}
         </Button>
       )}
       {variant === "staged" && onBulkUnstage && (
         <Button
-          data-testid="bulk-unstage"
+          data-testid={`bulk-unstage-${variant}`}
           size="sm"
           variant="outline"
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => {
-            onBulkUnstage(paths);
-            onClearSelection();
-          }}
+          onClick={() => onBulkUnstage(paths)}
         >
           Unstage {selectionCount}
         </Button>
       )}
       {onBulkDiscard && (
         <Button
-          data-testid="bulk-discard"
+          data-testid={`bulk-discard-${variant}`}
           size="sm"
           variant="outline"
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
-          onClick={() => {
-            onBulkDiscard(paths);
-            onClearSelection();
-          }}
+          onClick={() => onBulkDiscard(paths)}
         >
           Discard {selectionCount}
         </Button>

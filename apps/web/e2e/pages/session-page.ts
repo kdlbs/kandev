@@ -593,7 +593,7 @@ export class SessionPage {
 
   /** Find a file row in the changes panel by path. */
   changesFileRow(path: string): Locator {
-    return this.changes.getByTestId(`changes-file-${path}`);
+    return this.changes.locator(`[data-changes-file="${path}"]`);
   }
 
   /** All selected file rows in the changes panel. */
@@ -606,18 +606,18 @@ export class SessionPage {
     return this.changes.getByTestId(`bulk-actions-${variant}`);
   }
 
-  /** Bulk stage button. */
+  /** Bulk stage button (unstaged section). */
   changesBulkStageButton(): Locator {
     return this.changes.getByTestId("bulk-stage");
   }
 
-  /** Bulk unstage button. */
+  /** Bulk unstage button (staged section). */
   changesBulkUnstageButton(): Locator {
-    return this.changes.getByTestId("bulk-unstage");
+    return this.changes.getByTestId("bulk-unstage-staged");
   }
 
-  /** Bulk discard button. */
-  changesBulkDiscardButton(): Locator {
-    return this.changes.getByTestId("bulk-discard");
+  /** Bulk discard button for a variant. */
+  changesBulkDiscardButton(variant: "unstaged" | "staged" = "unstaged"): Locator {
+    return this.changes.getByTestId(`bulk-discard-${variant}`);
   }
 }

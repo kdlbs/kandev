@@ -361,7 +361,6 @@ export function FileListSection(props: FileListSectionProps) {
               onBulkStage={props.onBulkStage}
               onBulkUnstage={props.onBulkUnstage}
               onBulkDiscard={props.onBulkDiscard}
-              onClearSelection={multiSelect.clearSelection}
             />
           ) : (
             <DefaultActionButtons
