@@ -121,7 +121,10 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
   const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
-  const hasContent = value.trim().length > 0 || contextCount > 0;
+  // Exclude auto-added plan context from the count — it's always present in plan mode
+  // and shouldn't by itself enable the send button.
+  const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
+  const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);

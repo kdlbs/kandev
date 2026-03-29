@@ -33,14 +33,15 @@ func fixedDelay(ms int) {
 }
 
 // stripKandevSystem removes <kandev-system>...</kandev-system> blocks injected by
-// injectKandevContext so that /e2e: routing works regardless of system prompt wrapping.
+// the frontend (plan context, document context, etc.) so that command routing
+// works regardless of appended system tags.
 func stripKandevSystem(prompt string) string {
-	const endTag = "</kandev-system>"
-	idx := strings.LastIndex(prompt, endTag)
+	const startTag = "<kandev-system>"
+	idx := strings.Index(prompt, startTag)
 	if idx < 0 {
 		return prompt
 	}
-	return strings.TrimSpace(prompt[idx+len(endTag):])
+	return strings.TrimSpace(prompt[:idx])
 }
 
 // handlePrompt routes a user prompt to the appropriate sequence generator.
