@@ -226,13 +226,13 @@ function TaskItemWithContextMenu({
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         {onRenameTask && (
-          <ContextMenuItem onClick={() => onRenameTask(task.id, task.title)}>
+          <ContextMenuItem disabled={isDeleting} onClick={() => onRenameTask(task.id, task.title)}>
             <IconPencil className="mr-2 h-4 w-4" />
             Rename
           </ContextMenuItem>
         )}
         {onArchiveTask && (
-          <ContextMenuItem onClick={() => onArchiveTask(task.id)}>
+          <ContextMenuItem disabled={isDeleting} onClick={() => onArchiveTask(task.id)}>
             <IconArchive className="mr-2 h-4 w-4" />
             Archive
           </ContextMenuItem>
@@ -241,7 +241,7 @@ function TaskItemWithContextMenu({
           <>
             <ContextMenuSeparator />
             <ContextMenuSub>
-              <ContextMenuSubTrigger>
+              <ContextMenuSubTrigger disabled={isDeleting}>
                 <IconArrowRight className="mr-2 h-4 w-4" />
                 Move to
               </ContextMenuSubTrigger>
