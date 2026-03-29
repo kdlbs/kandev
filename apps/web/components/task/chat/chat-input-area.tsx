@@ -408,42 +408,21 @@ export function ChatInputArea({
     todoItems,
   } = panelState;
   const handleImplementPlan = useImplementPlan(
-    resolvedSessionId,
-    taskId,
-    handlePlanModeChange,
-    chatInputRef,
+    resolvedSessionId, taskId, handlePlanModeChange, chatInputRef,
   );
-
   const { proceedStepName, nextStepIsWorkStep, proceed, isMoving } = useNextWorkflowStep(taskId);
-  const { toast } = useToast();
   const implementPlanHandler =
     planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;
-
-  const handleProceed = useCallback(async () => {
-    try {
-      await proceed();
-    } catch {
-      toast({ description: "Failed to proceed to next step", variant: "error" });
-    }
-  }, [proceed, toast]);
-
   const hasClarification = !!panelState.pendingClarification;
-  const placeholder =
-    placeholderOverride ??
-    resolveInputPlaceholder(
-      isAgentBusy,
-      activeDocument?.type,
-      planModeEnabled,
-      hasClarification,
-      needsRecovery,
-    );
+  const placeholder = placeholderOverride ??
+    resolveInputPlaceholder(isAgentBusy, activeDocument?.type, planModeEnabled, hasClarification, needsRecovery);
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatStatusBar
         todoItems={todoItems}
         taskId={taskId}
         nextStepName={proceedStepName}
-        onProceed={handleProceed}
+        onProceed={proceed}
         isAgentBusy={isAgentBusy}
         isMoving={isMoving}
       />

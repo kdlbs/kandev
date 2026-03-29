@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { moveTask } from "@/lib/api/domains/kanban-api";
 
 const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_step"];
 
 export function useNextWorkflowStep(taskId: string | null) {
+  const { toast } = useToast();
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
   const taskStepId = useAppStore((s) => {
@@ -54,11 +56,12 @@ export function useNextWorkflowStep(taskId: string | null) {
         position: 0,
       });
     } catch (err) {
-      throw new Error("Failed to proceed to next step", { cause: err });
+      console.error("Failed to proceed to next step:", err);
+      toast({ description: "Failed to proceed to next step", variant: "error" });
     } finally {
       setIsMoving(false);
     }
-  }, [taskId, workflowId, nextStep]);
+  }, [taskId, workflowId, nextStep, toast]);
 
   // Show proceed when there's a next step and current step doesn't auto-transition
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
