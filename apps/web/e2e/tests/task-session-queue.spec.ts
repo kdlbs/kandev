@@ -127,17 +127,24 @@ test.describe("Task session queue", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(500);
 
-    // Type a message while agent is busy.
+    // In plan mode with no typed text, only the cancel button should be visible.
+    // The auto-added plan context should NOT cause the send button to appear.
+    const submitBtn = testPage.getByTestId("submit-message-button");
+    await expect(submitBtn).not.toBeVisible();
+    await expect(testPage.getByTestId("cancel-agent-button")).toBeVisible();
+
+    // Type a message while agent is busy — send button should appear.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "plan queue test");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
 
     // Click the submit button to queue the message.
-    const submitBtn = testPage.getByTestId("submit-message-button");
-    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
     await submitBtn.click();
 
-    // Verify the queued message indicator appears.
-    await expect(testPage.getByTitle("Cancel queued message")).toBeVisible({ timeout: 10_000 });
+    // Verify the queued message indicator shows clean text (no system tags).
+    const queueIndicator = testPage.getByTitle("Cancel queued message").locator("..");
+    await expect(queueIndicator).toBeVisible({ timeout: 10_000 });
+    await expect(queueIndicator).not.toContainText("kandev-system");
 
     // Wait for agent to finish processing.
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
