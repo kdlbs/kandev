@@ -58,10 +58,11 @@ function useNextWorkflowStep(taskId: string | null) {
         workflow_step_id: nextStep.id,
         position: 0,
       });
+      // Keep isMoving=true until the WS event updates taskStepId and
+      // proceedStepName becomes null, hiding the button entirely.
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
       toast({ description: "Failed to proceed to next step", variant: "error" });
-    } finally {
       setIsMoving(false);
     }
   }, [taskId, workflowId, nextStep, toast]);
