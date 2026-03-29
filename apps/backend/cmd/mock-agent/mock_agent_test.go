@@ -75,6 +75,16 @@ func TestStripKandevSystem(t *testing.T) {
 			want:  "/slow 5s",
 		},
 		{
+			name:  "tags prepended before user text (backend system context)",
+			input: "<kandev-system>\nKANDEV CONTEXT\n</kandev-system>\n\ne2e:delay(3000)\ne2e:message(\"hello\")",
+			want:  "e2e:delay(3000)\ne2e:message(\"hello\")",
+		},
+		{
+			name:  "tags both prepended and appended",
+			input: "<kandev-system>\nSYS\n</kandev-system>\n\n/slow 5s\n\n<kandev-system>\nPLAN\n</kandev-system>",
+			want:  "/slow 5s",
+		},
+		{
 			name:  "only tags, no user text",
 			input: "<kandev-system>\nsome context\n</kandev-system>",
 			want:  "",

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -32,17 +33,15 @@ func fixedDelay(ms int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-// stripKandevSystem removes <kandev-system>...</kandev-system> blocks injected by
-// the frontend (plan context, document context, etc.) so that command routing
-// works regardless of appended system tags.
+// stripKandevSystem removes all <kandev-system>...</kandev-system> blocks from the
+// prompt. Tags can be prepended (backend system context injection) or appended
+// (frontend plan/document context), so we strip all occurrences.
 func stripKandevSystem(prompt string) string {
-	const startTag = "<kandev-system>"
-	idx := strings.Index(prompt, startTag)
-	if idx < 0 {
-		return prompt
-	}
-	return strings.TrimSpace(prompt[:idx])
+	result := kandevSystemRegex.ReplaceAllString(prompt, "")
+	return strings.TrimSpace(result)
 }
+
+var kandevSystemRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>`)
 
 // handlePrompt routes a user prompt to the appropriate sequence generator.
 func handlePrompt(e *emitter, prompt, model string) {
