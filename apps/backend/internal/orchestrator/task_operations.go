@@ -546,12 +546,13 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 
 	// Completed sessions cannot be restarted — they require a new session.
-	// Cancelled and failed sessions are restarted fresh: clear the stale resume token so
-	// the agent launches in the same worktree without --resume (the old process is gone).
+	// Failed sessions clear the resume token so the agent starts fresh (the old
+	// process crashed). Cancelled sessions keep the token so --resume restores
+	// the conversation when the user re-starts a manually stopped session.
 	switch session.State {
 	case models.TaskSessionStateCompleted:
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	case models.TaskSessionStateCancelled, models.TaskSessionStateFailed:
+	case models.TaskSessionStateFailed:
 		s.clearResumeToken(ctx, sessionID)
 	}
 
