@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
-import { FileRow } from "./changes-panel-file-row";
+import { FileRow, BulkActionBar, DefaultActionButtons } from "./changes-panel-file-row";
 import { CommitRow, type CommitItem } from "./commit-row";
 
 // --- Timeline visual components ---
@@ -297,52 +297,18 @@ type FileListSectionProps = {
   onBulkDiscard?: (paths: string[]) => void;
 };
 
-function DefaultActionButtons({
-  actionLabel,
-  isActionLoading,
-  onAction,
-  secondaryActionLabel,
-  isSecondaryActionLoading,
-  onSecondaryAction,
-}: Pick<
-  FileListSectionProps,
-  | "actionLabel"
-  | "isActionLoading"
-  | "onAction"
-  | "secondaryActionLabel"
-  | "isSecondaryActionLoading"
-  | "onSecondaryAction"
->) {
-  return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-        onClick={onAction}
-        disabled={isActionLoading}
-      >
-        {isActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
-        {actionLabel}
-      </Button>
-      {onSecondaryAction && secondaryActionLabel && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={onSecondaryAction}
-          disabled={isSecondaryActionLoading}
-        >
-          {isSecondaryActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
-          {secondaryActionLabel}
-        </Button>
-      )}
-    </>
-  );
-}
-
 export function FileListSection(props: FileListSectionProps) {
-  const { variant, files, pendingStageFiles, isLast, onOpenDiff, onEditFile, onStage, onUnstage, onDiscard } = props;
+  const {
+    variant,
+    files,
+    pendingStageFiles,
+    isLast,
+    onOpenDiff,
+    onEditFile,
+    onStage,
+    onUnstage,
+    onDiscard,
+  } = props;
   const dotColor = variant === "unstaged" ? DOT_COLORS.unstaged : DOT_COLORS.staged;
   const label = variant === "unstaged" ? "Unstaged" : "Staged";
 
@@ -358,7 +324,13 @@ export function FileListSection(props: FileListSectionProps) {
   );
 
   return (
-    <TimelineSection dotColor={dotColor} label={label} count={files.length} isLast={isLast} data-testid={`${variant}-files-section`}>
+    <TimelineSection
+      dotColor={dotColor}
+      label={label}
+      count={files.length}
+      isLast={isLast}
+      data-testid={`${variant}-files-section`}
+    >
       {files.length > 0 && (
         <div onKeyDown={handleKeyDown}>
           <ul data-testid={`${variant}-file-list`} className="space-y-0.5">
@@ -404,74 +376,6 @@ export function FileListSection(props: FileListSectionProps) {
         </div>
       )}
     </TimelineSection>
-  );
-}
-
-function BulkActionBar({
-  variant,
-  selectionCount,
-  selectedPaths,
-  onBulkStage,
-  onBulkUnstage,
-  onBulkDiscard,
-  onClearSelection,
-}: {
-  variant: "unstaged" | "staged";
-  selectionCount: number;
-  selectedPaths: Set<string>;
-  onBulkStage?: (paths: string[]) => void;
-  onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
-  onClearSelection: () => void;
-}) {
-  const paths = useMemo(() => [...selectedPaths], [selectedPaths]);
-
-  return (
-    <div data-testid={`bulk-actions-${variant}`} className="flex items-center gap-1.5">
-      <span className="text-[11px] text-muted-foreground">{selectionCount} selected</span>
-      {variant === "unstaged" && onBulkStage && (
-        <Button
-          data-testid="bulk-stage"
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => {
-            onBulkStage(paths);
-            onClearSelection();
-          }}
-        >
-          Stage {selectionCount}
-        </Button>
-      )}
-      {variant === "staged" && onBulkUnstage && (
-        <Button
-          data-testid="bulk-unstage"
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={() => {
-            onBulkUnstage(paths);
-            onClearSelection();
-          }}
-        >
-          Unstage {selectionCount}
-        </Button>
-      )}
-      {onBulkDiscard && (
-        <Button
-          data-testid="bulk-discard"
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
-          onClick={() => {
-            onBulkDiscard(paths);
-            onClearSelection();
-          }}
-        >
-          Discard {selectionCount}
-        </Button>
-      )}
-    </div>
   );
 }
 
