@@ -69,7 +69,7 @@ make test-e2e-report               # open HTML report from last run
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install`
 - **Port conflicts** — backends use 18080+, frontends use 13000+ (per worker)
-- **Flaky timeouts** — health checks 30s, tests 60s. Check `fixtures/backend.ts` or `playwright.config.ts`
+- **Flaky timeouts** — **never increase timeouts to fix flaky tests.** 15s is more than enough for any element to appear. If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time.
 - Screenshots on failure, video on first retry (CI)
 
 ## TDD workflow
