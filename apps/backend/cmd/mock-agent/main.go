@@ -73,7 +73,7 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
 	a.sessions[sid] = true
@@ -83,15 +83,20 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
 
+	a.emitAvailableCommands(ctx, sid)
+
 	return acp.NewSessionResponse{SessionId: sid}, nil
 }
 
 // LoadSession restores a previous session for resume.
-func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
 	a.mu.Unlock()
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
+
+	a.emitAvailableCommands(ctx, req.SessionId)
+
 	return acp.LoadSessionResponse{}, nil
 }
 
@@ -118,6 +123,39 @@ func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeReques
 
 func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	return acp.SetSessionConfigOptionResponse{}, nil
+}
+
+// emitAvailableCommands sends the list of mock agent slash commands to the client.
+func (a *mockAgent) emitAvailableCommands(ctx context.Context, sid acp.SessionId) {
+	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: sid,
+		Update: acp.SessionUpdate{
+			AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+				AvailableCommands: mockAvailableCommands(),
+			},
+		},
+	})
+}
+
+// mockAvailableCommands returns the slash commands supported by the mock agent.
+func mockAvailableCommands() []acp.AvailableCommand {
+	hint := func(h string) *acp.AvailableCommandInput {
+		return &acp.AvailableCommandInput{Unstructured: &acp.UnstructuredCommandInput{Hint: h}}
+	}
+	return []acp.AvailableCommand{
+		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
+		{Name: "error", Description: "Simulate an error"},
+		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
+		{Name: "crash", Description: "Simulate agent crash"},
+		{Name: "all", Description: "Demonstrate all message types"},
+		{Name: "todo", Description: "Emit a todo list"},
+		{Name: "mermaid", Description: "Emit a mermaid diagram"},
+		{Name: "subagent", Description: "Emit a subagent sequence"},
+		{Name: "tool:read", Description: "Emit a read file tool call"},
+		{Name: "tool:edit", Description: "Emit an edit file tool call"},
+		{Name: "tool:exec", Description: "Emit a shell exec tool call"},
+		{Name: "tool:search", Description: "Emit a search tool call"},
+	}
 }
 
 // extractPromptText concatenates text content blocks from the prompt.
