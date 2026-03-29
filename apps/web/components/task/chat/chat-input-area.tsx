@@ -20,8 +20,7 @@ import {
   formatPRFeedbackAsMarkdown,
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
-import { setChatDraftContent } from "@/lib/local-storage";
-import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-next-workflow-step";
+import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -210,49 +209,6 @@ export function useChatPanelHandlers(
   return { handleCancelTurn, handleCancelQueue, handleQueueEditComplete };
 }
 
-function useImplementPlan(
-  resolvedSessionId: string | null,
-  taskId: string | null,
-  handlePlanModeChange: (enabled: boolean) => void,
-  chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
-) {
-  return useCallback(() => {
-    if (!resolvedSessionId || !taskId) return;
-
-    const client = getWebSocketClient();
-    if (!client) return;
-
-    const userText = chatInputRef.current?.getValue() ?? "";
-    chatInputRef.current?.clear();
-    if (resolvedSessionId) {
-      setChatDraftContent(resolvedSessionId, null);
-    }
-
-    const visibleText = userText.trim() || "Implement the plan";
-    const content = `${visibleText}\n\n<kandev-system>
-IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
-Read the current plan using the get_task_plan_kandev MCP tool.
-Implement all changes described in the plan step by step.
-After completing the implementation, provide a summary of what was done.
-</kandev-system>`;
-
-    client
-      .request(
-        "message.add",
-        {
-          task_id: taskId,
-          session_id: resolvedSessionId,
-          content,
-          plan_mode: false,
-        },
-        10000,
-      )
-      .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
-
-    handlePlanModeChange(false);
-  }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
-}
-
 function PRMergedBanner({ taskId }: { taskId: string }) {
   const taskPR = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
   const [dismissed, setDismissed] = useState(false);
@@ -387,35 +343,31 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const {
     resolvedSessionId,
-    task,
     taskId,
-    taskDescription,
-    isStarting,
     isAgentBusy,
-    isFailed,
     needsRecovery,
     planModeEnabled,
     activeDocument,
     handlePlanModeChange,
-    contextFiles,
-    handleToggleContextFile,
-    handleAddContextFile,
-    pendingCommentsByFile,
-    chatSubmitKey,
-    agentCommands,
-    contextItems,
-    planContextEnabled,
     todoItems,
   } = panelState;
-  const handleImplementPlan = useImplementPlan(
-    resolvedSessionId, taskId, handlePlanModeChange, chatInputRef,
-  );
-  const { proceedStepName, nextStepIsWorkStep, proceed, isMoving } = useNextWorkflowStep(taskId);
-  const implementPlanHandler =
-    planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;
+  const { implementPlanHandler, proceedStepName, proceed, isMoving } = usePlanActions({
+    resolvedSessionId,
+    taskId,
+    planModeEnabled,
+    handlePlanModeChange,
+    chatInputRef,
+  });
   const hasClarification = !!panelState.pendingClarification;
-  const placeholder = placeholderOverride ??
-    resolveInputPlaceholder(isAgentBusy, activeDocument?.type, planModeEnabled, hasClarification, needsRecovery);
+  const placeholder =
+    placeholderOverride ??
+    resolveInputPlaceholder(
+      isAgentBusy,
+      activeDocument?.type,
+      planModeEnabled,
+      hasClarification,
+      needsRecovery,
+    );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatStatusBar
@@ -432,14 +384,14 @@ export function ChatInputArea({
         onSubmit={handleSubmit}
         sessionId={resolvedSessionId}
         taskId={taskId}
-        taskTitle={task?.title}
-        taskDescription={taskDescription ?? ""}
+        taskTitle={panelState.task?.title}
+        taskDescription={panelState.taskDescription ?? ""}
         planModeEnabled={planModeEnabled}
         planModeAvailable={panelState.planModeAvailable}
         mcpServers={panelState.mcpServers}
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
-        isStarting={isStarting}
+        isStarting={panelState.isStarting}
         isSending={isSending}
         onCancel={handleCancelTurn}
         placeholder={placeholder}
@@ -447,19 +399,19 @@ export function ChatInputArea({
         onClarificationResolved={onClarificationResolved}
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-        pendingCommentsByFile={pendingCommentsByFile}
+        pendingCommentsByFile={panelState.pendingCommentsByFile}
         hasContextComments={
           panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
         }
-        submitKey={chatSubmitKey}
-        hasAgentCommands={!!(agentCommands && agentCommands.length > 0)}
-        isFailed={isFailed}
+        submitKey={panelState.chatSubmitKey}
+        hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}
+        isFailed={panelState.isFailed}
         needsRecovery={needsRecovery}
-        contextItems={contextItems}
-        planContextEnabled={planContextEnabled}
-        contextFiles={contextFiles}
-        onToggleContextFile={handleToggleContextFile}
-        onAddContextFile={handleAddContextFile}
+        contextItems={panelState.contextItems}
+        planContextEnabled={panelState.planContextEnabled}
+        contextFiles={panelState.contextFiles}
+        onToggleContextFile={panelState.handleToggleContextFile}
+        onAddContextFile={panelState.handleAddContextFile}
         onImplementPlan={implementPlanHandler}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
