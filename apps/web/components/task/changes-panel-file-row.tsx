@@ -9,6 +9,7 @@ import {
   IconPencil,
 } from "@tabler/icons-react";
 
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
 import type { FileInfo } from "@/lib/state/store";
@@ -35,6 +36,8 @@ type ChangedFile = {
 type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
+  isSelected?: boolean;
+  onSelect?: (path: string, e: React.MouseEvent) => void;
   onOpenDiff: (path: string) => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
@@ -45,6 +48,8 @@ type FileRowProps = {
 export function FileRow({
   file,
   isPending,
+  isSelected,
+  onSelect,
   onOpenDiff,
   onStage,
   onUnstage,
@@ -53,11 +58,27 @@ export function FileRow({
 }: FileRowProps) {
   const { folder, file: name } = splitPath(file.path);
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (onSelect) {
+      onSelect(file.path, e);
+      // On plain click (no modifier), also open diff
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        onOpenDiff(file.path);
+      }
+    } else {
+      onOpenDiff(file.path);
+    }
+  };
+
   return (
     <li
-      data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenDiff(file.path)}
+      data-testid={`changes-file-${file.path}`}
+      data-selected={isSelected ? "true" : "false"}
+      className={cn(
+        "group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 cursor-pointer",
+        isSelected ? "bg-accent/60" : "hover:bg-muted/60",
+      )}
+      onClick={handleClick}
     >
       <div className="flex items-center gap-2 min-w-0">
         <StageButton

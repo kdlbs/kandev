@@ -49,6 +49,16 @@ type TreeNodeItemProps = {
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  isSelected?: boolean;
+  onSelect?: (path: string, e: React.MouseEvent) => void;
+  isDragging?: boolean;
+  dragOverPath?: string | null;
+  onDragStart?: (path: string, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (path: string, e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (targetPath: string, e: React.DragEvent) => void;
+  selectedCount?: number;
 };
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
@@ -127,29 +137,78 @@ function TreeNodeChildren({ props, depth }: { props: TreeNodeItemProps; depth: n
   );
 }
 
-export function TreeNodeItem(props: TreeNodeItemProps) {
-  const { node, depth, expandedPaths, activeFolderPath, activeFilePath, visibleLoadingPaths } =
-    props;
-  const { fileStatuses, tree, onToggleExpand, onOpenFile, onDeleteFile, onRenameFile, setTree } =
-    props;
+function getTreeNodeRowClass(
+  isActive: boolean,
+  isActiveFolder: boolean,
+  isSelected: boolean | undefined,
+  isDragging: boolean | undefined,
+  isDropTarget: boolean,
+) {
+  return cn(
+    "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+    "hover:bg-muted",
+    isActive && !isSelected && "bg-muted",
+    isActiveFolder && !isSelected && "bg-muted/50",
+    isSelected && "bg-accent",
+    isDragging && isSelected && "opacity-50",
+    isDropTarget && "bg-accent/40 ring-1 ring-accent",
+  );
+}
 
-  const isExpanded = expandedPaths.has(node.path);
-  const isLoading = visibleLoadingPaths.has(node.path);
-  const isActive = !node.is_dir && activeFilePath === node.path;
-  const isActiveFolder = node.is_dir && activeFolderPath === node.path;
-  const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
-  const rename = useFileRename(node, tree, setTree, onRenameFile);
-
-  const rowContent = (
+function TreeNodeRow({
+  node,
+  depth,
+  isActive,
+  isActiveFolder,
+  isExpanded,
+  isLoading,
+  isSelected,
+  isDragging,
+  isDropTarget,
+  gitStatus,
+  rename,
+  onClick,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}: {
+  node: FileTreeNode;
+  depth: number;
+  isActive: boolean;
+  isActiveFolder: boolean;
+  isExpanded: boolean;
+  isLoading: boolean;
+  isSelected?: boolean;
+  isDragging?: boolean;
+  isDropTarget: boolean;
+  gitStatus: GitFileStatus;
+  rename: ReturnType<typeof useFileRename>;
+  onClick: (e: React.MouseEvent) => void;
+  onDragStart?: (path: string, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (path: string, e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (targetPath: string, e: React.DragEvent) => void;
+}) {
+  return (
     <div
-      className={cn(
-        "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
-        "hover:bg-muted",
-        isActive && "bg-muted",
-        isActiveFolder && "bg-muted/50",
-      )}
+      data-testid={`tree-node-${node.path}`}
+      data-selected={isSelected ? "true" : "false"}
+      className={getTreeNodeRowClass(isActive, isActiveFolder, isSelected, isDragging, isDropTarget)}
       style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
-      onClick={() => handleTreeNodeClick(node, onToggleExpand, onOpenFile)}
+      onClick={onClick}
+      draggable={!!onDragStart}
+      onDragStart={(e) => onDragStart?.(node.path, e)}
+      onDragEnd={() => onDragEnd?.()}
+      onDragOver={(e) => {
+        if (node.is_dir) onDragOver?.(node.path, e);
+      }}
+      onDragLeave={(e) => onDragLeave?.(e)}
+      onDrop={(e) => {
+        if (node.is_dir) onDrop?.(node.path, e);
+      }}
     >
       {node.is_dir && (
         <span className="flex-shrink-0">
@@ -160,6 +219,30 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
       <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
     </div>
   );
+}
+
+export function TreeNodeItem(props: TreeNodeItemProps) {
+  const { node, depth, expandedPaths, activeFolderPath, activeFilePath, visibleLoadingPaths } =
+    props;
+  const { fileStatuses, tree, onToggleExpand, onOpenFile, onDeleteFile, onRenameFile, setTree } =
+    props;
+
+  const isExpanded = expandedPaths.has(node.path);
+  const isActive = !node.is_dir && activeFilePath === node.path;
+  const isActiveFolder = node.is_dir && activeFolderPath === node.path;
+  const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
+  const rename = useFileRename(node, tree, setTree, onRenameFile);
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (props.onSelect) {
+      props.onSelect(node.path, e);
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        handleTreeNodeClick(node, onToggleExpand, onOpenFile);
+      }
+    } else {
+      handleTreeNodeClick(node, onToggleExpand, onOpenFile);
+    }
+  };
 
   return (
     <div>
@@ -170,8 +253,27 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
         onDeleteFile={onDeleteFile}
         onRenameFile={onRenameFile}
         onStartRename={rename.handleStartRename}
+        selectedCount={props.selectedCount}
       >
-        {rowContent}
+        <TreeNodeRow
+          node={node}
+          depth={depth}
+          isActive={isActive}
+          isActiveFolder={isActiveFolder}
+          isExpanded={isExpanded}
+          isLoading={visibleLoadingPaths.has(node.path)}
+          isSelected={props.isSelected}
+          isDragging={props.isDragging}
+          isDropTarget={node.is_dir && props.dragOverPath === node.path}
+          gitStatus={gitStatus}
+          rename={rename}
+          onClick={handleClick}
+          onDragStart={props.onDragStart}
+          onDragEnd={props.onDragEnd}
+          onDragOver={props.onDragOver}
+          onDragLeave={props.onDragLeave}
+          onDrop={props.onDrop}
+        />
       </FileContextMenu>
       {node.is_dir && isExpanded && <TreeNodeChildren props={props} depth={depth} />}
     </div>
@@ -257,87 +359,86 @@ type FileBrowserContentAreaProps = {
   onCancelCreate: () => void;
   onRetry: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  isSelected?: (path: string) => boolean;
+  onSelect?: (path: string, e: React.MouseEvent) => void;
+  isDragging?: boolean;
+  dragOverPath?: string | null;
+  onDragStart?: (path: string, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (path: string, e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (targetPath: string, e: React.DragEvent) => void;
+  selectedCount?: number;
 };
 
-export function FileBrowserContentArea({
-  isSearchActive,
-  searchResults,
-  isSessionFailed,
-  sessionError,
-  loadState,
-  isLoadingTree,
-  tree,
-  loadError,
-  creatingInPath,
-  fileStatuses,
-  expandedPaths,
-  activeFolderPath,
-  activeFilePath,
-  visibleLoadingPaths,
-  onOpenFile,
-  onToggleExpand,
-  onDeleteFile,
-  onRenameFile,
-  onCreateFileSubmit,
-  onCancelCreate,
-  onRetry,
-  setTree,
-}: FileBrowserContentAreaProps) {
-  if (isSearchActive && searchResults !== null) {
+function FileTreeView(props: FileBrowserContentAreaProps) {
+  const { tree, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
+  if (!tree) return null;
+  return (
+    <div className="pb-2">
+      {creatingInPath === "" && (
+        <InlineFileInput
+          depth={0}
+          onSubmit={(name) => onCreateFileSubmit("", name)}
+          onCancel={onCancelCreate}
+        />
+      )}
+      {tree.children &&
+        [...tree.children].sort(compareTreeNodes).map((child) => (
+          <TreeNodeItem
+            key={child.path}
+            node={child}
+            depth={0}
+            expandedPaths={props.expandedPaths}
+            activeFolderPath={props.activeFolderPath}
+            activeFilePath={props.activeFilePath}
+            visibleLoadingPaths={props.visibleLoadingPaths}
+            creatingInPath={creatingInPath}
+            fileStatuses={props.fileStatuses}
+            tree={tree}
+            onToggleExpand={props.onToggleExpand}
+            onOpenFile={props.onOpenFile}
+            onDeleteFile={props.onDeleteFile}
+            onRenameFile={props.onRenameFile}
+            onCreateFileSubmit={onCreateFileSubmit}
+            onCancelCreate={onCancelCreate}
+            setTree={props.setTree}
+            isSelected={props.isSelected?.(child.path)}
+            onSelect={props.onSelect}
+            isDragging={props.isDragging}
+            dragOverPath={props.dragOverPath}
+            onDragStart={props.onDragStart}
+            onDragEnd={props.onDragEnd}
+            onDragOver={props.onDragOver}
+            onDragLeave={props.onDragLeave}
+            onDrop={props.onDrop}
+            selectedCount={props.selectedCount}
+          />
+        ))}
+    </div>
+  );
+}
+
+export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
+  if (props.isSearchActive && props.searchResults !== null) {
     return (
       <SearchResultsList
-        searchResults={searchResults}
-        fileStatuses={fileStatuses}
-        onOpenFile={onOpenFile}
+        searchResults={props.searchResults}
+        fileStatuses={props.fileStatuses}
+        onOpenFile={props.onOpenFile}
       />
     );
   }
   const loadStateResult = renderSessionOrLoadState({
-    isSessionFailed,
-    sessionError,
-    loadState,
-    isLoadingTree,
-    tree,
-    loadError,
-    onRetry,
+    isSessionFailed: props.isSessionFailed,
+    sessionError: props.sessionError,
+    loadState: props.loadState,
+    isLoadingTree: props.isLoadingTree,
+    tree: props.tree,
+    loadError: props.loadError,
+    onRetry: props.onRetry,
   });
   if (loadStateResult) return loadStateResult;
-  if (tree) {
-    return (
-      <div className="pb-2">
-        {creatingInPath === "" && (
-          <InlineFileInput
-            depth={0}
-            onSubmit={(name) => onCreateFileSubmit("", name)}
-            onCancel={onCancelCreate}
-          />
-        )}
-        {tree.children &&
-          [...tree.children]
-            .sort(compareTreeNodes)
-            .map((child) => (
-              <TreeNodeItem
-                key={child.path}
-                node={child}
-                depth={0}
-                expandedPaths={expandedPaths}
-                activeFolderPath={activeFolderPath}
-                activeFilePath={activeFilePath}
-                visibleLoadingPaths={visibleLoadingPaths}
-                creatingInPath={creatingInPath}
-                fileStatuses={fileStatuses}
-                tree={tree}
-                onToggleExpand={onToggleExpand}
-                onOpenFile={onOpenFile}
-                onDeleteFile={onDeleteFile}
-                onRenameFile={onRenameFile}
-                onCreateFileSubmit={onCreateFileSubmit}
-                onCancelCreate={onCancelCreate}
-                setTree={setTree}
-              />
-            ))}
-      </div>
-    );
-  }
+  if (props.tree) return <FileTreeView {...props} />;
   return <div className="p-4 text-sm text-muted-foreground">No files found</div>;
 }
