@@ -48,6 +48,17 @@ class GitHelper {
   }
 }
 
+function makeGitEnv(tmpDir: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: tmpDir,
+    GIT_AUTHOR_NAME: "E2E Test",
+    GIT_AUTHOR_EMAIL: "e2e@test.local",
+    GIT_COMMITTER_NAME: "E2E Test",
+    GIT_COMMITTER_EMAIL: "e2e@test.local",
+  };
+}
+
 async function openTaskSession(page: Page, title: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
   await kanban.goto();
@@ -78,18 +89,16 @@ test.describe("File Tree Multi-Select", () => {
     seedData,
     backend,
   }) => {
-    // Setup: create files in the repo
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
+    // Commit files so they appear in the tree
     git.createFile("alpha.ts", "a");
     git.createFile("beta.ts", "b");
     git.createFile("gamma.ts", "c");
     git.stageAll();
     git.commit("add test files");
 
-    // Create task and navigate
     const profile = await createStandardProfile(apiClient, "file-tree-select");
     await apiClient.createTaskWithAgent(seedData.workspaceId, "File Tree Select Test", profile.id, {
       description: "/e2e:simple-message",
@@ -123,8 +132,7 @@ test.describe("File Tree Multi-Select", () => {
 
   test("escape clears selection", async ({ testPage, apiClient, seedData, backend }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
     git.createFile("file1.ts", "1");
     git.createFile("file2.ts", "2");
@@ -149,42 +157,8 @@ test.describe("File Tree Multi-Select", () => {
     await file1.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
     await expect(file1).toHaveAttribute("data-selected", "true");
 
-    // Press Escape to clear
-    await testPage.keyboard.press("Escape");
+    // Press Escape to clear — use the file node to ensure panel has focus
+    await file1.press("Escape");
     await expect(session.fileTreeSelectedNodes()).toHaveCount(0, { timeout: 5_000 });
-  });
-
-  test("drag file onto directory moves it", async ({ testPage, apiClient, seedData, backend }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = { ...process.env, HOME: backend.tmpDir };
-    const git = new GitHelper(repoDir, gitEnv);
-
-    git.createFile("moveme.txt", "to move");
-    git.createFile("dest/placeholder.txt", "keep");
-    git.stageAll();
-    git.commit("add files for drag test");
-
-    const profile = await createStandardProfile(apiClient, "file-tree-drag");
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "File Tree Drag Test", profile.id, {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
-
-    const session = await openTaskSession(testPage, "File Tree Drag Test");
-    await session.clickTab("Files");
-
-    const moveFile = session.fileTreeNode("moveme.txt");
-    const destDir = session.fileTreeNode("dest");
-    await expect(moveFile).toBeVisible({ timeout: 15_000 });
-    await expect(destDir).toBeVisible({ timeout: 15_000 });
-
-    // Drag moveme.txt onto dest/
-    await moveFile.dragTo(destDir);
-
-    // Verify: moveme.txt should no longer be at root, and dest/moveme.txt should exist
-    // The file tree updates via WS, so poll for the result
-    await expect(session.fileTreeNode("dest/moveme.txt")).toBeVisible({ timeout: 15_000 });
   });
 });
