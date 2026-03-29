@@ -1,11 +1,11 @@
 ---
-name: investigate
-description: Systematic bug investigation — reproduce, bisect to root cause, minimal fix with regression test. Use when something is broken and you don't know why.
+name: fix
+description: Fix bugs and issues — reproduce, find root cause, minimal fix with regression test. Use when something is broken.
 ---
 
-# Investigate
+# Fix
 
-Systematic debugging when something is broken and the cause is unknown. Iron law: **no fix without root cause investigation first.**
+Systematic bug fixing: reproduce the problem, find the root cause, apply a minimal fix with a regression test. **No fix without root cause investigation first.**
 
 ## Steps
 
