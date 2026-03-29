@@ -1,10 +1,14 @@
 import type { Terminal } from "@xterm/xterm";
 
-type TerminalContainerWithBuffer = HTMLDivElement & { __xtermReadBuffer?: () => string };
+type TerminalContainerWithBuffer = HTMLDivElement & {
+  __xtermReadBuffer?: () => string;
+  __xtermGetFontFamily?: () => string;
+};
 
 /** Expose buffer reader on the container for e2e tests (xterm renders to canvas). */
 export function exposeBufferReader(container: HTMLDivElement, terminal: Terminal) {
-  (container as TerminalContainerWithBuffer).__xtermReadBuffer = () => {
+  const c = container as TerminalContainerWithBuffer;
+  c.__xtermReadBuffer = () => {
     const buf = terminal.buffer.active;
     const lines: string[] = [];
     for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
@@ -12,6 +16,7 @@ export function exposeBufferReader(container: HTMLDivElement, terminal: Terminal
     }
     return lines.join("\n");
   };
+  c.__xtermGetFontFamily = () => terminal.options.fontFamily ?? "";
 }
 
 export function clearBufferReader(container: HTMLDivElement) {

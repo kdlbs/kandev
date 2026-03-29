@@ -60,14 +60,14 @@ test.describe("Terminal font settings", () => {
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
 
     // xterm.js applies fontFamily via canvas rendering, not CSS.
-    // The .xterm-helper-textarea gets the font for measuring, so read from there.
+    // Read the terminal options directly via the exposed __xtermGetFontFamily helper.
     const fontFamily = await testPage.evaluate(() => {
       const panel = document.querySelector('[data-testid="terminal-panel"]');
       if (!panel) return "";
-      const textarea = panel.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
-      if (textarea)
-        return textarea.style.fontFamily || window.getComputedStyle(textarea).fontFamily;
-      return "";
+      const xtermEl = panel.querySelector(".xterm");
+      type XC = HTMLElement & { __xtermGetFontFamily?: () => string };
+      const container = xtermEl?.parentElement as XC | null | undefined;
+      return container?.__xtermGetFontFamily?.() ?? "";
     });
 
     expect(fontFamily).toContain("JetBrains Mono");
