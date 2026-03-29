@@ -104,10 +104,7 @@ export function useMultiSelect({
     lastClickedRef.current = null;
   }, [onSelectionChange]);
 
-  const isSelected = useCallback(
-    (path: string) => selectedPaths.has(path),
-    [selectedPaths],
-  );
+  const isSelected = useCallback((path: string) => selectedPaths.has(path), [selectedPaths]);
 
   return {
     selectedPaths,

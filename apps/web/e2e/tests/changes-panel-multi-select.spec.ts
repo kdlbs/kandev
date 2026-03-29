@@ -92,17 +92,12 @@ test.describe("Changes Panel Multi-Select", () => {
     git.createFile("file-b.ts", "b");
 
     const profile = await createStandardProfile(apiClient, "changes-select");
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Changes Select Test",
-      profile.id,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Select Test", profile.id, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     const session = await openTaskSession(testPage, "Changes Select Test");
     await session.clickTab("Changes");
@@ -191,17 +186,12 @@ test.describe("Changes Panel Multi-Select", () => {
     git.createFile("esc-b.ts", "b");
 
     const profile = await createStandardProfile(apiClient, "changes-escape");
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Changes Escape Test",
-      profile.id,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Changes Escape Test", profile.id, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     const session = await openTaskSession(testPage, "Changes Escape Test");
     await session.clickTab("Changes");

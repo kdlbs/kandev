@@ -186,12 +186,20 @@ function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useT
     .then((results) => {
       if (results.some((ok) => !ok)) {
         treeState.setTree(snapshot);
-        toast({ title: "Move failed", description: "Some files could not be moved", variant: "error" });
+        toast({
+          title: "Move failed",
+          description: "Some files could not be moved",
+          variant: "error",
+        });
       }
     })
     .catch(() => {
       treeState.setTree(snapshot);
-      toast({ title: "Move failed", description: "An error occurred while moving files", variant: "error" });
+      toast({
+        title: "Move failed",
+        description: "An error occurred while moving files",
+        variant: "error",
+      });
     });
 }
 
@@ -296,7 +304,8 @@ function useKeyboardShortcuts(
     const container = containerRef.current;
     if (!container) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!container.contains(document.activeElement) && document.activeElement !== container) return;
+      if (!container.contains(document.activeElement) && document.activeElement !== container)
+        return;
       if (e.key === "Escape") {
         multiSelect.clearSelection();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
@@ -332,7 +341,8 @@ export function FileBrowser({
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
 
   const fileStatuses = useMemo(
-    () => new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    () =>
+      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
     [gitStatus?.files],
   );
   const fullPath = session?.worktree_path || repository?.local_path || "";
@@ -345,7 +355,12 @@ export function FileBrowser({
     [treeState.tree, treeState.expandedPaths],
   );
   const multiSelect = useMultiSelect({ items: visiblePaths });
-  const dnd = useDragAndDrop(treeState, multiSelect.selectedPaths, multiSelect.setSelectedPaths, onRenameFile);
+  const dnd = useDragAndDrop(
+    treeState,
+    multiSelect.selectedPaths,
+    multiSelect.setSelectedPaths,
+    onRenameFile,
+  );
 
   useKeyboardShortcuts(containerRef, multiSelect);
   useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);

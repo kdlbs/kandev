@@ -201,7 +201,13 @@ function TreeNodeRow({
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
       data-selected={isSelected ? "true" : "false"}
-      className={getTreeNodeRowClass(isActive, isActiveFolder, isSelected, isDragging, isDropTarget)}
+      className={getTreeNodeRowClass(
+        isActive,
+        isActiveFolder,
+        isSelected,
+        isDragging,
+        isDropTarget,
+      )}
       style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
       onClick={onClick}
       draggable={!!onDragStart}
@@ -389,37 +395,39 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
         />
       )}
       {tree.children &&
-        [...tree.children].sort(compareTreeNodes).map((child) => (
-          <TreeNodeItem
-            key={child.path}
-            node={child}
-            depth={0}
-            expandedPaths={props.expandedPaths}
-            activeFolderPath={props.activeFolderPath}
-            activeFilePath={props.activeFilePath}
-            visibleLoadingPaths={props.visibleLoadingPaths}
-            creatingInPath={creatingInPath}
-            fileStatuses={props.fileStatuses}
-            tree={tree}
-            onToggleExpand={props.onToggleExpand}
-            onOpenFile={props.onOpenFile}
-            onDeleteFile={props.onDeleteFile}
-            onRenameFile={props.onRenameFile}
-            onCreateFileSubmit={onCreateFileSubmit}
-            onCancelCreate={onCancelCreate}
-            setTree={props.setTree}
-            isSelected={props.isSelected?.(child.path)}
-            onSelect={props.onSelect}
-            isDragging={props.isDragging}
-            dragOverPath={props.dragOverPath}
-            onDragStart={props.onDragStart}
-            onDragEnd={props.onDragEnd}
-            onDragOver={props.onDragOver}
-            onDragLeave={props.onDragLeave}
-            onDrop={props.onDrop}
-            selectedCount={props.selectedCount}
-          />
-        ))}
+        [...tree.children]
+          .sort(compareTreeNodes)
+          .map((child) => (
+            <TreeNodeItem
+              key={child.path}
+              node={child}
+              depth={0}
+              expandedPaths={props.expandedPaths}
+              activeFolderPath={props.activeFolderPath}
+              activeFilePath={props.activeFilePath}
+              visibleLoadingPaths={props.visibleLoadingPaths}
+              creatingInPath={creatingInPath}
+              fileStatuses={props.fileStatuses}
+              tree={tree}
+              onToggleExpand={props.onToggleExpand}
+              onOpenFile={props.onOpenFile}
+              onDeleteFile={props.onDeleteFile}
+              onRenameFile={props.onRenameFile}
+              onCreateFileSubmit={onCreateFileSubmit}
+              onCancelCreate={onCancelCreate}
+              setTree={props.setTree}
+              isSelected={props.isSelected?.(child.path)}
+              onSelect={props.onSelect}
+              isDragging={props.isDragging}
+              dragOverPath={props.dragOverPath}
+              onDragStart={props.onDragStart}
+              onDragEnd={props.onDragEnd}
+              onDragOver={props.onDragOver}
+              onDragLeave={props.onDragLeave}
+              onDrop={props.onDrop}
+              selectedCount={props.selectedCount}
+            />
+          ))}
     </div>
   );
 }
