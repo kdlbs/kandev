@@ -297,22 +297,23 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	return message, nil
 }
 
-// CompleteRunningToolCallsForTurn marks all "running" tool call messages for a turn as "complete".
-// This is a safety net to ensure no tool calls remain stuck in "running" state after a turn completes.
-func (r *Repository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
+// CompletePendingToolCallsForTurn marks all non-terminal tool call messages for a turn as "complete".
+// This is a safety net to ensure no tool calls remain stuck in a non-terminal state (pending,
+// running, in_progress, etc.) after a turn completes.
+func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	drv := r.db.DriverName()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s
 		WHERE turn_id = ?
-		  AND %s = 'running'
+		  AND %s NOT IN ('complete', 'error')
 		  AND %s
 	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
 		dialect.JSONExtract(drv, "metadata", "status"),
 		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), turnID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to complete running tool calls for turn %s: %w", turnID, err)
+		return 0, fmt.Errorf("failed to complete pending tool calls for turn %s: %w", turnID, err)
 	}
 
 	rows, _ := result.RowsAffected()

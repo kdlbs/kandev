@@ -310,7 +310,7 @@ func TestSQLiteRepository_UpdateTaskSessionState(t *testing.T) {
 	}
 }
 
-func TestSQLiteRepository_CompleteRunningToolCallsForTurn(t *testing.T) {
+func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -351,22 +351,43 @@ func TestSQLiteRepository_CompleteRunningToolCallsForTurn(t *testing.T) {
 		Type:     models.MessageTypeToolCall,
 		Metadata: map[string]interface{}{"tool_call_id": "tc-3", "status": "running"},
 	}
+	// Create a tool call with status "pending" — should also be completed
+	pendingTool := &models.Message{
+		ID: "msg-pending-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Pending tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-4", "status": "pending"},
+	}
+	// Create a tool call with status "in_progress" — should also be completed
+	inProgressTool := &models.Message{
+		ID: "msg-inprogress-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "In-progress tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-5", "status": "in_progress"},
+	}
+	// Create a tool call with status "error" — should NOT be affected
+	errorTool := &models.Message{
+		ID: "msg-error-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Error tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-6", "status": "error"},
+	}
 
-	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2} {
+	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2, pendingTool, inProgressTool, errorTool} {
 		if err := repo.CreateMessage(ctx, msg); err != nil {
 			t.Fatalf("failed to create message %s: %v", msg.ID, err)
 		}
 	}
 
 	// Execute
-	affected, err := repo.CompleteRunningToolCallsForTurn(ctx, turnID)
+	affected, err := repo.CompletePendingToolCallsForTurn(ctx, turnID)
 	if err != nil {
-		t.Fatalf("CompleteRunningToolCallsForTurn failed: %v", err)
+		t.Fatalf("CompletePendingToolCallsForTurn failed: %v", err)
 	}
 
-	// Should have updated exactly 2 running tool call messages
-	if affected != 2 {
-		t.Errorf("expected 2 affected rows, got %d", affected)
+	// Should have updated 4 non-terminal tool call messages (running x2, pending, in_progress)
+	if affected != 4 {
+		t.Errorf("expected 4 affected rows, got %d", affected)
 	}
 
 	// Verify running tool calls are now "complete"
@@ -391,10 +412,28 @@ func TestSQLiteRepository_CompleteRunningToolCallsForTurn(t *testing.T) {
 		t.Errorf("expected msg-regular-1 status 'running' (unchanged), got %v", msg4.Metadata["status"])
 	}
 
+	// Verify pending tool call is now "complete"
+	msg5, _ := repo.GetMessage(ctx, "msg-pending-1")
+	if msg5.Metadata["status"] != "complete" {
+		t.Errorf("expected msg-pending-1 status 'complete', got %v", msg5.Metadata["status"])
+	}
+
+	// Verify in_progress tool call is now "complete"
+	msg6, _ := repo.GetMessage(ctx, "msg-inprogress-1")
+	if msg6.Metadata["status"] != "complete" {
+		t.Errorf("expected msg-inprogress-1 status 'complete', got %v", msg6.Metadata["status"])
+	}
+
+	// Verify error tool call was NOT affected
+	msg7, _ := repo.GetMessage(ctx, "msg-error-1")
+	if msg7.Metadata["status"] != "error" {
+		t.Errorf("expected msg-error-1 status 'error' (unchanged), got %v", msg7.Metadata["status"])
+	}
+
 	// Running again should affect 0 rows
-	affected2, err := repo.CompleteRunningToolCallsForTurn(ctx, turnID)
+	affected2, err := repo.CompletePendingToolCallsForTurn(ctx, turnID)
 	if err != nil {
-		t.Fatalf("second CompleteRunningToolCallsForTurn failed: %v", err)
+		t.Fatalf("second CompletePendingToolCallsForTurn failed: %v", err)
 	}
 	if affected2 != 0 {
 		t.Errorf("expected 0 affected rows on second call, got %d", affected2)

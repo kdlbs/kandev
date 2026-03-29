@@ -61,11 +61,11 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return err
 	}
 
-	// Safety net: mark any tool calls still in "running" state as "complete"
-	if affected, err := s.turns.CompleteRunningToolCallsForTurn(ctx, turnID); err != nil {
-		s.logger.Warn("failed to complete running tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
+	// Safety net: mark any tool calls still in a non-terminal state as "complete"
+	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
 	} else if affected > 0 {
-		s.logger.Info("completed stale running tool calls on turn end",
+		s.logger.Info("completed stale pending tool calls on turn end",
 			zap.String("turn_id", turnID),
 			zap.Int64("affected", affected))
 	}

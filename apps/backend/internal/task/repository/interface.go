@@ -78,7 +78,7 @@ type TurnRepository interface {
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
-	CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
+	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 }
 

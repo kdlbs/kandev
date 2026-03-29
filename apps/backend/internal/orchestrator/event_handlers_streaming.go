@@ -309,9 +309,9 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// Determine message type from normalized payload for fallback creation
 	msgType := toolKindToMessageType(payload.Data.Normalized)
 
-	// Handle all status updates (running, complete, error)
+	// Handle all status updates (running, complete, error, cancelled, pending, in_progress)
 	switch payload.Data.ToolStatus {
-	case "running", agentEventComplete, "completed", "success", agentEventError, "failed":
+	case "running", agentEventComplete, agentEventCompleted, "success", agentEventError, "failed", "cancelled", "pending", "in_progress":
 		if err := s.messageCreator.UpdateToolCallMessage(
 			ctx,
 			payload.TaskID,
@@ -333,7 +333,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 
 		// Update session state for completion events
 		// Allow tool completions to wake session from WAITING_FOR_INPUT
-		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == "completed" ||
+		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == agentEventCompleted ||
 			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == "failed" {
 			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", true)
 		}
@@ -759,7 +759,7 @@ func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID stri
 		todos[i] = map[string]interface{}{
 			"text":   e.Description,
 			"status": e.Status,
-			"done":   e.Status == "completed",
+			"done":   e.Status == agentEventCompleted,
 		}
 	}
 	metadata := map[string]interface{}{"todos": todos}

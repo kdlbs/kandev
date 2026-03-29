@@ -390,7 +390,7 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
-func (m *mockRepository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
+func (m *mockRepository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	return 0, nil
 }
 func (m *mockRepository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {

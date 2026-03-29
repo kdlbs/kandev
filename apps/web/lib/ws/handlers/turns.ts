@@ -37,13 +37,17 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       // Clear the active turn when it completes
       store.getState().setActiveTurn(payload.session_id, null);
 
-      // Safety net: mark any tool calls still in "running" state as "complete".
+      // Safety net: mark any tool calls still in a non-terminal state as "complete".
       // This handles edge cases where tool_update events were dropped or not processed.
       const messages = store.getState().messages.bySession[payload.session_id];
       if (messages) {
         for (const msg of messages) {
           const meta = msg.metadata as Record<string, unknown> | undefined;
-          if (meta?.status === "running" && meta?.tool_call_id) {
+          if (
+            meta?.tool_call_id &&
+            meta?.status !== "complete" &&
+            meta?.status !== "error"
+          ) {
             store.getState().updateMessage({
               ...msg,
               metadata: { ...meta, status: "complete" },
