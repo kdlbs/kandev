@@ -78,6 +78,27 @@ make test-e2e-report               # open HTML report from last run
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
+### Debugging CI shard failures
+
+CI splits tests across 10 shards. To reproduce a specific shard locally:
+
+```bash
+# List which tests are in a shard
+npx playwright test --config e2e/playwright.config.ts --shard=2/10 --list
+
+# Run that shard locally (requires production build)
+make build-backend build-web
+cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/10
+```
+
+E2E tests run against the **production build** (`next build`), not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
+
+## Selector guidelines
+
+- **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting.
+- **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
+- **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
+
 ## TDD workflow
 
 Follow `/tdd` when writing E2E tests:

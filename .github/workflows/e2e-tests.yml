@@ -29,13 +29,13 @@ permissions:
 
 jobs:
   e2e:
-    name: E2E Shard ${{ matrix.shard }}/4
+    name: E2E Shard ${{ matrix.shard }}/10
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
       - name: Checkout code
@@ -70,7 +70,7 @@ jobs:
 
       - name: Run E2E tests (shard ${{ matrix.shard }}/4)
         working-directory: apps/web
-        run: npx playwright test --config e2e/playwright.config.ts --shard=${{ matrix.shard }}/4
+        run: npx playwright test --config e2e/playwright.config.ts --shard=${{ matrix.shard }}/10
 
       - name: Upload blob report
         if: always()
