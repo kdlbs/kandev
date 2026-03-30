@@ -190,6 +190,10 @@ func (m *MockClient) GetPRFeedback(ctx context.Context, owner, repo string, numb
 	return getPRFeedback(ctx, m, owner, repo, number)
 }
 
+func (m *MockClient) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	return getPRStatus(ctx, m, owner, repo, number)
+}
+
 func (m *MockClient) ListPRFiles(_ context.Context, owner, repo string, number int) ([]PRFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

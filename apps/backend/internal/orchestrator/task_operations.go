@@ -145,7 +145,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 					zap.Error(launchErr))
 				return
 			}
-			if prepExec != nil && prepExec.WorktreeBranch != "" {
+			if prepExec != nil {
 				s.ensureSessionPRWatch(bgCtx, taskID, prepExec.SessionID, prepExec.WorktreeBranch)
 			}
 		}()
@@ -211,9 +211,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 			}
 		}
 	}
-	if execution.WorktreeBranch != "" {
-		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
-	}
+	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
 }
@@ -311,9 +309,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
 	// or hadn't completed, this guarantees coverage.
-	if execution.WorktreeBranch != "" {
-		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
-	}
+	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
 }
@@ -452,9 +448,7 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 			}
 		}
 	}
-	if execution.WorktreeBranch != "" {
-		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
-	}
+	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 }
 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
@@ -591,9 +585,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 
-	if execution.WorktreeBranch != "" {
-		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
-	}
+	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
 }

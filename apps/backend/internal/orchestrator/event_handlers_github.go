@@ -557,6 +557,60 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	return true, nil
 }
 
+// ListTasksNeedingPRWatch returns task-session pairs that have worktree branches
+// but no existing PR watch. This satisfies the github.TaskBranchProvider interface.
+func (s *Service) ListTasksNeedingPRWatch(ctx context.Context) ([]github.TaskBranchInfo, error) {
+	if s.githubService == nil {
+		return nil, nil
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil, nil
+	}
+	return s.buildTaskBranchList(ctx, store)
+}
+
+// buildTaskBranchList queries sessions with branches, filters out those with
+// existing PR watches, and resolves GitHub owner/repo for the remainder.
+func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]github.TaskBranchInfo, error) {
+	sessions, err := store.ListSessionsWithBranches(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions with branches: %w", err)
+	}
+	if len(sessions) == 0 {
+		return nil, nil
+	}
+
+	var result []github.TaskBranchInfo
+	for _, sess := range sessions {
+		if s.sessionHasWatch(ctx, sess.SessionID) {
+			continue
+		}
+		owner, repo := s.resolveTaskRepo(ctx, sess.TaskID)
+		if owner == "" || repo == "" {
+			continue
+		}
+		branch := s.resolvePRWatchBranch(ctx, sess.TaskID, sess.SessionID, sess.Branch)
+		if branch == "" {
+			continue
+		}
+		result = append(result, github.TaskBranchInfo{
+			TaskID:    sess.TaskID,
+			SessionID: sess.SessionID,
+			Owner:     owner,
+			Repo:      repo,
+			Branch:    branch,
+		})
+	}
+	return result, nil
+}
+
+// sessionHasWatch checks if a PR watch already exists for a session.
+func (s *Service) sessionHasWatch(ctx context.Context, sessionID string) bool {
+	existing, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	return err == nil && existing != nil
+}
+
 // subscribeGitHubEvents subscribes to GitHub-related events on the event bus.
 func (s *Service) subscribeGitHubEvents() {
 	if s.eventBus == nil {

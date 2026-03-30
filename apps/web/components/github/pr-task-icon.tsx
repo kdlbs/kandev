@@ -37,7 +37,11 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={cn("inline-flex items-center", getPRStatusColor(pr))}>
+        <span
+          data-testid={`pr-task-icon-${taskId}`}
+          data-pr-state={pr.state}
+          className={cn("inline-flex items-center", getPRStatusColor(pr))}
+        >
           <IconGitPullRequest className="h-3.5 w-3.5" />
         </span>
       </TooltipTrigger>

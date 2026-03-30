@@ -61,6 +61,10 @@ func (c *NoopClient) GetPRFeedback(context.Context, string, string, int) (*PRFee
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetPRStatus(context.Context, string, string, int) (*PRStatus, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListPRFiles(context.Context, string, string, int) ([]PRFile, error) {
 	return nil, ErrNoClient
 }

@@ -48,6 +48,10 @@ type Client interface {
 	// GetPRFeedback fetches aggregated feedback (reviews, comments, checks) for a PR.
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error)
 
+	// GetPRStatus fetches lightweight PR status (state, review summary, checks summary).
+	// Unlike GetPRFeedback, it skips comments for efficiency.
+	GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error)
+
 	// ListPRFiles lists files changed in a pull request.
 	ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error)
 

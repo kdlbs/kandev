@@ -67,6 +67,37 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	}, nil
 }
 
+// getPRStatus fetches lightweight PR status using any Client implementation.
+// Unlike getPRFeedback, it skips comments to reduce API calls.
+func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) (*PRStatus, error) {
+	pr, err := c.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	reviews, err := c.ListPRReviews(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	checks, err := c.ListCheckRuns(ctx, owner, repo, pr.HeadSHA)
+	if err != nil {
+		return nil, err
+	}
+	if reviews == nil {
+		reviews = []PRReview{}
+	}
+	if checks == nil {
+		checks = []CheckRun{}
+	}
+	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
+	return &PRStatus{
+		PR:                 pr,
+		ReviewState:        reviewState,
+		ChecksState:        computeOverallCheckStatus(checks),
+		ReviewCount:        len(reviews),
+		PendingReviewCount: pendingReviewCount,
+	}, nil
+}
+
 // convertRawCheckRuns converts raw ghCheckRun structs into the domain CheckRun type.
 func convertRawCheckRuns(raw []ghCheckRun) []CheckRun {
 	checks := make([]CheckRun, len(raw))

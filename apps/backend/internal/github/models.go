@@ -82,6 +82,16 @@ type PRFeedback struct {
 	HasIssues bool        `json:"has_issues"`
 }
 
+// PRStatus contains lightweight PR state used by the background poller.
+// Unlike PRFeedback, it skips comments to reduce API calls.
+type PRStatus struct {
+	PR                 *PR    `json:"pr"`
+	ReviewState        string `json:"review_state"` // "approved", "changes_requested", "pending", ""
+	ChecksState        string `json:"checks_state"` // "success", "failure", "pending", ""
+	ReviewCount        int    `json:"review_count"`
+	PendingReviewCount int    `json:"pending_review_count"`
+}
+
 // PRWatch tracks active PR monitoring (session → PR).
 type PRWatch struct {
 	ID              string     `json:"id" db:"id"`

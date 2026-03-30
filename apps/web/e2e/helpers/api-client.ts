@@ -25,6 +25,7 @@ export type MockPR = {
   draft?: boolean;
   additions?: number;
   deletions?: number;
+  merged_at?: string;
   requested_reviewers?: Array<{ login: string; type: string }>;
 };
 

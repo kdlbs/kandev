@@ -359,6 +359,10 @@ func (c *GHClient) GetPRFeedback(ctx context.Context, owner, repo string, number
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
 
+func (c *GHClient) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	return getPRStatus(ctx, c, owner, repo, number)
+}
+
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),

@@ -5,24 +5,24 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR auto-detection", () => {
   /**
-   * Tests the full PR auto-detection pipeline: the backend detects a PR on
-   * GitHub (mock) and associates it with the task — without manually calling
-   * mockGitHubAssociateTaskPR.
+   * Tests the full PR auto-detection pipeline: the backend poller detects
+   * a PR on GitHub (mock) and associates it with the task -- without
+   * manually calling mockGitHubAssociateTaskPR.
    *
-   * Detection flow exercised:
-   *   useTaskPRDetection (frontend, every 30s)
-   *     -> github.check_session_pr (WS action)
-   *       -> CheckSessionPR (backend)
-   *         -> resolveTaskRepo -> resolvePRWatchBranch -> FindPRByBranch (mock)
-   *           -> AssociatePRWithTask -> github.task_pr.updated (WS event)
-   *             -> PR button appears in topbar
+   * Detection flow:
+   *   Poller (backend, every 30s)
+   *     -> reconcileWatches -> EnsurePRWatch (if missing)
+   *     -> checkPRWatches -> FindPRByBranch (mock)
+   *       -> AssociatePRWithTask -> github.task_pr.updated (WS event)
+   *         -> PR icon appears on kanban card
    *
    * Prerequisites for detection to work:
    *   - Repository has provider=github with owner/name set
    *   - TaskRepository has checkout_branch set
    *   - Mock GitHub has a PR matching the checkout branch
+   *   - Agent has started (creates PR watch via ensureSessionPRWatch)
    */
-  test("detects PR automatically via check_session_pr", async ({
+  test("detects PR automatically via backend poller", async ({
     testPage,
     apiClient,
     seedData,
@@ -85,6 +85,7 @@ test.describe("PR auto-detection", () => {
     await kanban.goto();
 
     // Move task to Working -> auto_start -> mock agent completes -> Done
+    // This creates a PR watch via ensureSessionPRWatch during task start
     await apiClient.moveTask(task.id, workflow.id, workingStep.id);
 
     await expect(kanban.taskCardInColumn("Auto-Detect PR Task", doneStep.id)).toBeVisible({
@@ -107,14 +108,16 @@ test.describe("PR auto-detection", () => {
       },
     ]);
 
-    // --- Open the task session ---
+    // --- Open the task to trigger on-demand sync (github.task_pr.sync) ---
     await kanban.taskCardInColumn("Auto-Detect PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // --- Verify PR button appears in topbar ---
+    // The useTaskPR hook triggers github.task_pr.sync which calls TriggerPRSync.
+    // Since a PR watch was created during task start (ensureSessionPRWatch),
+    // TriggerPRSync finds the PR via FindPRByBranch and associates it.
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
     await expect(session.prTopbarButton()).toContainText("#99");
   });
@@ -158,7 +161,7 @@ test.describe("PR auto-detection", () => {
 
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
-    // No PRs added to mock GitHub — detection should find nothing
+    // No PRs added to mock GitHub -- backend poller should find nothing
 
     const task = await apiClient.createTask(seedData.workspaceId, "No PR Task", {
       workflow_id: workflow.id,
@@ -189,6 +192,128 @@ test.describe("PR auto-detection", () => {
     // Verify no PR button
     await expect(session.prTopbarButton()).not.toBeVisible({ timeout: 10_000 });
   });
+
+  /**
+   * Verifies the sync-before-delete bug fix: when a PR is merged on GitHub,
+   * the backend poller syncs the merged state to the TaskPR record before
+   * deleting the watch. The PR icon on the kanban card should update to
+   * show the merged state.
+   */
+  test("updates PR status to merged", async ({ testPage, apiClient, seedData, backend }) => {
+    test.setTimeout(180_000);
+
+    // --- Seed workflow: Inbox -> Working (auto_start -> Done) -> Done ---
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "PR Merged Status Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+
+    await apiClient.updateWorkflowStep(workingStep.id, {
+      prompt: 'e2e:message("done")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    // --- Create repository with GitHub provider info ---
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const githubRepo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "GitHub Merged PR Repo",
+      provider: "github",
+      provider_owner: "testorg",
+      provider_name: "testrepo",
+    });
+
+    // --- Setup mock GitHub ---
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+
+    // --- Create task with checkout_branch ---
+    const task = await apiClient.createTask(seedData.workspaceId, "Merged PR Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repositories: [
+        {
+          repository_id: githubRepo.id,
+          checkout_branch: "main",
+        },
+      ],
+    });
+
+    // Navigate to kanban and subscribe to WS events
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // Move task to Working -> auto_start -> mock agent completes -> Done
+    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+
+    await expect(kanban.taskCardInColumn("Merged PR Task", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    // --- Add OPEN PR to mock GitHub ---
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 101,
+        title: "Feature branch PR",
+        state: "open",
+        head_branch: "main",
+        base_branch: "develop",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 20,
+        deletions: 3,
+      },
+    ]);
+
+    // --- Open the task to trigger on-demand sync and detect the PR ---
+    await kanban.taskCardInColumn("Merged PR Task", doneStep.id).click();
+    await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // useTaskPR triggers github.task_pr.sync -> TriggerPRSync -> FindPRByBranch
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
+    await expect(session.prTopbarButton()).toContainText("#101");
+
+    // --- Update mock PR to MERGED state ---
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 101,
+        title: "Feature branch PR",
+        state: "merged",
+        head_branch: "main",
+        base_branch: "develop",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 20,
+        deletions: 3,
+        merged_at: "2026-03-30T12:00:00Z",
+      },
+    ]);
+
+    // --- Verify PR topbar button updates to merged state ---
+    // The backend poller (every 30s) syncs the merged state and broadcasts
+    // via WS. The PRTopbarButton re-renders with the purple merged icon.
+    await expect(session.prTopbarButton().locator(".text-purple-500").first()).toBeVisible({
+      timeout: 90_000,
+    });
+  });
 });
 
 test.describe("PR external detection", () => {
@@ -196,6 +321,9 @@ test.describe("PR external detection", () => {
    * Verifies that when a PR is created externally (e.g. via `gh pr create`)
    * after a task session is already running, the PR button appears in the
    * topbar and the Changes panel shows the PR files and commits.
+   *
+   * This uses mockGitHubAssociateTaskPR which directly creates the TaskPR
+   * record and publishes the WS event -- no poller needed.
    */
   test("shows PR button and changes after external PR creation", async ({
     testPage,
@@ -296,7 +424,7 @@ test.describe("PR external detection", () => {
       },
     ]);
 
-    // Associate PR with task
+    // Associate PR with task directly via mock API
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: featureTask.id,
       owner: "testorg",

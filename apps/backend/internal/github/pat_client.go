@@ -256,6 +256,10 @@ func (c *PATClient) GetPRFeedback(ctx context.Context, owner, repo string, numbe
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
 
+func (c *PATClient) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	return getPRStatus(ctx, c, owner, repo, number)
+}
+
 func (c *PATClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	var raw []ghPRFile
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/files?per_page=100", owner, repo, number)

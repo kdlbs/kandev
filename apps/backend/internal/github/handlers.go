@@ -45,6 +45,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
 }
 
@@ -57,6 +58,26 @@ func parseMap(msg *ws.Message) (map[string]interface{}, error) {
 		m = make(map[string]interface{})
 	}
 	return m, err
+}
+
+// wsWithField returns a WS handler that parses a single named string field from
+// the payload and passes it to serviceFn, returning the result as the response.
+func wsWithField(field string, serviceFn func(ctx context.Context, val string) (interface{}, error)) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+parseErr.Error(), nil)
+		}
+		val, _ := payload[field].(string)
+		if val == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, field+" required", nil)
+		}
+		result, err := serviceFn(ctx, val)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
 }
 
 // wsDeleteByID returns a WS handler that parses an "id" field from the payload
@@ -129,6 +150,12 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 	}
 }
 
+func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
+		return svc.TriggerPRSync(ctx, taskID)
+	})
+}
+
 func wsGetPRFeedback(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		payload, parseErr := parseMap(msg)
@@ -151,21 +178,10 @@ func wsGetPRFeedback(svc *Service, _ *logger.Logger) func(ctx context.Context, m
 }
 
 func wsListReviewWatches(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		payload, parseErr := parseMap(msg)
-		if parseErr != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+parseErr.Error(), nil)
-		}
-		workspaceID, _ := payload["workspace_id"].(string)
-		if workspaceID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
-		}
+	return wsWithField("workspace_id", func(ctx context.Context, workspaceID string) (interface{}, error) {
 		watches, err := svc.ListReviewWatches(ctx, workspaceID)
-		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-		}
-		return ws.NewResponse(msg.ID, msg.Action, watches)
-	}
+		return watches, err
+	})
 }
 
 func wsCreateReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

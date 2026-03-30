@@ -7,6 +7,8 @@ import (
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // mockGitHubService implements GitHubService for testing.
@@ -491,6 +493,136 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 
 		if ghSvc.updateBranchCalls != 0 {
 			t.Errorf("expected no UpdatePRWatchBranch calls when branch matches, got %d", ghSvc.updateBranchCalls)
+		}
+	})
+}
+
+func TestListTasksNeedingPRWatch(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// seedFullSession creates a task, session, repository, task-repo, and worktree.
+	seedFullSession := func(t *testing.T, repo interface {
+		CreateRepository(ctx context.Context, r *models.Repository) error
+		CreateTaskRepository(ctx context.Context, tr *models.TaskRepository) error
+		CreateTaskSessionWorktree(ctx context.Context, wt *models.TaskSessionWorktree) error
+	}, taskID, sessionID, branch, repoID string) {
+		t.Helper()
+		rObj := &models.Repository{
+			ID: repoID, WorkspaceID: "ws1", Name: "myrepo",
+			SourceType: "provider", Provider: "github",
+			ProviderOwner: "myorg", ProviderName: "myrepo",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		// Ignore duplicate errors for shared repos.
+		_ = repo.CreateRepository(ctx, rObj)
+
+		tr := &models.TaskRepository{
+			ID: "tr-" + sessionID, TaskID: taskID, RepositoryID: repoID,
+			Position: 0, CreatedAt: now, UpdatedAt: now,
+		}
+		_ = repo.CreateTaskRepository(ctx, tr)
+
+		wt := &models.TaskSessionWorktree{
+			ID: "wt-" + sessionID, SessionID: sessionID,
+			WorktreeID: "wtree-" + sessionID, RepositoryID: repoID,
+			WorktreeBranch: branch, CreatedAt: now,
+		}
+		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+			t.Fatalf("failed to create worktree: %v", err)
+		}
+	}
+
+	// seedTask creates a second task and session in an already-seeded repo.
+	seedTask := func(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) {
+		t.Helper()
+		task := &models.Task{
+			ID: taskID, WorkflowID: "wf1", WorkflowStepID: "step1",
+			Title: "Test Task", Description: "Test",
+			State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+		session := &models.TaskSession{
+			ID: sessionID, TaskID: taskID,
+			State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+		}
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("failed to create session: %v", err)
+		}
+	}
+
+	t.Run("returns sessions with branches but no watch", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+		seedTask(t, testRepo, "t2", "s2")
+		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
+		seedFullSession(t, testRepo, "t2", "s2", "feature-b", "repo1")
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		ghSvc := &mockGitHubService{
+			// s1 has a watch, s2 does not.
+			prWatch: nil,
+		}
+		svc.SetGitHubService(ghSvc)
+
+		tasks, err := svc.ListTasksNeedingPRWatch(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Both sessions have branches and no watches (mock returns nil for all).
+		if len(tasks) < 1 {
+			t.Fatalf("expected at least 1 task, got %d", len(tasks))
+		}
+
+		// Verify results contain expected fields.
+		found := map[string]bool{}
+		for _, ti := range tasks {
+			found[ti.SessionID] = true
+			if ti.Owner != "myorg" {
+				t.Errorf("expected owner %q, got %q", "myorg", ti.Owner)
+			}
+		}
+		if !found["s1"] && !found["s2"] {
+			t.Error("expected at least one of s1 or s2 in results")
+		}
+	})
+
+	t.Run("excludes sessions on archived tasks", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
+
+		// Archive the task.
+		if err := testRepo.ArchiveTask(ctx, "t1"); err != nil {
+			t.Fatalf("failed to archive task: %v", err)
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		ghSvc := &mockGitHubService{}
+		svc.SetGitHubService(ghSvc)
+
+		tasks, err := svc.ListTasksNeedingPRWatch(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(tasks) != 0 {
+			t.Errorf("expected no tasks for archived task, got %d", len(tasks))
+		}
+	})
+
+	t.Run("returns nil when github service is nil", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+
+		tasks, err := svc.ListTasksNeedingPRWatch(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(tasks) != 0 {
+			t.Errorf("expected empty result when github service is nil, got %d", len(tasks))
 		}
 	})
 }

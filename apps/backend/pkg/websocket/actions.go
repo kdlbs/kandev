@@ -358,6 +358,7 @@ const (
 	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
+	ActionGitHubTaskPRSync        = "github.task_pr.sync"
 	ActionGitHubStats             = "github.stats"
 	ActionGitHubCheckSessionPR    = "github.check_session_pr"
 )

@@ -22,7 +22,7 @@ import {
 } from "./changes-panel-timeline";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
-import { useActiveTaskPR, useTaskPRDetection } from "@/hooks/domains/github/use-task-pr";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -512,20 +512,13 @@ const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
 }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
 
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
   const vcsDialogs = useVcsDialogs();
-
-  // Periodically check for a PR when the session has a branch but no PR yet
-  useTaskPRDetection(
-    isArchived ? null : (activeTaskId ?? null),
-    isArchived ? null : (activeSessionId ?? null),
-    isArchived ? null : (git.branch ?? null),
-  );
 
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);

@@ -319,6 +319,7 @@ func startAgentInfrastructure(
 
 		// Start GitHub background poller
 		ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
+		ghPoller.SetTaskBranchProvider(orchestratorSvc)
 		ghPoller.Start(ctx)
 		addCleanup(func() error { ghPoller.Stop(); return nil })
 		log.Info("GitHub poller started")

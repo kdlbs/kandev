@@ -240,6 +240,14 @@ type TaskSessionWorktree struct {
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 }
 
+// SessionBranchInfo is a lightweight projection of a session with its worktree branch.
+// Used by the PR watch reconciler to find sessions that may need PR watches.
+type SessionBranchInfo struct {
+	SessionID string
+	TaskID    string
+	Branch    string
+}
+
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
