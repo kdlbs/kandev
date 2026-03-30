@@ -8,6 +8,7 @@ import {
   listWorkspaces,
   listTaskSessionMessages,
   listQuickChatSessions,
+  listTaskPRs,
 } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -89,6 +90,20 @@ async function loadSnapshotState(
       : Promise.resolve(null),
   ]);
   const state: Partial<AppState> = { ...snapshotToState(snapshot) };
+
+  // Fetch PR associations for all tasks so sidebar icons render immediately
+  const taskIds =
+    snapshot.tasks?.filter((t) => !t.is_ephemeral && t.workflow_step_id).map((t) => t.id) ?? [];
+  if (taskIds.length > 0) {
+    try {
+      const prResponse = await listTaskPRs(taskIds, { cache: "no-store" });
+      if (prResponse?.task_prs) {
+        state.taskPRs = { byTaskId: prResponse.task_prs, loaded: true, loading: false };
+      }
+    } catch {
+      // Non-critical: PR icons will populate via WS later
+    }
+  }
 
   if (sessionId && messagesResponse) {
     const messages = [...(messagesResponse.messages ?? [])].reverse();
