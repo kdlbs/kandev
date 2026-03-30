@@ -17,7 +17,17 @@ apps/web/e2e/
 ├── helpers/
 │   └── api-client.ts        # HTTP client for seeding data (read for available methods)
 ├── pages/                   # Page objects (read for available pages and methods)
-└── tests/                   # Spec files (*.spec.ts)
+└── tests/                   # Spec files (*.spec.ts), grouped by feature
+    ├── task/                # Task creation, deletion, archiving, environment, subtasks
+    ├── kanban/              # Kanban board, mobile kanban, preview panel
+    ├── session/             # Session lifecycle, resume, recovery, multi-session, layout
+    ├── workflow/            # Workflow steps, settings, automation, import/export
+    ├── git/                 # Git changes panel, commits, diffs, symlinks
+    ├── pr/                  # PR detection, watchers, changes panel
+    ├── terminal/            # Terminal agent, keyboard, settings
+    ├── chat/                # Quick chat, message queue, clarification, markdown, toolbar
+    ├── settings/            # Config management, agent profiles, editor integration
+    └── review/              # Code review diffs
 ```
 
 Each worker gets an isolated backend, frontend, database, and mock agent — no Docker, no API keys needed.
@@ -28,7 +38,7 @@ Each worker gets an isolated backend, frontend, database, and mock agent — no 
 make test-e2e                                                      # all tests, headless
 make test-e2e-headed                                               # with visible browser
 make test-e2e-ui                                                   # Playwright UI mode
-cd apps && pnpm --filter @kandev/web e2e -- tests/my-test.spec.ts  # single file
+cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single file
 cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
 ```
 
@@ -45,8 +55,8 @@ Prerequisites: `make build-backend build-web` (Make targets do this automaticall
 Example:
 
 ```typescript
-import { test, expect } from "../fixtures/test-base";
-import { KanbanPage } from "../pages/kanban-page";
+import { test, expect } from "../../fixtures/test-base";
+import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("my feature", () => {
   test("does something", async ({ testPage, seedData, apiClient }) => {
@@ -57,6 +67,15 @@ test.describe("my feature", () => {
   });
 });
 ```
+
+## Test organization
+
+Tests are grouped by feature area in subdirectories under `tests/`. When creating a new test:
+
+- **Place it in the matching feature directory.** A test for PR detection goes in `pr/`, a test for session resume goes in `session/`, etc.
+- **Merge related tests into the same file.** Tests covering the same feature (e.g., git commit body and pre-hooks) belong in one file with separate `test.describe` blocks. Don't create a new file for each narrow scenario.
+- **Import paths from subdirectories** use `../../` (e.g., `from "../../fixtures/test-base"`).
+- **Standalone root files** are allowed for truly cross-cutting tests that don't fit any group.
 
 ## Test quality guidelines
 
