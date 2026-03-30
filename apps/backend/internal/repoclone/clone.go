@@ -122,7 +122,7 @@ func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 
 func (c *Cloner) fetch(ctx context.Context, repoPath string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune")
+	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath),
