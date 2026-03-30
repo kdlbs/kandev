@@ -71,9 +71,8 @@ export const JIRA_STATUSES: JiraStatus[] = ["To Do", "In Progress", "In Review",
 export const DEMO_JIRA_TICKETS: DemoJiraTicket[] = [
   {
     key: "BFF-1234",
-    title: "Implement rate limiting for BFF gateway",
-    description:
-      "Add configurable rate limiting to the BFF gateway to prevent abuse and ensure fair usage across tenants. Should support per-tenant and per-endpoint limits with Redis-backed counters. Include bypass for internal services via JWT claims.",
+    title: "Add nft scope to commit linting config",
+    description: "Add nft scope to commit lint config",
     priority: "High",
     storyPoints: 8,
     sprint: CURRENT_SPRINT,
