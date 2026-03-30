@@ -56,7 +56,7 @@ test.describe("Session tab cleanup", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { session } = await createTaskAndNavigate(
+    await createTaskAndNavigate(
       testPage,
       apiClient,
       seedData,

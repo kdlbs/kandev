@@ -200,6 +200,50 @@ function DeleteSessionDialog({
   );
 }
 
+function SessionContextMenuItems({
+  sessionState,
+  isPrimary,
+  actions,
+  onDelete,
+}: {
+  sessionState: TaskSessionState | null;
+  isPrimary: boolean;
+  actions: ReturnType<typeof useSessionTabActions>;
+  onDelete: () => void;
+}) {
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem
+        className="cursor-pointer"
+        onSelect={actions.handleSetPrimary}
+        disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
+      >
+        Set as Primary
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      {sessionState && isStoppable(sessionState) && (
+        <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
+          Stop
+        </ContextMenuItem>
+      )}
+      {sessionState && isResumable(sessionState) && (
+        <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
+          Resume
+        </ContextMenuItem>
+      )}
+      {sessionState && isDeletable(sessionState) && (
+        <ContextMenuItem className="cursor-pointer text-destructive" onSelect={onDelete}>
+          Delete
+        </ContextMenuItem>
+      )}
+      <ContextMenuSeparator />
+      <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
+        Close Others
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
+}
+
 /**
  * Custom dockview tab for session panels.
  * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
@@ -222,6 +266,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     if (agentLabel && api.title !== agentLabel) api.setTitle(agentLabel);
   }, [agentLabel, api]);
 
+  const showMultiSessionBadges = sessionCount > 1;
+
   return (
     <>
       <ContextMenu>
@@ -230,10 +276,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
         >
           <div className="flex items-center">
-            {isPrimary && sessionCount > 1 && (
+            {isPrimary && showMultiSessionBadges && (
               <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
             )}
-            {sessionNumber != null && sessionCount > 1 && (
+            {sessionNumber != null && showMultiSessionBadges && (
               <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
                 {sessionNumber}
               </span>
@@ -248,38 +294,12 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             <DockviewDefaultTab {...props} />
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem
-            className="cursor-pointer"
-            onSelect={actions.handleSetPrimary}
-            disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
-          >
-            Set as Primary
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          {sessionState && isStoppable(sessionState) && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
-              Stop
-            </ContextMenuItem>
-          )}
-          {sessionState && isResumable(sessionState) && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
-              Resume
-            </ContextMenuItem>
-          )}
-          {sessionState && isDeletable(sessionState) && (
-            <ContextMenuItem
-              className="cursor-pointer text-destructive"
-              onSelect={() => setConfirmDelete(true)}
-            >
-              Delete
-            </ContextMenuItem>
-          )}
-          <ContextMenuSeparator />
-          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
-            Close Others
-          </ContextMenuItem>
-        </ContextMenuContent>
+        <SessionContextMenuItems
+          sessionState={sessionState}
+          isPrimary={isPrimary}
+          actions={actions}
+          onDelete={() => setConfirmDelete(true)}
+        />
       </ContextMenu>
       <DeleteSessionDialog
         open={confirmDelete}
