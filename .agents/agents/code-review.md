@@ -12,16 +12,7 @@ Review the current changes in the codebase (Go + Next.js monorepo). Every findin
 
 ## Steps
 
-### 1. Run verification first
-
-Run the full verification pipeline to ensure all formatters, linters, typechecks, and tests pass before reviewing:
-- `make -C apps/backend fmt` then `cd apps && pnpm format`
-- `make -C apps/backend test lint`
-- `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint`
-
-Do NOT proceed with review until all commands pass clean.
-
-### 2. Identify changed files and check scope
+### 1. Identify changed files and check scope
 
 Determine the right diff scope:
 - **Local changes**: `git diff --name-only` (unstaged) and `git diff --cached --name-only` (staged)
@@ -31,7 +22,7 @@ Read each changed file in full — understand surrounding code, not just the dif
 
 For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
 
-### 3. Review for issues
+### 2. Review for issues
 
 Check every changed file for the following layers. Skip layers that don't apply to the change.
 
@@ -85,12 +76,12 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - We do NOT test React components — skip those
 - Flag untested logic but don't block on it; suggest what tests to add
 
-### 4. Fix or report
+### 3. Fix or report
 
 - **Fix directly** any issues you can resolve confidently (dead code, unused imports, simple duplication, missing early returns)
 - **Report** issues that need the author's input — always explain *why* the issue matters and provide a concrete suggested fix
 
-### 5. Output
+### 4. Output
 
 Use this format:
 
