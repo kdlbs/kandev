@@ -23,12 +23,8 @@ function makeLayout(centerPanels: Array<{ id: string; component: string }>): Lay
 
 describe("mergePanelsIntoPreset", () => {
   it("replaces chat panel with session panels when session panels exist", () => {
-    const currentState = makeLayout([
-      { id: "session:abc123", component: "chat" },
-    ]);
-    const targetPreset = makeLayout([
-      { id: "chat", component: "chat" },
-    ]);
+    const currentState = makeLayout([{ id: "session:abc123", component: "chat" }]);
+    const targetPreset = makeLayout([{ id: "chat", component: "chat" }]);
 
     const result = mergePanelsIntoPreset(currentState, targetPreset);
 
@@ -40,12 +36,8 @@ describe("mergePanelsIntoPreset", () => {
   });
 
   it("preserves chat panel when no session panels exist", () => {
-    const currentState = makeLayout([
-      { id: "chat", component: "chat" },
-    ]);
-    const targetPreset = makeLayout([
-      { id: "chat", component: "chat" },
-    ]);
+    const currentState = makeLayout([{ id: "chat", component: "chat" }]);
+    const targetPreset = makeLayout([{ id: "chat", component: "chat" }]);
 
     const result = mergePanelsIntoPreset(currentState, targetPreset);
 
@@ -60,9 +52,7 @@ describe("mergePanelsIntoPreset", () => {
       { id: "session:abc", component: "chat" },
       { id: "session:def", component: "chat" },
     ]);
-    const targetPreset = makeLayout([
-      { id: "chat", component: "chat" },
-    ]);
+    const targetPreset = makeLayout([{ id: "chat", component: "chat" }]);
 
     const result = mergePanelsIntoPreset(currentState, targetPreset);
 
