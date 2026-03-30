@@ -49,6 +49,24 @@ export function focusOrAddPanel(
     if (!quiet) existing.api.setActive();
     return;
   }
+  // Guard: if the referenced group no longer exists (stale ID after layout
+  // transition), fall back to the active panel's group or the first group.
+  const pos = options.position;
+  if (pos && "referenceGroup" in pos) {
+    const groupExists = api.groups.some((g) => g.id === pos.referenceGroup);
+    if (!groupExists) {
+      if (api.activePanel) {
+        options = { ...options, position: { referencePanel: api.activePanel.id } };
+      } else if (api.groups.length > 0) {
+        options = { ...options, position: { referenceGroup: api.groups[0].id } };
+      } else {
+        options = Object.fromEntries(
+          Object.entries(options).filter(([k]) => k !== "position"),
+        ) as typeof options;
+      }
+    }
+  }
+
   const prev = quiet ? api.activePanel : null;
   api.addPanel(options);
   if (prev) prev.api.setActive();
