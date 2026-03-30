@@ -492,7 +492,10 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
 
 function useAutoStartSession(
   task: Task | null,
-  handleStartAgent: (agentProfileId: string, prompt?: string) => Promise<void>,
+  handleStartAgent: (
+    agentProfileId: string,
+    opts?: { prompt?: string; autoStart?: boolean },
+  ) => Promise<void>,
 ) {
   const { isLoaded } = useTaskSessions(task?.id ?? null);
   const sessions = useAppStore((state) =>
@@ -515,7 +518,7 @@ function useAutoStartSession(
     if (!agentProfileId) return;
     if (startedRef.current) return;
     startedRef.current = true;
-    handleStartAgent(agentProfileId).catch(() => {
+    handleStartAgent(agentProfileId, { autoStart: true }).catch(() => {
       startedRef.current = false;
     });
   }, [task?.id, isLoaded, sessions.length, agentProfileId, handleStartAgent]);

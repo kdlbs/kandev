@@ -14,7 +14,10 @@ interface UseSessionAgentReturn {
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
-  handleStartAgent: (agentProfileId: string, prompt?: string) => Promise<void>;
+  handleStartAgent: (
+    agentProfileId: string,
+    opts?: { prompt?: string; autoStart?: boolean },
+  ) => Promise<void>;
   handleStopAgent: () => Promise<void>;
 }
 
@@ -47,14 +50,15 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
   const isAgentRunning = taskSessionState === "STARTING" || taskSessionState === "RUNNING";
 
   const handleStartAgent = useCallback(
-    async (agentProfileId: string, prompt?: string) => {
+    async (agentProfileId: string, opts?: { prompt?: string; autoStart?: boolean }) => {
       if (!task?.id) return;
       if (!agentProfileId) return;
 
       setIsAgentLoading(true);
       try {
         const { request } = buildStartRequest(task.id, agentProfileId, {
-          prompt: prompt ?? task.description ?? "",
+          prompt: opts?.prompt ?? task.description ?? "",
+          autoStart: opts?.autoStart,
         });
         await launchSession(request);
       } catch {

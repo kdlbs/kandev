@@ -133,9 +133,11 @@ test.describe("Workflow automation", () => {
     await apiClient.createWorkflowStep(workflow.id, "Review", 2);
     const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 3);
 
-    // Todo: on_turn_complete moves task to In Progress after the first agent turn.
+    // Todo: auto_start_agent on enter (so useAutoStartSession can start the agent),
+    // on_turn_complete moves task to In Progress after the first agent turn.
     await apiClient.updateWorkflowStep(todoStep.id, {
       events: {
+        on_enter: [{ type: "auto_start_agent" }],
         on_turn_complete: [{ type: "move_to_next" }],
       },
     });
@@ -545,6 +547,82 @@ test.describe("Workflow automation", () => {
     // Stepper shows In Progress as current step
     await expect(session.stepperStep("In Progress")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
+    });
+  });
+
+  /**
+   * Seeds a 2-step workflow (Waiting → In Progress).
+   * "Waiting" has NO events — it's a manual holding step.
+   * "In Progress" has on_enter: [auto_start_agent].
+   *
+   * Creates a task in "Waiting" and navigates to it. The frontend's
+   * useAutoStartSession hook fires session.launch, but the backend should
+   * block auto-start because the step lacks auto_start_agent.
+   *
+   * Verifies:
+   * - Opening a task in a non-auto-start step does NOT launch the agent
+   * - The idle input is visible (user can manually start)
+   * - Manually sending a message DOES start the agent
+   */
+  test("non-auto-start step blocks agent launch on task open", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Waiting Step Workflow");
+
+    // Waiting step: no events at all
+    const waitingStep = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0);
+    // In Progress: has auto_start_agent (not used in this test, just to show contrast)
+    await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const agentProfileId = seedData.agentProfileId;
+
+    // Create task in Waiting step
+    const task = await apiClient.createTask(seedData.workspaceId, "Waiting Task", {
+      description: "/e2e:simple-message",
+      workflow_id: workflow.id,
+      workflow_step_id: waitingStep.id,
+      agent_profile_id: agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Navigate to kanban, then click the task card to open the task page.
+    // useAutoStartSession fires session.launch when the task page loads.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = testPage.locator('[data-testid^="task-card-"]', {
+      has: testPage.locator('[data-testid="task-card-title"]', { hasText: "Waiting Task" }),
+    });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Wait for the idle input (chat is ready)
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+
+    // Verify the backend did NOT create any session for this task.
+    // The useAutoStartSession hook fires session.launch with auto_start: true,
+    // but the backend blocks it because the step lacks auto_start_agent.
+    const sessions = await apiClient.listTaskSessions(task.id);
+    expect(sessions.total).toBe(0);
+
+    // The chat should show the empty state — no agent messages
+    await expect(testPage.getByText("No messages yet")).toBeVisible();
+
+    // Stepper shows Waiting as current step (task didn't move)
+    await expect(session.stepperStep("Waiting")).toHaveAttribute("aria-current", "step", {
+      timeout: 5_000,
     });
   });
 

@@ -16,6 +16,7 @@ export function buildStartRequest(
     prompt?: string;
     planMode?: boolean;
     priority?: number;
+    autoStart?: boolean;
     attachments?: MessageAttachment[];
   },
 ): BuildResult {
@@ -29,6 +30,7 @@ export function buildStartRequest(
       prompt: opts?.prompt,
       plan_mode: opts?.planMode,
       priority: opts?.priority,
+      auto_start: opts?.autoStart,
       attachments: opts?.attachments,
     },
     layout: opts?.planMode ? "plan" : "default",

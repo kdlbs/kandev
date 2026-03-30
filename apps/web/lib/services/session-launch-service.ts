@@ -28,6 +28,7 @@ export type LaunchSessionRequest = {
   priority?: number;
   launch_workspace?: boolean;
   skip_message_record?: boolean;
+  auto_start?: boolean;
   attachments?: MessageAttachment[];
 };
 
