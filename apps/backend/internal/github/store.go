@@ -142,7 +142,7 @@ func (s *Store) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRW
 // GetPRWatchByTask returns the PR watch for a task (first match).
 func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, error) {
 	var w PRWatch
-	err := s.ro.GetContext(ctx, &w, `SELECT * FROM github_pr_watches WHERE task_id = ? LIMIT 1`, taskID)
+	err := s.ro.GetContext(ctx, &w, `SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1`, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

@@ -135,6 +135,7 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	if syncErr := p.service.SyncTaskPR(ctx, watch.TaskID, status); syncErr != nil {
 		p.logger.Error("failed to sync task PR",
 			zap.String("task_id", watch.TaskID), zap.Error(syncErr))
+		return // Keep watch so the next cycle can retry
 	}
 
 	// Auto-cleanup: remove watch when PR is merged or closed.

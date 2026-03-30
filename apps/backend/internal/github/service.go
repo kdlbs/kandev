@@ -401,6 +401,9 @@ func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string
 
 // SyncTaskPR updates a TaskPR record with the latest PR status.
 func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatus) error {
+	if status == nil || status.PR == nil {
+		return fmt.Errorf("sync task PR: missing PR data for task %s", taskID)
+	}
 	tp, err := s.store.GetTaskPR(ctx, taskID)
 	if err != nil || tp == nil {
 		return err
@@ -485,13 +488,14 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
-	tp, assocErr := s.AssociatePRWithTask(ctx, taskID, pr)
-	if assocErr != nil {
+	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, pr); assocErr != nil {
 		s.logger.Error("failed to associate PR with task during sync",
 			zap.String("task_id", taskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
-	return tp, nil
+	// Also fetch status so the first response includes review/check state
+	watch.PRNumber = pr.Number
+	return s.triggerPRStatusSync(ctx, watch, taskID)
 }
 
 func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {

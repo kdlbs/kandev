@@ -21,6 +21,8 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
+	rawDB.SetMaxIdleConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 

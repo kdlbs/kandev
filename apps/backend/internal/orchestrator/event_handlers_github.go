@@ -623,12 +623,6 @@ func (s *Service) buildWatchedSessionSet(ctx context.Context) map[string]bool {
 	return set
 }
 
-// sessionHasWatch checks if a PR watch already exists for a session.
-func (s *Service) sessionHasWatch(ctx context.Context, sessionID string) bool {
-	existing, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
-	return err == nil && existing != nil
-}
-
 // subscribeGitHubEvents subscribes to GitHub-related events on the event bus.
 func (s *Service) subscribeGitHubEvents() {
 	if s.eventBus == nil {

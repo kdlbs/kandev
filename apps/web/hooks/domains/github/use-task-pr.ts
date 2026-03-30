@@ -65,13 +65,14 @@ export function useTaskPR(taskId: string | null) {
   }, [taskId]);
 
   useEffect(() => {
-    if (!taskId || pr) return;
+    if (!taskId) return;
 
-    // Initial sync attempt
+    // Always sync once when the task becomes active (freshness)
     refresh();
 
-    // Retry periodically until PR is found or max retries reached.
-    // The backend may still be creating the PR watch when we first try.
+    // If no PR in store yet, retry periodically until found
+    if (pr) return;
+
     const interval = setInterval(() => {
       if (retryRef.current >= SYNC_MAX_RETRIES) {
         clearInterval(interval);

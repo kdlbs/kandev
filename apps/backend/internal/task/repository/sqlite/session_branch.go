@@ -16,6 +16,9 @@ func (r *Repository) ListSessionsWithBranches(ctx context.Context) ([]models.Ses
 		INNER JOIN task_session_worktrees tsw ON tsw.session_id = ts.id
 		WHERE t.archived_at IS NULL
 		  AND tsw.worktree_branch != ''
+		  AND tsw.deleted_at IS NULL
+		  AND tsw.status = 'active'
+		GROUP BY ts.id
 		ORDER BY ts.started_at DESC
 	`)
 	if err != nil {
