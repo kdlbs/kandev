@@ -66,6 +66,13 @@ func isBranchCheckedOutError(output string) bool {
 		strings.Contains(out, "is already used by worktree at")
 }
 
+// isFetchRefusedCheckedOut checks if a git fetch error is caused by the branch
+// being checked out in another worktree. Git refuses to update a local branch
+// ref that is currently checked out.
+func isFetchRefusedCheckedOut(output string) bool {
+	return strings.Contains(strings.ToLower(output), "refusing to fetch into branch")
+}
+
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error
 // based on the command output.
 func ClassifyGitError(output string, _ error) error {

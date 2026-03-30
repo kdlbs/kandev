@@ -278,7 +278,11 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		if err != nil {
 			return nil, err
 		}
-		startPoint = req.CheckoutBranch
+		if fetchResult.StartPoint != "" {
+			startPoint = fetchResult.StartPoint
+		} else {
+			startPoint = req.CheckoutBranch
+		}
 	}
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -396,6 +400,7 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 
 // FetchBranchResult holds the outcome of a fetchBranchToLocal call.
 type FetchBranchResult struct {
+	StartPoint    string // Ref to use as worktree start point (e.g., "origin/branch"); empty = use local branch
 	Warning       string // User-friendly warning (non-empty when fell back to local)
 	WarningDetail string // Raw git command output for debugging
 }
@@ -417,6 +422,19 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch+":"+branch)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
+
+		// If the branch is checked out in another worktree, git refuses to update
+		// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
+		// which is always safe regardless of worktree state.
+		if isFetchRefusedCheckedOut(outputStr) {
+			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch)
+			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
+				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
+					zap.String("branch", branch))
+				return &FetchBranchResult{StartPoint: "origin/" + branch}, nil
+			}
+		}
+
 		m.logger.Warn("fetch from origin failed, checking local branch",
 			zap.String("branch", branch),
 			zap.String("output", outputStr),
