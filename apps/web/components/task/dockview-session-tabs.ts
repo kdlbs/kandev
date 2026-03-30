@@ -88,8 +88,10 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // Always remove the generic "chat" panel when a session is active —
     // it's replaced by per-session tabs. Must run before the early return
     // so restored layouts with both "chat" and session panels get cleaned up.
+    // Skip removal in maximized state to avoid triggering the safety net
+    // which could disrupt the saved maximize layout.
     const chatPanel = api.getPanel("chat");
-    if (chatPanel) {
+    if (chatPanel && !useDockviewStore.getState().preMaximizeLayout) {
       api.removePanel(chatPanel);
     }
     if (api.getPanel(`session:${effectiveSessionId}`)) {
