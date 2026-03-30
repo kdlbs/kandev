@@ -56,12 +56,7 @@ test.describe("Session tab cleanup", () => {
   }) => {
     test.setTimeout(90_000);
 
-    await createTaskAndNavigate(
-      testPage,
-      apiClient,
-      seedData,
-      "Single Session Tab Task",
-    );
+    await createTaskAndNavigate(testPage, apiClient, seedData, "Single Session Tab Task");
 
     // Should have exactly one session tab (the named agent tab)
     const sessionTabs = testPage.locator("[data-testid^='session-tab-']");
