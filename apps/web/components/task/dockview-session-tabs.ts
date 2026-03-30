@@ -85,6 +85,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!effectiveSessionId) return;
     const api = useDockviewStore.getState().api;
     if (!api) return;
+
     // Always remove the generic "chat" panel when a session is active —
     // it's replaced by per-session tabs. Must run before the early return
     // so restored layouts with both "chat" and session panels get cleaned up.
