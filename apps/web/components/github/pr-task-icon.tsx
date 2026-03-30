@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
-function getPRStatusColor(pr: TaskPR): string {
+export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return "text-purple-500";
   if (pr.state === "closed") return "text-red-500";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {

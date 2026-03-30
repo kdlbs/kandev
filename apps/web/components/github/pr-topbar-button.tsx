@@ -6,14 +6,9 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { getPRStatusColor } from "@/components/github/pr-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
-
-function prIconColor(state: string): string {
-  if (state === "merged") return "text-purple-500";
-  if (state === "closed") return "text-red-500";
-  return "text-green-600";
-}
 
 function PRStatusIcon({ pr }: { pr: TaskPR }) {
   // Terminal states take priority
@@ -55,7 +50,7 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
           className="cursor-pointer gap-1.5 px-2"
           onClick={addPRPanel}
         >
-          <IconGitPullRequest className={`h-4 w-4 ${prIconColor(pr.state)}`} />
+          <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
           <span className="text-xs font-medium">#{pr.pr_number}</span>
           <PRStatusIcon pr={pr} />
         </Button>
