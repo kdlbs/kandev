@@ -2,9 +2,17 @@ package github
 
 import (
 	"context"
+	"database/sql"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 func TestGetPR_NilClient(t *testing.T) {
@@ -415,6 +423,221 @@ func TestFindLatestCommentTime(t *testing.T) {
 			}
 			if !got.Equal(*tt.want) {
 				t.Errorf("got %v, want %v", *got, *tt.want)
+			}
+		})
+	}
+}
+
+// --- mockEventBus for SyncTaskPR tests ---
+
+type mockEventBus struct {
+	mu     sync.Mutex
+	events []*bus.Event
+}
+
+func (m *mockEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (m *mockEventBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (m *mockEventBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
+	return nil, nil
+}
+
+func (m *mockEventBus) Close() {}
+
+func (m *mockEventBus) IsConnected() bool { return true }
+
+func (m *mockEventBus) publishedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.events)
+}
+
+// setupSyncTest creates a Service backed by in-memory SQLite and a mock event bus.
+func setupSyncTest(t *testing.T) (*Service, *Store, *mockEventBus) {
+	t.Helper()
+
+	rawDB, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	rawDB.SetMaxIdleConns(1)
+	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	eb := &mockEventBus{}
+	svc := NewService(nil, "pat", nil, store, eb, log)
+
+	return svc, store, eb
+}
+
+func TestSyncTaskPR_PublishesEventOnChange(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "owner",
+		Repo:       "repo",
+		PRNumber:   1,
+		PRURL:      "https://github.com/owner/repo/pull/1",
+		PRTitle:    "Initial",
+		HeadBranch: "feat",
+		BaseBranch: "main",
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	status := &PRStatus{
+		PR: &PR{
+			Number:    1,
+			Title:     "Updated title",
+			State:     "open",
+			RepoOwner: "owner",
+			RepoName:  "repo",
+		},
+	}
+
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync task PR: %v", err)
+	}
+
+	if got := eb.publishedCount(); got != 1 {
+		t.Errorf("expected 1 event after change, got %d", got)
+	}
+}
+
+func TestSyncTaskPR_NoEventWhenUnchanged(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:      "t1",
+		Owner:       "owner",
+		Repo:        "repo",
+		PRNumber:    1,
+		PRURL:       "https://github.com/owner/repo/pull/1",
+		PRTitle:     "Same title",
+		HeadBranch:  "feat",
+		BaseBranch:  "main",
+		State:       "open",
+		Additions:   10,
+		Deletions:   5,
+		ReviewState: "approved",
+		ChecksState: "success",
+		ReviewCount: 2,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	status := &PRStatus{
+		PR: &PR{
+			Number:    1,
+			Title:     "Same title",
+			State:     "open",
+			Additions: 10,
+			Deletions: 5,
+			RepoOwner: "owner",
+			RepoName:  "repo",
+		},
+		ReviewState: "approved",
+		ChecksState: "success",
+		ReviewCount: 2,
+	}
+
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync task PR: %v", err)
+	}
+
+	if got := eb.publishedCount(); got != 0 {
+		t.Errorf("expected 0 events when unchanged, got %d", got)
+	}
+}
+
+func TestSyncTaskPR_SecondIdenticalSyncNoEvent(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "owner",
+		Repo:       "repo",
+		PRNumber:   1,
+		PRURL:      "https://github.com/owner/repo/pull/1",
+		PRTitle:    "Original",
+		HeadBranch: "feat",
+		BaseBranch: "main",
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	status := &PRStatus{
+		PR: &PR{
+			Number:    1,
+			Title:     "Changed",
+			State:     "open",
+			RepoOwner: "owner",
+			RepoName:  "repo",
+		},
+	}
+
+	// First sync: data changed -> event.
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("expected 1 event after first sync, got %d", got)
+	}
+
+	// Second sync with same data -> no additional event.
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Errorf("expected still 1 event after identical second sync, got %d", got)
+	}
+}
+
+func TestTimeEqual(t *testing.T) {
+	now := time.Now()
+	later := now.Add(time.Second)
+
+	tests := []struct {
+		name string
+		a, b *time.Time
+		want bool
+	}{
+		{"both nil", nil, nil, true},
+		{"a nil", nil, &now, false},
+		{"b nil", &now, nil, false},
+		{"equal", &now, &now, true},
+		{"not equal", &now, &later, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := timeEqual(tt.a, tt.b); got != tt.want {
+				t.Errorf("timeEqual() = %v, want %v", got, tt.want)
 			}
 		})
 	}
