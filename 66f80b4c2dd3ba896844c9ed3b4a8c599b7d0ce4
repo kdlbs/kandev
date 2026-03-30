@@ -1,0 +1,1 @@
+{"v":4,"author":"carlosmflorencio@gmail.com","week":"2026-03-30","files":{"apps/web/lib/demo/demo-data.ts":{"ai_del_ai":0,"ai_del_usr":0,"usr_del_usr":3,"usr_del_ai":0,"ai_add":0,"usr_hashes":["448e0e4c","4ce82180"],"usr_add":2,"usr_lines":[74,75]}},"agents":["user_only"],"source":"hook","orig_sha":"66f80b4c2dd3ba896844c9ed3b4a8c599b7d0ce4"}
