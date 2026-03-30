@@ -186,7 +186,10 @@ export function CommitRow({
           }
         }}
       >
-        <span className="shrink-0">
+        <span
+          className="shrink-0"
+          title={commit.pushed === true ? "Pushed to remote" : "Local commit (not yet pushed)"}
+        >
           <span className="sr-only">
             {commit.pushed === true ? "Pushed commit" : "Unpushed commit"}
           </span>

@@ -177,6 +177,18 @@ func TestCreateWorktree_CheckoutBranchNoFetchWarningWithRemote(t *testing.T) {
 	if sha1 != sha2 {
 		t.Fatalf("worktree SHAs differ: wt1=%q, wt2=%q", sha1, sha2)
 	}
+
+	// Both worktrees should have upstream set to origin/feature/pr-branch
+	// so that "git rev-list branch...@{upstream}" gives correct ahead/behind counts.
+	const wantUpstream = "origin/feature/pr-branch"
+	upstream1 := strings.TrimSpace(runGit(t, wt1.Path, "rev-parse", "--abbrev-ref", "@{upstream}"))
+	if upstream1 != wantUpstream {
+		t.Fatalf("first worktree upstream = %q, want %q", upstream1, wantUpstream)
+	}
+	upstream2 := strings.TrimSpace(runGit(t, wt2.Path, "rev-parse", "--abbrev-ref", "@{upstream}"))
+	if upstream2 != wantUpstream {
+		t.Fatalf("second worktree upstream = %q, want %q", upstream2, wantUpstream)
+	}
 }
 
 // initGitRepoWithRemote creates a bare "origin" repo, clones it, and creates

@@ -376,6 +376,8 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 // addWorktreeForBranch creates the git worktree, trying the checkout branch directly first
 // and falling back to a suffixed branch if the checkout branch is already in use.
+// When a checkout branch is specified, it sets the upstream tracking branch to
+// origin/<checkout-branch> so ahead/behind counts are relative to the PR's remote branch.
 func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, worktreePath, fallbackBranch, startPoint, baseRef string) (string, string, error) {
 	if req.CheckoutBranch == "" {
 		id, err := m.gitAddWorktree(ctx, req.RepositoryPath, fallbackBranch, worktreePath, baseRef)
@@ -385,6 +387,7 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	// Try checking out the PR branch directly (common case: single task per PR).
 	id, err := m.gitAddWorktreeExisting(ctx, req.RepositoryPath, req.CheckoutBranch, worktreePath)
 	if err == nil {
+		m.setUpstreamIfExists(ctx, worktreePath, req.CheckoutBranch, req.CheckoutBranch)
 		return id, req.CheckoutBranch, nil
 	}
 	if !errors.Is(err, ErrBranchCheckedOut) {
@@ -395,7 +398,31 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	// using the original branch name with a random suffix.
 	suffixed := req.CheckoutBranch + "-" + SmallSuffix(3)
 	id, err = m.gitAddWorktree(ctx, req.RepositoryPath, suffixed, worktreePath, startPoint)
+	if err == nil {
+		m.setUpstreamIfExists(ctx, worktreePath, suffixed, req.CheckoutBranch)
+	}
 	return id, suffixed, err
+}
+
+// setUpstreamIfExists sets the upstream tracking branch for a worktree branch
+// to origin/<remoteBranch> if the remote-tracking ref exists. Non-fatal on failure.
+func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBranch, remoteBranch string) {
+	upstream := "origin/" + remoteBranch
+	// Verify the remote-tracking ref exists
+	verifyCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", upstream)
+	verifyCmd.Dir = worktreePath
+	if err := verifyCmd.Run(); err != nil {
+		return
+	}
+	cmd := exec.CommandContext(ctx, "git", "branch", "--set-upstream-to="+upstream, localBranch)
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		m.logger.Debug("failed to set upstream (non-fatal)",
+			zap.String("branch", localBranch),
+			zap.String("upstream", upstream),
+			zap.String("output", string(out)),
+			zap.Error(err))
+	}
 }
 
 // FetchBranchResult holds the outcome of a fetchBranchToLocal call.
