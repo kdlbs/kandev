@@ -64,14 +64,16 @@ export function useTaskPR(taskId: string | null) {
     retryRef.current = 0;
   }, [taskId]);
 
+  // Sync once when the task becomes active (freshness check).
+  // Intentionally excludes `pr` so WS-driven store updates don't re-trigger.
   useEffect(() => {
     if (!taskId) return;
-
-    // Always sync once when the task becomes active (freshness)
     refresh();
+  }, [taskId, refresh]);
 
-    // If no PR in store yet, retry periodically until found
-    if (pr) return;
+  // Retry polling when no PR is in the store yet.
+  useEffect(() => {
+    if (!taskId || pr) return;
 
     const interval = setInterval(() => {
       if (retryRef.current >= SYNC_MAX_RETRIES) {
