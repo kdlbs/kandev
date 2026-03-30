@@ -230,10 +230,7 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
-    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
-    await taskRow.hover();
-    await taskRow.getByRole("button", { name: "Task actions" }).click();
-    await this.page.getByRole("menuitem", { name: "Delete" }).click();
+    await this.openSidebarMenuAndClick(title, "Delete");
   }
 
   /**
@@ -241,10 +238,38 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, and clicks "Archive".
    */
   async archiveTaskInSidebar(title: string): Promise<void> {
+    await this.openSidebarMenuAndClick(title, "Archive");
+  }
+
+  /**
+   * Open a sidebar task's dropdown menu and click an item.
+   * Retries the full open-click sequence if the menu gets detached by a
+   * React re-render (e.g. WS-driven sidebar update) between open and click.
+   */
+  private async openSidebarMenuAndClick(
+    title: string,
+    itemName: string,
+    retries = 3,
+  ): Promise<void> {
     const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        await taskRow.hover();
+        await taskRow.getByRole("button", { name: "Task actions" }).click();
+        const menuItem = this.page.getByRole("menuitem", { name: itemName });
+        await menuItem.waitFor({ state: "visible", timeout: 3_000 });
+        await menuItem.click({ timeout: 3_000 });
+        return;
+      } catch {
+        // Menu was likely detached by a re-render — dismiss and retry
+        await this.page.keyboard.press("Escape");
+        await this.page.waitForTimeout(500);
+      }
+    }
+    // Final attempt without catch
     await taskRow.hover();
     await taskRow.getByRole("button", { name: "Task actions" }).click();
-    await this.page.getByRole("menuitem", { name: "Archive" }).click();
+    await this.page.getByRole("menuitem", { name: itemName }).click();
   }
 
   stepperStep(name: string): Locator {
