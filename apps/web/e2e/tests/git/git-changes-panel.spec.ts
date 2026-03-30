@@ -1290,17 +1290,15 @@ test.describe("Git Changes Panel", () => {
     await expect(commitsList.locator("li")).toHaveCount(2, { timeout: 5_000 });
 
     // Unpushed commit should have arrow-up icon (emerald)
-    await expect(session.changes.getByText("Unpushed commit")).toBeVisible({ timeout: 10_000 });
     const unpushedRow = commitsList.locator("li", { hasText: "Unpushed commit" });
+    await expect(unpushedRow).toBeVisible({ timeout: 10_000 });
     await expect(unpushedRow.locator(".tabler-icon-arrow-up")).toBeVisible({ timeout: 5_000 });
 
     // Pushed commit should have git-commit icon (muted)
-    await expect(session.changes.getByText("Pushed commit", { exact: true })).toBeVisible({
-      timeout: 10_000,
-    });
     const pushedRow = commitsList.locator(
       `li:has-text("Pushed commit"):not(:has-text("Unpushed"))`,
     );
+    await expect(pushedRow).toBeVisible({ timeout: 10_000 });
     await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
   });
 });
