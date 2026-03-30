@@ -225,17 +225,17 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 
 	hasNew := false
 
-	// Check for check status changes
+	// Check for check status or review state changes
 	if status.ChecksState != watch.LastCheckStatus {
 		hasNew = true
 	}
-
-	// Note: we no longer check for new comments here since GetPRStatus skips comments.
-	// Comment tracking is handled on-demand when the user opens the PR panel.
+	if status.ReviewState != watch.LastReviewState {
+		hasNew = true
+	}
 
 	// Update watch timestamps
 	now := time.Now().UTC()
-	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState); err != nil {
+	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
 	}
 
@@ -480,8 +480,17 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	if err != nil || pr == nil {
 		return nil, err
 	}
-	_ = s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number)
-	tp, _ := s.AssociatePRWithTask(ctx, taskID, pr)
+	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
+		s.logger.Error("failed to update PR watch number during sync",
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		return nil, fmt.Errorf("update PR watch: %w", err)
+	}
+	tp, assocErr := s.AssociatePRWithTask(ctx, taskID, pr)
+	if assocErr != nil {
+		s.logger.Error("failed to associate PR with task during sync",
+			zap.String("task_id", taskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
+		return nil, fmt.Errorf("associate PR: %w", assocErr)
+	}
 	return tp, nil
 }
 

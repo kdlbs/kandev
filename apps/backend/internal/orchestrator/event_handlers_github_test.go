@@ -59,6 +59,9 @@ func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, p
 	m.updatedPRNumber = prNumber
 	return nil
 }
+func (m *mockGitHubService) ListActivePRWatches(context.Context) ([]*github.PRWatch, error) {
+	return nil, nil
+}
 func (m *mockGitHubService) RecordReviewPRTask(context.Context, string, string, string, int, string, string) error {
 	return nil
 }

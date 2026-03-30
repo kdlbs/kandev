@@ -59,11 +59,13 @@ export function useTaskPR(taskId: string | null) {
       });
   }, [taskId, setTaskPR]);
 
+  // Reset retry count when taskId changes
   useEffect(() => {
-    if (!taskId || pr) {
-      retryRef.current = 0;
-      return;
-    }
+    retryRef.current = 0;
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId || pr) return;
 
     // Initial sync attempt
     refresh();

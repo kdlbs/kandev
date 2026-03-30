@@ -104,6 +104,7 @@ type PRWatch struct {
 	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
 	LastCommentAt   *time.Time `json:"last_comment_at,omitempty" db:"last_comment_at"`
 	LastCheckStatus string     `json:"last_check_status" db:"last_check_status"`
+	LastReviewState string     `json:"last_review_state" db:"last_review_state"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
@@ -253,8 +254,6 @@ type PRFeedbackEvent struct {
 	PRNumber       int    `json:"pr_number"`
 	Owner          string `json:"owner"`
 	Repo           string `json:"repo"`
-	NewComments    int    `json:"new_comments"`
-	ChecksChanged  bool   `json:"checks_changed"`
 	NewCheckStatus string `json:"new_check_status"`
 	NewReviewState string `json:"new_review_state"`
 }

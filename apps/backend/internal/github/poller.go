@@ -177,7 +177,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 
 	// Update last_checked_at regardless of result
 	now := time.Now().UTC()
-	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "")
+	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
 
 	if pr == nil {
 		return
@@ -216,7 +216,6 @@ func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, statu
 		PRNumber:       watch.PRNumber,
 		Owner:          watch.Owner,
 		Repo:           watch.Repo,
-		ChecksChanged:  true,
 		NewCheckStatus: status.ChecksState,
 		NewReviewState: status.ReviewState,
 	}

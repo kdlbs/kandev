@@ -40,6 +40,7 @@ const createTablesSQL = `
 		last_checked_at DATETIME,
 		last_comment_at DATETIME,
 		last_check_status TEXT DEFAULT '',
+		last_review_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -103,8 +104,12 @@ const createTablesSQL = `
 `
 
 func (s *Store) initSchema() error {
-	_, err := s.db.Exec(createTablesSQL)
-	return err
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	// Idempotent migrations for existing databases.
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
+	return nil
 }
 
 // --- PR Watch operations ---
@@ -151,12 +156,12 @@ func (s *Store) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	return watches, err
 }
 
-// UpdatePRWatchTimestamps updates the last checked timestamps.
-func (s *Store) UpdatePRWatchTimestamps(ctx context.Context, id string, checkedAt time.Time, commentAt *time.Time, checkStatus string) error {
+// UpdatePRWatchTimestamps updates the last checked timestamps and status fields.
+func (s *Store) UpdatePRWatchTimestamps(ctx context.Context, id string, checkedAt time.Time, commentAt *time.Time, checkStatus, reviewState string) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE github_pr_watches SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, updated_at = ?
+		UPDATE github_pr_watches SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?, updated_at = ?
 		WHERE id = ?`,
-		checkedAt, commentAt, checkStatus, time.Now().UTC(), id)
+		checkedAt, commentAt, checkStatus, reviewState, time.Now().UTC(), id)
 	return err
 }
 

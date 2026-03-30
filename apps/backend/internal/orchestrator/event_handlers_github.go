@@ -28,6 +28,7 @@ type GitHubService interface {
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
+	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
 	RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error
 }
 
@@ -581,9 +582,12 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 		return nil, nil
 	}
 
+	// Batch fetch existing watches to avoid N+1 queries.
+	watchedSessions := s.buildWatchedSessionSet(ctx)
+
 	var result []github.TaskBranchInfo
 	for _, sess := range sessions {
-		if s.sessionHasWatch(ctx, sess.SessionID) {
+		if watchedSessions[sess.SessionID] {
 			continue
 		}
 		owner, repo := s.resolveTaskRepo(ctx, sess.TaskID)
@@ -603,6 +607,20 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 		})
 	}
 	return result, nil
+}
+
+// buildWatchedSessionSet returns a set of session IDs that already have PR watches.
+func (s *Service) buildWatchedSessionSet(ctx context.Context) map[string]bool {
+	watches, err := s.githubService.ListActivePRWatches(ctx)
+	if err != nil {
+		s.logger.Debug("failed to list PR watches for reconciliation", zap.Error(err))
+		return nil
+	}
+	set := make(map[string]bool, len(watches))
+	for _, w := range watches {
+		set[w.SessionID] = true
+	}
+	return set
 }
 
 // sessionHasWatch checks if a PR watch already exists for a session.
