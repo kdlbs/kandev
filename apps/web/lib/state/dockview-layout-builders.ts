@@ -1,6 +1,8 @@
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
 import {
   SIDEBAR_LOCK,
+  SIDEBAR_GROUP,
+  CENTER_GROUP,
   LAYOUT_SIDEBAR_MAX_PX,
   LAYOUT_RIGHT_MAX_PX,
   RIGHT_TOP_GROUP,
@@ -50,15 +52,21 @@ export function focusOrAddPanel(
     return;
   }
   // Guard: if the referenced group no longer exists (stale ID after layout
-  // transition), fall back to the active panel's group or the first group.
+  // transition), try the well-known center group, then the first non-sidebar
+  // group. Avoid falling back to the active panel's group because the user
+  // may have just clicked in the sidebar, which would place the new panel there.
   const pos = options.position;
   if (pos && "referenceGroup" in pos) {
     const groupExists = api.groups.some((g) => g.id === pos.referenceGroup);
     if (!groupExists) {
-      if (api.activePanel) {
-        options = { ...options, position: { referencePanel: api.activePanel.id } };
+      const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
+      const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
+      if (centerGroup) {
+        options = { ...options, position: { ...pos, referenceGroup: centerGroup.id } };
+      } else if (nonSidebarGroup) {
+        options = { ...options, position: { ...pos, referenceGroup: nonSidebarGroup.id } };
       } else if (api.groups.length > 0) {
-        options = { ...options, position: { referenceGroup: api.groups[0].id } };
+        options = { ...options, position: { ...pos, referenceGroup: api.groups[0].id } };
       } else {
         options = Object.fromEntries(
           Object.entries(options).filter(([k]) => k !== "position"),

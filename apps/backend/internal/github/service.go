@@ -400,6 +400,8 @@ func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string
 }
 
 // SyncTaskPR updates a TaskPR record with the latest PR status.
+// It only publishes a github.task_pr.updated event when data actually changed,
+// preventing feedback loops with frontend sync handlers.
 func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatus) error {
 	if status == nil || status.PR == nil {
 		return fmt.Errorf("sync task PR: missing PR data for task %s", taskID)
@@ -408,6 +410,17 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	if err != nil || tp == nil {
 		return err
 	}
+
+	changed := tp.State != status.PR.State ||
+		tp.PRTitle != status.PR.Title ||
+		tp.Additions != status.PR.Additions ||
+		tp.Deletions != status.PR.Deletions ||
+		tp.ReviewState != status.ReviewState ||
+		tp.ChecksState != status.ChecksState ||
+		tp.ReviewCount != status.ReviewCount ||
+		tp.PendingReviewCount != status.PendingReviewCount ||
+		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
+		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
 
 	tp.State = status.PR.State
 	tp.PRTitle = status.PR.Title
@@ -427,13 +440,24 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return fmt.Errorf("update task PR: %w", err)
 	}
 
-	if s.eventBus != nil {
+	if changed && s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
 	}
 	return nil
+}
+
+// timeEqual compares two nullable time pointers for equality.
+func timeEqual(a, b *time.Time) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Equal(*b)
 }
 
 // --- PR info and feedback (live) ---
