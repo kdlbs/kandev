@@ -114,11 +114,14 @@ export function useExpandableDiff({
   const [error, setError] = useState<string | null>(null);
 
   // Reset cached content when inputs change so stale data is never rendered.
+  // Including fileDiffMetadata ensures expansion content is invalidated when
+  // the diff changes (e.g., file modified while Diff panel is open), because
+  // @pierre/diffs uses oldLines/newLines for rendering when present.
   useEffect(() => {
     requestVersionRef.current += 1;
     setLoadedContent(null);
     setError(null);
-  }, [sessionId, filePath, baseRef]);
+  }, [sessionId, filePath, baseRef, fileDiffMetadata]);
 
   const loadContent = useCallback(async () => {
     if (!sessionId || !enableExpansion || loadedContent || isLoading) return;

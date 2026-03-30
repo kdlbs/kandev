@@ -158,6 +158,54 @@ test.describe("Diff update on file change", () => {
       timeout: 15_000,
     });
   });
+
+  test("diff panel auto-updates without re-opening when file changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // This test verifies the Diff [file] panel reactively updates when the
+    // underlying file changes, WITHOUT the user re-clicking the file.
+    const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openFileDiff(testPage, "diff_update_test.txt");
+
+    // Verify initial diff content
+    const diffsContainer = getDiffsContainer(testPage);
+    await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
+    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Switch to chat, trigger the second modification
+    await session.clickSessionChatTab();
+    await session.sendMessage("/e2e:diff-update-modify");
+    await expect(
+      session.chat.getByText("diff-update-modify complete", { exact: false }),
+    ).toBeVisible({ timeout: 45_000 });
+
+    // DO NOT re-open the file diff via Changes tab. Instead, click the diff
+    // panel tab directly — the panel is still mounted, just not the active tab.
+    const diffTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
+    await expect(diffTab).toBeVisible({ timeout: 10_000 });
+    await diffTab.click();
+
+    // The diff should auto-update with the new content (no re-click needed).
+    const updatedDiffsContainer = getDiffsContainer(testPage);
+    await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
+    await expect(
+      updatedDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Verify old content is gone
+    await expect(
+      updatedDiffsContainer.getByText("FIRST_MODIFICATION", { exact: true }),
+    ).toHaveCount(0);
+
+    await expect(updatedDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+  });
 });
 
 test.describe("Untracked file diff update", () => {
