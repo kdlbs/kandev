@@ -24,17 +24,14 @@ function collectPanelIds(state: LayoutState): Set<string> {
 }
 
 /**
- * Merge current live panels into a target preset layout.
- *
- * Captures panels from the current dockview state that aren't in the target
- * preset and appends them as tabs in the center group. This prevents panels
- * from being lost when switching layouts.
+ * Pure merge logic: merge extra panels from the current state into a target
+ * preset layout.  Session panels (`session:*`) replace the generic `chat`
+ * panel rather than coexisting alongside it.
  */
-export function mergeCurrentPanelsIntoPreset(
-  api: DockviewApi,
+export function mergePanelsIntoPreset(
+  currentState: LayoutState,
   targetPreset: LayoutState,
 ): LayoutState {
-  const currentState = fromDockviewApi(api);
   const currentPanels = collectAllPanels(currentState);
   const targetPanelIds = collectPanelIds(targetPreset);
 
@@ -45,6 +42,8 @@ export function mergeCurrentPanelsIntoPreset(
   if (extraPanels.length === 0) {
     return targetPreset;
   }
+
+  const hasSessionPanels = extraPanels.some((p) => p.id.startsWith("session:"));
 
   console.debug(
     "[layout-merger] merging extra panels into preset:",
@@ -57,13 +56,19 @@ export function mergeCurrentPanelsIntoPreset(
     const groups = col.groups.map((group, idx) => {
       if (idx !== 0) return group;
 
-      const existingIds = new Set(group.panels.map((p) => p.id));
+      // If extra panels include session tabs, drop the generic "chat"
+      // placeholder — session panels replace it.
+      const basePanels = hasSessionPanels
+        ? group.panels.filter((p) => p.id !== "chat")
+        : group.panels;
+
+      const existingIds = new Set(basePanels.map((p) => p.id));
       const toAdd = extraPanels.filter((p) => !existingIds.has(p.id));
-      if (toAdd.length === 0) return group;
+      if (toAdd.length === 0 && basePanels.length === group.panels.length) return group;
 
       return {
         ...group,
-        panels: [...group.panels, ...toAdd],
+        panels: [...basePanels, ...toAdd],
       };
     });
 
@@ -71,4 +76,18 @@ export function mergeCurrentPanelsIntoPreset(
   });
 
   return { columns: mergedColumns };
+}
+
+/**
+ * Merge current live panels into a target preset layout.
+ *
+ * Captures panels from the current dockview state that aren't in the target
+ * preset and appends them as tabs in the center group. This prevents panels
+ * from being lost when switching layouts.
+ */
+export function mergeCurrentPanelsIntoPreset(
+  api: DockviewApi,
+  targetPreset: LayoutState,
+): LayoutState {
+  return mergePanelsIntoPreset(fromDockviewApi(api), targetPreset);
 }

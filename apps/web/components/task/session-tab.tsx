@@ -230,10 +230,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
         >
           <div className="flex items-center">
-            {isPrimary && (
+            {isPrimary && sessionCount > 1 && (
               <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
             )}
-            {sessionNumber != null && (
+            {sessionNumber != null && sessionCount > 1 && (
               <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
                 {sessionNumber}
               </span>

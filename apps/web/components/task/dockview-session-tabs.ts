@@ -85,6 +85,13 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!effectiveSessionId) return;
     const api = useDockviewStore.getState().api;
     if (!api) return;
+    // Always remove the generic "chat" panel when a session is active —
+    // it's replaced by per-session tabs. Must run before the early return
+    // so restored layouts with both "chat" and session panels get cleaned up.
+    const chatPanel = api.getPanel("chat");
+    if (chatPanel) {
+      api.removePanel(chatPanel);
+    }
     if (api.getPanel(`session:${effectiveSessionId}`)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
       return;
@@ -95,11 +102,6 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (useDockviewStore.getState().preMaximizeLayout !== null) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
       return;
-    }
-    // Always remove the generic "chat" panel — it's replaced by per-session tabs
-    const chatPanel = api.getPanel("chat");
-    if (chatPanel) {
-      api.removePanel(chatPanel);
     }
     // Resolve position: prefer centerGroupId if the group still exists,
     // fall back to placing right of sidebar, or omit position entirely.
