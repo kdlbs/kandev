@@ -1,8 +1,9 @@
 ---
 name: code-review
 description: Review changed code in the Kandev monorepo for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
-tools: Bash, Read, Grep, Glob
+tools: Bash, Read, Edit, Write, Grep, Glob
 model: opus
+permissionMode: acceptEdits
 ---
 
 # Code Review

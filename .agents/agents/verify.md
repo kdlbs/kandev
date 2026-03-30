@@ -18,7 +18,7 @@ Run the full verification pipeline for the Kandev monorepo, then fix any issues 
    ```
    - If the current branch is `main`, skip this step.
    - If the branch is stacked on another feature branch (not main), skip this step.
-     Detect: `git merge-base --is-ancestor origin/main HEAD` — if false, the branch diverged from a non-main base; skip rebase.
+     Detect: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null` — if the upstream is NOT `origin/main` (e.g., another feature branch), skip rebase.
    - Otherwise, rebase:
      ```bash
      git rebase origin/main
