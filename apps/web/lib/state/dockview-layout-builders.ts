@@ -62,11 +62,11 @@ export function focusOrAddPanel(
       const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
       const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
       if (centerGroup) {
-        options = { ...options, position: { referenceGroup: centerGroup.id } };
+        options = { ...options, position: { ...pos, referenceGroup: centerGroup.id } };
       } else if (nonSidebarGroup) {
-        options = { ...options, position: { referenceGroup: nonSidebarGroup.id } };
+        options = { ...options, position: { ...pos, referenceGroup: nonSidebarGroup.id } };
       } else if (api.groups.length > 0) {
-        options = { ...options, position: { referenceGroup: api.groups[0].id } };
+        options = { ...options, position: { ...pos, referenceGroup: api.groups[0].id } };
       } else {
         options = Object.fromEntries(
           Object.entries(options).filter(([k]) => k !== "position"),
