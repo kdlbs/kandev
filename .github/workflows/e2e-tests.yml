@@ -72,6 +72,7 @@ jobs:
         with:
           name: e2e-web-build
           path: apps/web/.next/
+          include-hidden-files: true
           retention-days: 1
 
   e2e:
