@@ -97,8 +97,9 @@ test.describe("Terminal keyboard navigation", () => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "CtrlArrow Test");
     await focusTerminal(testPage, session);
 
-    // Start bash explicitly — it has Ctrl+Arrow bindings via /etc/inputrc
-    // (zsh without .zshrc doesn't bind Ctrl+Arrow by default)
+    // Start bash explicitly (zsh without .zshrc doesn't bind Ctrl+Arrow).
+    // Use --norc --noprofile so readline starts clean, then bind Ctrl+Arrow
+    // manually — macOS /bin/bash (3.2) lacks /etc/inputrc with word-movement.
     await testPage.keyboard.type("bash --norc --noprofile");
     await testPage.keyboard.press("Enter");
     // Wait for bash prompt (bash --norc uses "bash-X.Y$ " pattern)
@@ -106,6 +107,20 @@ test.describe("Terminal keyboard navigation", () => {
       .poll(async () => (await readTerminalBuffer(testPage)).includes("bash"), {
         timeout: 5_000,
         message: "Waiting for bash prompt",
+      })
+      .toBe(true);
+
+    // Bind Ctrl+Arrow to word movement (required on macOS bash 3.2 which has
+    // no /etc/inputrc; harmless on Linux bash 5.x where it's already bound)
+    await testPage.keyboard.type("bind '\"\\e[1;5D\": backward-word'");
+    await testPage.keyboard.press("Enter");
+    await testPage.keyboard.type("bind '\"\\e[1;5C\": forward-word'");
+    await testPage.keyboard.press("Enter");
+    // Wait for prompt to return after bind commands
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).includes("bash"), {
+        timeout: 5_000,
+        message: "Waiting for bash prompt after bind",
       })
       .toBe(true);
 
