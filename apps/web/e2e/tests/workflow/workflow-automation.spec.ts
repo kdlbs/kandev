@@ -611,11 +611,11 @@ test.describe("Workflow automation", () => {
     // Wait for the idle input (chat is ready)
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Verify the backend did NOT create any session for this task.
-    // The useAutoStartSession hook fires session.launch with auto_start: true,
-    // but the backend blocks it because the step lacks auto_start_agent.
+    // The backend downgraded auto-start to prepare: session exists but agent
+    // was NOT started. Verify session was created in CREATED state.
     const sessions = await apiClient.listTaskSessions(task.id);
-    expect(sessions.total).toBe(0);
+    expect(sessions.total).toBe(1);
+    expect(sessions.sessions[0].state).toBe("CREATED");
 
     // The chat should show the empty state — no agent messages
     await expect(testPage.getByText("No messages yet")).toBeVisible();

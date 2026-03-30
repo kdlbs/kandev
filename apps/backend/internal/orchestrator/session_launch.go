@@ -120,14 +120,13 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 // launchStart creates a new session and launches the agent.
-// If the task's current workflow step does not have auto_start_agent, the request
-// is downgraded to a prepare (workspace-only, no agent) to prevent unwanted auto-starts
-// from the frontend's useAutoStartSession hook.
+// If the request is an auto-start and the task's current workflow step does not
+// have auto_start_agent, the request is downgraded to a prepare (workspace-only,
+// no agent) to prevent unwanted auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart {
-		if blocked, resp := s.blockIfStepDisallowsAutoStart(ctx, req); blocked {
-			return resp, nil
-		}
+	if req.AutoStart && s.shouldBlockAutoStart(ctx, req) {
+		req.LaunchWorkspace = true
+		return s.launchPrepare(ctx, req)
 	}
 
 	execution, err := s.StartTask(
@@ -141,39 +140,34 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
 
-// blockIfStepDisallowsAutoStart checks whether the task's workflow step allows
-// auto-starting the agent. Returns true (blocked) when the step exists but does
-// not have auto_start_agent in its on_enter events.
-// Tasks without a workflow step (ephemeral, no workflow) are never blocked.
-func (s *Service) blockIfStepDisallowsAutoStart(ctx context.Context, req *LaunchSessionRequest) (bool, *LaunchSessionResponse) {
+// shouldBlockAutoStart checks whether the task's workflow step allows auto-starting
+// the agent. Returns true when the step exists but does not have auto_start_agent
+// in its on_enter events. Tasks without a workflow step are never blocked.
+func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRequest) bool {
 	if s.workflowStepGetter == nil {
-		return false, nil
+		return false
 	}
 
 	task, err := s.repo.GetTask(ctx, req.TaskID)
 	if err != nil || task.WorkflowStepID == "" {
-		return false, nil
+		return false
 	}
 
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || step == nil {
-		return false, nil
+		return false
 	}
 
 	if step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
-		return false, nil
+		return false
 	}
 
-	s.logger.Info("blocked auto-start: workflow step lacks auto_start_agent",
+	s.logger.Info("auto-start downgraded to prepare: step lacks auto_start_agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("workflow_step_id", task.WorkflowStepID),
 		zap.String("step_name", step.Name))
 
-	return true, &LaunchSessionResponse{
-		Success: false,
-		TaskID:  req.TaskID,
-		State:   "blocked",
-	}
+	return true
 }
 
 // launchStartCreated starts agent execution on an existing CREATED session.
