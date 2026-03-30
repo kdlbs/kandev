@@ -1,6 +1,9 @@
 ---
 name: code-review
 description: Review changed code for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
+tools: Bash, Read, Edit, Write, Grep, Glob
+model: opus
+permissionMode: acceptEdits
 ---
 
 # Code Review
@@ -48,8 +51,8 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Algorithm complexity appropriate for the data scale
 
 **Complexity limits** (CI also enforces these, but catch them early to avoid pushing and waiting):
-- Go: functions ≤80 lines, ≤50 statements, cyclomatic ≤15, cognitive ≤30, nesting ≤5
-- TS: files ≤600 lines, functions ≤100 lines, cyclomatic ≤15, cognitive ≤20, nesting ≤4
+- Go: functions <=80 lines, <=50 statements, cyclomatic <=15, cognitive <=30, nesting <=5
+- TS: files <=600 lines, functions <=100 lines, cyclomatic <=15, cognitive <=20, nesting <=4
 - If too large or complex, split into smaller cohesive files/functions
 
 **Code quality:**
@@ -71,7 +74,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Backend (Go): new or changed functions/methods should have corresponding tests
 - Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices should have tests
 - We do NOT test React components — skip those
-- Flag untested logic but don't block on it; suggest what tests to add and recommend `/tdd`
+- Flag untested logic but don't block on it; suggest what tests to add
 
 ### 3. Fix or report
 

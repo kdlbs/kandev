@@ -30,11 +30,11 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn             *acp.AgentSideConnection
-	model            string
-	sessions         map[acp.SessionId]bool
-	commandsEmitted  map[acp.SessionId]bool
-	mu               sync.Mutex
+	conn            *acp.AgentSideConnection
+	model           string
+	sessions        map[acp.SessionId]bool
+	commandsEmitted map[acp.SessionId]bool
+	mu              sync.Mutex
 }
 
 func main() {

@@ -1,6 +1,9 @@
 ---
 name: verify
-description: Run format, typecheck, test, and lint across the monorepo. Use after implementing changes.
+description: Run format, typecheck, test, and lint across the monorepo, then fix any issues found. Use before committing code.
+tools: Bash, Read, Edit, Write, Grep, Glob
+model: sonnet
+permissionMode: acceptEdits
 ---
 
 # Verify
@@ -25,7 +28,7 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
      2. Resolve by keeping the correct combination of both changes (don't just pick one side)
      3. `git add <resolved-file>` then `git rebase --continue`
      4. Repeat for each conflicting commit until the rebase completes
-     5. If a conflict is too ambiguous to resolve confidently, abort (`git rebase --abort`) and ask the user for guidance
+     5. If a conflict is too ambiguous to resolve confidently, abort (`git rebase --abort`) and report the issue
 
 2. **Format** (prevents formatter-induced lint failures):
    - `make -C apps/backend fmt`
@@ -41,7 +44,7 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
    - Common fixes:
      - **Type errors**: fix the type, add a missing import, or correct the function signature
      - **Lint — function too long**: extract a helper function or sub-component
-     - **Lint — file too long**: split the file into smaller, cohesive files grouped by responsibility (e.g., separate types, helpers, constants, or sub-domains into their own files)
+     - **Lint — file too long**: split the file into smaller, cohesive files grouped by responsibility
      - **Lint — cyclomatic/cognitive complexity**: simplify conditionals, extract early returns, break into smaller functions
      - **Lint — unused imports**: remove them
      - **Lint — duplicate strings**: extract to a constant
