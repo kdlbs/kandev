@@ -60,22 +60,6 @@ jobs:
       - name: Build backend and web
         run: make build-backend build-web
 
-      - name: Debug build outputs
-        run: |
-          echo "=== Backend binaries ==="
-          ls -la apps/backend/bin/
-          echo "=== .next top-level ==="
-          ls -la apps/web/.next/
-          echo "=== Standalone structure ==="
-          ls -la apps/web/.next/standalone/
-          ls -la apps/web/.next/standalone/web/
-          echo "=== Standalone server.js ==="
-          file apps/web/.next/standalone/web/server.js
-          echo "=== Symlinks in standalone ==="
-          find apps/web/.next/standalone -type l | head -20
-          echo "=== Static dir ==="
-          ls apps/web/.next/static/ | head -5
-
       - name: Upload backend build
         uses: actions/upload-artifact@v4
         with:
@@ -83,12 +67,16 @@ jobs:
           path: apps/backend/bin/
           retention-days: 1
 
+      # Tar the .next directory to preserve pnpm symlinks in the standalone build.
+      # upload-artifact dereferences symlinks which breaks the Node.js module resolution.
+      - name: Package web build
+        run: tar -cf apps/web/next-build.tar -C apps/web .next
+
       - name: Upload web build
         uses: actions/upload-artifact@v4
         with:
           name: e2e-web-build
-          path: apps/web/.next/
-          include-hidden-files: true
+          path: apps/web/next-build.tar
           retention-days: 1
 
   e2e:
@@ -99,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1] # DEBUG: single shard for faster feedback
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
       - name: Checkout code
@@ -136,25 +124,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: e2e-web-build
-          path: apps/web/.next/
+          path: apps/web/
 
-      - name: Debug artifact contents
-        run: |
-          echo "=== Backend binaries ==="
-          ls -la apps/backend/bin/
-          file apps/backend/bin/kandev
-          echo "=== Web standalone ==="
-          ls -la apps/web/.next/standalone/web/server.js 2>&1 || echo "server.js NOT FOUND"
-          ls -la apps/web/.next/standalone/ 2>&1 || echo "standalone/ NOT FOUND"
-          echo "=== .next top-level ==="
-          ls apps/web/.next/ 2>&1
-          echo "=== Static assets ==="
-          ls apps/web/.next/static/ 2>&1 || echo "static/ NOT FOUND"
+      - name: Extract web build
+        working-directory: apps/web
+        run: tar -xf next-build.tar && rm next-build.tar
 
       - name: Run E2E tests (shard ${{ matrix.shard }}/10)
         working-directory: apps/web
-        env:
-          E2E_DEBUG: "1"
         run: npx playwright test --config e2e/playwright.config.ts --shard=${{ matrix.shard }}/10
 
       - name: Upload blob report
