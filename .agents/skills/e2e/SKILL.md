@@ -47,7 +47,7 @@ Prerequisites: `make build-backend build-web` (Make targets do this automaticall
 ## Writing a test
 
 1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
-2. Import fixtures from `../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow)
+2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow)
 3. Use `data-testid` attributes for selectors — add them to components as needed
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data

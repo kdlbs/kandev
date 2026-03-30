@@ -10,8 +10,8 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
  */
 async function createTaskAndNavigate(
   testPage: import("@playwright/test").Page,
-  apiClient: import("../helpers/api-client").ApiClient,
-  seedData: import("../fixtures/test-base").SeedData,
+  apiClient: import("../../helpers/api-client").ApiClient,
+  seedData: import("../../fixtures/test-base").SeedData,
   title: string,
 ) {
   const task = await apiClient.createTaskWithAgent(

@@ -330,15 +330,15 @@ test.describe("Create task regression", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
     // Verify task has exactly one session
-    // Extract task ID from the URL: /t/<taskId>
-    const { sessions } = await apiClient.listTaskSessions(await getTaskIdFromPage(testPage));
+    const taskId = await getTaskIdFromPage(testPage);
+    const { sessions } = await apiClient.listTaskSessions(taskId);
     expect(sessions.length).toBe(1);
     expect(DONE_STATES).toContain(sessions[0].state);
 
     // Verify task environment was created
-    const env = await apiClient.getTaskEnvironment(await getTaskIdFromPage(testPage));
+    const env = await apiClient.getTaskEnvironment(taskId);
     expect(env).not.toBeNull();
-    expect(env!.task_id).toBeTruthy();
+    expect(env!.task_id).toBe(taskId);
     expect(env!.status).toBe("ready");
   });
 
