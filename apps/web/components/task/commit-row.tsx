@@ -186,11 +186,16 @@ export function CommitRow({
           }
         }}
       >
-        {commit.pushed === true ? (
-          <IconGitCommit className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        ) : (
-          <IconArrowUp className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-        )}
+        <span className="shrink-0">
+          <span className="sr-only">
+            {commit.pushed === true ? "Pushed commit" : "Unpushed commit"}
+          </span>
+          {commit.pushed === true ? (
+            <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <IconArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-emerald-500" />
+          )}
+        </span>
         <code className="font-mono text-muted-foreground text-[11px]">
           {commit.commit_sha.slice(0, 7)}
         </code>

@@ -410,7 +410,7 @@ function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolea
       {showCommitsList && (
         <CommitsSection
           commits={props.commits}
-          isLast={false}
+          isLast={!showCommits}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
           onAmendCommit={props.dialogs.handleOpenAmendDialog}
