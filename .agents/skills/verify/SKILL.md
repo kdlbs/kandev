@@ -5,7 +5,7 @@ description: Run format, typecheck, test, and lint across the monorepo. Use afte
 
 # Verify
 
-Run the full verification pipeline for the Kandev monorepo, then fix any issues found.
+Run the full verification pipeline for the monorepo, then fix any issues found.
 
 ## Steps
 

@@ -1,11 +1,11 @@
 ---
 name: code-review
-description: Review changed code in the Kandev monorepo for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
+description: Review changed code for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
 ---
 
 # Code Review
 
-Review the current changes in the Kandev codebase (Go + Next.js monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
+Review the current changes in the codebase (Go + Next.js monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
 
 ## Steps
 

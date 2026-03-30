@@ -8,7 +8,7 @@ permissionMode: acceptEdits
 
 # Verify
 
-Run the full verification pipeline for the Kandev monorepo, then fix any issues found.
+Run the full verification pipeline for the monorepo, then fix any issues found.
 
 ## Steps
 
