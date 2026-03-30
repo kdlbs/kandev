@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  IconGitCommit,
   IconGitPullRequest,
   IconCloudUpload,
   IconChevronDown,
@@ -140,6 +139,9 @@ export function CommitsSection({
   onAmendCommit,
   onResetToCommit,
 }: CommitsSectionProps) {
+  // Find the first unpushed commit for context menu actions (amend/revert only on latest unpushed)
+  const firstUnpushedIndex = commits.findIndex((c) => c.pushed !== true);
+
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
@@ -153,11 +155,11 @@ export function CommitsSection({
           <CommitRow
             key={`${commit.commit_sha}-${index}`}
             commit={commit}
-            isLatest={index === 0}
+            isLatest={index === firstUnpushedIndex}
             onOpenCommitDetail={onOpenCommitDetail}
-            onAmendCommit={onAmendCommit}
-            onRevertCommit={onRevertCommit}
-            onResetToCommit={onResetToCommit}
+            onAmendCommit={commit.pushed ? undefined : onAmendCommit}
+            onRevertCommit={commit.pushed ? undefined : onRevertCommit}
+            onResetToCommit={commit.pushed ? undefined : onResetToCommit}
           />
         ))}
       </ul>
@@ -431,54 +433,6 @@ function PRFileRow({
         <FileStatusIcon status={file.status} />
       </div>
     </li>
-  );
-}
-
-// --- PR commits section ---
-
-type PRCommitItem = {
-  sha: string;
-  message: string;
-  author_login: string;
-  author_date: string;
-};
-
-type PRCommitsSectionProps = {
-  commits: PRCommitItem[];
-  isLast: boolean;
-  onOpenCommitDetail?: (sha: string) => void;
-};
-
-export function PRCommitsSection({ commits, isLast, onOpenCommitDetail }: PRCommitsSectionProps) {
-  return (
-    <TimelineSection
-      dotColor={DOT_COLORS.pr}
-      label="PR Commits"
-      count={commits.length}
-      isLast={isLast}
-      data-testid="pr-commits-timeline-section"
-    >
-      <ul className="space-y-0.5">
-        {commits.map((commit, index) => (
-          <li
-            key={`${commit.sha}-${index}`}
-            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-            onClick={() => onOpenCommitDetail?.(commit.sha)}
-          >
-            <IconGitCommit className="h-3.5 w-3.5 text-purple-500 shrink-0" />
-            <code className="font-mono text-muted-foreground text-[11px]">
-              {commit.sha.slice(0, 7)}
-            </code>
-            <span className="flex-1 min-w-0 truncate text-foreground">{commit.message}</span>
-            {commit.author_login && (
-              <span className="shrink-0 text-[10px] text-muted-foreground">
-                {commit.author_login}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </TimelineSection>
   );
 }
 

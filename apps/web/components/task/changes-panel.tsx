@@ -19,7 +19,6 @@ import {
   ActionButtonsSection,
   ReviewProgressBar,
   PRFilesSection,
-  PRCommitsSection,
 } from "./changes-panel-timeline";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
@@ -163,6 +162,65 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
   );
 }
 
+type MergedCommit = {
+  commit_sha: string;
+  commit_message: string;
+  insertions: number;
+  deletions: number;
+  pushed: boolean;
+};
+
+/**
+ * Merge local session commits and PR commits into a single list.
+ * Local commits matched to a PR commit are marked pushed; unmatched are unpushed.
+ * PR-only commits (e.g. from other contributors) are appended as pushed.
+ * Order: unpushed first, then pushed.
+ */
+export function mergeCommits(
+  localCommits: {
+    commit_sha: string;
+    commit_message: string;
+    insertions: number;
+    deletions: number;
+  }[],
+  prCommits: { sha: string; message: string; additions: number; deletions: number }[],
+): MergedCommit[] {
+  const matchesPR = (localSha: string) =>
+    prCommits.some((pr) => pr.sha.startsWith(localSha) || localSha.startsWith(pr.sha));
+
+  const unpushed: MergedCommit[] = [];
+  const pushed: MergedCommit[] = [];
+  const matchedPRShas = new Set<string>();
+
+  for (const c of localCommits) {
+    if (matchesPR(c.commit_sha)) {
+      pushed.push({ ...c, pushed: true });
+      for (const pr of prCommits) {
+        if (pr.sha.startsWith(c.commit_sha) || c.commit_sha.startsWith(pr.sha)) {
+          matchedPRShas.add(pr.sha);
+        }
+      }
+    } else {
+      unpushed.push({ ...c, pushed: false });
+    }
+  }
+
+  // Add PR-only commits (not matched to any local commit)
+  for (const pr of prCommits) {
+    if (!matchedPRShas.has(pr.sha)) {
+      pushed.push({
+        commit_sha: pr.sha,
+        commit_message: pr.message,
+        insertions: pr.additions,
+        deletions: pr.deletions,
+        pushed: true,
+      });
+    }
+  }
+
+  return [...unpushed, ...pushed];
+}
+
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
   return baseBranch ? baseBranch.replace(/^origin\//, "") : "main";
 }
@@ -202,8 +260,21 @@ type ChangesPanelBodyProps = {
   unstagedFiles: ChangedFile[];
   stagedFiles: ChangedFile[];
   prFiles: PRChangedFile[];
-  prCommits: { sha: string; message: string; author_login: string; author_date: string }[];
-  commits: ReturnType<typeof useSessionGit>["commits"];
+  prCommits: {
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    additions: number;
+    deletions: number;
+  }[];
+  commits: {
+    commit_sha: string;
+    commit_message: string;
+    insertions: number;
+    deletions: number;
+    pushed?: boolean;
+  }[];
   pendingStageFiles: Set<string>;
   reviewedCount: number;
   totalFileCount: number;
@@ -265,7 +336,6 @@ type TimelineProps = Pick<
   | "hasStaged"
   | "hasCommits"
   | "hasPRFiles"
-  | "hasPRCommits"
   | "canPush"
   | "canCreatePR"
   | "existingPrUrl"
@@ -373,9 +443,9 @@ function ChangesPanelTimeline(props: TimelineProps) {
     );
   }
 
-  const unpushedCommits = filterUnpushedCommits(props.commits, props.prCommits);
-  const hasUnpushedCommits = unpushedCommits.length > 0;
-  const hasLocalChanges = props.hasUnstaged || props.hasStaged || hasUnpushedCommits;
+  const mergedCommits = mergeCommits(props.commits, props.prCommits);
+  const hasMergedCommits = mergedCommits.length > 0;
+  const hasLocalChanges = props.hasUnstaged || props.hasStaged || hasMergedCommits;
 
   return (
     <div className="flex flex-col">
@@ -383,24 +453,15 @@ function ChangesPanelTimeline(props: TimelineProps) {
         <div data-testid="pr-files-section">
           <PRFilesSection
             files={props.prFiles}
-            isLast={!props.hasPRCommits && !hasLocalChanges}
-            onOpenDiff={props.onOpenDiffFile}
-          />
-        </div>
-      )}
-      {props.hasPRCommits && (
-        <div data-testid="pr-commits-section">
-          <PRCommitsSection
-            commits={props.prCommits}
             isLast={!hasLocalChanges}
-            onOpenCommitDetail={props.onOpenCommitDetail}
+            onOpenDiff={props.onOpenDiffFile}
           />
         </div>
       )}
       <TimelineLocalChanges
         {...props}
-        commits={unpushedCommits}
-        hasCommitsToShow={hasUnpushedCommits}
+        commits={mergedCommits}
+        hasCommitsToShow={hasMergedCommits}
       />
     </div>
   );

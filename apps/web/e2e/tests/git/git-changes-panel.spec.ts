@@ -1128,7 +1128,7 @@ test.describe("Git Changes Panel", () => {
    * Verifies that local commits section is hidden when all commits are already
    * in the PR. Only unpushed commits should be shown in the local section.
    */
-  test("hides local commits section when all commits are in PR", async ({
+  test("shows pushed commits with git-commit icon when all commits are in PR", async ({
     testPage,
     apiClient,
     seedData,
@@ -1200,18 +1200,21 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // PR commits section should be visible
-    await expect(session.prCommitsSection()).toBeVisible({ timeout: 15_000 });
-
-    // Local commits section should be hidden (all commits are in the PR)
-    await expect(testPage.getByTestId("commits-section")).not.toBeVisible({ timeout: 10_000 });
+    // Unified commits section should show the commit as pushed (git-commit icon, not arrow-up)
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("Commit in PR")).toBeVisible({ timeout: 10_000 });
+    const commitsList = testPage.getByTestId("commits-list");
+    await expect(commitsList.locator("li")).toHaveCount(1, { timeout: 5_000 });
+    // Pushed commits use IconGitCommit (tabler-icon-git-commit), not IconArrowUp
+    await expect(commitsList.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
+    await expect(commitsList.locator(".tabler-icon-arrow-up")).not.toBeVisible();
   });
 
   /**
-   * Verifies that only unpushed commits appear in the local section
-   * when some commits are already in the PR.
+   * Verifies that pushed and unpushed commits are visually distinguished
+   * in the unified commits list.
    */
-  test("shows only unpushed commits when some commits are in PR", async ({
+  test("distinguishes pushed and unpushed commits in unified list", async ({
     testPage,
     apiClient,
     seedData,
@@ -1252,7 +1255,7 @@ test.describe("Git Changes Panel", () => {
 
     git.createFile("unpushed.txt", "unpushed content");
     git.stageFile("unpushed.txt");
-    const unpushedSha = git.commit("Unpushed commit");
+    git.commit("Unpushed commit");
 
     // Mock a PR that only contains the first commit
     await apiClient.mockGitHubAssociateTaskPR({
@@ -1281,18 +1284,23 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // PR commits section should show
-    await expect(session.prCommitsSection()).toBeVisible({ timeout: 15_000 });
-
-    // Local commits section should show only the unpushed commit
+    // Unified commits section should show both commits
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
-    await expect(session.changes.getByText("Unpushed commit")).toBeVisible({ timeout: 10_000 });
-    await expect(session.changes.getByText(unpushedSha.slice(0, 7))).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // The local commits section should only contain the unpushed commit
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator("li")).toHaveCount(1, { timeout: 5_000 });
+    await expect(commitsList.locator("li")).toHaveCount(2, { timeout: 5_000 });
+
+    // Unpushed commit should have arrow-up icon (emerald)
+    await expect(session.changes.getByText("Unpushed commit")).toBeVisible({ timeout: 10_000 });
+    const unpushedRow = commitsList.locator("li", { hasText: "Unpushed commit" });
+    await expect(unpushedRow.locator(".tabler-icon-arrow-up")).toBeVisible({ timeout: 5_000 });
+
+    // Pushed commit should have git-commit icon (muted)
+    await expect(session.changes.getByText("Pushed commit", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    const pushedRow = commitsList.locator(
+      `li:has-text("Pushed commit"):not(:has-text("Unpushed"))`,
+    );
+    await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
   });
 });

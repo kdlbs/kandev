@@ -329,7 +329,7 @@ test.describe("PR external detection", () => {
     await expect(session.prFilesSection().getByText("feature.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("index.ts")).toBeVisible();
 
-    await expect(session.prCommitsSection()).toBeVisible();
-    await expect(session.prCommitsSection().getByText("implement feature X")).toBeVisible();
+    await expect(session.commitsSection()).toBeVisible();
+    await expect(session.commitsSection().getByText("implement feature X")).toBeVisible();
   });
 });

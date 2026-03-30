@@ -301,9 +301,9 @@ export class SessionPage {
     return this.changes.getByTestId("pr-files-section");
   }
 
-  /** PR commits section within the changes panel. */
-  prCommitsSection(): Locator {
-    return this.changes.getByTestId("pr-commits-section");
+  /** Commits section within the changes panel (unified list of pushed + unpushed commits). */
+  commitsSection(): Locator {
+    return this.changes.getByTestId("commits-section");
   }
 
   /**

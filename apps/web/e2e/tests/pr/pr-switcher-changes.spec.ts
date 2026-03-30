@@ -193,8 +193,8 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
-    await expect(session.prCommitsSection()).toBeVisible();
-    await expect(session.prCommitsSection().getByText("fix auth token expiry")).toBeVisible();
+    await expect(session.commitsSection()).toBeVisible();
+    await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
 
     // --- Switch to Task B ---
     await session.taskInSidebar("Dashboard Task").click();
@@ -210,9 +210,9 @@ test.describe("PR switcher changes panel", () => {
     // Verify Task A files are NOT visible
     await expect(session.prFilesSection().getByText("auth.go")).not.toBeVisible();
 
-    await expect(session.prCommitsSection()).toBeVisible();
-    await expect(session.prCommitsSection().getByText("add dashboard component")).toBeVisible();
-    await expect(session.prCommitsSection().getByText("add api client")).toBeVisible();
+    await expect(session.commitsSection()).toBeVisible();
+    await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible();
+    await expect(session.commitsSection().getByText("add api client")).toBeVisible();
 
     // --- Switch to Task C (no PR) ---
     await session.taskInSidebar("No PR Task").click();
@@ -221,7 +221,7 @@ test.describe("PR switcher changes panel", () => {
 
     // PR sections should NOT be visible for a task without a PR
     await expect(session.prFilesSection()).not.toBeVisible({ timeout: 10_000 });
-    await expect(session.prCommitsSection()).not.toBeVisible();
+    await expect(session.commitsSection()).not.toBeVisible();
 
     // --- Switch back to Task A to confirm data reappears ---
     await session.taskInSidebar("Auth Fix Task").click();
@@ -231,6 +231,6 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
-    await expect(session.prCommitsSection().getByText("fix auth token expiry")).toBeVisible();
+    await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
   });
 });

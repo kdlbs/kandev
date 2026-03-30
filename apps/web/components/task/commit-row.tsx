@@ -1,6 +1,12 @@
 "use client";
 
-import { IconGitCommit, IconArrowBackUp, IconPencil, IconHistoryToggle } from "@tabler/icons-react";
+import {
+  IconGitCommit,
+  IconArrowBackUp,
+  IconPencil,
+  IconHistoryToggle,
+  IconArrowUp,
+} from "@tabler/icons-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -15,6 +21,7 @@ export type CommitItem = {
   commit_message: string;
   insertions: number;
   deletions: number;
+  pushed?: boolean;
 };
 
 /** Context menu for commit items */
@@ -179,7 +186,11 @@ export function CommitRow({
           }
         }}
       >
-        <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+        {commit.pushed === true ? (
+          <IconGitCommit className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        ) : (
+          <IconArrowUp className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+        )}
         <code className="font-mono text-muted-foreground text-[11px]">
           {commit.commit_sha.slice(0, 7)}
         </code>
