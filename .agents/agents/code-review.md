@@ -1,6 +1,8 @@
 ---
 name: code-review
 description: Review changed code in the Kandev monorepo for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
+tools: Bash, Read, Grep, Glob
+model: opus
 ---
 
 # Code Review
@@ -11,7 +13,12 @@ Review the current changes in the Kandev codebase (Go + Next.js monorepo). Every
 
 ### 1. Run verification first
 
-Delegate to the **`verify` sub-agent** to ensure all formatters, linters, typechecks, and tests pass. Do NOT proceed with review until verify passes clean.
+Run the full verification pipeline to ensure all formatters, linters, typechecks, and tests pass before reviewing:
+- `make -C apps/backend fmt` then `cd apps && pnpm format`
+- `make -C apps/backend test lint`
+- `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint`
+
+Do NOT proceed with review until all commands pass clean.
 
 ### 2. Identify changed files and check scope
 
@@ -52,8 +59,8 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Algorithm complexity appropriate for the data scale
 
 **Complexity limits** (CI also enforces these, but catch them early to avoid pushing and waiting):
-- Go: functions ≤80 lines, ≤50 statements, cyclomatic ≤15, cognitive ≤30, nesting ≤5
-- TS: files ≤600 lines, functions ≤100 lines, cyclomatic ≤15, cognitive ≤20, nesting ≤4
+- Go: functions <=80 lines, <=50 statements, cyclomatic <=15, cognitive <=30, nesting <=5
+- TS: files <=600 lines, functions <=100 lines, cyclomatic <=15, cognitive <=20, nesting <=4
 - If too large or complex, split into smaller cohesive files/functions
 
 **Code quality:**
@@ -75,7 +82,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Backend (Go): new or changed functions/methods should have corresponding tests
 - Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices should have tests
 - We do NOT test React components — skip those
-- Flag untested logic but don't block on it; suggest what tests to add and recommend `/tdd`
+- Flag untested logic but don't block on it; suggest what tests to add
 
 ### 4. Fix or report
 

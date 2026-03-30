@@ -1,6 +1,9 @@
 ---
 name: simplify
 description: Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting, replace cleverness with clarity. Run after implementing a feature.
+tools: Bash, Read, Edit, Write, Grep, Glob
+model: opus
+permissionMode: acceptEdits
 ---
 
 # Simplify
@@ -48,7 +51,12 @@ Work through each changed file. For each simplification, verify tests still pass
 
 ### 3. Verify
 
-Delegate to the **`verify` sub-agent** to ensure all tests, lints, and typechecks still pass. If anything breaks, the simplification changed behavior — revert it.
+Run the full verification pipeline to ensure all tests, lints, and typechecks still pass:
+- `make -C apps/backend fmt` then `cd apps && pnpm format`
+- `make -C apps/backend test lint`
+- `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint`
+
+If anything breaks, the simplification changed behavior — revert it.
 
 ### 4. Summary
 

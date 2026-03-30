@@ -102,7 +102,7 @@ After each wave completes:
 
 ## Phase 5: QA
 
-Run `/qa` as a subagent (keeps the main context clean) to verify the feature works end-to-end:
+Delegate to the **`qa` sub-agent** to verify the feature works end-to-end. It will:
 - Trace the wiring (exports used, APIs called, data flows)
 - Test the happy path
 - Try to break it (boundary values, error paths, concurrency)
@@ -110,9 +110,9 @@ Run `/qa` as a subagent (keeps the main context clean) to verify the feature wor
 
 ## Phase 6: Review
 
-1. Run `/simplify` to clean up the implementation
-2. Run `/verify` to ensure fmt, typecheck, test, and lint all pass
-3. Run `/code-review` as a subagent on the changes
+1. Delegate to the **`simplify` sub-agent** to clean up the implementation
+2. Delegate to the **`verify` sub-agent** to ensure fmt, typecheck, test, and lint all pass
+3. Delegate to the **`code-review` sub-agent** to review the changes
 4. Fix any blockers, present suggestions to the user
 5. Summarize: what was built, key decisions, files modified, suggested next steps
 6. If significant architectural decisions were made, record them via `/record decision`

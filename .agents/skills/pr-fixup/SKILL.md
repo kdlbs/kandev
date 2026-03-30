@@ -161,19 +161,21 @@ Then resolve using the thread `id`:
 gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
 ```
 
-### 7. Commit and push
+### 7. Verify, commit, and push
 
-Run `/commit` to stage and commit fixes (it runs `/verify` internally). Use a descriptive message, e.g.:
-```
-fix: address PR review feedback
-fix: resolve CI lint failures
-fix: address review feedback and fix CI failures
-```
+1. Delegate to the **`verify` sub-agent** to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
 
-Then push:
-```bash
-git push
-```
+2. Stage and commit the fixes directly. Use a descriptive Conventional Commits message, e.g.:
+   ```
+   fix: address PR review feedback
+   fix: resolve CI lint failures
+   fix: address review feedback and fix CI failures
+   ```
+
+3. Push:
+   ```bash
+   git push
+   ```
 
 ### 8. Summary
 
