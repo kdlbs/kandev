@@ -10,20 +10,34 @@ import type { TaskPR } from "@/lib/types/github";
 export function useWorkspacePRs(workspaceId: string | null) {
   const setTaskPRs = useAppStore((state) => state.setTaskPRs);
   const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
-  const fetchedRef = useRef("");
+  const fetchedRef = useRef<string | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
-    if (!workspaceId || fetchedRef.current === workspaceId) return;
+    if (!workspaceId) {
+      fetchedRef.current = null;
+      return;
+    }
+    if (fetchedRef.current === workspaceId) return;
+
+    const requestId = ++requestRef.current;
     fetchedRef.current = workspaceId;
 
     setTaskPRsLoading(true);
     listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
       .then((response) => {
+        if (requestRef.current !== requestId) return;
         setTaskPRs(response?.task_prs ?? {});
       })
-      .catch(() => {})
+      .catch(() => {
+        if (requestRef.current === requestId) {
+          fetchedRef.current = null; // allow retry on failure
+        }
+      })
       .finally(() => {
-        setTaskPRsLoading(false);
+        if (requestRef.current === requestId) {
+          setTaskPRsLoading(false);
+        }
       });
   }, [workspaceId, setTaskPRs, setTaskPRsLoading]);
 }

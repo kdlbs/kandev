@@ -428,7 +428,9 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 				sem <- struct{}{}
 				go func(id string) {
 					defer func() { <-sem }()
-					if _, syncErr := s.TriggerPRSync(context.Background(), id); syncErr != nil {
+					syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					if _, syncErr := s.TriggerPRSync(syncCtx, id); syncErr != nil {
 						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
 					}
 				}(taskID)

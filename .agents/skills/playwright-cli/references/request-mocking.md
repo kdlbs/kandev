@@ -27,7 +27,7 @@ playwright-cli unroute
 
 ## URL Patterns
 
-```
+```text
 **/api/users           - Exact path match
 **/api/*/details       - Wildcard in path
 **/*.{png,jpg,jpeg}    - Match file extensions
