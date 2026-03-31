@@ -271,7 +271,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		AgentExecutionID: resp.AgentExecutionID,
 		AgentProfileID:   session.AgentProfileID,
 		StartedAt:        now,
-		SessionState:     v1.TaskSessionState(session.State),
+		SessionState:     v1.TaskSessionStateStarting,
 		LastUpdate:       now,
 		SessionID:        session.ID,
 		WorktreePath:     worktreePath,
@@ -530,13 +530,8 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	session.ContainerID = resp.ContainerID
 	session.ErrorMessage = ""
 	if startAgent {
-		switch session.State {
-		case models.TaskSessionStateWaitingForInput, models.TaskSessionStateRunning:
-			// Preserve state during resume -- avoid moving the task in the sidebar.
-		default:
-			session.State = models.TaskSessionStateStarting
-			session.CompletedAt = nil
-		}
+		session.State = models.TaskSessionStateStarting
+		session.CompletedAt = nil
 	}
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {

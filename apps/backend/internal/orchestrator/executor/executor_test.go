@@ -618,135 +618,48 @@ func TestRepositoryCloneURL(t *testing.T) {
 	}
 }
 
-func TestPersistResumeState_PreservesActiveSessionStates(t *testing.T) {
+func TestPersistResumeState_SetsStartingState(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{}
+	executor := newTestExecutor(t, agentManager, repo)
 	now := time.Now().UTC()
 	completedAt := now.Add(-time.Hour)
 
-	tests := []struct {
-		name             string
-		initialState     models.TaskSessionState
-		startAgent       bool
-		setCompletedAt   bool // seed CompletedAt before calling persistResumeState
-		wantState        models.TaskSessionState
-		wantCompletedNil bool // true means CompletedAt should be cleared
-	}{
-		{
-			name:         "preserves WAITING_FOR_INPUT state on resume",
-			initialState: models.TaskSessionStateWaitingForInput,
-			startAgent:   true,
-			wantState:    models.TaskSessionStateWaitingForInput,
-		},
-		{
-			name:         "preserves RUNNING state on resume",
-			initialState: models.TaskSessionStateRunning,
-			startAgent:   true,
-			wantState:    models.TaskSessionStateRunning,
-		},
-		{
-			name:             "transitions CANCELLED to STARTING and clears CompletedAt",
-			initialState:     models.TaskSessionStateCancelled,
-			startAgent:       true,
-			setCompletedAt:   true,
-			wantState:        models.TaskSessionStateStarting,
-			wantCompletedNil: true,
-		},
-		{
-			name:             "transitions FAILED to STARTING and clears CompletedAt",
-			initialState:     models.TaskSessionStateFailed,
-			startAgent:       true,
-			setCompletedAt:   true,
-			wantState:        models.TaskSessionStateStarting,
-			wantCompletedNil: true,
-		},
-		{
-			name:           "does not change state when startAgent is false",
-			initialState:   models.TaskSessionStateWaitingForInput,
-			startAgent:     false,
-			setCompletedAt: true,
-			wantState:      models.TaskSessionStateWaitingForInput,
-		},
-	}
+	t.Run("sets STARTING when startAgent is true", func(t *testing.T) {
+		session := &models.TaskSession{
+			ID:          "session-1",
+			TaskID:      "task-1",
+			State:       models.TaskSessionStateWaitingForInput,
+			CompletedAt: &completedAt,
+			UpdatedAt:   now,
+		}
+		repo.sessions[session.ID] = session
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := newMockRepository()
-			agentManager := &mockAgentManager{}
-			executor := newTestExecutor(t, agentManager, repo)
+		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
+		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
 
-			session := &models.TaskSession{
-				ID:        "session-1",
-				TaskID:    "task-1",
-				State:     tt.initialState,
-				UpdatedAt: now,
-			}
-			if tt.setCompletedAt {
-				session.CompletedAt = &completedAt
-			}
-			repo.sessions[session.ID] = session
+		if session.State != models.TaskSessionStateStarting {
+			t.Errorf("expected state STARTING, got %s", session.State)
+		}
+		if session.CompletedAt != nil {
+			t.Error("expected CompletedAt to be nil")
+		}
+	})
 
-			resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
-			executor.persistResumeState(context.Background(), "task-1", session, resp, tt.startAgent, executorConfig{}, nil)
+	t.Run("does not change state when startAgent is false", func(t *testing.T) {
+		session := &models.TaskSession{
+			ID:        "session-2",
+			TaskID:    "task-1",
+			State:     models.TaskSessionStateWaitingForInput,
+			UpdatedAt: now,
+		}
+		repo.sessions[session.ID] = session
 
-			if session.State != tt.wantState {
-				t.Errorf("expected state %s, got %s", tt.wantState, session.State)
-			}
-			if tt.wantCompletedNil && session.CompletedAt != nil {
-				t.Error("expected CompletedAt to be nil after transition to STARTING")
-			}
-			if !tt.wantCompletedNil && tt.setCompletedAt && session.CompletedAt == nil {
-				t.Error("expected CompletedAt to remain non-nil")
-			}
-		})
-	}
-}
+		resp := &LaunchAgentResponse{AgentExecutionID: "exec-2"}
+		executor.persistResumeState(context.Background(), "task-1", session, resp, false, executorConfig{}, nil)
 
-func TestResumeSession_PreservesSessionState(t *testing.T) {
-	repo := newMockRepository()
-
-	session := &models.TaskSession{
-		ID:             "session-1",
-		TaskID:         "task-1",
-		AgentProfileID: "profile-1",
-		State:          models.TaskSessionStateWaitingForInput,
-		StartedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
-	}
-	repo.sessions[session.ID] = session
-
-	repo.tasks["task-1"] = &models.Task{
-		ID:          "task-1",
-		WorkspaceID: "workspace-1",
-		Title:       "Test Task",
-	}
-
-	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           "task-1",
-		AgentExecutionID: "old-exec-1",
-		ResumeToken:      "resume-token-1",
-	}
-
-	agentManager := &mockAgentManager{
-		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			return &LaunchAgentResponse{
-				AgentExecutionID: "new-exec-1",
-				Status:           v1.AgentStatusStarting,
-			}, nil
-		},
-		startAgentProcessFunc: func(ctx context.Context, id string) error {
-			return nil
-		},
-	}
-
-	executor := newTestExecutor(t, agentManager, repo)
-
-	execution, err := executor.ResumeSession(context.Background(), session, true)
-	if err != nil {
-		t.Fatalf("ResumeSession failed: %v", err)
-	}
-
-	if execution.SessionState != v1.TaskSessionStateWaitingForInput {
-		t.Errorf("expected SessionState %s, got %s", v1.TaskSessionStateWaitingForInput, execution.SessionState)
-	}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)
+		}
+	})
 }

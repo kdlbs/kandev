@@ -66,10 +66,21 @@ const REVIEW_STATES = new Set<TaskSessionState>([
 const IN_PROGRESS_STATES = new Set<TaskSessionState>(["RUNNING"]);
 const BACKLOG_STATES = new Set<TaskSessionState>(["CREATED", "STARTING"]);
 
+const TASK_STATE_REVIEW = new Set<TaskState | undefined>(["REVIEW", "COMPLETED"]);
+const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS"]);
+
 function classifyTask(
   sessionState: TaskSessionState | undefined,
+  taskState?: TaskState,
 ): "review" | "in_progress" | "backlog" {
   if (!sessionState) return "backlog";
+  // STARTING is transient (e.g., resume after backend restart). Use the
+  // task-level state so the sidebar position stays stable.
+  if (sessionState === "STARTING" && taskState) {
+    if (TASK_STATE_REVIEW.has(taskState)) return "review";
+    if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
+    return "backlog";
+  }
   if (REVIEW_STATES.has(sessionState)) return "review";
   if (IN_PROGRESS_STATES.has(sessionState)) return "in_progress";
   if (BACKLOG_STATES.has(sessionState)) return "backlog";
@@ -189,7 +200,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
     const backlog: TaskSwitcherItem[] = [];
 
     for (const task of tasks) {
-      const bucket = classifyTask(task.sessionState);
+      const bucket = classifyTask(task.sessionState, task.state);
       if (bucket === "review") review.push(task);
       else if (bucket === "in_progress") inProgress.push(task);
       else backlog.push(task);
