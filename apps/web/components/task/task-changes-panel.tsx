@@ -125,7 +125,7 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
   const pr = useActiveTaskPR();
-  const { files: prDiffFiles } = usePRDiff(
+  const { files: prDiffFiles, loading: prDiffLoading } = usePRDiff(
     pr?.owner ?? null,
     pr?.repo ?? null,
     pr?.pr_number ?? null,
@@ -145,6 +145,12 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   const { reviewedFiles, staleFiles } = useMemo(() => {
     const reviewed = new Set<string>();
     const stale = new Set<string>();
+    // When a PR exists but its diff files are still loading, the file list
+    // temporarily uses cumulative diff content which has a different hash.
+    // Skip review computation until PR diffs arrive to avoid a 1/1 -> 0/1 flash.
+    if (pr && prDiffLoading) {
+      return { reviewedFiles: reviewed, staleFiles: stale };
+    }
     for (const file of allFiles) {
       const reviewState = reviews.get(file.path);
       if (!reviewState?.reviewed) continue;
@@ -156,7 +162,7 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
       }
     }
     return { reviewedFiles: reviewed, staleFiles: stale };
-  }, [allFiles, reviews]);
+  }, [allFiles, reviews, pr, prDiffLoading]);
 
   const totalCommentCount = useMemo(() => {
     if (!commentSessionIds || commentSessionIds.length === 0) return 0;

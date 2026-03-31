@@ -110,8 +110,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   useEffect(() => {
     if (!sessionId || fetchedSessions.has(sessionId)) {
       if (sessionId && reviewsCache[sessionId]) {
-        const cached = reviewsCache[sessionId];
-        queueMicrotask(() => setReviews(cached));
+        queueMicrotask(() => setReviews(reviewsCache[sessionId]));
       }
       return;
     }

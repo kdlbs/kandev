@@ -100,10 +100,10 @@ function KanbanCardBody({
               {repoName}
             </p>
           )}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 min-w-0">
             <p
               data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1"
+              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
             >
               {task.title}
             </p>

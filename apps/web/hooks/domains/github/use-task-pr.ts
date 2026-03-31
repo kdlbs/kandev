@@ -1,35 +1,45 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
-import { listTaskPRs } from "@/lib/api/domains/github-api";
+import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
-/** Fetch and cache PR associations for a batch of task IDs. */
-export function useTaskPRs(taskIds: string[]) {
-  const byTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const loading = useAppStore((state) => state.taskPRs.loading);
+/** Fetch all PR associations for a workspace. */
+export function useWorkspacePRs(workspaceId: string | null) {
   const setTaskPRs = useAppStore((state) => state.setTaskPRs);
   const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
+  const fetchedRef = useRef<string | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
-    if (taskIds.length === 0 || loading) return;
+    if (!workspaceId) {
+      fetchedRef.current = null;
+      return;
+    }
+    if (fetchedRef.current === workspaceId) return;
+
+    const requestId = ++requestRef.current;
+    fetchedRef.current = workspaceId;
+
     setTaskPRsLoading(true);
-    listTaskPRs(taskIds, { cache: "no-store" })
+    listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
       .then((response) => {
+        if (requestRef.current !== requestId) return;
         setTaskPRs(response?.task_prs ?? {});
       })
       .catch(() => {
-        // Keep existing data on error
+        if (requestRef.current === requestId) {
+          fetchedRef.current = null; // allow retry on failure
+        }
       })
       .finally(() => {
-        setTaskPRsLoading(false);
+        if (requestRef.current === requestId) {
+          setTaskPRsLoading(false);
+        }
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskIds.join(",")]);
-
-  return { byTaskId, loading };
+  }, [workspaceId, setTaskPRs, setTaskPRsLoading]);
 }
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds

@@ -238,6 +238,22 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 	return result, nil
 }
 
+// ListTaskPRsByWorkspaceID returns all PR associations for tasks in a workspace.
+func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string]*TaskPR, error) {
+	var prs []TaskPR
+	if err := s.ro.SelectContext(ctx, &prs,
+		`SELECT gtp.* FROM github_task_prs gtp
+		 INNER JOIN tasks t ON gtp.task_id = t.id
+		 WHERE t.workspace_id = ?`, workspaceID); err != nil {
+		return nil, err
+	}
+	result := make(map[string]*TaskPR, len(prs))
+	for i := range prs {
+		result[prs[i].TaskID] = &prs[i]
+	}
+	return result, nil
+}
+
 // UpdateTaskPR updates a task-PR association.
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()

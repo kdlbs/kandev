@@ -9,6 +9,7 @@ import {
   listTaskSessionMessages,
   listQuickChatSessions,
 } from "@/lib/api";
+import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
@@ -136,6 +137,10 @@ export default async function Page({ searchParams }: PageProps) {
         </>
       );
     }
+
+    // Fire-and-forget: warm the backend PR cache for this workspace.
+    // The client will fetch the data after mount via useWorkspacePRs.
+    listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
 
     const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
       listWorkflows(activeWorkspaceId, { cache: "no-store" }),

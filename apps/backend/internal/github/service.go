@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -31,6 +32,9 @@ type TaskSessionChecker interface {
 	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
 }
 
+// prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
+const prSyncFreshnessWindow = 30 * time.Second
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu                 sync.Mutex
@@ -42,6 +46,7 @@ type Service struct {
 	logger             *logger.Logger
 	taskDeleter        TaskDeleter
 	taskSessionChecker TaskSessionChecker
+	syncGroup          singleflight.Group
 }
 
 // NewService creates a new GitHub service.
@@ -399,6 +404,43 @@ func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string
 	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
 }
 
+// ListWorkspaceTaskPRs returns all PR associations for a workspace.
+// It returns cached data immediately and triggers background refresh for stale entries.
+func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) (map[string]*TaskPR, error) {
+	result, err := s.store.ListTaskPRsByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect stale task IDs for background refresh
+	var staleTaskIDs []string
+	for _, tp := range result {
+		if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= prSyncFreshnessWindow {
+			staleTaskIDs = append(staleTaskIDs, tp.TaskID)
+		}
+	}
+
+	// Background refresh with bounded concurrency
+	if len(staleTaskIDs) > 0 {
+		go func() {
+			sem := make(chan struct{}, 5)
+			for _, taskID := range staleTaskIDs {
+				sem <- struct{}{}
+				go func(id string) {
+					defer func() { <-sem }()
+					syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					if _, syncErr := s.TriggerPRSync(syncCtx, id); syncErr != nil {
+						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
+					}
+				}(taskID)
+			}
+		}()
+	}
+
+	return result, nil
+}
+
 // SyncTaskPR updates a TaskPR record with the latest PR status.
 // It only publishes a github.task_pr.updated event when data actually changed,
 // preventing feedback loops with frontend sync handlers.
@@ -523,17 +565,37 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 }
 
 func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
-	status, _, err := s.CheckPRWatch(ctx, watch)
+	// Freshness check: skip GitHub API if recently synced
+	if tp, _ := s.store.GetTaskPR(ctx, taskID); tp != nil && tp.LastSyncedAt != nil {
+		if time.Since(*tp.LastSyncedAt) < prSyncFreshnessWindow {
+			return tp, nil
+		}
+	}
+
+	// Coalesce concurrent syncs for the same PR
+	key := fmt.Sprintf("%s/%s/%d", watch.Owner, watch.Repo, watch.PRNumber)
+	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		status, _, checkErr := s.CheckPRWatch(bgCtx, watch)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if status == nil {
+			return s.store.GetTaskPR(bgCtx, taskID)
+		}
+		if syncErr := s.SyncTaskPR(bgCtx, taskID, status); syncErr != nil {
+			return nil, syncErr
+		}
+		return s.store.GetTaskPR(bgCtx, taskID)
+	})
 	if err != nil {
 		return nil, err
 	}
-	if status == nil {
-		return s.store.GetTaskPR(ctx, taskID)
+	if v == nil {
+		return nil, nil
 	}
-	if syncErr := s.SyncTaskPR(ctx, taskID, status); syncErr != nil {
-		return nil, syncErr
-	}
-	return s.store.GetTaskPR(ctx, taskID)
+	return v.(*TaskPR), nil
 }
 
 // --- PR files and commits (live) ---
