@@ -605,9 +605,7 @@ export class ApiClient {
 
   // --- Session ---
 
-  async listSessionMessages(
-    sessionId: string,
-  ): Promise<{
+  async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;
       content: string;

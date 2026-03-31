@@ -137,9 +137,11 @@ test.describe("Plan mode follow-up messages", () => {
     // Toggle plan mode so the plan panel is visible with content.
     await session.togglePlanMode();
     await expect(session.planModeInput()).toBeVisible({ timeout: 10_000 });
-    await expect(session.planPanel.getByText("Analyze requirements", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(session.planPanel.getByText("Analyze requirements", { exact: false })).toBeVisible(
+      {
+        timeout: 15_000,
+      },
+    );
 
     // Select text in the plan editor to trigger the comment popover.
     const editor = session.planPanel.locator(".ProseMirror");
