@@ -109,6 +109,76 @@ test.describe("Session resume (ACP mode)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests — task status preservation during resume
+// ---------------------------------------------------------------------------
+
+test.describe("Task status during resume", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("task stays in Turn Finished section after backend restart and agent resume", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    // 1. Create task and start agent — after the turn completes the workflow
+    //    advances it from "Running" to "Turn Finished".
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Status Stable Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    // 2. Navigate to the session and wait for the agent to finish its first turn
+    const session = await openTaskSession(testPage, "Status Stable Task");
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+
+    // 3. Confirm the task moved to the "Turn Finished" section after the turn completed
+    await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // 4. Restart the backend
+    await backend.restart();
+
+    // 5. Reload the page so SSR fetches from the new backend instance
+    await testPage.reload();
+    await session.waitForLoad();
+
+    // 6. Immediately after reload, the task must still be in "Turn Finished" — not
+    //    regressed to "Backlog" or "Running" due to resume lifecycle.
+    await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.taskInSection("Status Stable Task", "Running")).not.toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(session.taskInSection("Status Stable Task", "Backlog")).not.toBeVisible({
+      timeout: 5_000,
+    });
+
+    // 7. Wait for auto-resume to complete (agent relaunches and becomes idle)
+    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+
+    // 8. After resume completes, the task must still be in "Turn Finished"
+    await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests — TUI (passthrough) mode
 // ---------------------------------------------------------------------------
 
