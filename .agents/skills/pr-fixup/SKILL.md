@@ -7,6 +7,11 @@ description: Wait for CI checks and automated reviews (CodeRabbit, Greptile) on 
 
 Wait for CI and code review to complete on a pull request, fix any failures or valid comments, then push.
 
+## Available skills and subagents
+
+- **`verify` subagent** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
+- **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
+
 ## Context
 
 - Current branch: !`git branch --show-current`
