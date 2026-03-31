@@ -119,7 +119,7 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	}
 
 	// Call with agent profile but no executor info
-	h.autoStartTask(task, "agent-profile-1", "")
+	h.autoStartTask(task, "agent-profile-1", "", "")
 
 	select {
 	case <-launcher.called:
@@ -147,7 +147,7 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	}
 
 	// Call with explicit executor profile
-	h.autoStartTask(task, "agent-profile-1", "exec-profile-docker")
+	h.autoStartTask(task, "agent-profile-1", "exec-profile-docker", "")
 
 	select {
 	case <-launcher.called:
@@ -158,4 +158,44 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")
 	assert.Equal(t, "", req.ExecutorID, "executorID should be empty when profile is set")
+}
+
+func TestResolveTaskRepositories_ExplicitRepos(t *testing.T) {
+	log := testLogger(t)
+	h := &Handlers{logger: log.WithFields()}
+
+	explicit := []mcpRepositoryInput{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+		{LocalPath: "/tmp/myrepo"},
+	}
+	result, err := h.resolveTaskRepositories(context.Background(), "", "", explicit)
+	require.NoError(t, err)
+	require.Len(t, result.Repos, 2)
+	assert.Equal(t, "repo-1", result.Repos[0].RepositoryID)
+	assert.Equal(t, "main", result.Repos[0].BaseBranch)
+	assert.Equal(t, "/tmp/myrepo", result.Repos[1].LocalPath)
+	assert.Empty(t, result.WorkspaceID, "workspace should not be set for explicit repos")
+	assert.Empty(t, result.WorkflowID, "workflow should not be set for explicit repos")
+}
+
+func TestResolveTaskRepositories_NoInputs_ReturnsEmpty(t *testing.T) {
+	log := testLogger(t)
+	h := &Handlers{logger: log.WithFields()}
+
+	result, err := h.resolveTaskRepositories(context.Background(), "", "", nil)
+	require.NoError(t, err)
+	assert.Empty(t, result.Repos)
+}
+
+func TestResolveTaskRepositories_ExplicitRepos_SkipsParentLookup(t *testing.T) {
+	log := testLogger(t)
+	h := &Handlers{logger: log.WithFields()}
+
+	// Even with a parentID, explicit repos should be used without looking up the parent
+	// (taskSvc is nil — if it tried to call GetTask it would panic).
+	explicit := []mcpRepositoryInput{{RepositoryID: "repo-explicit"}}
+	result, err := h.resolveTaskRepositories(context.Background(), "some-parent", "some-source", explicit)
+	require.NoError(t, err)
+	require.Len(t, result.Repos, 1)
+	assert.Equal(t, "repo-explicit", result.Repos[0].RepositoryID)
 }

@@ -62,11 +62,12 @@ func TestCreateTask_SelfResolvesToTaskID(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPCreateTask, backend.lastAction)
 
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-current", payload["parent_id"], "self should resolve to current task ID")
 	assert.Equal(t, "Write tests", payload["title"])
 	assert.Equal(t, "task-current", payload["source_task_id"], "source_task_id should be set to current task")
+	assert.Equal(t, true, payload["start_agent"], "start_agent should default to true")
 }
 
 func TestCreateTask_SelfWithNoTaskContext_ReturnsError(t *testing.T) {
@@ -94,7 +95,7 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 
 	assert.False(t, result.IsError)
 
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-abc", payload["parent_id"])
 }
@@ -125,7 +126,7 @@ func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
 
 	assert.False(t, result.IsError)
 
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "", payload["parent_id"])
 	assert.Equal(t, "ws-1", payload["workspace_id"])
@@ -145,7 +146,7 @@ func TestCreateTask_SourceTaskID_AlwaysSet(t *testing.T) {
 		"workflow_id":  "wf-1",
 	})
 
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "my-task-123", payload["source_task_id"])
 }
@@ -162,7 +163,77 @@ func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {
 		"workflow_id":  "wf-1",
 	})
 
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "", payload["source_task_id"])
+}
+
+func TestCreateTask_StartAgentFalse_DoesNotAutoStart(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Plan task"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "Plan task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"start_agent":  false,
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, payload["start_agent"], "start_agent should be false when explicitly set")
+}
+
+func TestCreateTask_WithRepositoryID(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Task with repo"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":         "Task with repo",
+		"workspace_id":  "ws-1",
+		"workflow_id":   "wf-1",
+		"repository_id": "repo-123",
+		"base_branch":   "main",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+
+	repos, ok := payload["repositories"].([]map[string]string)
+	require.True(t, ok, "repositories should be a slice")
+	require.Len(t, repos, 1)
+	assert.Equal(t, "repo-123", repos[0]["repository_id"])
+	assert.Equal(t, "main", repos[0]["base_branch"])
+}
+
+func TestCreateTask_WithLocalPath(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Task with local path"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "Task with local path",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"local_path":   "/Users/me/projects/myrepo",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+
+	repos, ok := payload["repositories"].([]map[string]string)
+	require.True(t, ok, "repositories should be a slice")
+	require.Len(t, repos, 1)
+	assert.Equal(t, "/Users/me/projects/myrepo", repos[0]["local_path"])
 }

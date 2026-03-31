@@ -288,19 +288,28 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		})
 }
 
-// handleCreateTask creates a new task and auto-starts an agent session.
+// mcpRepositoryInput matches the repository input structure from MCP create_task
+type mcpRepositoryInput struct {
+	RepositoryID string `json:"repository_id"`
+	LocalPath    string `json:"local_path"`
+	BaseBranch   string `json:"base_branch"`
+}
+
+// handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
-		ParentID          string `json:"parent_id"`
-		SourceTaskID      string `json:"source_task_id"`
-		WorkspaceID       string `json:"workspace_id"`
-		WorkflowID        string `json:"workflow_id"`
-		WorkflowStepID    string `json:"workflow_step_id"`
-		Title             string `json:"title"`
-		Description       string `json:"description"`
-		AgentProfileID    string `json:"agent_profile_id"`
-		ExecutorProfileID string `json:"executor_profile_id"`
+		ParentID          string               `json:"parent_id"`
+		SourceTaskID      string               `json:"source_task_id"`
+		WorkspaceID       string               `json:"workspace_id"`
+		WorkflowID        string               `json:"workflow_id"`
+		WorkflowStepID    string               `json:"workflow_step_id"`
+		Title             string               `json:"title"`
+		Description       string               `json:"description"`
+		AgentProfileID    string               `json:"agent_profile_id"`
+		ExecutorProfileID string               `json:"executor_profile_id"`
+		StartAgent        *bool                `json:"start_agent"`  // nil means default to true for backward compatibility
+		Repositories      []mcpRepositoryInput `json:"repositories"` // explicit repositories for top-level tasks
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -308,51 +317,26 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
-	if req.ParentID != "" && req.Description == "" {
+
+	// Default start_agent to true for backward compatibility
+	startAgent := req.StartAgent == nil || *req.StartAgent
+
+	// Only require description for subtasks if we're starting an agent
+	if req.ParentID != "" && req.Description == "" && startAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
 	}
 
-	// Inherit workspace/workflow/repositories from parent when not explicitly provided.
-	// WorkflowStepID is intentionally NOT inherited — the service layer resolves
-	// the start step so subtasks always begin at the first workflow step, not the
-	// parent's current (potentially advanced) step.
-	var inheritedRepos []service.TaskRepositoryInput
-	if req.ParentID != "" {
-		parent, err := h.taskSvc.GetTask(ctx, req.ParentID)
-		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid parent_id: "+err.Error(), nil)
-		}
-		if req.WorkspaceID == "" {
-			req.WorkspaceID = parent.WorkspaceID
-		}
-		if req.WorkflowID == "" {
-			req.WorkflowID = parent.WorkflowID
-		}
-		for _, r := range parent.Repositories {
-			inheritedRepos = append(inheritedRepos, service.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-			})
-		}
+	// Resolve repositories and inherit workspace/workflow from parent if needed.
+	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-
-	// For top-level tasks, inherit repositories from the calling agent's current task
-	// so the new task is associated with the same codebase.
-	if req.ParentID == "" && req.SourceTaskID != "" {
-		sourceTask, err := h.taskSvc.GetTask(ctx, req.SourceTaskID)
-		if err != nil {
-			h.logger.Warn("source task not found, skipping repo inheritance",
-				zap.String("source_task_id", req.SourceTaskID), zap.Error(err))
-		} else {
-			for _, r := range sourceTask.Repositories {
-				inheritedRepos = append(inheritedRepos, service.TaskRepositoryInput{
-					RepositoryID:   r.RepositoryID,
-					BaseBranch:     r.BaseBranch,
-					CheckoutBranch: r.CheckoutBranch,
-				})
-			}
-		}
+	repos := resolved.Repos
+	if req.WorkspaceID == "" {
+		req.WorkspaceID = resolved.WorkspaceID
+	}
+	if req.WorkflowID == "" {
+		req.WorkflowID = resolved.WorkflowID
 	}
 
 	if req.WorkspaceID == "" {
@@ -369,29 +353,108 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
-		Repositories:   inheritedRepos,
+		Repositories:   repos,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
-	// Auto-start agent session asynchronously
-	h.autoStartTask(task, req.AgentProfileID, req.ExecutorProfileID)
+	// Auto-start agent session asynchronously only if requested
+	if startAgent {
+		h.autoStartTask(task, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
+	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
+// taskRepoResult holds the output of resolveTaskRepositories.
+type taskRepoResult struct {
+	Repos       []service.TaskRepositoryInput
+	WorkspaceID string // inherited from parent, empty otherwise
+	WorkflowID  string // inherited from parent, empty otherwise
+}
+
+// resolveTaskRepositories builds the repository list for a new task.
+// Priority: explicit repositories > parent task repos > source task repos.
+// When inheriting from a parent, it also returns the parent's workspace/workflow IDs.
+func (h *Handlers) resolveTaskRepositories(
+	ctx context.Context,
+	parentID, sourceTaskID string,
+	explicit []mcpRepositoryInput,
+) (taskRepoResult, error) {
+	if len(explicit) > 0 {
+		var repos []service.TaskRepositoryInput
+		for _, r := range explicit {
+			repos = append(repos, service.TaskRepositoryInput{
+				RepositoryID: r.RepositoryID,
+				LocalPath:    r.LocalPath,
+				BaseBranch:   r.BaseBranch,
+			})
+		}
+		return taskRepoResult{Repos: repos}, nil
+	}
+
+	if parentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, parentID)
+		if err != nil {
+			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
+		}
+		var repos []service.TaskRepositoryInput
+		for _, r := range parent.Repositories {
+			repos = append(repos, service.TaskRepositoryInput{
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+			})
+		}
+		return taskRepoResult{
+			Repos:       repos,
+			WorkspaceID: parent.WorkspaceID,
+			WorkflowID:  parent.WorkflowID,
+		}, nil
+	}
+
+	// For top-level tasks, inherit from the calling agent's current task.
+	if sourceTaskID != "" {
+		sourceTask, err := h.taskSvc.GetTask(ctx, sourceTaskID)
+		if err != nil {
+			h.logger.Warn("source task not found, skipping repo inheritance",
+				zap.String("source_task_id", sourceTaskID), zap.Error(err))
+			return taskRepoResult{}, nil
+		}
+		var repos []service.TaskRepositoryInput
+		for _, r := range sourceTask.Repositories {
+			repos = append(repos, service.TaskRepositoryInput{
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+			})
+		}
+		return taskRepoResult{Repos: repos}, nil
+	}
+
+	return taskRepoResult{}, nil
+}
+
 // autoStartTask launches an agent session for a newly created task in the background.
-// It resolves the agent profile: explicit > parent's session > workspace default.
+// It resolves the agent profile: explicit > parent's session > source task's session > workspace default.
 // It resolves the executor: explicit executor_profile_id > parent's executor_profile_id >
-// parent's executor_id > "exec-worktree" (default for MCP-created tasks).
-func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID string) {
+// source task's executor_profile_id > parent's executor_id > "exec-worktree" (default for MCP-created tasks).
+func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) {
 	if h.sessionLauncher == nil {
 		return
 	}
 
 	executorID := h.inheritFromParentSession(task.ParentID, &agentProfileID, &executorProfileID)
+
+	// For top-level tasks, inherit from the source task (the calling agent's task)
+	if task.ParentID == "" && sourceTaskID != "" {
+		sourceExecutorID := h.inheritFromParentSession(sourceTaskID, &agentProfileID, &executorProfileID)
+		if executorID == "" {
+			executorID = sourceExecutorID
+		}
+	}
 
 	// Fall back to workspace defaults for agent profile and worktree executor
 	if agentProfileID == "" {
