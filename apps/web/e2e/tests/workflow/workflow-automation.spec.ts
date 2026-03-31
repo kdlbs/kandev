@@ -93,8 +93,8 @@ test.describe("Workflow automation", () => {
     // Session transitions to idle after agent completes
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
   });
 
   /**
@@ -229,8 +229,8 @@ test.describe("Workflow automation", () => {
     // Session is idle after agent completes the turn in Review
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
 
     // --- Move task to Done manually via API ---
     await apiClient.moveTask(task.id, workflow.id, doneStep.id);
@@ -321,8 +321,8 @@ test.describe("Workflow automation", () => {
     // Session transitions to idle — plan mode input placeholder visible
     await expect(session.planModeInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
   });
 
   /**
@@ -444,8 +444,8 @@ test.describe("Workflow automation", () => {
     // The cascade runs 4 sequential agent turns; session state may lag message display.
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
   });
 
   /**

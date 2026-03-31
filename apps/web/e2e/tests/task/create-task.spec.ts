@@ -148,10 +148,10 @@ test.describe("Task creation", () => {
     // Session transitions to idle — input placeholder changes from "Queue instructions..."
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Review" section — this uses kanban tasks which update
+    // Sidebar shows the task under "Turn Finished" section — this uses kanban tasks which update
     // via task.updated WS event. Check this first to give more time for the stepper data
     // (session.state_changed) to propagate through the store.
-    await expect(session.sidebarSection("Review")).toBeVisible({ timeout: 15_000 });
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible({ timeout: 15_000 });
 
     // After the agent completes, the workflow step transitions from "In Progress" to "Review".
     // The step update arrives via WS (task.updated and session.state_changed events) which may
@@ -226,8 +226,8 @@ test.describe("Task creation", () => {
       timeout: 10_000,
     });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
   });
 
   test("start task in plan mode: opens session with plan panel visible", async ({ testPage }) => {
@@ -284,8 +284,8 @@ test.describe("Task creation", () => {
       timeout: 10_000,
     });
 
-    // Sidebar shows the task under "Review" section
-    await expect(session.sidebarSection("Review")).toBeVisible();
+    // Sidebar shows the task under "Turn Finished" section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
   });
 });
 

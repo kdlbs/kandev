@@ -131,12 +131,12 @@ export class SessionPage {
     return this.sidebar.getByText(title, { exact: false });
   }
 
-  /** Sidebar section header (e.g. "Review", "In Progress", "Backlog"). */
+  /** Sidebar section header (e.g. "Turn Finished", "Running", "Backlog"). */
   sidebarSection(label: string): Locator {
     return this.sidebar.getByTestId(`sidebar-section-${label}`);
   }
 
-  /** Task title scoped to a specific sidebar section (Review, In Progress, Backlog). */
+  /** Task title scoped to a specific sidebar section (Turn Finished, Running, Backlog). */
   taskInSection(title: string, sectionLabel: string): Locator {
     return this.sidebar
       .getByTestId(`sidebar-section-${sectionLabel}`)

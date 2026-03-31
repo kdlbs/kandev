@@ -125,8 +125,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       timeout: 30_000,
     });
 
-    // Sidebar shows the task under the Review section
-    await expect(session.sidebarSection("Review")).toBeVisible({ timeout: 15_000 });
+    // Sidebar shows the task under the Turn Finished section
+    await expect(session.sidebarSection("Turn Finished")).toBeVisible({ timeout: 15_000 });
   });
 
   /**

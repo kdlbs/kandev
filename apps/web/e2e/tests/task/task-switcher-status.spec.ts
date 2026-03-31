@@ -17,9 +17,9 @@ test.describe("Task switcher sidebar status", () => {
    *   Inbox → Working (auto_start, message+15s delay, on_turn_complete → Done) → Done
    *   3 tasks in Inbox.
    *
-   * The mock agent sends a message immediately (triggers RUNNING / "In Progress"),
-   * then delays 15s (stays in RUNNING), then completes (→ WAITING_FOR_INPUT / "Review").
-   * Each task progresses through: Backlog → In Progress → Review.
+   * The mock agent sends a message immediately (triggers RUNNING / "Running"),
+   * then delays 15s (stays in RUNNING), then completes (→ WAITING_FOR_INPUT / "Turn Finished").
+   * Each task progresses through: Backlog → Running → Turn Finished.
    */
   test("sidebar reflects real-time status updates and preserves state on task switch", async ({
     testPage,
@@ -91,45 +91,59 @@ test.describe("Task switcher sidebar status", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // --- Initial state: Alpha in Review, Beta + Gamma in Backlog ---
-    await expect(session.taskInSection("Alpha Task", "Review")).toBeVisible({ timeout: 15_000 });
+    // --- Initial state: Alpha in Turn Finished, Beta + Gamma in Backlog ---
+    await expect(session.taskInSection("Alpha Task", "Turn Finished")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(session.taskInSection("Beta Task", "Backlog")).toBeVisible({ timeout: 10_000 });
     await expect(session.taskInSection("Gamma Task", "Backlog")).toBeVisible({ timeout: 10_000 });
 
     // --- Move Beta to Working (background task) ---
     await apiClient.moveTask(taskBeta.id, workflow.id, workingStep.id);
 
-    // Beta should appear in "In Progress" (RUNNING state) while the 15s delay runs
-    await expect(session.taskInSection("Beta Task", "In Progress")).toBeVisible({
+    // Beta should appear in "Running" (RUNNING state) while the 15s delay runs
+    await expect(session.taskInSection("Beta Task", "Running")).toBeVisible({
       timeout: 30_000,
     });
 
-    // While Beta is in progress, Alpha should remain in Review and Gamma in Backlog
-    await expect(session.taskInSection("Alpha Task", "Review")).toBeVisible({ timeout: 5_000 });
+    // While Beta is running, Alpha should remain in Turn Finished and Gamma in Backlog
+    await expect(session.taskInSection("Alpha Task", "Turn Finished")).toBeVisible({
+      timeout: 5_000,
+    });
     await expect(session.taskInSection("Gamma Task", "Backlog")).toBeVisible({ timeout: 5_000 });
 
-    // Beta transitions from "In Progress" → "Review" after the 15s delay completes
-    await expect(session.taskInSection("Beta Task", "Review")).toBeVisible({ timeout: 30_000 });
+    // Beta transitions from "Running" → "Turn Finished" after the 15s delay completes
+    await expect(session.taskInSection("Beta Task", "Turn Finished")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // --- Move Gamma to Working (background task) ---
     // Small delay to let the backend settle after Beta's completion
     await testPage.waitForTimeout(2_000);
     await apiClient.moveTask(taskGamma.id, workflow.id, workingStep.id);
 
-    // Gamma should appear in "In Progress" while running
-    await expect(session.taskInSection("Gamma Task", "In Progress")).toBeVisible({
+    // Gamma should appear in "Running" while running
+    await expect(session.taskInSection("Gamma Task", "Running")).toBeVisible({
       timeout: 45_000,
     });
 
-    // Gamma transitions to "Review"
-    await expect(session.taskInSection("Gamma Task", "Review")).toBeVisible({ timeout: 30_000 });
+    // Gamma transitions to "Turn Finished"
+    await expect(session.taskInSection("Gamma Task", "Turn Finished")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // --- Switch to Beta's session by clicking in sidebar ---
     await session.taskInSidebar("Beta Task").click();
 
-    // All three tasks should remain in "Review" after switching sessions
-    await expect(session.taskInSection("Alpha Task", "Review")).toBeVisible({ timeout: 10_000 });
-    await expect(session.taskInSection("Beta Task", "Review")).toBeVisible({ timeout: 10_000 });
-    await expect(session.taskInSection("Gamma Task", "Review")).toBeVisible({ timeout: 10_000 });
+    // All three tasks should remain in "Turn Finished" after switching sessions
+    await expect(session.taskInSection("Alpha Task", "Turn Finished")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.taskInSection("Beta Task", "Turn Finished")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.taskInSection("Gamma Task", "Turn Finished")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

@@ -11,8 +11,8 @@ const SECTION_ICONS: Record<
   string,
   { Icon: ComponentType<{ className?: string }>; className: string }
 > = {
-  Review: { Icon: IconCircleCheck, className: "text-green-500" },
-  "In Progress": { Icon: IconProgress, className: "text-yellow-500" },
+  "Turn Finished": { Icon: IconCircleCheck, className: "text-green-500" },
+  Running: { Icon: IconProgress, className: "text-yellow-500" },
   Backlog: { Icon: IconCircleDashed, className: "text-muted-foreground" },
 };
 
@@ -196,8 +196,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
     }
 
     return [
-      { label: "Review", tasks: review },
-      { label: "In Progress", tasks: inProgress },
+      { label: "Turn Finished", tasks: review },
+      { label: "Running", tasks: inProgress },
       { label: "Backlog", tasks: backlog },
     ] satisfies Section[];
   }, [tasks]);
