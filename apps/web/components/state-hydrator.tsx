@@ -18,12 +18,9 @@ export function StateHydrator({ initialState, sessionId }: StateHydratorProps) {
   // decide whether to fetch data.
   useLayoutEffect(() => {
     if (Object.keys(initialState).length) {
-      console.log("[hydrator] taskPRs in initialState", initialState.taskPRs ? Object.keys(initialState.taskPRs.byTaskId ?? {}).length : 0);
       store.getState().hydrate(initialState, {
         forceMergeSessionId: sessionId,
       });
-      const after = store.getState().taskPRs;
-      console.log("[hydrator] taskPRs in store AFTER hydrate", Object.keys(after.byTaskId).length, "loaded:", after.loaded);
     }
   }, [initialState, sessionId, store]);
 

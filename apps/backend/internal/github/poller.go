@@ -109,7 +109,6 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 		p.logger.Error("failed to list PR watches", zap.Error(err))
 		return
 	}
-	p.logger.Warn("[PR-DEBUG] checkPRWatches", zap.Int("watch_count", len(watches)))
 	for _, watch := range watches {
 		p.checkSinglePRWatch(ctx, watch)
 	}

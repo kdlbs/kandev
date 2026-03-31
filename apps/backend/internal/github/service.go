@@ -401,11 +401,7 @@ func (s *Service) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error)
 
 // ListTaskPRs returns PR associations for multiple tasks.
 func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string]*TaskPR, error) {
-	result, err := s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
-	if err == nil {
-		s.logger.Warn("[PR-DEBUG] ListTaskPRs", zap.Int("requested", len(taskIDs)), zap.Int("found", len(result)))
-	}
-	return result, err
+	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
 }
 
 // ListWorkspaceTaskPRs returns all PR associations for a workspace.
@@ -416,17 +412,28 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 		return nil, err
 	}
 
-	// Trigger background refresh for stale PRs
+	// Collect stale task IDs for background refresh
+	var staleTaskIDs []string
 	for _, tp := range result {
 		if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= prSyncFreshnessWindow {
-			taskID := tp.TaskID
-			go func() {
-				bgCtx := context.Background()
-				if _, syncErr := s.TriggerPRSync(bgCtx, taskID); syncErr != nil {
-					s.logger.Debug("background PR sync failed", zap.String("task_id", taskID), zap.Error(syncErr))
-				}
-			}()
+			staleTaskIDs = append(staleTaskIDs, tp.TaskID)
 		}
+	}
+
+	// Background refresh with bounded concurrency
+	if len(staleTaskIDs) > 0 {
+		go func() {
+			sem := make(chan struct{}, 5)
+			for _, taskID := range staleTaskIDs {
+				sem <- struct{}{}
+				go func(id string) {
+					defer func() { <-sem }()
+					if _, syncErr := s.TriggerPRSync(context.Background(), id); syncErr != nil {
+						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
+					}
+				}(taskID)
+			}
+		}()
 	}
 
 	return result, nil
@@ -474,13 +481,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 
 	if changed && s.eventBus != nil {
-		s.logger.Warn("[PR-DEBUG] SyncTaskPR publishing event", zap.String("task_id", taskID), zap.String("state", tp.State), zap.String("review_state", tp.ReviewState))
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
-	} else {
-		s.logger.Warn("[PR-DEBUG] SyncTaskPR no change", zap.String("task_id", taskID), zap.Bool("changed", changed))
 	}
 	return nil
 }
@@ -519,19 +523,15 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 // and syncs it to the TaskPR record. If still searching (pr_number=0),
 // it attempts to find the PR by branch.
 func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, error) {
-	s.logger.Warn("[PR-DEBUG] TriggerPRSync called", zap.String("task_id", taskID))
 	watch, err := s.store.GetPRWatchByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get PR watch: %w", err)
 	}
 	if watch == nil {
 		// No watch — just return existing TaskPR if any
-		tp, tpErr := s.store.GetTaskPR(ctx, taskID)
-		s.logger.Warn("[PR-DEBUG] TriggerPRSync no watch, returning stored TaskPR", zap.String("task_id", taskID), zap.Bool("has_task_pr", tp != nil))
-		return tp, tpErr
+		return s.store.GetTaskPR(ctx, taskID)
 	}
 
-	s.logger.Warn("[PR-DEBUG] TriggerPRSync has watch", zap.String("task_id", taskID), zap.Int("pr_number", watch.PRNumber))
 	if watch.PRNumber == 0 {
 		return s.triggerPRDetection(ctx, watch, taskID)
 	}
@@ -573,17 +573,19 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 	// Coalesce concurrent syncs for the same PR
 	key := fmt.Sprintf("%s/%s/%d", watch.Owner, watch.Repo, watch.PRNumber)
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
-		status, _, checkErr := s.CheckPRWatch(ctx, watch)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		status, _, checkErr := s.CheckPRWatch(bgCtx, watch)
 		if checkErr != nil {
 			return nil, checkErr
 		}
 		if status == nil {
-			return s.store.GetTaskPR(ctx, taskID)
+			return s.store.GetTaskPR(bgCtx, taskID)
 		}
-		if syncErr := s.SyncTaskPR(ctx, taskID, status); syncErr != nil {
+		if syncErr := s.SyncTaskPR(bgCtx, taskID, status); syncErr != nil {
 			return nil, syncErr
 		}
-		return s.store.GetTaskPR(ctx, taskID)
+		return s.store.GetTaskPR(bgCtx, taskID)
 	})
 	if err != nil {
 		return nil, err

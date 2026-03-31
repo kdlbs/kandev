@@ -157,23 +157,10 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
       const currentHash = hashDiff(file.diff);
       if (reviewState.diffHash && reviewState.diffHash !== currentHash) {
         stale.add(file.path);
-        console.log("[file-reviews] stale file", {
-          path: file.path,
-          storedHash: reviewState.diffHash,
-          currentHash,
-          diffLength: file.diff?.length,
-        });
       } else {
         reviewed.add(file.path);
       }
     }
-    console.log("[file-reviews] computed review state", {
-      totalFiles: allFiles.length,
-      reviewedCount: reviewed.size,
-      staleCount: stale.size,
-      reviewMapSize: reviews.size,
-      reviewEntries: [...reviews.entries()].map(([k, v]) => ({ path: k, ...v })),
-    });
     return { reviewedFiles: reviewed, staleFiles: stale };
   }, [allFiles, reviews, pr, prDiffLoading]);
 

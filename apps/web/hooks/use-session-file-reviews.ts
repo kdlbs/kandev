@@ -67,14 +67,6 @@ function fetchSessionReviews(
   fetchedSessions.add(sessionId);
   queueMicrotask(() => setLoading(true));
 
-  const cachedBefore = reviewsCache[sessionId];
-  console.log("[file-reviews] fetch start", {
-    sessionId,
-    cachedEntries: cachedBefore
-      ? [...cachedBefore.entries()].map(([k, v]) => ({ path: k, ...v }))
-      : null,
-  });
-
   client
     .request<{ reviews: SessionFileReview[] }>("session.file_review.get", { session_id: sessionId })
     .then((response) => {
@@ -84,11 +76,6 @@ function fetchSessionReviews(
           map.set(review.file_path, { reviewed: review.reviewed, diffHash: review.diff_hash });
         }
       }
-      console.log("[file-reviews] fetch result", {
-        sessionId,
-        serverEntries: [...map.entries()].map(([k, v]) => ({ path: k, ...v })),
-        reviewCount: response?.reviews?.length ?? 0,
-      });
       updateCache(sessionId, map);
       setReviews(map);
     })
@@ -123,12 +110,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   useEffect(() => {
     if (!sessionId || fetchedSessions.has(sessionId)) {
       if (sessionId && reviewsCache[sessionId]) {
-        const cached = reviewsCache[sessionId];
-        console.log("[file-reviews] using cached (already fetched)", {
-          sessionId,
-          entries: [...cached.entries()].map(([k, v]) => ({ path: k, ...v })),
-        });
-        queueMicrotask(() => setReviews(cached));
+        queueMicrotask(() => setReviews(reviewsCache[sessionId]));
       }
       return;
     }

@@ -150,12 +150,9 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 	}
 }
 
-func wsSyncTaskPR(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
-		log.Warn("[PR-DEBUG] wsSyncTaskPR request", zap.String("task_id", taskID))
-		result, err := svc.TriggerPRSync(ctx, taskID)
-		log.Warn("[PR-DEBUG] wsSyncTaskPR response", zap.String("task_id", taskID), zap.Bool("has_result", result != nil), zap.Error(err))
-		return result, err
+		return svc.TriggerPRSync(ctx, taskID)
 	})
 }
 

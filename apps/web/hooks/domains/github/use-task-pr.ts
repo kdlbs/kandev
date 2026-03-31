@@ -1,42 +1,10 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
-import { listTaskPRs, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
+import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
-
-/** Fetch and cache PR associations for a batch of task IDs. */
-export function useTaskPRs(taskIds: string[]) {
-  const byTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const loading = useAppStore((state) => state.taskPRs.loading);
-  const setTaskPRs = useAppStore((state) => state.setTaskPRs);
-  const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
-  const fetchedRef = useRef("");
-
-  useEffect(() => {
-    if (taskIds.length === 0 || loading) return;
-    // Deduplicate: skip if same set of task IDs already fetched
-    const key = taskIds.join(",");
-    if (fetchedRef.current === key) return;
-    fetchedRef.current = key;
-
-    setTaskPRsLoading(true);
-    listTaskPRs(taskIds, { cache: "no-store" })
-      .then((response) => {
-        setTaskPRs(response?.task_prs ?? {});
-      })
-      .catch(() => {
-        // Keep existing data on error
-      })
-      .finally(() => {
-        setTaskPRsLoading(false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskIds.join(",")]);
-
-  return { byTaskId, loading };
-}
 
 /** Fetch all PR associations for a workspace. */
 export function useWorkspacePRs(workspaceId: string | null) {
