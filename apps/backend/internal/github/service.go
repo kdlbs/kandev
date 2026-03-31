@@ -396,7 +396,11 @@ func (s *Service) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error)
 
 // ListTaskPRs returns PR associations for multiple tasks.
 func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string]*TaskPR, error) {
-	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
+	result, err := s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
+	if err == nil {
+		s.logger.Warn("[PR-DEBUG] ListTaskPRs", zap.Int("requested", len(taskIDs)), zap.Int("found", len(result)))
+	}
+	return result, err
 }
 
 // SyncTaskPR updates a TaskPR record with the latest PR status.
@@ -441,10 +445,13 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 
 	if changed && s.eventBus != nil {
+		s.logger.Warn("[PR-DEBUG] SyncTaskPR publishing event", zap.String("task_id", taskID), zap.String("state", tp.State), zap.String("review_state", tp.ReviewState))
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
+	} else {
+		s.logger.Warn("[PR-DEBUG] SyncTaskPR no change", zap.String("task_id", taskID), zap.Bool("changed", changed))
 	}
 	return nil
 }
@@ -483,15 +490,19 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 // and syncs it to the TaskPR record. If still searching (pr_number=0),
 // it attempts to find the PR by branch.
 func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, error) {
+	s.logger.Warn("[PR-DEBUG] TriggerPRSync called", zap.String("task_id", taskID))
 	watch, err := s.store.GetPRWatchByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get PR watch: %w", err)
 	}
 	if watch == nil {
 		// No watch — just return existing TaskPR if any
-		return s.store.GetTaskPR(ctx, taskID)
+		tp, tpErr := s.store.GetTaskPR(ctx, taskID)
+		s.logger.Warn("[PR-DEBUG] TriggerPRSync no watch, returning stored TaskPR", zap.String("task_id", taskID), zap.Bool("has_task_pr", tp != nil))
+		return tp, tpErr
 	}
 
+	s.logger.Warn("[PR-DEBUG] TriggerPRSync has watch", zap.String("task_id", taskID), zap.Int("pr_number", watch.PRNumber))
 	if watch.PRNumber == 0 {
 		return s.triggerPRDetection(ctx, watch, taskID)
 	}

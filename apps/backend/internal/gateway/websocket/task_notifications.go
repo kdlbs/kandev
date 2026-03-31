@@ -116,6 +116,10 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			}
 		}
 
+		if action == ws.ActionGitHubTaskPRUpdated {
+			b.logger.Warn("[PR-DEBUG] broadcasting github.task_pr.updated", zap.String("action", action), zap.String("session_id", sessionID))
+		}
+
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
 			if sessionID != "" {
