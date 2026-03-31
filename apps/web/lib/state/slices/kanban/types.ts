@@ -38,6 +38,7 @@ export type KanbanState = {
     isRemoteExecutor?: boolean;
     parentTaskId?: string | null;
     updatedAt?: string;
+    createdAt?: string;
   }>;
   isLoading?: boolean;
 };

@@ -11,6 +11,39 @@ function withFallback<T>(value: T | null | undefined, fallback: T | undefined): 
   return value ?? fallback;
 }
 
+function buildNullableFields(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existing?: KanbanTask,
+): Pick<
+  KanbanTask,
+  | "repositoryId"
+  | "primarySessionId"
+  | "primarySessionState"
+  | "sessionCount"
+  | "reviewStatus"
+  | "primaryExecutorId"
+  | "primaryExecutorType"
+  | "primaryExecutorName"
+  | "parentTaskId"
+  | "updatedAt"
+  | "createdAt"
+> {
+  return {
+    repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
+    primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
+    primarySessionState: withFallback(payload.primary_session_state, existing?.primarySessionState),
+    sessionCount: withFallback(payload.session_count, existing?.sessionCount),
+    reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
+    primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
+    primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),
+    primaryExecutorName: withFallback(payload.primary_executor_name, existing?.primaryExecutorName),
+    parentTaskId: withFallback(payload.parent_id, existing?.parentTaskId),
+    updatedAt: withFallback(payload.updated_at, existing?.updatedAt),
+    createdAt: withFallback(payload.created_at, existing?.createdAt),
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
   return {
@@ -20,17 +53,8 @@ function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
     description: payload.description,
     position: payload.position ?? 0,
     state: payload.state,
-    repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
-    primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
-    primarySessionState: withFallback(payload.primary_session_state, existing?.primarySessionState),
-    sessionCount: withFallback(payload.session_count, existing?.sessionCount),
-    reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
-    primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
-    primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),
-    primaryExecutorName: withFallback(payload.primary_executor_name, existing?.primaryExecutorName),
     isRemoteExecutor: payload.is_remote_executor ?? existing?.isRemoteExecutor ?? false,
-    parentTaskId: withFallback(payload.parent_id, existing?.parentTaskId),
-    updatedAt: withFallback(payload.updated_at, existing?.updatedAt),
+    ...buildNullableFields(payload, existing),
   };
 }
 

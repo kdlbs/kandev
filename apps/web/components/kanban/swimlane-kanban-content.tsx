@@ -79,9 +79,8 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
         .filter(
           (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
         )
-        .sort(
-          (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
-            a.position - b.position,
+        .sort((a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
+          (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
         );
       const nextPosition = targetTasks.length;
       const originalTasks = snapshot.tasks;
@@ -164,7 +163,7 @@ function useTasksByStep(tasks: Task[]) {
     (stepId: string) =>
       tasks
         .filter((t) => t.workflowStepId === stepId)
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "")),
     [tasks],
   );
 }

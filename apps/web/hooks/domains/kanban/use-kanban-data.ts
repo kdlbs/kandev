@@ -75,6 +75,7 @@ export function useKanbanData({
     sessionCount: task.sessionCount,
     reviewStatus: task.reviewStatus,
     parentTaskId: task.parentTaskId,
+    createdAt: task.createdAt,
   }));
 
   const activeSteps = kanban.workflowId ? steps : [];

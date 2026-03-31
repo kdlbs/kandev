@@ -59,7 +59,7 @@ function getTasksForStep(tasks: Task[], stepId: string) {
   return tasks
     .filter((task) => task.workflowStepId === stepId)
     .map((task) => ({ ...task, position: task.position ?? 0 }))
-    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
 }
 
 function EmptyState({ showLoading }: { showLoading: boolean }) {

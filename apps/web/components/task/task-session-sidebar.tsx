@@ -143,6 +143,7 @@ function toSidebarItem(
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
     updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+    createdAt: task.createdAt,
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
   };
@@ -232,6 +233,7 @@ function useSidebarData(workspaceId: string | null) {
         remoteExecutorName: undefined,
         primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
+        createdAt: undefined,
         isArchived: true,
         parentTaskTitle: undefined,
       });

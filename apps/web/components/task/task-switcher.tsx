@@ -34,6 +34,7 @@ type TaskSwitcherItem = {
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
+  createdAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
   parentTaskTitle?: string;
@@ -206,10 +207,13 @@ export const TaskSwitcher = memo(function TaskSwitcher({
       else backlog.push(task);
     }
 
+    const byCreatedAt = (a: TaskSwitcherItem, b: TaskSwitcherItem) =>
+      (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+
     return [
-      { label: "Turn Finished", tasks: review },
-      { label: "Running", tasks: inProgress },
-      { label: "Backlog", tasks: backlog },
+      { label: "Turn Finished", tasks: review.sort(byCreatedAt) },
+      { label: "Running", tasks: inProgress.sort(byCreatedAt) },
+      { label: "Backlog", tasks: backlog.sort(byCreatedAt) },
     ] satisfies Section[];
   }, [tasks]);
 

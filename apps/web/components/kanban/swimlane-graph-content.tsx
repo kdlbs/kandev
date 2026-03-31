@@ -194,7 +194,7 @@ function useSwimlaneGraphDnd({ tasks, steps, workflowId, onMoveError }: Swimlane
     for (const col of steps) {
       map[col.id] = tasks
         .filter((t) => t.workflowStepId === col.id)
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
     }
     return map;
   }, [steps, tasks]);

@@ -59,6 +59,7 @@ export interface Task {
   isRemoteExecutor?: boolean;
   parentTaskId?: string | null;
   updatedAt?: string;
+  createdAt?: string;
 }
 
 export interface WorkflowStep {

@@ -129,7 +129,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, parent_id, archived_at, created_at, updated_at
 		FROM tasks
 		WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0
-		ORDER BY position
+		ORDER BY created_at ASC
 	`), workflowID)
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, parent_id, archived_at, created_at, updated_at
 		FROM tasks
-		WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0 ORDER BY position
+		WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0 ORDER BY created_at ASC
 	`), workflowStepID)
 	if err != nil {
 		return nil, err
