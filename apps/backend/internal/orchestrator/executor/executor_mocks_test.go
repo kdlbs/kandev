@@ -136,7 +136,7 @@ func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID st
 	}, nil
 }
 
-func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error) {
+func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
 	return nil, nil
 }
 
