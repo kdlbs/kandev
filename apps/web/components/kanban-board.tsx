@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
@@ -15,7 +15,7 @@ import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
-import { useTaskPRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
@@ -204,18 +204,7 @@ function useKanbanBoardSetup(
   } = useKanbanBoardStore();
 
   useAllWorkflowSnapshots(workspaceState.activeId);
-
-  // Fetch PR associations for all visible tasks so kanban cards show PR icons.
-  // SSR hydration provides initial data, but this ensures client-side fallback.
-  const snapshots = useAppStore((s) => s.kanbanMulti.snapshots);
-  const allTaskIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const snapshot of Object.values(snapshots)) {
-      for (const task of snapshot.tasks) ids.push(task.id);
-    }
-    return ids;
-  }, [snapshots]);
-  useTaskPRs(allTaskIds);
+  useWorkspacePRs(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({

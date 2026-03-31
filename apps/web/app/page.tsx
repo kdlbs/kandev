@@ -8,8 +8,8 @@ import {
   listWorkspaces,
   listTaskSessionMessages,
   listQuickChatSessions,
-  listTaskPRs,
 } from "@/lib/api";
+import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
@@ -91,23 +91,6 @@ async function loadSnapshotState(
   ]);
   const state: Partial<AppState> = { ...snapshotToState(snapshot) };
 
-  // Fetch PR associations for all tasks so sidebar icons render immediately
-  const taskIds =
-    snapshot.tasks?.filter((t) => !t.is_ephemeral && t.workflow_step_id).map((t) => t.id) ?? [];
-  if (taskIds.length > 0) {
-    try {
-      const prResponse = await listTaskPRs(taskIds, { cache: "no-store" });
-      const prCount = prResponse?.task_prs ? Object.keys(prResponse.task_prs).length : 0;
-      console.log("[ssr] listTaskPRs", { taskCount: taskIds.length, prCount, hasTaskPRs: !!prResponse?.task_prs });
-      if (prResponse?.task_prs) {
-        state.taskPRs = { byTaskId: prResponse.task_prs, loaded: true, loading: false };
-      }
-    } catch (err) {
-      console.log("[ssr] listTaskPRs failed", err);
-      // Non-critical: PR icons will populate via WS later
-    }
-  }
-
   if (sessionId && messagesResponse) {
     const messages = [...(messagesResponse.messages ?? [])].reverse();
     state.messages = {
@@ -154,6 +137,10 @@ export default async function Page({ searchParams }: PageProps) {
         </>
       );
     }
+
+    // Fire-and-forget: warm the backend PR cache for this workspace.
+    // The client will fetch the data after mount via useWorkspacePRs.
+    listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
 
     const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
       listWorkflows(activeWorkspaceId, { cache: "no-store" }),

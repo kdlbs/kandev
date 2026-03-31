@@ -63,9 +63,22 @@ func (c *Controller) httpGetStatus(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
+	// Workspace-scoped: returns all PRs for a workspace, triggers background refresh for stale ones
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID != "" {
+		result, err := c.service.ListWorkspaceTaskPRs(ctx.Request.Context(), workspaceID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
+		return
+	}
+
+	// Legacy: filter by task IDs
 	taskIDsParam := ctx.Query("task_ids")
 	if taskIDsParam == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task_ids query parameter required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id or task_ids query parameter required"})
 		return
 	}
 	taskIDs := strings.Split(taskIDsParam, ",")
@@ -74,7 +87,6 @@ func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.logger.Debug("listing task PRs", zap.Int("requested_tasks", len(taskIDs)), zap.Int("found_prs", len(result)))
 	ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
 }
 

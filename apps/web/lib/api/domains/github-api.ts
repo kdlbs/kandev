@@ -28,6 +28,13 @@ export async function listTaskPRs(taskIds: string[], options?: ApiRequestOptions
   return fetchJson<TaskPRsResponse>(`/api/v1/github/task-prs?${query.toString()}`, options);
 }
 
+export async function listWorkspaceTaskPRs(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskPRsResponse>(
+    `/api/v1/github/task-prs?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+}
+
 export async function getTaskPR(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskPR>(`/api/v1/github/task-prs/${taskId}`, options);
 }

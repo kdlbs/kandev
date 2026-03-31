@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
-import { listTaskPRs } from "@/lib/api/domains/github-api";
+import { listTaskPRs, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
@@ -36,6 +36,28 @@ export function useTaskPRs(taskIds: string[]) {
   }, [taskIds.join(",")]);
 
   return { byTaskId, loading };
+}
+
+/** Fetch all PR associations for a workspace. */
+export function useWorkspacePRs(workspaceId: string | null) {
+  const setTaskPRs = useAppStore((state) => state.setTaskPRs);
+  const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
+  const fetchedRef = useRef("");
+
+  useEffect(() => {
+    if (!workspaceId || fetchedRef.current === workspaceId) return;
+    fetchedRef.current = workspaceId;
+
+    setTaskPRsLoading(true);
+    listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
+      .then((response) => {
+        setTaskPRs(response?.task_prs ?? {});
+      })
+      .catch(() => {})
+      .finally(() => {
+        setTaskPRsLoading(false);
+      });
+  }, [workspaceId, setTaskPRs, setTaskPRsLoading]);
 }
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
