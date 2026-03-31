@@ -248,10 +248,8 @@ export function hydrateState(
 function hydrateGitHub(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
   if (state.taskPRs) {
-    console.log("[hydrateGitHub] incoming taskPRs keys", Object.keys(state.taskPRs.byTaskId ?? {}));
-    console.log("[hydrateGitHub] draft taskPRs keys before", Object.keys(draft.taskPRs.byTaskId));
+    console.log("[hydrateGitHub] merging taskPRs", Object.keys(state.taskPRs.byTaskId ?? {}).length, "into", Object.keys(draft.taskPRs.byTaskId).length);
     mergeWithLoading(draft.taskPRs, state.taskPRs);
-    console.log("[hydrateGitHub] draft taskPRs keys after", Object.keys(draft.taskPRs.byTaskId));
   }
   if (state.prWatches) mergeWithLoading(draft.prWatches, state.prWatches);
   if (state.reviewWatches) mergeWithLoading(draft.reviewWatches, state.reviewWatches);
