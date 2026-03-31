@@ -133,7 +133,7 @@ func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID st
 	}, nil
 }
 
-func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
+func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
 	return nil, nil
 }
 func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {

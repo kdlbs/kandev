@@ -28,7 +28,8 @@ func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecy
 
 // mockSessionReader implements SessionReader for testing.
 type mockSessionReader struct {
-	baseCommits map[string]string
+	baseCommits  map[string]string
+	baseBranches map[string]string
 }
 
 func (m *mockSessionReader) GetSessionBaseCommit(_ context.Context, sessionID string) string {
@@ -36,6 +37,13 @@ func (m *mockSessionReader) GetSessionBaseCommit(_ context.Context, sessionID st
 		return ""
 	}
 	return m.baseCommits[sessionID]
+}
+
+func (m *mockSessionReader) GetSessionBaseBranch(_ context.Context, sessionID string) string {
+	if m.baseBranches == nil {
+		return ""
+	}
+	return m.baseBranches[sessionID]
 }
 
 func TestNewGitHandlers(t *testing.T) {

@@ -452,7 +452,7 @@ func (s *SimulatedAgentManagerClient) GetExecutionIDForSession(_ context.Context
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
 }
-func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
+func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
 	return nil, nil
 }
 func (s *SimulatedAgentManagerClient) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
