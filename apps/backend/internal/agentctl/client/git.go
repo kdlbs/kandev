@@ -326,8 +326,13 @@ type GitCommitInfo struct {
 
 // GitLog gets the commit log from baseCommit to HEAD.
 // If baseCommit is empty, returns recent commits (limited by limit).
-func (c *Client) GitLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/git/log?since=%s&limit=%d", c.baseURL, url.QueryEscape(baseCommit), limit)
+// If targetBranch is provided, computes merge-base dynamically for accurate filtering.
+func (c *Client) GitLog(ctx context.Context, baseCommit string, limit int, targetBranch string) (*GitLogResult, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/git/log?since=%s&limit=%d",
+		c.baseURL, url.QueryEscape(baseCommit), limit)
+	if targetBranch != "" {
+		reqURL += "&target_branch=" + url.QueryEscape(targetBranch)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {

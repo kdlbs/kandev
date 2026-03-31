@@ -1143,7 +1143,7 @@ func (s *Service) StopExecution(ctx context.Context, executionID string, reason 
 func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) error {
 	s.logger.Info("capturing archive snapshot", zap.String("session_id", sessionID))
 
-	baseCommit, err := s.resolveArchiveBaseCommit(ctx, sessionID)
+	baseCommit, baseBranch, err := s.resolveArchiveBaseCommitAndBranch(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1153,7 +1153,7 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 		return nil
 	}
 
-	if !s.captureArchiveCommits(ctx, sessionID, baseCommit) {
+	if !s.captureArchiveCommits(ctx, sessionID, baseCommit, baseBranch) {
 		// Agent not running, skip diff capture as well
 		return nil
 	}
@@ -1162,16 +1162,19 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 	return nil
 }
 
-// resolveArchiveBaseCommit retrieves the base commit for archive snapshot capture.
-// It first checks the session's stored base_commit_sha, falling back to git status if empty.
-func (s *Service) resolveArchiveBaseCommit(ctx context.Context, sessionID string) (string, error) {
+// resolveArchiveBaseCommitAndBranch retrieves the base commit and branch for archive snapshot capture.
+// It first checks the session's stored values, falling back to git status if empty.
+func (s *Service) resolveArchiveBaseCommitAndBranch(ctx context.Context, sessionID string) (string, string, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get session: %w", err)
+		return "", "", fmt.Errorf("failed to get session: %w", err)
 	}
 
-	if session.BaseCommitSHA != "" {
-		return session.BaseCommitSHA, nil
+	baseCommit := session.BaseCommitSHA
+	baseBranch := session.BaseBranch
+
+	if baseCommit != "" {
+		return baseCommit, baseBranch, nil
 	}
 
 	// Fallback: try to get base commit from git status for legacy sessions
@@ -1180,21 +1183,22 @@ func (s *Service) resolveArchiveBaseCommit(ctx context.Context, sessionID string
 		s.logger.Debug("failed to get git status for base commit fallback",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return "", nil
+		return "", baseBranch, nil
 	}
 	if status != nil && status.BaseCommit != "" {
 		s.logger.Debug("using git status base commit as fallback for archive",
 			zap.String("session_id", sessionID),
 			zap.String("base_commit", status.BaseCommit))
-		return status.BaseCommit, nil
+		return status.BaseCommit, baseBranch, nil
 	}
-	return "", nil
+	return "", baseBranch, nil
 }
 
 // captureArchiveCommits fetches and saves commits from baseCommit to HEAD.
+// If targetBranch is provided, uses dynamic merge-base for accurate filtering.
 // Returns false if the agent is not running (caller should skip remaining capture).
-func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseCommit string) bool {
-	logResult, err := s.agentManager.GetGitLog(ctx, sessionID, baseCommit, 0) // 0 = no limit
+func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseCommit, targetBranch string) bool {
+	logResult, err := s.agentManager.GetGitLog(ctx, sessionID, baseCommit, 0, targetBranch) // 0 = no limit
 	if err != nil {
 		s.logger.Warn("failed to capture git log for archive",
 			zap.String("session_id", sessionID),

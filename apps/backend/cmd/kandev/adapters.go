@@ -341,7 +341,8 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
-func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error) {
+// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
+func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
 	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		return nil, nil // No execution, not an error
@@ -350,7 +351,7 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if agentClient == nil {
 		return nil, nil
 	}
-	return agentClient.GitLog(ctx, baseCommit, limit)
+	return agentClient.GitLog(ctx, baseCommit, limit, targetBranch)
 }
 
 // GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.
