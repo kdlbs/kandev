@@ -9,6 +9,10 @@ Post-implementation simplification pass. Review recently changed code and active
 
 The best code is code you don't have to write. The second best is code anyone can read.
 
+## Available skills and subagents
+
+- **`verify` subagent** — Run after simplifications to ensure all tests, lints, and typechecks still pass.
+
 ## Steps
 
 ### 1. Identify what to simplify

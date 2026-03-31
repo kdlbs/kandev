@@ -7,6 +7,10 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 Create a git commit following this project's Conventional Commits convention. These messages are used by git-cliff (`cliff.toml`) to auto-generate changelogs and release notes. PRs are squash-merged, so the PR title becomes the commit on `main` — CI validates it via `pr-title.yml`.
 
+## Available skills and subagents
+
+- **`verify` subagent** — Run fmt, typecheck, test, and lint. Delegate to this before committing to catch issues early.
+
 ## Format
 
 ```
@@ -46,11 +50,11 @@ ci: add PR title linting workflow
 
 ## Steps
 
-**Create a todo/task for each step below and mark them as completed as you go.**
+**Create a task for each step below and mark them as completed as you go.**
 
 1. Run `git status` and `git diff` to understand all changes
 2. Review recent commits with `git log --oneline -10` to match project style
-3. Delegate to the **`verify` sub-agent** to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete before proceeding.
+3. Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete before proceeding.
 4. Stage relevant files (prefer specific files over `git add -A`)
 5. Write a commit message following the format above
 6. If changes span multiple concerns, consider separate commits

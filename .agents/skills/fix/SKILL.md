@@ -5,11 +5,32 @@ description: Fix bugs and issues — reproduce, find root cause, minimal fix wit
 
 # Fix
 
-Systematic bug fixing: reproduce the problem, find the root cause, apply a minimal fix with a regression test. **No fix without root cause investigation first.**
+Systematic bug fixing: reproduce the problem, find the root cause, apply a minimal fix with a regression test.
 
-## Steps
+## Available skills and subagents
 
-### 1. Reproduce
+- **`/tdd`** — Use for implementing the fix with a regression test (Red-Green-Refactor).
+- **`/e2e`** — Use when the bug is in a user-facing flow and needs a Playwright regression test.
+- **`/verify`** — Run after fixing to ensure nothing else broke.
+
+---
+
+## Before anything else: create the pipeline
+
+Create these tasks immediately (use your task/todo tracking tool if available):
+
+1. **Reproduce the bug** — Write a test or find a reliable reproduction case
+2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
+3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
+4. **Verify** — Run full verification, check for similar patterns elsewhere
+
+Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
+
+---
+
+## Phase 1: Reproduce
+
+Mark task 1 as in_progress.
 
 Before anything else, reproduce the bug reliably. Pick the right method based on where the bug lives:
 
@@ -21,7 +42,13 @@ Before anything else, reproduce the bug reliably. Pick the right method based on
 If it can't be reproduced, add logging/assertions to gather more info — don't guess at a fix.
 Find the minimal reproduction case: strip away everything that isn't needed to trigger the bug.
 
-### 2. Narrow down the cause
+Mark task 1 as completed.
+
+---
+
+## Phase 2: Find the root cause
+
+Mark task 2 as in_progress.
 
 Don't guess and patch — systematically narrow the scope:
 
@@ -31,27 +58,41 @@ Don't guess and patch — systematically narrow the scope:
 
 **Check history (only if it used to work):** If a feature regressed, use `git bisect` to find the commit that broke it. Skip this for bugs that were always present.
 
-### 3. Confirm root cause
-
-Before fixing, state the root cause clearly:
+**Before proceeding, state the root cause clearly:**
 - What is the actual cause (not the symptom)?
 - Why does it happen? (e.g., "empty string bypasses validation and reaches the DB layer")
 - Under what conditions? (e.g., "only when the input is whitespace-only")
 
-If you can't state this clearly, you haven't found the root cause yet — go back to step 2.
+If you can't state this clearly, you haven't found the root cause yet — keep investigating. Present your root cause analysis to the user before fixing.
 
-### 4. Fix with TDD
+Mark task 2 as completed.
+
+---
+
+## Phase 3: Fix with TDD
+
+Mark task 3 as in_progress.
 
 Follow `/tdd`:
 1. Write a test that reproduces the exact bug — confirm it fails
 2. Write the minimal fix — change only what's necessary, don't refactor surrounding code
 3. Confirm the test passes and no other tests regress
 
-### 5. Verify
+Mark task 3 as completed.
 
-- Run `/verify` to ensure nothing else broke
-- Check that the fix addresses the root cause, not just the symptom
-- If the same category of bug could occur elsewhere, grep for similar patterns
+---
+
+## Phase 4: Verify
+
+Mark task 4 as in_progress.
+
+1. Run `/verify` to ensure nothing else broke
+2. Check that the fix addresses the root cause, not just the symptom
+3. If the same category of bug could occur elsewhere, grep for similar patterns and flag them
+
+Mark task 4 as completed.
+
+---
 
 ## Stop conditions
 

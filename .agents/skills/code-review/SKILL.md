@@ -7,6 +7,10 @@ description: Review changed code for quality, security, and architecture complia
 
 Review the current changes in the codebase (Go + Next.js monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
 
+## Available skills
+
+- **`/tdd`** — Recommend when flagging untested logic. The author can use this to add tests.
+
 ## Steps
 
 ### 1. Identify changed files and check scope

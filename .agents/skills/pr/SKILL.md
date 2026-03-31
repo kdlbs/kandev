@@ -5,6 +5,11 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 # PR
 
+## Available skills
+
+- **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.
+- **`/pr-fixup`** — Wait for CI checks and CodeRabbit review, fix any failures or valid comments, and push.
+
 ## Context
 
 - Current git status: !`git status`
@@ -17,13 +22,9 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
 - Default (no flag) — create as ready-for-review and run `/pr-fixup` to wait for CI/CodeRabbit and fix issues.
 
-## Your task
+## Steps
 
-Commit, push, and create a pull request.
-
-### Steps
-
-**Create a todo/task for each step below and mark them as completed as you go.**
+**Create a task for each step below and mark them as completed as you go.**
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
@@ -36,7 +37,7 @@ Commit, push, and create a pull request.
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
    **PR body** must follow the project's pull request template:
-   - **Summary** (required): 1–2 sentences of prose, no heading. Lead with the problem/goal, end with the outcome. Say WHY, not what.
+   - **Summary** (required): 1-2 sentences of prose, no heading. Lead with the problem/goal, end with the outcome. Say WHY, not what.
    - **Important Changes** (optional): short bullet list of significant architectural changes. Remove section if not needed.
    - **Validation** (required): list commands or checks run (e.g. `go test ./...`, `make lint`).
    - **Diagram** (optional): Mermaid diagram only for non-obvious flows. Remove section if not needed.

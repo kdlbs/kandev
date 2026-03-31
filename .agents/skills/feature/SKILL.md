@@ -7,26 +7,68 @@ description: Guided feature development — brainstorm, explore codebase, design
 
 Systematic feature development: understand the problem, explore the codebase, design the solution, implement with TDD, verify it works, and review.
 
-**No implementation before design approval.**
+## Available skills and subagents
+
+The following skills and subagents are available in this repo to delegate work to. Use them instead of doing everything inline — they have specialized instructions and keep your context clean:
+
+- **`/tdd`** — Implement changes using Test-Driven Development (Red-Green-Refactor). Delegate implementation tasks to this.
+- **`/e2e`** — Write and run Playwright E2E tests using TDD. Use for the final wave when the full feature needs end-to-end coverage.
+- **`qa` subagent** — Verify a feature works after implementation. Actively tries to break it — edge cases, error paths, integration wiring.
+- **`verify` subagent** — Run fmt, typecheck, test, and lint across the monorepo, then fix any issues found.
+- **`simplify` subagent** — Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting.
+- **`code-review` subagent** — Review changed code for quality, security, and architecture compliance.
+
+---
+
+## Before anything else: create the pipeline
+
+The first thing you do — before reading code, before asking questions, before any exploration — is create a task list for the full pipeline. This is non-negotiable because it keeps you accountable to the process and lets the user see where you are.
+
+Create these tasks immediately (use your task/todo tracking tool if available):
+
+1. **Understand the problem** — Clarify requirements, identify constraints, confirm understanding with user
+2. **Explore the codebase** — Find similar patterns, relevant architecture, integration points
+3. **Design the solution** — Propose approaches with trade-offs, get user approval before implementing
+4. **Implement with TDD** — Break into waves, implement test-first, delegate where possible
+5. **QA** — Verify the feature works end-to-end, try to break it
+6. **Review and finalize** — Simplify, verify, code review, summarize
+
+Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — each phase produces context that the next phase needs. Designing without exploring leads to solutions that fight the codebase. Implementing without design approval wastes time on the wrong approach.
+
+---
 
 ## Phase 1: Understand the problem
 
+Mark task 1 as in_progress.
+
 1. If the request is vague, ask clarifying questions — one at a time, prefer multiple choice
-2. Challenge the premise: is this the right feature, or is the real need something different?
+2. **Challenge the premise** — before accepting the feature at face value, ask whether this is the right solution to the underlying problem. For example: "Have you considered X instead?" or "Is the real need Y rather than Z?" This is especially important for vague requests where the user may not have thought through alternatives. Even for clear requests, briefly consider whether a simpler approach exists.
 3. Identify: what problem is being solved, who benefits, what are the constraints
 4. Summarize understanding and confirm with the user
 
+Mark task 1 as completed.
+
+---
+
 ## Phase 2: Explore the codebase
 
-1. Launch 2-3 Explore agents in parallel targeting different aspects:
+Mark task 2 as in_progress.
+
+1. Search the codebase in parallel targeting different aspects:
    - Similar features and their implementation patterns
    - Architecture and abstractions in the relevant area
    - Integration points, data flow, and extension points
-2. Read all key files the agents identify
+2. Read all key files identified
 3. Check `docs/decisions/INDEX.md` for relevant architectural decisions in this area
 4. Present a summary of existing patterns and conventions to reuse
 
+Mark task 2 as completed.
+
+---
+
 ## Phase 3: Design
+
+Mark task 3 as in_progress.
 
 1. **Scope check:** If the feature spans multiple independent subsystems, break it into sub-features first. Each should produce working, testable software on its own.
 2. Identify remaining ambiguities: edge cases, error handling, scope boundaries, backward compatibility
@@ -35,51 +77,56 @@ Systematic feature development: understand the problem, explore the codebase, de
    - Minimal change (smallest diff, maximum reuse)
    - Clean architecture (maintainability, elegant abstractions)
    - Pragmatic balance (speed + quality)
-5. **Map the file structure:** Before getting approval, list which files will be created or modified and what each is responsible for. This locks in decomposition decisions.
-6. Get explicit user approval on the approach before proceeding
+5. **Map the file structure:** List which files will be created or modified and what each is responsible for. This locks in decomposition decisions.
+6. **Stop and wait for explicit user approval on the approach before proceeding.** Do not start Phase 4 until the user confirms the design.
+
+Mark task 3 as completed only after the user approves.
+
+---
 
 ## Phase 4: Implement with TDD
 
-**You are the coordinator.** Your job is to hold the big picture (requirements, design, file structure, wave progress) and delegate implementation to subagents. Protect your context:
+Mark task 4 as in_progress.
 
-- **Prefer subagents over inline work.** Every task you implement inline fills your context with code details and tool outputs. Delegate to subagents whenever possible — they get fresh context and return only a summary.
-- **Keep coupled tasks small.** If you must implement inline (coupled tasks), keep each task focused and short. Don't read entire files unnecessarily — read only what you need to verify the subagent's work or wire things together.
-- **Don't debug in the coordinator.** If a subagent's task fails quality gates, dispatch a new subagent to fix it rather than debugging inline. Pass the failure details and let the fresh subagent investigate.
+**You are the coordinator.** Your job is to hold the big picture (requirements, design, file structure, wave progress) and delegate implementation. Protect your context:
+
+- **Delegate over inline work.** Every task you implement inline fills your context with code details and tool outputs. Delegate to sub-tasks whenever possible — they get fresh context and return only a summary.
+- **Keep coupled tasks small.** If you must implement inline (coupled tasks), keep each task focused and short. Don't read entire files unnecessarily — read only what you need to verify work or wire things together.
+- **Don't debug in the coordinator.** If a task fails quality gates, dispatch a new sub-task to fix it rather than debugging inline. Pass the failure details and let the fresh context investigate.
 - **Track progress, not details.** For each completed task, note: what was done, which files changed, commit hash. Don't carry the implementation details forward.
 
-### 4a. Decompose into tasks
+### 4a. Decompose into implementation tasks
 
-Using the file structure map from Phase 3, break the implementation into discrete tasks. Each task should:
+Using the file structure map from Phase 3, create sub-tasks for each discrete piece of work. Each task should:
 - Touch a specific set of files
 - Have a clear done condition (test passes, API works, component renders)
 - Be classifiable as independent or coupled
 
 ### 4b. Group into waves
 
-Subagents share the same worktree, so parallelism is constrained by build boundaries:
-- **Backend (Go)**: packages compile independently — different packages can run in parallel subagents
-- **Frontend (Next.js)**: single build — only ONE subagent can work on frontend at a time
+Parallelism is constrained by build boundaries:
+- **Backend (Go)**: packages compile independently — different packages can run in parallel
+- **Frontend (Next.js)**: single build — only ONE task can work on frontend at a time
 - **E2E tests**: need full build — only after both backend and frontend changes are done
 - **Coupled tasks** (shared types, sequential data flow): must run sequentially regardless
 
 Group tasks into waves. Example:
 ```text
-Wave 1 (parallel): [Backend API handler (subagent), Frontend component + hook (subagent)]
+Wave 1 (parallel): [Backend API handler, Frontend component + hook]
 Wave 2 (sequential): [Wire frontend to API, integration test]
 Wave 3: [E2E test for the full flow]
 ```
 
-Max parallelism: 1 frontend subagent + 1-2 backend subagents (if working on independent packages). For small features with 1-3 tasks, skip wave grouping and implement sequentially.
+For small features with 1-3 tasks, skip wave grouping and implement sequentially.
 
 ### 4c. Execute wave by wave
 
-For each wave, follow `/tdd` strictly (RED-GREEN-REFACTOR):
+For each wave, follow TDD strictly (RED-GREEN-REFACTOR):
 
-**Independent tasks in the wave**: dispatch one subagent per task. Each gets fresh context with:
+**Independent tasks in the wave**: delegate each task via `/tdd`. Each gets:
 - Task description and acceptance criteria
 - Relevant file paths from Phase 3
 - Codebase conventions from Phase 2
-- Instruction to follow `/tdd`
 
 **Coupled tasks** (e.g., wiring frontend to backend, integration glue): implement inline but keep it minimal — only the glue code, not full feature implementation.
 
@@ -91,29 +138,45 @@ After each wave completes:
 - Backend: `cd apps/backend && go test ./internal/path/...` (changed packages only)
 - Frontend: `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web test`
 - If tests fail, fix before proceeding to the next wave
-- E2E tests only in the final wave or Phase 5 (QA)
+- E2E tests only in the final wave (via `/e2e`) or Phase 5 (QA)
+
+Mark each implementation sub-task as completed as it passes its quality gate.
 
 ### 4e. Stop conditions
 
-- **Bugs or missing validation discovered during a subagent's task:** the subagent fixes it inline. If the bug surfaces after a wave completes (quality gate failure), dispatch a new subagent to fix it — don't debug in the coordinator.
+- **Bugs or missing validation discovered during a task:** fix inline. If the bug surfaces after a wave completes (quality gate failure), dispatch a new task to fix it — don't debug in the coordinator.
 - **Blocker (missing dependency, unclear requirement, test fails repeatedly):** stop and ask the user
 - **Fix requires architectural change (new DB table, new service layer, switching libraries):** stop and ask — don't make structural decisions silently
 - **3 failed fix attempts on the same issue:** stop, question the approach, ask the user
 
+Mark task 4 as completed when all implementation sub-tasks pass their quality gates.
+
+---
+
 ## Phase 5: QA
 
-Delegate to the **`qa` sub-agent** to verify the feature works end-to-end. It will:
+Mark task 5 as in_progress.
+
+Delegate to the `qa` subagent to verify the feature works end-to-end. It will:
 - Trace the wiring (exports used, APIs called, data flows)
 - Test the happy path
 - Try to break it (boundary values, error paths, concurrency)
 - Write tests for any gaps found
 
-## Phase 6: Review
+Mark task 5 as completed.
 
-1. Delegate to the **`simplify` sub-agent** to clean up the implementation
-2. Delegate to the **`verify` sub-agent** to ensure fmt, typecheck, test, and lint all pass
-3. Delegate to the **`code-review` sub-agent** to review the changes
+---
+
+## Phase 6: Review and finalize
+
+Mark task 6 as in_progress.
+
+1. Delegate to the `simplify` subagent to clean up the implementation
+2. Delegate to the `verify` subagent to run fmt, typecheck, test, and lint
+3. Delegate to the `code-review` subagent to review changes for quality, security, and architecture compliance
 4. Fix any blockers, present suggestions to the user
 5. Summarize: what was built, key decisions, files modified, suggested next steps
-6. If significant architectural decisions were made, record them via `/record decision`
-7. Save the feature design to `docs/plans/` via `/record plan` for permanent reference
+6. If significant architectural decisions were made, record them
+7. Save the feature design to `docs/plans/` for permanent reference
+
+Mark task 6 as completed.

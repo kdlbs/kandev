@@ -5,6 +5,11 @@ description: Commit and push to the current branch. Use --fixup to also wait for
 
 # Push
 
+## Available skills
+
+- **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.
+- **`/pr-fixup`** — Wait for CI checks and CodeRabbit review, fix any failures, and push again.
+
 ## Context
 
 - Current branch: !`git branch --show-current`

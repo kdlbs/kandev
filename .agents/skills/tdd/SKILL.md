@@ -9,6 +9,11 @@ Implement code changes using strict Red-Green-Refactor. Iron law: **no productio
 
 Wrote code before a test? Delete it. Start over from a failing test.
 
+## Available skills and subagents
+
+- **`/e2e`** — Use when the change needs a Playwright E2E test instead of a unit test.
+- **`/verify`** — Run after completing all TDD cycles to ensure everything passes across the monorepo.
+
 ## When to use
 
 - Bug fixes — write a test that reproduces the bug before fixing
@@ -27,14 +32,9 @@ Wrote code before a test? Delete it. Start over from a failing test.
   ```bash
   cd apps && pnpm --filter @kandev/web test -- --run path/to/file.test.ts
   ```
-- **Web E2E** (`apps/web/e2e/`): Playwright tests with full-stack isolation (backend + frontend + DB per worker). Uses page objects in `e2e/pages/` and fixtures in `e2e/fixtures/`. Run:
-  ```bash
-  make test-e2e                                                    # all tests, headless
-  cd apps && pnpm --filter @kandev/web e2e -- tests/my-test.spec.ts  # single file
-  make test-e2e-headed                                             # with visible browser
-  ```
+- **Web E2E** (`apps/web/e2e/`): delegate to `/e2e` for Playwright tests.
 
-Choose the right level: unit tests for isolated logic, web E2E for user-facing flows.
+Choose the right level: unit tests for isolated logic, E2E for user-facing flows.
 
 ## Steps
 
