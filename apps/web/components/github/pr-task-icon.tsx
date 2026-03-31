@@ -40,7 +40,7 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
         <span
           data-testid={`pr-task-icon-${taskId}`}
           data-pr-state={pr.state}
-          className={cn("inline-flex items-center", getPRStatusColor(pr))}
+          className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
         >
           <IconGitPullRequest className="h-3.5 w-3.5" />
         </span>
