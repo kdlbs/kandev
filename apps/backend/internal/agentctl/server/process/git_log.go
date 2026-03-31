@@ -342,3 +342,13 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 
 	return files
 }
+
+// GetMergeBase returns the merge-base commit SHA between two refs (e.g., HEAD and origin/main).
+// This is used to determine the common ancestor for filtering commits.
+func (g *GitOperator) GetMergeBase(ctx context.Context, ref1, ref2 string) (string, error) {
+	output, err := g.runGitCommand(ctx, "merge-base", ref1, ref2)
+	if err != nil {
+		return "", fmt.Errorf("failed to compute merge-base: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}

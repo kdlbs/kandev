@@ -165,8 +165,9 @@ type AgentManagerClient interface {
 	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
 
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
+	// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
-	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error)
+	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
 
 	// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to the
 	// working tree (including uncommitted/unstaged changes). Used for archive snapshot capture.

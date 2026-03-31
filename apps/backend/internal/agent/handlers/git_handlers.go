@@ -34,6 +34,11 @@ type SessionReader interface {
 	// GetSessionBaseCommit returns the base commit SHA for a session.
 	// Returns empty string if not set or on error.
 	GetSessionBaseCommit(ctx context.Context, sessionID string) string
+
+	// GetSessionBaseBranch returns the target branch for a session (e.g., "origin/main").
+	// Used for computing merge-base to filter commits accurately after rebases.
+	// Returns empty string if not set or on error.
+	GetSessionBaseBranch(ctx context.Context, sessionID string) string
 }
 
 // GitHandlers provides WebSocket handlers for git worktree operations.
@@ -635,6 +640,7 @@ type GitCommitsRequest struct {
 // wsGitCommits handles session.git.commits action
 // The base commit SHA is always looked up from the session metadata in the database.
 // This ensures commits are filtered to only those made during the session.
+// When a target branch is available, we use dynamic merge-base calculation for accuracy.
 func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req GitCommitsRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -656,10 +662,11 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 		return nil, err
 	}
 
-	// Look up base commit SHA from the session metadata
-	var baseCommit string
+	// Look up base commit SHA and target branch from the session metadata
+	var baseCommit, targetBranch string
 	if h.sessionReader != nil {
 		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
 
 	// Fallback: if base_commit_sha is not stored in session, use git merge-base
@@ -675,7 +682,9 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 		}
 	}
 
-	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit)
+	// Use target branch for dynamic merge-base calculation.
+	// This ensures accurate commit filtering even after rebases.
+	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit, targetBranch)
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}

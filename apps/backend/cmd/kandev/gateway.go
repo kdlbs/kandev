@@ -67,6 +67,22 @@ func (a *sessionReaderAdapter) GetSessionBaseCommit(ctx context.Context, session
 	return session.BaseCommitSHA
 }
 
+func (a *sessionReaderAdapter) GetSessionBaseBranch(ctx context.Context, sessionID string) string {
+	session, err := a.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("failed to load session for base branch lookup",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return ""
+	}
+	if session == nil {
+		return ""
+	}
+	return session.BaseBranch
+}
+
 func provideGateway(
 	ctx context.Context,
 	log *logger.Logger,

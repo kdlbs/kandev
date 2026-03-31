@@ -89,8 +89,9 @@ type GitResetRequest struct {
 
 // GitLogRequest for GET /api/v1/git/log
 type GitLogRequest struct {
-	Since string `form:"since"` // Base commit SHA (exclusive)
-	Limit int    `form:"limit"` // Max commits to return
+	Since        string `form:"since"`         // Base commit SHA (exclusive)
+	TargetBranch string `form:"target_branch"` // Target branch for merge-base calculation (e.g., "origin/main")
+	Limit        int    `form:"limit"`         // Max commits to return
 }
 
 // GitCumulativeDiffRequest for GET /api/v1/git/cumulative-diff
@@ -541,7 +542,24 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	}
 
 	gitOp := s.procMgr.GitOperator()
-	result, err := gitOp.GetLog(c.Request.Context(), req.Since, limit)
+
+	// If target_branch is provided, compute merge-base dynamically.
+	// This ensures we only show commits not yet merged into the target branch,
+	// which is accurate even after rebases.
+	baseCommit := req.Since
+	if req.TargetBranch != "" {
+		mergeBase, err := gitOp.GetMergeBase(c.Request.Context(), "HEAD", req.TargetBranch)
+		if err != nil {
+			s.logger.Warn("failed to compute merge-base, falling back to since",
+				zap.String("target_branch", req.TargetBranch),
+				zap.Error(err))
+			// Fall back to the provided base commit
+		} else if mergeBase != "" {
+			baseCommit = mergeBase
+		}
+	}
+
+	result, err := gitOp.GetLog(c.Request.Context(), baseCommit, limit)
 	if err != nil {
 		s.logger.Error("git log failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, process.GitLogResult{
