@@ -108,6 +108,9 @@ type mockAgentManager struct {
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 
+	// Prompt tracking
+	capturedPrompts []string // tracks prompts passed to PromptAgent
+
 	// Passthrough stdin tracking
 	passthroughStdinCalls []passthroughStdinCall
 	passthroughStdinErr   error
@@ -141,7 +144,8 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return nil
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, _ string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+	m.capturedPrompts = append(m.capturedPrompts, prompt)
 	if m.promptErr != nil {
 		return nil, m.promptErr
 	}

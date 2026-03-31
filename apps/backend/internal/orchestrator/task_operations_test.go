@@ -117,6 +117,70 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 	}
 }
 
+func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "update the plan", "", true, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected 1 prompt, got %d", len(agentMgr.capturedPrompts))
+	}
+	if !strings.Contains(agentMgr.capturedPrompts[0], "PLAN MODE ACTIVE") {
+		t.Fatalf("expected plan mode prefix in prompt, got: %s", agentMgr.capturedPrompts[0])
+	}
+}
+
+func TestPromptTask_NoPlanModeDoesNotInjectPrefix(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "implement the feature", "", false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected 1 prompt, got %d", len(agentMgr.capturedPrompts))
+	}
+	if strings.Contains(agentMgr.capturedPrompts[0], "PLAN MODE ACTIVE") {
+		t.Fatalf("expected no plan mode prefix in prompt, got: %s", agentMgr.capturedPrompts[0])
+	}
+}
+
 func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()

@@ -1334,6 +1334,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
 	}
 
+	// Inject plan mode prefix for follow-up messages in plan mode sessions.
+	if planMode {
+		effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
+	}
+
 	// Check if model switching is requested
 	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
 		return result, err

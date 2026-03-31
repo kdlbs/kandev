@@ -55,6 +55,10 @@ WORKFLOW:
 5. Save your changes using the update_task_plan_kandev MCP tool (or create_task_plan_kandev if no plan exists yet).
 6. After saving, STOP and wait for the user to review.
 
+When the user sends comments or feedback on the plan, treat them as revision requests:
+- Read the current plan, apply the requested changes, and save the updated plan.
+- Do NOT start implementing code changes. Stay in planning mode.
+
 This instruction applies to THIS PROMPT ONLY.`
 
 // KandevContext is the system prompt that provides Kandev-specific instructions

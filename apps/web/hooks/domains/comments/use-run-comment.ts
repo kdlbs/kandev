@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { appendToQueue } from "@/lib/api/domains/queue-api";
+import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
   formatReviewCommentsAsMarkdown,
@@ -62,6 +63,9 @@ type UseRunCommentParams = {
  */
 export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const planModeEnabled = useAppStore((s) =>
+    sessionId ? (s.chatInput.planModeBySessionId[sessionId] ?? false) : false,
+  );
 
   const runComment = useCallback(
     async (comment: Comment) => {
@@ -75,6 +79,7 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
             session_id: sessionId,
             task_id: taskId,
             content,
+            ...(planModeEnabled && { plan_mode: true }),
           });
         } else {
           const client = getWebSocketClient();
@@ -86,6 +91,7 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
               task_id: taskId,
               session_id: sessionId,
               content,
+              ...(planModeEnabled && { plan_mode: true }),
               ...(comment.source !== "plan" && { has_review_comments: true }),
             },
             10000,
@@ -98,7 +104,7 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
         throw error;
       }
     },
-    [sessionId, taskId, isAgentBusy, markCommentsSent],
+    [sessionId, taskId, isAgentBusy, planModeEnabled, markCommentsSent],
   );
 
   return { runComment };
