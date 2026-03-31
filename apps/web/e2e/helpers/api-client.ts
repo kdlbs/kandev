@@ -607,7 +607,15 @@ export class ApiClient {
 
   async listSessionMessages(
     sessionId: string,
-  ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
+  ): Promise<{
+    messages: Array<{
+      id: string;
+      content: string;
+      author_type: string;
+      raw_content?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+  }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
   }
 
