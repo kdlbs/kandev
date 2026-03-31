@@ -5,9 +5,16 @@ description: Write and run web E2E tests (Playwright) using TDD — locations, p
 
 # E2E Tests
 
-Write E2E tests using `/tdd` (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
+Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
 
-**Location:** `apps/web/e2e/`
+## Available skills and subagents
+
+- **`/tdd`** — Follow the Red-Green-Refactor cycle when writing tests.
+- **`/verify`** — Run after completing tests to ensure everything passes across the monorepo.
+
+## Location
+
+`apps/web/e2e/`
 
 ```
 apps/web/e2e/
