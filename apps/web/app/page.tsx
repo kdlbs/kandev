@@ -97,10 +97,13 @@ async function loadSnapshotState(
   if (taskIds.length > 0) {
     try {
       const prResponse = await listTaskPRs(taskIds, { cache: "no-store" });
+      const prCount = prResponse?.task_prs ? Object.keys(prResponse.task_prs).length : 0;
+      console.log("[ssr] listTaskPRs", { taskCount: taskIds.length, prCount, hasTaskPRs: !!prResponse?.task_prs });
       if (prResponse?.task_prs) {
         state.taskPRs = { byTaskId: prResponse.task_prs, loaded: true, loading: false };
       }
-    } catch {
+    } catch (err) {
+      console.log("[ssr] listTaskPRs failed", err);
       // Non-critical: PR icons will populate via WS later
     }
   }

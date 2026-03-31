@@ -74,7 +74,8 @@ func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, result)
+	c.logger.Debug("listing task PRs", zap.Int("requested_tasks", len(taskIDs)), zap.Int("found_prs", len(result)))
+	ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
 }
 
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
