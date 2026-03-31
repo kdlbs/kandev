@@ -35,7 +35,8 @@ function createTaskPRActions(
     setTaskPRs: (prs) =>
       set((draft) => {
         console.log("[store] setTaskPRs called", { count: Object.keys(prs).length, keys: Object.keys(prs) });
-        draft.taskPRs.byTaskId = prs;
+        // Merge instead of replace to avoid clobbering SSR-hydrated data
+        Object.assign(draft.taskPRs.byTaskId, prs);
         draft.taskPRs.loaded = true;
       }),
     setTaskPR: (taskId, pr) =>

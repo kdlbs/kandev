@@ -10,11 +10,13 @@ import type { TaskPR } from "@/lib/types/github";
 export function useTaskPRs(taskIds: string[]) {
   const byTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const loading = useAppStore((state) => state.taskPRs.loading);
+  const loaded = useAppStore((state) => state.taskPRs.loaded);
   const setTaskPRs = useAppStore((state) => state.setTaskPRs);
   const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
 
   useEffect(() => {
-    if (taskIds.length === 0 || loading) return;
+    // Skip if no tasks, already loading, or SSR already hydrated the data
+    if (taskIds.length === 0 || loading || loaded) return;
     setTaskPRsLoading(true);
     listTaskPRs(taskIds, { cache: "no-store" })
       .then((response) => {
@@ -27,7 +29,7 @@ export function useTaskPRs(taskIds: string[]) {
         setTaskPRsLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskIds.join(",")]);
+  }, [taskIds.join(","), loaded]);
 
   return { byTaskId, loading };
 }
