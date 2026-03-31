@@ -31,6 +31,8 @@ function getPRTooltip(pr: TaskPR): string {
 
 export function PRTaskIcon({ taskId }: { taskId: string }) {
   const pr = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+  const storeKeys = useAppStore((state) => Object.keys(state.taskPRs.byTaskId));
+  console.log("[PRTaskIcon]", { taskId, hasPR: !!pr, storeKeys });
 
   if (!pr) return null;
 

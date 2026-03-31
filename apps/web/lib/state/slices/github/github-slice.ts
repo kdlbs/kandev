@@ -34,6 +34,7 @@ function createTaskPRActions(
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
+        console.log("[store] setTaskPRs called", { count: Object.keys(prs).length, keys: Object.keys(prs) });
         draft.taskPRs.byTaskId = prs;
         draft.taskPRs.loaded = true;
       }),
