@@ -255,7 +255,7 @@ test.describe("Task session queue", () => {
 
     // Type a short message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
-    await typeWhileBusy(testPage, editor, "short queue msg");
+    await typeWhileBusy(testPage, editor, "short queued msg");
 
     const submitBtn = testPage.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible({ timeout: 5_000 });
