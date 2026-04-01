@@ -28,7 +28,11 @@ export async function reorderWorkflows(
 ) {
   return fetchJson<{ success: boolean }>(`/api/v1/workspaces/${workspaceId}/workflows/reorder`, {
     ...options,
-    init: { method: "PUT", body: JSON.stringify({ workflow_ids: workflowIds }), ...(options?.init ?? {}) },
+    init: {
+      method: "PUT",
+      body: JSON.stringify({ workflow_ids: workflowIds }),
+      ...(options?.init ?? {}),
+    },
   });
 }
 

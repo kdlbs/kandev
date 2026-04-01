@@ -3,7 +3,13 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { IconDownload, IconGripVertical, IconLayoutColumns, IconPlus, IconUpload } from "@tabler/icons-react";
+import {
+  IconDownload,
+  IconGripVertical,
+  IconLayoutColumns,
+  IconPlus,
+  IconUpload,
+} from "@tabler/icons-react";
 import {
   DndContext,
   closestCenter,
@@ -359,7 +365,10 @@ function WorkflowList({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext items={workflowItems.map((wf) => wf.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext
+        items={workflowItems.map((wf) => wf.id)}
+        strategy={verticalListSortingStrategy}
+      >
         <div className="grid gap-3 pl-8">
           {workflowItems.map((workflow) => {
             const isTempWorkflow = workflow.id.startsWith("temp-");

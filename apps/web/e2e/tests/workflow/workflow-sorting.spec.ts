@@ -15,11 +15,7 @@ test.describe("Workflow sorting", () => {
     expect(namesBefore).toEqual(["E2E Workflow", "Workflow B", "Workflow C"]);
 
     // Reorder: C, E2E, B
-    await apiClient.reorderWorkflows(workspaceId, [
-      wfC.id,
-      seedData.workflowId,
-      wfB.id,
-    ]);
+    await apiClient.reorderWorkflows(workspaceId, [wfC.id, seedData.workflowId, wfB.id]);
 
     // Verify new order persists
     const after = await apiClient.listWorkflows(workspaceId);
@@ -68,11 +64,7 @@ test.describe("Workflow sorting", () => {
     expect(await handles.count()).toBeGreaterThanOrEqual(2);
   });
 
-  test("kanban board respects workflow sort order", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("kanban board respects workflow sort order", async ({ testPage, apiClient, seedData }) => {
     const { workspaceId, workflowId } = seedData;
 
     // Create a second workflow with a task so both show on kanban

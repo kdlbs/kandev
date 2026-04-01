@@ -128,7 +128,12 @@ function SortableWorkflowItem({ wf, hideHeader, isSortable, ...rest }: WorkflowI
   const dragHandleProps = isSortable && !hideHeader ? { ...attributes, ...listeners } : undefined;
   return (
     <div ref={setNodeRef} style={style}>
-      <WorkflowItemContent wf={wf} hideHeader={hideHeader} dragHandleProps={dragHandleProps} {...rest} />
+      <WorkflowItemContent
+        wf={wf}
+        hideHeader={hideHeader}
+        dragHandleProps={dragHandleProps}
+        {...rest}
+      />
     </div>
   );
 }
@@ -171,9 +176,7 @@ function useWorkflowReorder(
   const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
   const workflows = useAppStore((state) => state.workflows.items);
   const workspaceId = workflows[0]?.workspaceId;
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const canSort = !workflowFilter && orderedWorkflows.length > 1;
 
   const handleDragEnd = useCallback(
@@ -186,7 +189,10 @@ function useWorkflowReorder(
       const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
       reorderWorkflowItems(reordered.map((wf) => wf.id));
       if (workspaceId) {
-        reorderWorkflows(workspaceId, reordered.map((wf) => wf.id)).catch(() => {});
+        reorderWorkflows(
+          workspaceId,
+          reordered.map((wf) => wf.id),
+        ).catch(() => {});
       }
     },
     [orderedWorkflows, reorderWorkflowItems, workspaceId],
@@ -236,8 +242,11 @@ export function SwimlaneContainer({
   }, [workflowFilter, workflows, snapshots]);
 
   const getFilteredTasks = (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery);
-  const { sensors: workflowSensors, canSort: canSortWorkflows, handleDragEnd: handleWorkflowDragEnd } =
-    useWorkflowReorder(orderedWorkflows, workflowFilter);
+  const {
+    sensors: workflowSensors,
+    canSort: canSortWorkflows,
+    handleDragEnd: handleWorkflowDragEnd,
+  } = useWorkflowReorder(orderedWorkflows, workflowFilter);
 
   const emptyMessage = getEmptyMessage(
     isLoading,
@@ -254,14 +263,19 @@ export function SwimlaneContainer({
 
   const ViewComponent = (getViewByStoredValue(viewMode) ?? getDefaultView()).component;
   const hideHeaders = isMobile && (workflowFilter !== null || orderedWorkflows.length === 1);
-  const containerClass = isMobile
-    ? "flex-1 min-h-0 overflow-y-auto pb-4 space-y-3"
-    : "flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-3";
+  const cls = `flex-1 min-h-0 overflow-y-auto${isMobile ? "" : " px-4"} pb-4 space-y-3`;
 
   return (
-    <DndContext sensors={workflowSensors} collisionDetection={closestCenter} onDragEnd={handleWorkflowDragEnd}>
-      <SortableContext items={visibleWorkflows.map((wf) => wf.id)} strategy={verticalListSortingStrategy}>
-        <div className={containerClass} data-testid="swimlane-container">
+    <DndContext
+      sensors={workflowSensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleWorkflowDragEnd}
+    >
+      <SortableContext
+        items={visibleWorkflows.map((wf) => wf.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className={cls} data-testid="swimlane-container">
           {visibleWorkflows.map((wf) => {
             const snapshot = snapshots[wf.id];
             if (!snapshot) return null;

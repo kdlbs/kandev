@@ -56,7 +56,13 @@ export type KanbanMultiState = {
 };
 
 export type WorkflowsState = {
-  items: Array<{ id: string; workspaceId: string; name: string; description?: string | null; sortOrder?: number }>;
+  items: Array<{
+    id: string;
+    workspaceId: string;
+    name: string;
+    description?: string | null;
+    sortOrder?: number;
+  }>;
   activeId: string | null;
 };
 
