@@ -7,6 +7,7 @@ import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
+import { useAppStore } from "@/components/state-provider";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -39,6 +40,10 @@ type AdapterContext = {
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const [isStarting, setIsStarting] = useState(false);
+  const prepareStatus = useAppStore(
+    (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
+  );
+
   const handleStart = useCallback(async () => {
     setIsStarting(true);
     try {
@@ -51,6 +56,9 @@ function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; ses
     }
   }, [taskId, sessionId]);
 
+  // Hide while environment is being prepared
+  if (prepareStatus === "preparing") return null;
+
   return (
     <div className="flex justify-end mt-1.5">
       <Button
@@ -59,6 +67,7 @@ function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; ses
         className="cursor-pointer gap-1.5"
         onClick={handleStart}
         disabled={isStarting}
+        data-testid="task-description-start-button"
       >
         <IconPlayerPlay className="h-3.5 w-3.5" />
         {isStarting ? "Starting…" : "Start agent"}
