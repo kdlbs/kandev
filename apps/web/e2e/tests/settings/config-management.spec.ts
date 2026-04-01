@@ -136,11 +136,13 @@ test.describe("Config-mode MCP — workflow management", () => {
 
     await runAndWait(testPage, session.task_id, "Workflow created");
 
-    // Verify workflow was created via API
+    // Verify workflow was created via API.
+    // Filter by both name and description since the seed workflow shares the same name.
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
-    const created = workflows.find((w) => w.name === "E2E Workflow");
+    const created = workflows.find(
+      (w) => w.name === "E2E Workflow" && w.description === "Created by E2E test",
+    );
     expect(created).toBeTruthy();
-    expect(created!.description).toBe("Created by E2E test");
   });
 
   test("agent can update a workflow", async ({ testPage, apiClient, seedData }) => {
