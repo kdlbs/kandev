@@ -39,9 +39,10 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.CreatedAt = now
 	workflow.UpdatedAt = now
 
-	// Auto-assign sort_order as max+1 within the workspace
+	// Auto-assign sort_order as max+1 within the workspace.
+	// Use writer connection (r.db) to avoid stale reads under concurrent creation.
 	var maxOrder int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(
 		`SELECT COALESCE(MAX(sort_order), -1) FROM workflows WHERE workspace_id = ?`,
 	), workflow.WorkspaceID).Scan(&maxOrder)
 	if err != nil {
