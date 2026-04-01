@@ -10,6 +10,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 ## Available skills and subagents
 
 - **`verify` subagent** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
+- **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
 ## Context
@@ -17,11 +18,30 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 - Current branch: !`git branch --show-current`
 - Current PR: !`gh pr view --json number,url,title`
 
+## Before anything else: create the pipeline
+
+The first thing you do — before fetching PR state, before reading logs, before any fixes — is create a task list for the full pipeline. This is non-negotiable because it keeps you accountable to the process and lets the user see where you are.
+
+Create these tasks immediately (use your task/todo tracking tool if available):
+
+1. **Gather PR state** — Fetch checks, comments, and review status
+2. **Wait for CI checks** — Poll until all checks resolve
+3. **Wait for automated reviews** — Poll for CodeRabbit and Greptile
+4. **Fix failing CI checks** — Read logs, fix issues, run E2E tests locally if needed
+5. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
+6. **Address each comment** — Fix or reply with reasoning
+7. **Verify, commit, and push** — Run verification pipeline, commit fixes, push
+8. **Summary** — Report what was done: CI fixes, comments addressed/skipped, pushed commit
+
+Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it.
+
+---
+
 ## Steps
 
-**Create a todo/task for each step below and mark them as completed as you go.**
-
 ### 1. Gather PR state
+
+Mark task 1 as in_progress.
 
 Get the PR number from context or the user. Fetch the current state:
 
@@ -31,7 +51,11 @@ gh pr view <number> --json comments
 gh api repos/:owner/:repo/pulls/<number>/comments
 ```
 
+Mark task 1 as completed.
+
 ### 2. Wait for CI checks
+
+Mark task 2 as in_progress.
 
 If any checks are still running (`pending` / `queued` / `in_progress`), poll until they all resolve:
 
@@ -43,7 +67,11 @@ gh pr checks <number>
 - Cap at **10 minutes** (20 polls). If still running after 10 min, report which checks are stuck and proceed.
 - Once done, note which checks passed and which failed.
 
+Mark task 2 as completed.
+
 ### 3. Wait for automated reviews
+
+Mark task 3 as in_progress.
 
 Check if CodeRabbit and Greptile have posted or are generating reviews.
 
@@ -67,7 +95,11 @@ gh pr view <number> --json comments --jq '.comments[] | select(.author.login == 
 gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "greptile-apps[bot]") | {user: .user.login, state: .state}'
 ```
 
+Mark task 3 as completed.
+
 ### 4. Fix failing CI checks
+
+Mark task 4 as in_progress.
 
 If any CI checks failed:
 
@@ -79,7 +111,25 @@ If any CI checks failed:
 3. Read the relevant source files at the failing lines
 4. Fix the issues (lint errors, test failures, type errors, etc.)
 
+**E2E test failures require special handling:**
+
+If any failing check is an E2E test (Playwright):
+
+1. Read the `/e2e` skill (`SKILL.md`) for debugging guidance, test patterns, and run commands
+2. Follow the "Debugging failures" section — read error output, check failure screenshots in `e2e/test-results/`, classify the failure (test logic, frontend, backend)
+3. Fix the root cause. **Never increase timeouts to fix flaky tests** — find the real issue
+4. Confirm fixes pass locally before pushing:
+   ```bash
+   make build-backend build-web
+   cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts
+   ```
+   Run the specific failing test file(s), not the full suite. Only proceed to step 7 after the test passes locally.
+
+Mark task 4 as completed.
+
 ### 5. Triage review comments
+
+Mark task 5 as in_progress.
 
 Fetch all review comments — human reviewers, CodeRabbit, and Greptile:
 
@@ -109,7 +159,11 @@ Then classify:
 - It's technically incorrect for this stack
 - It conflicts with architectural decisions
 
+Mark task 5 as completed.
+
 ### 6. Address each comment
+
+Mark task 6 as in_progress.
 
 Every comment must get a response — either a fix or a reply explaining why it was skipped.
 
@@ -166,7 +220,11 @@ Then resolve using the thread `id`:
 gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
 ```
 
+Mark task 6 as completed.
+
 ### 7. Verify, commit, and push
+
+Mark task 7 as in_progress.
 
 1. Delegate to the **`verify` sub-agent** to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
 
@@ -182,10 +240,16 @@ gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thre
    git push
    ```
 
+Mark task 7 as completed.
+
 ### 8. Summary
+
+Mark task 8 as in_progress.
 
 Report what was done:
 - CI checks: which failed and how they were fixed
 - Comments addressed (with thumbs up)
 - Comments skipped and why
 - Link to the pushed commit
+
+Mark task 8 as completed.
