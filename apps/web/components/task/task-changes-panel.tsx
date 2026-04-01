@@ -174,11 +174,15 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
     return count;
   }, [byId, commentSessionIds]);
 
+  // Derive a stable key from file paths so refs are only recreated when
+  // the file list itself changes, not when diff content updates.
+  const filePathsKey = useMemo(() => allFiles.map((f) => f.path).join("\0"), [allFiles]);
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
     for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>());
     return refs;
-  }, [allFiles]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on stable path list, not allFiles reference
+  }, [filePathsKey]);
 
   const scrolledRef = useRef<string | null>(null);
   useEffect(() => {
