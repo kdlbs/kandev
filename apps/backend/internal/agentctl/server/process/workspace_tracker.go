@@ -46,8 +46,9 @@ type WorkspaceTracker struct {
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
 	workspaceSubMu             sync.RWMutex
 
-	// Git polling interval
-	gitPollInterval time.Duration
+	// Polling intervals
+	filePollInterval time.Duration
+	gitPollInterval  time.Duration
 
 	// Control
 	stopCh     chan struct{}
@@ -72,6 +73,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		gitIndexPath:               gitIndexPath,
 		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
+		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
 		stopCh:                     make(chan struct{}),
 		cancelCtx:                  ctx,
