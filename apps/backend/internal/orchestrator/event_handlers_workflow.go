@@ -548,6 +548,19 @@ func (s *Service) autoStartStepPrompt(
 	// Record a user message so the auto-start prompt is visible in chat history.
 	s.recordAutoStartMessage(ctx, taskID, sessionID, prompt, planMode)
 
+	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
+	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
+	// so use StartCreatedSession which properly launches the agent on the prepared workspace.
+	// Pass skipMessageRecord=true since recordAutoStartMessage above already recorded it.
+	if session.State == models.TaskSessionStateCreated {
+		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, nil)
+		return err
+	}
+
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, nil)
