@@ -11,11 +11,12 @@ test.describe("PR watcher start button timing", () => {
    *
    * Flow:
    *   1. Create workflow step without auto_start_agent
-   *   2. Create a task as the PR watcher would (with checkout_branch + metadata)
-   *   3. Navigate to kanban, click the task
-   *   4. Wait for preparation to complete
-   *   5. Assert: "Start agent" button becomes visible
-   *   6. Click the button → agent starts and completes
+   *   2. Create a task as the PR watcher would (with metadata.agent_profile_id)
+   *   3. Navigate to task — auto-start fires, backend downgrades to prepare
+   *   4. Wait for CREATED session to exist (env preparing)
+   *   5. Reload page so SSR picks up the session and renders it
+   *   6. Assert: "Start agent" button becomes visible
+   *   7. Click the button — agent starts and completes
    */
   test("start button appears after environment preparation and starts agent", async ({
     testPage,
@@ -34,10 +35,7 @@ test.describe("PR watcher start button timing", () => {
     });
 
     // --- Create a task as the PR watcher would ---
-    // The task has a checkout_branch and metadata.agent_profile_id so that
-    // useAutoStartSession fires, but the backend downgrades to prepare
-    // because the step lacks auto_start_agent.
-    await apiClient.createTask(seedData.workspaceId, "PR #42: Add feature", {
+    const task = await apiClient.createTask(seedData.workspaceId, "PR #42: Add feature", {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: reviewStep.id,
@@ -67,20 +65,30 @@ test.describe("PR watcher start button timing", () => {
     // Wait for navigation to session view
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
+    // --- Wait for auto-start to create a CREATED session ---
+    // useAutoStartSession fires with autoStart=true, backend downgrades to
+    // prepare (step lacks auto_start_agent). Session stays in CREATED state.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.length > 0;
+        },
+        { timeout: 30_000, message: "Waiting for session to be created" },
+      )
+      .toBe(true);
+
+    // --- Reload so SSR picks up the session and renders the chat ---
+    // After auto-start creates the CREATED session, the frontend doesn't
+    // automatically set it as the active session. Reloading ensures SSR
+    // resolves the session and the chat panel renders with the task description.
+    await testPage.reload();
+
     const session = new SessionPage(testPage);
-
-    // --- Assert: "Start agent" button should NOT be visible during preparation ---
-    // The environment preparation starts when the session auto-prepares.
-    // The button should be hidden while status is "preparing".
-    const startButton = session.chat.getByTestId("task-description-start-button");
-
-    // First, wait for the session chat to be visible (so we know the page loaded)
     await session.waitForLoad();
 
-    // --- Assert: button appears only after preparation completes ---
-    // In the mock environment, preparation may complete very quickly.
-    // The key invariant is: the button must eventually become visible
-    // (it was hidden during the preparing phase via prepareProgress store check).
+    // --- Assert: "Start agent" button becomes visible after prep completes ---
+    const startButton = session.chat.getByTestId("task-description-start-button");
     await expect(startButton).toBeVisible({ timeout: 60_000 });
 
     // --- Click the button to start the agent ---
