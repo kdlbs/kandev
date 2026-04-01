@@ -7,6 +7,10 @@ import { Button } from "@kandev/ui/button";
 import { IconArrowRight } from "@tabler/icons-react";
 import { moveTask } from "@/lib/api";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
+import { useAppStore } from "@/components/state-provider";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
+import { useLayoutStore } from "@/lib/state/layout-store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 
 type Step = {
@@ -19,6 +23,38 @@ type Step = {
   prompt?: string;
   is_start_step?: boolean;
 };
+
+const PLAN_CONTEXT_PATH = "plan:context";
+
+/** Returns a callback that disables plan mode for the active session of a task. */
+function useDisablePlanMode() {
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const planModeEnabled = useAppStore((s) =>
+    activeSessionId ? (s.chatInput.planModeBySessionId[activeSessionId] ?? false) : false,
+  );
+  const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument);
+  const closeDocument = useLayoutStore((s) => s.closeDocument);
+  const removeContextFile = useContextFilesStore((s) => s.removeFile);
+  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+
+  return useCallback(() => {
+    if (!activeSessionId || !planModeEnabled) return;
+    applyBuiltInPreset("default");
+    closeDocument(activeSessionId);
+    setActiveDocument(activeSessionId, null);
+    setPlanMode(activeSessionId, false);
+    removeContextFile(activeSessionId, PLAN_CONTEXT_PATH);
+  }, [
+    activeSessionId,
+    planModeEnabled,
+    setPlanMode,
+    setActiveDocument,
+    closeDocument,
+    removeContextFile,
+    applyBuiltInPreset,
+  ]);
+}
 
 type WorkflowStepperProps = {
   steps: Step[];
@@ -36,6 +72,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   isArchived,
 }: WorkflowStepperProps) {
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
+  const disablePlanMode = useDisablePlanMode();
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -47,6 +84,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   const handleMove = useCallback(
     async (stepId: string) => {
       if (!taskId || !workflowId) return;
+      disablePlanMode();
       setMovingToStepId(stepId);
       try {
         await moveTask(taskId, {
@@ -60,7 +98,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId],
+    [taskId, workflowId, disablePlanMode],
   );
 
   if (sortedSteps.length === 0) return null;

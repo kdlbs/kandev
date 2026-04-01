@@ -11,7 +11,6 @@ const PLAN_CONTEXT_PATH = "plan:context";
 type AutoDisablePlanOpts = {
   resolvedSessionId: string | null;
   taskId: string | null;
-  taskStepId: string | null;
   sessionMetaPlanMode: boolean;
   planModeFromStore: boolean;
   applyBuiltInPreset: (preset: BuiltInPreset) => void;
@@ -22,22 +21,18 @@ type AutoDisablePlanOpts = {
 };
 
 /**
- * Auto-disable plan mode when the task moves to a different workflow step.
+ * Auto-disable plan mode when the backend clears plan_mode from session metadata.
  *
- * Two triggers:
- * 1. `taskStepId` changes — the task moved to a new step (via stepper, proceed button, or backend).
- *    This is the primary signal because `task.updated` WS events always fire on step changes.
- * 2. `sessionMetaPlanMode` transitions from true to false — the backend cleared plan_mode from
- *    session metadata. This is a fallback for cases where the step didn't change but plan mode was
- *    explicitly cleared (e.g., on_turn_complete: disable_plan_mode).
+ * Triggers when `sessionMetaPlanMode` transitions from true to false — the backend explicitly
+ * cleared plan_mode (e.g., on_exit: disable_plan_mode, or entering a non-plan-mode step).
  *
- * The disable is idempotent — safe to call even if plan mode is already off.
+ * User-initiated step moves (proceed button, stepper) disable plan mode directly in their
+ * click handlers rather than relying on this effect.
  */
 export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
   const {
     resolvedSessionId,
     taskId,
-    taskStepId,
     sessionMetaPlanMode,
     planModeFromStore,
     applyBuiltInPreset,
@@ -47,24 +42,15 @@ export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
     removeContextFile,
   } = opts;
 
-  const prevStepIdRef = useRef(taskStepId);
   const prevSessionMetaPlanRef = useRef(sessionMetaPlanMode);
 
   useEffect(() => {
-    const prevStepId = prevStepIdRef.current;
     const wasPlanMode = prevSessionMetaPlanRef.current;
-    prevStepIdRef.current = taskStepId;
     prevSessionMetaPlanRef.current = sessionMetaPlanMode;
 
     if (!resolvedSessionId || !taskId) return;
 
-    const stepChanged = prevStepId != null && taskStepId != null && prevStepId !== taskStepId;
-    const metaCleared = wasPlanMode && !sessionMetaPlanMode;
-
-    // On step change: always reset plan mode state + layout. This is idempotent — if
-    // the proceed button already disabled plan mode, these calls are harmless no-ops.
-    // On meta cleared: only act if the store still has plan mode enabled.
-    if (stepChanged || (metaCleared && planModeFromStore)) {
+    if (wasPlanMode && !sessionMetaPlanMode && planModeFromStore) {
       applyBuiltInPreset("default");
       closeDocument(resolvedSessionId);
       setActiveDocument(resolvedSessionId, null);
@@ -74,7 +60,6 @@ export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
   }, [
     resolvedSessionId,
     taskId,
-    taskStepId,
     sessionMetaPlanMode,
     planModeFromStore,
     applyBuiltInPreset,
