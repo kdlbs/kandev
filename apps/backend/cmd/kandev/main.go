@@ -446,6 +446,7 @@ func buildHTTPServer(
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		webInternalURL:          cfg.Server.WebInternalURL,
+		pprofEnabled:            cfg.Debug.PprofEnabled,
 		log:                     log,
 	})
 

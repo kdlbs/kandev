@@ -27,6 +27,7 @@ type Config struct {
 	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
 	Worktree            WorktreeConfig            `mapstructure:"worktree"`
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
+	Debug               DebugConfig               `mapstructure:"debug"`
 }
 
 // ResolvedHomeDir returns the Kandev home directory (~/.kandev for local dev).
@@ -151,6 +152,13 @@ type WorktreeConfig struct {
 // RepoCloneConfig holds configuration for automatic repository cloning.
 type RepoCloneConfig struct {
 	BasePath string `mapstructure:"basePath"` // Base directory for cloned repos (default: ~/.kandev/repos)
+}
+
+// DebugConfig holds debug/profiling configuration.
+type DebugConfig struct {
+	// PprofEnabled enables pprof endpoints at /debug/pprof/ and /api/v1/debug/memory.
+	// Controlled via KANDEV_DEBUG_PPROF_ENABLED env var. Default: false.
+	PprofEnabled bool `mapstructure:"pprofEnabled"`
 }
 
 // AgentConfig holds agent runtime configuration.
@@ -282,6 +290,9 @@ func setDefaults(v *viper.Viper) {
 
 	// RepoClone defaults
 	v.SetDefault("repoClone.basePath", "")
+
+	// Debug defaults
+	v.SetDefault("debug.pprofEnabled", false)
 }
 
 // DefaultDockerHost returns the platform-appropriate Docker socket path.
@@ -338,6 +349,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("dataDir", "KANDEV_DATA_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
+	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 
 	// Configure config file
 	v.SetConfigName("config")

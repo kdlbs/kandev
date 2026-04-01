@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-mock-agent clean run dev test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-mock-agent clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -71,10 +71,15 @@ run: build
 	@echo "Running $(BINARY_NAME)..."
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
-## Run in development mode
+## Run in development mode (with pprof enabled)
 dev: build
 	@echo "Running $(BINARY_NAME) in development mode..."
-	@exec ./$(BUILD_DIR)/$(BINARY_NAME)
+	@KANDEV_DEBUG_PPROF_ENABLED=true exec ./$(BUILD_DIR)/$(BINARY_NAME)
+
+## Run in debug mode (pprof + debug logging)
+start-debug: build
+	@echo "Running $(BINARY_NAME) in debug mode (pprof + debug logging)..."
+	@KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./$(BUILD_DIR)/$(BINARY_NAME)
 
 ## Run tests
 test:
@@ -149,7 +154,8 @@ help:
 	@echo "  build-mock-agent Build the mock-agent binary for testing"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
-	@echo "  dev           Run in development mode with a local database"
+	@echo "  dev           Run in development mode (pprof enabled)"
+	@echo "  start-debug   Run in debug mode (pprof + debug logging)"
 	@echo "  test          Run tests"
 	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
 	@echo "  test-coverage Run tests with coverage report"

@@ -431,6 +431,7 @@ type routeParams struct {
 	secretStore             secrets.SecretStore
 	mcpConfigSvc            *mcpconfig.Service
 	webInternalURL          string
+	pprofEnabled            bool
 	log                     *logger.Logger
 }
 
@@ -590,6 +591,11 @@ func registerMCPAndDebugRoutes(
 
 	debughandlers.RegisterRoutes(p.router, p.log)
 	p.log.Debug("Registered Debug handlers (HTTP)")
+
+	if p.pprofEnabled {
+		debughandlers.RegisterPprofRoutes(p.router, p.log)
+		debughandlers.RegisterMemoryRoute(p.router, p.log)
+	}
 }
 
 // runGracefulShutdown gracefully stops all services and runs cleanups.
