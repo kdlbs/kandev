@@ -100,6 +100,9 @@ test.describe("PR detail panel auto-show", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
+    // Wait for mock agent to complete so layout is fully settled
+    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+
     // Wait for PR data to sync and panel to auto-appear
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 10_000 });

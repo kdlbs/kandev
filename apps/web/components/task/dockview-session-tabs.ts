@@ -117,7 +117,6 @@ export function useAutoPRPanel() {
   useEffect(() => {
     if (!taskId || !hasPR) return;
     if (handledRef.current.has(taskId)) return;
-    handledRef.current.add(taskId);
 
     const api = useDockviewStore.getState().api;
     if (!api) return;
@@ -126,8 +125,12 @@ export function useAutoPRPanel() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (useDockviewStore.getState().isRestoringLayout) return;
-        if (api.getPanel("pr-detail")) return;
         if (useDockviewStore.getState().preMaximizeLayout !== null) return;
+        if (api.getPanel("pr-detail")) {
+          // Panel exists from a restored layout — just mark as handled.
+          handledRef.current.add(taskId);
+          return;
+        }
 
         const { centerGroupId } = useDockviewStore.getState();
         const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
@@ -138,6 +141,7 @@ export function useAutoPRPanel() {
           title: "Pull Request",
           position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
         });
+        handledRef.current.add(taskId);
       });
     });
   }, [taskId, hasPR]);
