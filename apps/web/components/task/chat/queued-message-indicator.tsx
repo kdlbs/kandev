@@ -51,7 +51,7 @@ function QueuedEditView({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         className={cn(
-          "min-h-[60px] resize-none",
+          "min-h-[60px] max-h-[200px] overflow-y-auto resize-none",
           "bg-white dark:bg-gray-900",
           "border-blue-300 dark:border-blue-700",
           "focus:ring-blue-500 focus:border-blue-500",

@@ -234,6 +234,56 @@ test.describe("Task session queue", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
+  test("queue editor textarea scrolls when content is long", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue editor scroll test",
+    );
+
+    // Send a slow command to keep the agent busy.
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await testPage.waitForTimeout(500);
+
+    // Type a long message while agent is busy and queue it.
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const longText = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of scroll test content`).join("\n");
+    await typeWhileBusy(testPage, editor, longText);
+
+    const submitBtn = testPage.getByTestId("submit-message-button");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
+    await submitBtn.click();
+
+    // Verify the queued indicator appears, then click edit.
+    const editBtn = testPage.getByTitle("Edit message");
+    await expect(editBtn).toBeVisible({ timeout: 10_000 });
+    await editBtn.click();
+
+    // The edit textarea should now be visible.
+    const textarea = testPage.locator("textarea");
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+
+    // Verify the textarea has a constrained max-height and is scrollable.
+    const metrics = await textarea.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      maxHeight: getComputedStyle(el).maxHeight,
+      overflowY: getComputedStyle(el).overflowY,
+    }));
+
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    expect(metrics.maxHeight).toBe("200px");
+    expect(metrics.overflowY).toBe("auto");
+  });
+
   test("queue message with plan mode enabled via submit button", async ({
     testPage,
     apiClient,
