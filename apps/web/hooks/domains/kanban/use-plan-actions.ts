@@ -128,9 +128,23 @@ export function usePlanActions(opts: {
     opts.handlePlanModeChange,
     opts.chatInputRef,
   );
-  const { proceedStepName, nextStepIsWorkStep, proceed, isMoving } = useNextWorkflowStep(
-    opts.taskId,
-  );
+  const {
+    proceedStepName,
+    nextStepIsWorkStep,
+    proceed: rawProceed,
+    isMoving,
+  } = useNextWorkflowStep(opts.taskId);
+
+  const { planModeEnabled, handlePlanModeChange } = opts;
+  // Disable plan mode before proceeding so the layout switches back to default
+  // and the next step's auto-start prompt is visible in chat.
+  const proceed = useCallback(() => {
+    if (planModeEnabled) {
+      handlePlanModeChange(false);
+    }
+    rawProceed();
+  }, [planModeEnabled, handlePlanModeChange, rawProceed]);
+
   const implementPlanHandler =
     opts.planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;
   return { implementPlanHandler, proceedStepName, proceed, isMoving };

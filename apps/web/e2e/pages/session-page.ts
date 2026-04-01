@@ -543,6 +543,11 @@ export class SessionPage {
     return tab.locator(".tabler-icon-star").first();
   }
 
+  /** "Move to next step" button in the chat status bar. */
+  proceedNextStepButton(): Locator {
+    return this.page.getByTestId("proceed-next-step");
+  }
+
   /** Click a task in the sidebar by title. */
   async clickTaskInSidebar(title: string): Promise<void> {
     const taskRow = this.sidebar.locator("[role='button']").filter({ hasText: title });

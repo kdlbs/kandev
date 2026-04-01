@@ -21,6 +21,7 @@ import {
   usePendingPRFeedback,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
+import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
@@ -80,6 +81,12 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   const autoAppliedPlanSessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!resolvedSessionId || !taskId) return;
+    // Reset the guard when plan mode is disabled so future plan-mode steps
+    // in the same session can be auto-applied (e.g. after proceeding away and back).
+    if (!sessionMetaPlanMode && autoAppliedPlanSessionRef.current === resolvedSessionId) {
+      autoAppliedPlanSessionRef.current = null;
+      return;
+    }
     if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
     if (sessionMetaPlanMode) {
       autoAppliedPlanSessionRef.current = resolvedSessionId;
@@ -115,7 +122,6 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   const planModeFromStore = useAppStore((state) =>
     resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false,
   );
-
   const sessionMetaPlanMode = useAppStore((state) =>
     resolvedSessionId
       ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
@@ -144,62 +150,30 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     addContextFile,
   });
 
+  useAutoDisablePlanMode({
+    resolvedSessionId,
+    taskId,
+    sessionMetaPlanMode,
+    planModeFromStore,
+    applyBuiltInPreset,
+    closeDocument,
+    setActiveDocument,
+    setPlanMode,
+    removeContextFile,
+  });
+
   const refocusChatAfterLayout = useRefocusChatAfterLayout();
-
-  // Toggle only the plan layout (plan panel + preset) without changing chat input plan mode state
-  const togglePlanLayout = useCallback(
-    (show: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
-      if (show) {
-        setActiveDocument(resolvedSessionId, { type: "plan", taskId });
-        applyBuiltInPreset("plan");
-      } else {
-        applyBuiltInPreset("default");
-        closeDocument(resolvedSessionId);
-        setActiveDocument(resolvedSessionId, null);
-      }
-      refocusChatAfterLayout();
-    },
-    [
-      resolvedSessionId,
-      taskId,
-      setActiveDocument,
-      applyBuiltInPreset,
-      closeDocument,
-      refocusChatAfterLayout,
-    ],
-  );
-
-  // Full plan mode toggle: layout + chat input state (context file, border, submit style)
-  const handlePlanModeChange = useCallback(
-    (enabled: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
-      if (enabled) {
-        setActiveDocument(resolvedSessionId, { type: "plan", taskId });
-        applyBuiltInPreset("plan");
-        setPlanMode(resolvedSessionId, true);
-        addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-      } else {
-        applyBuiltInPreset("default");
-        closeDocument(resolvedSessionId);
-        setActiveDocument(resolvedSessionId, null);
-        setPlanMode(resolvedSessionId, false);
-        removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-      }
-      refocusChatAfterLayout();
-    },
-    [
-      resolvedSessionId,
-      taskId,
-      setActiveDocument,
-      applyBuiltInPreset,
-      closeDocument,
-      setPlanMode,
-      addContextFile,
-      removeContextFile,
-      refocusChatAfterLayout,
-    ],
-  );
+  const { togglePlanLayout, handlePlanModeChange } = usePlanLayoutHandlers({
+    resolvedSessionId,
+    taskId,
+    setActiveDocument,
+    applyBuiltInPreset,
+    closeDocument,
+    setPlanMode,
+    addContextFile,
+    removeContextFile,
+    refocusChatAfterLayout,
+  });
 
   return {
     planModeEnabled,
