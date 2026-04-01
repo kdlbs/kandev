@@ -253,13 +253,9 @@ test.describe("Task session queue", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(500);
 
-    // Type a long message while agent is busy and queue it.
+    // Type a short message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
-    const longText = Array.from(
-      { length: 30 },
-      (_, i) => `Line ${i + 1} of scroll test content`,
-    ).join("\n");
-    await typeWhileBusy(testPage, editor, longText);
+    await typeWhileBusy(testPage, editor, "short queue msg");
 
     const submitBtn = testPage.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible({ timeout: 5_000 });
@@ -270,9 +266,14 @@ test.describe("Task session queue", () => {
     await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
 
-    // The edit textarea should now be visible.
+    // The edit textarea should now be visible — fill it with long content.
     const textarea = testPage.locator("textarea");
     await expect(textarea).toBeVisible({ timeout: 5_000 });
+    const longText = Array.from(
+      { length: 30 },
+      (_, i) => `Line ${i + 1} of scroll test content`,
+    ).join("\n");
+    await textarea.fill(longText);
 
     // Verify the textarea has a constrained max-height and is scrollable.
     const metrics = await textarea.evaluate((el) => ({
