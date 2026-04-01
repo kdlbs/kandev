@@ -187,7 +187,7 @@ async function prepareReleaseBundle({
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
     KANDEV_DATABASE_PATH: dbPath,
     KANDEV_LOG_LEVEL: logLevel,
-    ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
+    ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
   };
 
   const webEnv: NodeJS.ProcessEnv = {

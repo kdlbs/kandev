@@ -26,6 +26,7 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const extra: Record<string, string> = {
     KANDEV_DATABASE_PATH: dbPath,
     KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
+    KANDEV_DEBUG_PPROF_ENABLED: "true",
   };
   const backendEnv = buildBackendEnv({ ports, extra });
   const webEnv = buildWebEnv({ ports, debug: true });

@@ -118,7 +118,7 @@ export async function runStart({
     logLevel,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
-      ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
+      ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
     },
   });
   const webEnv = buildWebEnv({ ports, production: true, debug });
