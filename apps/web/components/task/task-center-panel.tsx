@@ -35,6 +35,8 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { PRDetailContent } from "@/components/github/pr-detail-panel";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -231,11 +233,13 @@ function useCenterPanelTabs(
   openFileTabs: OpenFileTab[],
   handleCloseFileTab: (path: string) => void,
   hasChanges: boolean | undefined,
+  hasPR: boolean,
 ) {
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
       ...(hasChanges ? [{ id: "changes", label: "All changes" }] : []),
       { id: "chat", label: "Chat" },
+      ...(hasPR ? [{ id: "pr", label: "Pull Request" }] : []),
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
       id: `file:${tab.path}`,
@@ -249,11 +253,12 @@ function useCenterPanelTabs(
       className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasChanges]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges, hasPR]);
   const separatorAfterIndex = useMemo(() => {
     if (openFileTabs.length === 0) return undefined;
-    return hasChanges ? 1 : 0;
-  }, [openFileTabs.length, hasChanges]);
+    const staticCount = (hasChanges ? 1 : 0) + 1 + (hasPR ? 1 : 0); // changes + chat + pr
+    return staticCount - 1;
+  }, [openFileTabs.length, hasChanges, hasPR]);
   return { tabs, separatorAfterIndex };
 }
 
@@ -277,6 +282,8 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     activeTaskId,
   );
+  const taskPR = useActiveTaskPR();
+  const hasPR = !!taskPR;
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -309,6 +316,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     openFileTabs,
     fileTabOps.handleCloseFileTab,
     hasChanges,
+    hasPR,
   );
 
   useEffect(() => {
@@ -342,6 +350,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     isPassthroughMode,
     showApproveButton,
     handleApprove,
+    taskPR,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -367,6 +376,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     isPassthroughMode,
     showApproveButton,
     handleApprove,
+    taskPR,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -411,6 +421,11 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
         />
+        {taskPR && activeSessionId && (
+          <TabsContent value="pr" className="flex-1 min-h-0" data-testid="pr-detail-panel">
+            <PRDetailContent taskPR={taskPR} sessionId={activeSessionId} />
+          </TabsContent>
+        )}
         {openFileTabs.map((tab) => (
           <FileTabContent
             key={tab.path}

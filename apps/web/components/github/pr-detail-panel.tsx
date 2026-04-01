@@ -60,7 +60,11 @@ export function PRDetailPanelComponent({ panelId }: PRDetailPanelProps) {
     );
   }
 
-  return <PRDetailContent taskPR={pr} sessionId={sessionId} />;
+  return (
+    <div data-testid="pr-detail-panel" className="h-full">
+      <PRDetailContent taskPR={pr} sessionId={sessionId} />
+    </div>
+  );
 }
 
 // --- Add PR feedback as chat context ---
@@ -205,7 +209,7 @@ function ApproveButton({
   );
 }
 
-function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
+export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
   const setTaskPR = useAppStore((s) => s.setTaskPR);
