@@ -267,7 +267,7 @@ test.describe("Task session queue", () => {
     await editBtn.click();
 
     // The edit textarea should now be visible — fill it with long content.
-    const textarea = testPage.locator("textarea");
+    const textarea = testPage.getByPlaceholder("Enter message content...");
     await expect(textarea).toBeVisible({ timeout: 5_000 });
     const longText = Array.from(
       { length: 30 },
