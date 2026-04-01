@@ -2,24 +2,20 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
-test.describe("PR detail panel auto-show", () => {
+test.describe("PR detail panel", () => {
   /**
-   * Verifies that the PR detail panel automatically appears as a tab in
-   * the center group when a task has an associated pull request.
+   * Verifies that the PR detail panel can be opened via the topbar button
+   * when a task has an associated pull request, and renders PR content.
    *
    * Setup:
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
    *   Task A (with PR #101)
    */
-  test("auto-shows PR detail tab for task with associated PR", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("opens PR detail panel via topbar button", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     // --- Seed workflow ---
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Auto-Show Workflow");
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Panel Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
@@ -73,7 +69,7 @@ test.describe("PR detail panel auto-show", () => {
     // Move task to Working → auto_start → mock agent completes → Done
     await apiClient.moveTask(taskA.id, workflow.id, workingStep.id);
 
-    // Associate PR with Task A only
+    // Associate PR with Task A
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: taskA.id,
       owner: "testorg",
@@ -93,7 +89,7 @@ test.describe("PR detail panel auto-show", () => {
       timeout: 45_000,
     });
 
-    // --- Open Task A (has PR) ---
+    // --- Open Task A ---
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -103,12 +99,14 @@ test.describe("PR detail panel auto-show", () => {
     // Wait for mock agent to complete so layout is fully settled
     await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
 
-    // Wait for PR data to sync and panel to auto-appear
+    // Verify PR topbar button appears with PR number
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prDetailTab()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prTopbarButton()).toContainText("#101");
 
-    // Click the PR detail tab to verify it shows content
-    await session.prDetailTab().click();
+    // Click PR topbar button to open the PR detail panel
+    await session.prTopbarButton().click();
+
+    // Verify PR detail panel shows content
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
   });
 });
