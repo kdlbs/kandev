@@ -35,7 +35,7 @@ test.describe("Branch selector behavior with executor types", () => {
 
     // Branch selector should be disabled and show "Uses current branch"
     const branchSelector = testPage.getByTestId("branch-selector");
-    await expect(branchSelector.locator("button")).toBeDisabled({ timeout: 5_000 });
+    await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
     await expect(branchSelector).toContainText("Uses current branch");
 
     // Cleanup
@@ -77,13 +77,13 @@ test.describe("Branch selector behavior with executor types", () => {
     await testPage.getByRole("option", { name: /E2E Local/i }).click();
 
     const branchSelector = testPage.getByTestId("branch-selector");
-    await expect(branchSelector.locator("button")).toBeDisabled({ timeout: 5_000 });
+    await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
 
     // Switch to worktree executor → branch should be enabled
     await executorSelector.click();
     await testPage.getByRole("option", { name: new RegExp(worktreeProfile.name, "i") }).click();
 
-    await expect(branchSelector.locator("button")).toBeEnabled({ timeout: 5_000 });
+    await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
 
     // Cleanup
     await apiClient.deleteExecutorProfile(localProfile.id);
@@ -156,7 +156,7 @@ test.describe("Branch selector behavior with executor types", () => {
 
     // Branch selector should NOT be disabled (GitHub URL mode overrides)
     const branchSelector = testPage.getByTestId("branch-selector");
-    await expect(branchSelector.locator("button")).toBeEnabled({ timeout: 10_000 });
+    await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
 
     // Cleanup
     await apiClient.deleteExecutorProfile(localProfile.id);
