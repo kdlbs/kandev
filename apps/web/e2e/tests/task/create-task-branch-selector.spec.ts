@@ -99,6 +99,17 @@ test.describe("Branch selector behavior with executor types", () => {
     seedData,
     backend,
   }) => {
+    const fs = await import("fs");
+    const { execSync } = await import("child_process");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+
     // Find local executor and create profile
     const { executors } = await apiClient.listExecutors();
     const localExec = executors.find((e) => e.type === "local");
@@ -111,8 +122,13 @@ test.describe("Branch selector behavior with executor types", () => {
       "E2E Local GitHub URL",
     );
 
+    // Create a unique repo for this test
+    const repoDir = `${backend.tmpDir}/repos/e2e-branch-gh`;
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+
     // Seed mock GitHub branches
-    const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "branch-test-owner/branch-test-repo",
       provider: "github",
@@ -159,6 +175,7 @@ test.describe("Branch selector behavior with executor types", () => {
     test.setTimeout(90_000);
 
     const { execSync } = await import("child_process");
+    const fs = await import("fs");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -168,8 +185,11 @@ test.describe("Branch selector behavior with executor types", () => {
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
 
-    // Create a repo with a develop branch
-    const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    // Create a unique repo with a develop branch
+    const repoDir = `${backend.tmpDir}/repos/e2e-base-branch`;
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout -b develop", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "develop commit"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
