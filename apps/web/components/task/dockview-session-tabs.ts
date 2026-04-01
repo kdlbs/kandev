@@ -110,20 +110,21 @@ export function useAutoPRPanel() {
     const tid = s.tasks.activeTaskId;
     return tid ? !!s.taskPRs.byTaskId[tid] : false;
   });
+  // Subscribe to dockview API readiness so the effect re-runs when API appears.
+  const hasApi = useDockviewStore((s) => !!s.api);
   // Track which tasks have already been handled to avoid re-adding on every
   // store update or task switch. Only auto-add once per task visit.
   const handledRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!taskId || !hasPR) return;
+    if (!taskId || !hasPR || !hasApi) return;
     if (handledRef.current.has(taskId)) return;
-
-    const api = useDockviewStore.getState().api;
-    if (!api) return;
 
     // Defer to avoid racing with layout restore on initial load / session switch.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        const api = useDockviewStore.getState().api;
+        if (!api) return;
         if (useDockviewStore.getState().isRestoringLayout) return;
         if (useDockviewStore.getState().preMaximizeLayout !== null) return;
         if (api.getPanel("pr-detail")) {
@@ -144,7 +145,7 @@ export function useAutoPRPanel() {
         handledRef.current.add(taskId);
       });
     });
-  }, [taskId, hasPR]);
+  }, [taskId, hasPR, hasApi]);
 }
 
 /**
