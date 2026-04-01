@@ -47,6 +47,7 @@ function QueuedEditView({
     <div className="p-2 space-y-2">
       <Textarea
         ref={textareaRef}
+        data-testid="queue-edit-textarea"
         value={editValue}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}

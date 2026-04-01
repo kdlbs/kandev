@@ -266,17 +266,27 @@ test.describe("Task session queue", () => {
     await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
 
-    // The edit textarea should now be visible — fill it with long content.
-    const textarea = testPage.getByPlaceholder("Enter message content...");
+    // The edit textarea should now be visible.
+    const textarea = testPage.getByTestId("queue-edit-textarea");
     await expect(textarea).toBeVisible({ timeout: 5_000 });
+
+    // Fill via native setter + React event so the controlled component updates.
     const longText = Array.from(
       { length: 30 },
       (_, i) => `Line ${i + 1} of scroll test content`,
     ).join("\n");
-    await textarea.fill(longText);
+    await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(el, text);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, longText);
+
+    // Allow layout to settle after content change.
+    await testPage.waitForTimeout(300);
 
     // Verify the textarea has a constrained max-height and is scrollable.
-    const metrics = await textarea.evaluate((el) => ({
+    const metrics = await textarea.evaluate((el: HTMLTextAreaElement) => ({
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
       maxHeight: getComputedStyle(el).maxHeight,
