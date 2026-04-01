@@ -19,10 +19,7 @@ test.describe("PR detail panel auto-show", () => {
     test.setTimeout(120_000);
 
     // --- Seed workflow ---
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "PR Auto-Show Workflow",
-    );
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Auto-Show Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);

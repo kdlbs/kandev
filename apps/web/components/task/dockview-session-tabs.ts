@@ -139,9 +139,7 @@ export function useAutoPRPanel() {
         id: "pr-detail",
         component: "pr-detail",
         title: "Pull Request",
-        position: centerGroupExists
-          ? { referenceGroup: centerGroupId }
-          : undefined,
+        position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
       });
     } else if (!hasPR) {
       // PR was disassociated — remove the auto-added panel if it's still open.
