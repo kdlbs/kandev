@@ -123,29 +123,39 @@ export function useAutoPRPanel() {
     const api = useDockviewStore.getState().api;
     if (!api) return;
 
-    const action = shouldAutoAddPRPanel({
-      hasPR,
-      panelExists: !!api.getPanel("pr-detail"),
-      isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
-      isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
-      wasClosedByUser: closedForTaskRef.current === taskId,
-    });
+    // Defer panel addition to avoid racing with layout restore operations
+    // (session switch, layout persistence). Double rAF matches the pattern
+    // used by setupChatPanelSafetyNet for the same reason.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const dv = useDockviewStore.getState();
+        if (dv.isRestoringLayout) return;
 
-    if (action === "add") {
-      const { centerGroupId } = useDockviewStore.getState();
-      const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+        const action = shouldAutoAddPRPanel({
+          hasPR,
+          panelExists: !!api.getPanel("pr-detail"),
+          isRestoringLayout: dv.isRestoringLayout,
+          isMaximized: dv.preMaximizeLayout !== null,
+          wasClosedByUser: closedForTaskRef.current === taskId,
+        });
 
-      api.addPanel({
-        id: "pr-detail",
-        component: "pr-detail",
-        title: "Pull Request",
-        position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+        if (action === "add") {
+          const { centerGroupId } = useDockviewStore.getState();
+          const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+
+          api.addPanel({
+            id: "pr-detail",
+            component: "pr-detail",
+            title: "Pull Request",
+            position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+          });
+        } else if (!hasPR) {
+          // PR was disassociated or task switched — remove stale panel.
+          const existing = api.getPanel("pr-detail");
+          if (existing) api.removePanel(existing);
+        }
       });
-    } else if (!hasPR) {
-      // PR was disassociated — remove the auto-added panel if it's still open.
-      const existing = api.getPanel("pr-detail");
-      if (existing) api.removePanel(existing);
-    }
+    });
   }, [taskId, hasPR]);
 
   useEffect(() => {
