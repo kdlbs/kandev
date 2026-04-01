@@ -179,6 +179,7 @@ type ActionButtonsSectionProps = {
   canPush: boolean;
   canCreatePR: boolean;
   existingPrUrl?: string;
+  isLast?: boolean;
 };
 
 export function ActionButtonsSection({
@@ -191,6 +192,7 @@ export function ActionButtonsSection({
   canPush,
   canCreatePR,
   existingPrUrl,
+  isLast = true,
 }: ActionButtonsSectionProps) {
   const prExists = !!existingPrUrl;
   const createPrDisabled = !canCreatePR || prExists || isLoading;
@@ -201,7 +203,7 @@ export function ActionButtonsSection({
   if (isLoading) pushTooltip = "A git operation is in progress";
   else if (!canPush) pushTooltip = "No commits ahead of remote";
   return (
-    <TimelineSection dotColor={DOT_COLORS.action} isLast>
+    <TimelineSection dotColor={DOT_COLORS.action} isLast={isLast}>
       <div className="flex items-center gap-2 -mt-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
