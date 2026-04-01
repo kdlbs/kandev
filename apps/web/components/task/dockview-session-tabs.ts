@@ -131,19 +131,23 @@ export function useAutoPRPanel() {
       wasClosedByUser: closedForTaskRef.current === taskId,
     });
 
-    if (action !== "add") return;
+    if (action === "add") {
+      const { centerGroupId } = useDockviewStore.getState();
+      const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
 
-    const { centerGroupId } = useDockviewStore.getState();
-    const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
-
-    api.addPanel({
-      id: "pr-detail",
-      component: "pr-detail",
-      title: "Pull Request",
-      position: centerGroupExists
-        ? { referenceGroup: centerGroupId }
-        : undefined,
-    });
+      api.addPanel({
+        id: "pr-detail",
+        component: "pr-detail",
+        title: "Pull Request",
+        position: centerGroupExists
+          ? { referenceGroup: centerGroupId }
+          : undefined,
+      });
+    } else if (!hasPR) {
+      // PR was disassociated — remove the auto-added panel if it's still open.
+      const existing = api.getPanel("pr-detail");
+      if (existing) api.removePanel(existing);
+    }
   }, [taskId, hasPR]);
 
   useEffect(() => {
