@@ -9,7 +9,7 @@ test.describe("Workflow sorting", () => {
     const wfB = await apiClient.createWorkflow(workspaceId, "Workflow B", "simple");
     const wfC = await apiClient.createWorkflow(workspaceId, "Workflow C", "simple");
 
-    // Verify initial order: E2E Workflow (seed), Workflow B, Workflow C
+    // Verify initial order: sorted by sort_order ASC (0, 1, 2)
     const before = await apiClient.listWorkflows(workspaceId);
     const namesBefore = before.workflows.map((w) => w.name);
     expect(namesBefore).toEqual(["E2E Workflow", "Workflow B", "Workflow C"]);
@@ -84,6 +84,12 @@ test.describe("Workflow sorting", () => {
 
     // Reorder: Second Board first
     await apiClient.reorderWorkflows(workspaceId, [wfSecond.id, workflowId]);
+
+    // Clear workflow filter so kanban shows all workflows with swimlane headers
+    await apiClient.saveUserSettings({
+      workspace_id: workspaceId,
+      workflow_filter_id: "",
+    });
 
     // Navigate to kanban
     await testPage.goto("/");
