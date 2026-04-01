@@ -161,6 +161,13 @@ export function useExecutorOptions(executors: Executor[]): OptionItem[] {
   }, [executors]);
 }
 
+export function useIsLocalExecutor(executors: Executor[], executorId: string): boolean {
+  return useMemo(() => {
+    const selected = executors.find((e: Executor) => e.id === executorId);
+    return selected?.type === "local";
+  }, [executors, executorId]);
+}
+
 export function useExecutorHint(executors: Executor[], executorId: string): string | null {
   return useMemo(() => {
     const selectedExecutor = executors.find((e: Executor) => e.id === executorId);

@@ -19,6 +19,7 @@ import {
   useAgentProfileOptions,
   useExecutorHint,
   useExecutorProfileOptions,
+  useIsLocalExecutor,
 } from "@/components/task-create-dialog-options";
 import {
   setLocalStorage,
@@ -551,6 +552,7 @@ export function useDialogComputed({
   }, [executors]);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId);
+  const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
@@ -564,6 +566,7 @@ export function useDialogComputed({
     agentProfileOptions,
     executorProfileOptions,
     executorHint,
+    isLocalExecutor,
     headerRepositoryOptions,
     agentProfilesLoading,
     executorsLoading,

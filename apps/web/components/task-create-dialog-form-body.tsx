@@ -59,6 +59,8 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     triggerClassName?: string;
   }>;
+  isLocalExecutor: boolean;
+  useGitHubUrl: boolean;
 };
 
 export const CreateEditSelectors = memo(function CreateEditSelectors({
@@ -79,19 +81,25 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   executorProfileId,
   onExecutorProfileChange,
   executorsLoading,
+  isLocalExecutor,
+  useGitHubUrl,
   BranchSelectorComponent,
   AgentSelectorComponent,
   ExecutorProfileSelectorComponent,
 }: CreateEditSelectorsProps) {
   if (isTaskStarted) return null;
 
+  const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
+
   const branchPlaceholder = (() => {
+    if (isLocalWithoutGitHubUrl) return "Uses current branch";
     if (!hasRepositorySelection) return "Select repository first";
     if (branchesLoading || localBranchesLoading) return "Loading branches...";
     return branchOptions.length > 0 ? "Select branch" : "No branches found";
   })();
 
   const branchDisabled =
+    isLocalWithoutGitHubUrl ||
     !hasRepositorySelection ||
     branchesLoading ||
     localBranchesLoading ||

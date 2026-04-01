@@ -259,6 +259,7 @@ type DialogFormBodyProps = {
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
   hasRepositorySelection: boolean;
+  isLocalExecutor: boolean;
 };
 
 function DialogFormBody({
@@ -286,6 +287,7 @@ function DialogFormBody({
   onExecutorProfileChange,
   onWorkflowChange,
   hasRepositorySelection,
+  isLocalExecutor,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -327,6 +329,8 @@ function DialogFormBody({
           executorProfileId={fs.executorProfileId}
           onExecutorProfileChange={onExecutorProfileChange}
           executorsLoading={executorsLoading}
+          isLocalExecutor={isLocalExecutor}
+          useGitHubUrl={fs.useGitHubUrl}
           BranchSelectorComponent={BranchSelector}
           AgentSelectorComponent={AgentSelector}
           ExecutorProfileSelectorComponent={ExecutorProfileSelector}
@@ -523,6 +527,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onExecutorProfileChange={handlers.handleExecutorProfileChange}
             onWorkflowChange={handlers.handleWorkflowChange}
             hasRepositorySelection={computed.hasRepositorySelection}
+            isLocalExecutor={computed.isLocalExecutor}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

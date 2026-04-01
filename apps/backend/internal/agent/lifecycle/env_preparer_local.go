@@ -15,7 +15,7 @@ import (
 )
 
 // LocalPreparer prepares a local (non-worktree) execution environment.
-// Steps: validate workspace → checkout PR branch (if set) → run setup script (if any).
+// Steps: validate workspace → checkout branch (if set) → run setup script (if any).
 type LocalPreparer struct {
 	logger *logger.Logger
 }
@@ -39,8 +39,14 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	}
 	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
 
+	// Determine effective branch: CheckoutBranch (PR head) takes priority over BaseBranch.
+	effectiveBranch := req.CheckoutBranch
+	if effectiveBranch == "" {
+		effectiveBranch = req.BaseBranch
+	}
+
 	totalSteps := 1 // validate workspace
-	if req.CheckoutBranch != "" {
+	if effectiveBranch != "" {
 		totalSteps++
 	}
 	if resolvedScript != "" {
@@ -62,13 +68,13 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 	stepIdx++
 
-	// Step 2: Checkout PR branch (if specified)
-	if req.CheckoutBranch != "" {
+	// Step 2: Checkout branch (if specified)
+	if effectiveBranch != "" {
 		step = beginStep("Checkout branch")
 		reportProgress(onProgress, step, stepIdx, totalSteps)
-		output, err := checkoutBranch(ctx, workspacePath, req.CheckoutBranch)
+		output, err := checkoutBranch(ctx, workspacePath, effectiveBranch)
 		if err != nil {
-			errMsg := fmt.Sprintf("failed to checkout branch %q: %s", req.CheckoutBranch, output)
+			errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
 			completeStepError(&step, errMsg)
 			steps = append(steps, step)
 			reportProgress(onProgress, step, stepIdx, totalSteps)

@@ -341,3 +341,94 @@ func TestLocalPreparer_CheckoutWithDirtyWorkdir(t *testing.T) {
 		t.Fatalf("expected branch 'main' after failed checkout, got %q", branch)
 	}
 }
+
+func TestLocalPreparer_BaseBranchCheckout(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+	// Create a feature branch
+	for _, args := range [][]string{
+		{"checkout", "-b", "develop"},
+		{"commit", "--allow-empty", "-m", "develop commit"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		BaseBranch:     "develop",
+	}
+
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
+	}
+	// 2 steps: validate workspace + checkout branch
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
+	}
+	if result.Steps[1].Name != "Checkout branch" {
+		t.Fatalf("expected step name 'Checkout branch', got %q", result.Steps[1].Name)
+	}
+	// Branch should be develop
+	if branch := currentBranch(t, repoDir); branch != "develop" {
+		t.Fatalf("expected branch 'develop', got %q", branch)
+	}
+}
+
+func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+	// Create two branches
+	for _, args := range [][]string{
+		{"checkout", "-b", "develop"},
+		{"commit", "--allow-empty", "-m", "develop commit"},
+		{"checkout", "main"},
+		{"checkout", "-b", "feature/pr-branch"},
+		{"commit", "--allow-empty", "-m", "pr commit"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		BaseBranch:     "develop",
+		CheckoutBranch: "feature/pr-branch",
+	}
+
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
+	}
+	// CheckoutBranch should win over BaseBranch
+	if branch := currentBranch(t, repoDir); branch != "feature/pr-branch" {
+		t.Fatalf("expected branch 'feature/pr-branch' (CheckoutBranch priority), got %q", branch)
+	}
+}

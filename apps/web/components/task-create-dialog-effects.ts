@@ -349,6 +349,18 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   ]);
 }
 
+/** Clear branch when switching to a local executor (non-GitHub URL mode). */
+function useLocalExecutorBranchClearEffect(fs: DialogFormState, executors: Executor[]) {
+  const { executorId, useGitHubUrl, setBranch } = fs;
+  useEffect(() => {
+    if (!executorId) return;
+    const selected = executors.find((e) => e.id === executorId);
+    if (selected?.type === "local" && !useGitHubUrl) {
+      setBranch("");
+    }
+  }, [executorId, executors, useGitHubUrl, setBranch]);
+}
+
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading, branches } = args;
   const { agentProfiles, executors, workspaceDefaults, toast } = args;
@@ -359,4 +371,5 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useLocalBranchesEffect(fs, open, workspaceId, toast);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults });
   useGitHubUrlBranchesEffect(fs, open);
+  useLocalExecutorBranchClearEffect(fs, executors);
 }

@@ -48,6 +48,7 @@ export type DialogComputedValues = {
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   executorHint: string | null;
+  isLocalExecutor: boolean;
   headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
