@@ -281,6 +281,16 @@ export class SessionPage {
     return this.page.getByTestId("pr-topbar-button");
   }
 
+  /** PR detail panel (auto-shown when task has an associated PR). */
+  prDetailPanel(): Locator {
+    return this.page.getByTestId("pr-detail-panel");
+  }
+
+  /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
+  prDetailTab(): Locator {
+    return this.page.locator(".dv-default-tab").filter({ hasText: /^(Pull Request|PR #\d+)$/ });
+  }
+
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
   async clickTab(label: string): Promise<void> {
     const tab = this.page.locator(`.dv-default-tab:has-text('${label}')`);

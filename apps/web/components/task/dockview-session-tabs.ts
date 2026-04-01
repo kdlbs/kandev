@@ -3,6 +3,7 @@ import type { DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -73,6 +74,79 @@ export function setupChatPanelSafetyNet(
       });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Auto-show PR detail panel
+// ---------------------------------------------------------------------------
+
+/** Pure decision function for whether the PR panel should be auto-added. */
+export function shouldAutoAddPRPanel(params: {
+  hasPR: boolean;
+  panelExists: boolean;
+  isRestoringLayout: boolean;
+  isMaximized: boolean;
+}): "add" | "none" {
+  if (!params.hasPR) return "none";
+  if (params.panelExists) return "none";
+  if (params.isRestoringLayout) return "none";
+  if (params.isMaximized) return "none";
+  return "add";
+}
+
+/**
+ * Auto-add the PR detail panel to the center group when the active task
+ * has an associated pull request. The panel is added as a background tab
+ * (the session/agent tab stays focused).
+ *
+ * Reads task ID and PR state from the app store internally.
+ *
+ * Tracks per-task dismissal: if the user manually closes the PR panel,
+ * it won't be re-added for the same task until they navigate away and back.
+ */
+export function useAutoPRPanel() {
+  const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const hasPR = useAppStore((s) => {
+    const tid = s.tasks.activeTaskId;
+    return tid ? !!s.taskPRs.byTaskId[tid] : false;
+  });
+  // Subscribe to dockview API readiness so the effect re-runs when API appears.
+  const hasApi = useDockviewStore((s) => !!s.api);
+  // Track which tasks have already been handled to avoid re-adding on every
+  // store update or task switch. Only auto-add once per task visit.
+  const handledRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!taskId || !hasPR || !hasApi) return;
+    if (handledRef.current.has(taskId)) return;
+
+    // Defer to avoid racing with layout restore on initial load / session switch.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const api = useDockviewStore.getState().api;
+        if (!api) return;
+        if (useDockviewStore.getState().isRestoringLayout) return;
+        if (useDockviewStore.getState().preMaximizeLayout !== null) return;
+        if (api.getPanel("pr-detail")) {
+          // Panel exists from a restored layout — just mark as handled.
+          handledRef.current.add(taskId);
+          return;
+        }
+
+        const { centerGroupId } = useDockviewStore.getState();
+        const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+
+        api.addPanel({
+          id: "pr-detail",
+          component: "pr-detail",
+          title: "Pull Request",
+          position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+          inactive: true,
+        });
+        handledRef.current.add(taskId);
+      });
+    });
+  }, [taskId, hasPR, hasApi]);
 }
 
 /**

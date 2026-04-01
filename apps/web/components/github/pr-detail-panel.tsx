@@ -60,7 +60,11 @@ export function PRDetailPanelComponent({ panelId }: PRDetailPanelProps) {
     );
   }
 
-  return <PRDetailContent taskPR={pr} sessionId={sessionId} />;
+  return (
+    <div data-testid="pr-detail-panel" className="h-full">
+      <PRDetailContent taskPR={pr} sessionId={sessionId} />
+    </div>
+  );
 }
 
 // --- Add PR feedback as chat context ---
@@ -205,13 +209,15 @@ function ApproveButton({
   );
 }
 
-function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
+export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
   const setTaskPR = useAppStore((s) => s.setTaskPR);
 
   // Sync live feedback data back to the store so topbar/other consumers stay up to date.
   // Use primitive deps to avoid re-render loops from object reference changes.
+  // Guard: never regress the store to a less-terminal state (e.g. merged → open)
+  // because the feedback fetch may return stale data from before a backend poll update.
   const prState = taskPR.state;
   const prMergedAt = taskPR.merged_at ?? null;
   const prClosedAt = taskPR.closed_at ?? null;
@@ -221,20 +227,29 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
   useEffect(() => {
     if (!feedback) return;
     const livePR = feedback.pr;
+    // State priority: merged > closed > open. Never regress to a less-terminal state.
+    const stateRank = (s: string) => {
+      if (s === "merged") return 2;
+      if (s === "closed") return 1;
+      return 0;
+    };
+    const effectiveState = stateRank(livePR.state) >= stateRank(prState) ? livePR.state : prState;
+    const effectiveMergedAt = effectiveState === prState ? prMergedAt : (livePR.merged_at ?? null);
+    const effectiveClosedAt = effectiveState === prState ? prClosedAt : (livePR.closed_at ?? null);
     if (
-      livePR.state !== prState ||
-      (livePR.merged_at ?? null) !== prMergedAt ||
-      (livePR.closed_at ?? null) !== prClosedAt ||
+      effectiveState !== prState ||
+      effectiveMergedAt !== prMergedAt ||
+      effectiveClosedAt !== prClosedAt ||
       livePR.additions !== prAdditions ||
       livePR.deletions !== prDeletions
     ) {
       setTaskPR(prTaskId, {
         ...taskPR,
-        state: livePR.state,
+        state: effectiveState as TaskPR["state"],
         additions: livePR.additions,
         deletions: livePR.deletions,
-        merged_at: livePR.merged_at,
-        closed_at: livePR.closed_at,
+        merged_at: effectiveMergedAt,
+        closed_at: effectiveClosedAt,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
