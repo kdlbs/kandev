@@ -6,20 +6,18 @@ test.describe("PR watcher start button timing", () => {
   /**
    * When a task is created from a PR watcher on a workflow step WITHOUT
    * auto_start_agent, opening the task triggers environment preparation
-   * (workspace-only, no agent). The "Start agent" button must NOT appear
-   * while the environment is being prepared — only after preparation
-   * completes.
+   * (workspace-only, no agent). The "Start agent" button should appear
+   * after preparation completes and clicking it should start the agent.
    *
    * Flow:
    *   1. Create workflow step without auto_start_agent
    *   2. Create a task as the PR watcher would (with checkout_branch + metadata)
    *   3. Navigate to kanban, click the task
-   *   4. Assert: "Start agent" button is NOT visible during preparation
-   *   5. Wait for preparation to complete
-   *   6. Assert: "Start agent" button becomes visible
-   *   7. Click the button → agent starts and completes
+   *   4. Wait for preparation to complete
+   *   5. Assert: "Start agent" button becomes visible
+   *   6. Click the button → agent starts and completes
    */
-  test("hides start button during environment preparation", async ({
+  test("start button appears after environment preparation and starts agent", async ({
     testPage,
     apiClient,
     seedData,
