@@ -4,16 +4,17 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("Manual proceed to next workflow step", () => {
   /**
-   * Regression test: clicking "proceed to next step" from a plan-mode step
-   * must disable plan mode and show the next step's auto-start prompt in chat.
+   * Regression test: moving a task out of a plan-mode step must disable plan mode
+   * and show the next step's auto-start prompt in chat.
    *
-   * Workflow: Spec (no auto events) -> Work (auto_start_agent) -> Done
+   * Workflow: Spec (auto_start_agent) -> Work (auto_start_agent) -> Done
    *
-   * 1. Create task via dialog in plan mode -> lands in Spec with plan layout
-   * 2. Click "proceed to next step" button (Work)
-   * 3. Assert: plan mode is disabled (plan panel hidden, default input placeholder)
-   * 4. Assert: stepper shows Work as current step
-   * 5. Assert: Work step's auto-start prompt response is visible in chat
+   * 1. Create task via API in Spec step — agent auto-starts and completes
+   * 2. Navigate to session page, manually enable plan mode
+   * 3. Click "proceed to next step" button (Work)
+   * 4. Assert: plan mode is disabled (plan panel hidden, default input placeholder)
+   * 5. Assert: stepper shows Work as current step
+   * 6. Assert: Work step's auto-start prompt response is visible in chat
    */
   test("proceed from plan-mode step disables plan mode and shows next step prompt", async ({
     testPage,
@@ -25,11 +26,19 @@ test.describe("Manual proceed to next workflow step", () => {
       "Proceed Plan Step Workflow",
     );
 
-    await apiClient.createWorkflowStep(workflow.id, "Spec", 0);
+    const specStep = await apiClient.createWorkflowStep(workflow.id, "Spec", 0);
     const workStep = await apiClient.createWorkflowStep(workflow.id, "Work", 1);
     await apiClient.createWorkflowStep(workflow.id, "Done", 2);
 
-    // Work: auto-start agent with a delayed response so we can observe the message
+    // Spec: auto-start agent (completes quickly so we can proceed)
+    await apiClient.updateWorkflowStep(specStep.id, {
+      prompt: 'e2e:message("spec done")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+      },
+    });
+
+    // Work: auto-start agent with a response we can assert on
     await apiClient.updateWorkflowStep(workStep.id, {
       prompt: 'e2e:delay(2000)\ne2e:message("work step response")\n{{task_prompt}}',
       events: {
@@ -43,33 +52,28 @@ test.describe("Manual proceed to next workflow step", () => {
       enable_preview_on_click: false,
     });
 
-    // --- Create task via dialog in plan mode ---
+    // Create task via API in Spec step — triggers auto_start_agent
+    await apiClient.createTask(seedData.workspaceId, "Plan Proceed Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: specStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Navigate to task session page
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    // Fill title only -> "Start Plan Mode" becomes the default submit action
-    await testPage.getByTestId("task-title-input").fill("Plan Proceed Task");
-
-    const submitBtn = dialog.getByRole("button", { name: /Start Plan Mode/ });
-    await expect(submitBtn).toBeEnabled({ timeout: 10_000 });
-    await submitBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // Navigates to session page with plan layout
+    const card = kanban.taskCardInColumn("Plan Proceed Task", specStep.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Plan panel should be visible (plan layout activated by dialog flow)
-    await expect(session.planPanel).toBeVisible({ timeout: 15_000 });
-
-    // Plan mode input placeholder confirms plan mode is on
-    await expect(session.planModeInput()).toBeVisible({ timeout: 10_000 });
+    // Wait for agent to complete its turn (idle input visible)
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // Stepper shows Spec as current step
     await expect(session.stepperStep("Spec")).toHaveAttribute("aria-current", "step", {
@@ -79,6 +83,12 @@ test.describe("Manual proceed to next workflow step", () => {
     // The "proceed to next step" button should be visible (showing "Work")
     const proceedBtn = session.proceedNextStepButton();
     await expect(proceedBtn).toBeVisible({ timeout: 10_000 });
+
+    // --- Enable plan mode manually (simulates being in a plan-mode workflow step) ---
+    await testPage.waitForTimeout(1_000);
+    await session.togglePlanMode();
+    await expect(session.planPanel).toBeVisible({ timeout: 15_000 });
+    await expect(session.planModeInput()).toBeVisible({ timeout: 10_000 });
 
     // --- Click proceed to move to Work step ---
     await proceedBtn.click();

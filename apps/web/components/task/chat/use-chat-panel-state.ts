@@ -127,6 +127,11 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
       ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
       : false,
   );
+  const taskStepId = useAppStore((s) => {
+    if (!taskId) return null;
+    const task = s.kanban.tasks.find((t) => t.id === taskId);
+    return task?.workflowStepId ?? null;
+  });
 
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
@@ -153,6 +158,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   useAutoDisablePlanMode({
     resolvedSessionId,
     taskId,
+    taskStepId,
     sessionMetaPlanMode,
     planModeFromStore,
     applyBuiltInPreset,
