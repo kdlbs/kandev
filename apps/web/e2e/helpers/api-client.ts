@@ -56,6 +56,8 @@ export type MockCheckRun = {
   status: string;
   conclusion?: string;
   html_url?: string;
+  started_at?: string;
+  completed_at?: string;
 };
 
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
