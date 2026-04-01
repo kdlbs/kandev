@@ -164,6 +164,37 @@ function WorkflowItemContent({
   );
 }
 
+function useWorkflowReorder(
+  orderedWorkflows: { id: string; name: string }[],
+  workflowFilter: string | null,
+) {
+  const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const workspaceId = workflows[0]?.workspaceId;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+  const canSort = !workflowFilter && orderedWorkflows.length > 1;
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = orderedWorkflows.findIndex((wf) => wf.id === active.id);
+      const newIndex = orderedWorkflows.findIndex((wf) => wf.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
+      reorderWorkflowItems(reordered.map((wf) => wf.id));
+      if (workspaceId) {
+        reorderWorkflows(workspaceId, reordered.map((wf) => wf.id)).catch(() => {});
+      }
+    },
+    [orderedWorkflows, reorderWorkflowItems, workspaceId],
+  );
+
+  return { sensors, canSort, handleDragEnd };
+}
+
 export function SwimlaneContainer({
   viewMode,
   workflowFilter,
@@ -183,7 +214,6 @@ export function SwimlaneContainer({
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);
-  const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
 
@@ -206,28 +236,8 @@ export function SwimlaneContainer({
   }, [workflowFilter, workflows, snapshots]);
 
   const getFilteredTasks = (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery);
-
-  const workflowSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-  );
-  const workspaceId = workflows[0]?.workspaceId;
-  const canSortWorkflows = !workflowFilter && orderedWorkflows.length > 1;
-
-  const handleWorkflowDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const oldIndex = orderedWorkflows.findIndex((wf) => wf.id === active.id);
-      const newIndex = orderedWorkflows.findIndex((wf) => wf.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
-      reorderWorkflowItems(reordered.map((wf) => wf.id));
-      if (workspaceId) {
-        reorderWorkflows(workspaceId, reordered.map((wf) => wf.id)).catch(() => {});
-      }
-    },
-    [orderedWorkflows, reorderWorkflowItems, workspaceId],
-  );
+  const { sensors: workflowSensors, canSort: canSortWorkflows, handleDragEnd: handleWorkflowDragEnd } =
+    useWorkflowReorder(orderedWorkflows, workflowFilter);
 
   const emptyMessage = getEmptyMessage(
     isLoading,
