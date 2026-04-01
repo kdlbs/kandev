@@ -42,7 +42,6 @@ import {
   setupSessionTabSync,
   setupChatPanelSafetyNet,
   useAutoSessionTab,
-  useAutoPRPanel,
 } from "./dockview-session-tabs";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
@@ -482,9 +481,6 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
-
-  // Auto-show PR detail panel when the task has an associated PR
-  useAutoPRPanel();
 
   // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {

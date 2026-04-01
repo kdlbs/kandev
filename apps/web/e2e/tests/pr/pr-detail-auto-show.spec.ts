@@ -4,19 +4,14 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR detail panel", () => {
   /**
-   * Verifies that the PR detail panel automatically appears as a tab in
-   * the center group when a task has an associated pull request, and that
-   * clicking it shows PR content.
+   * Verifies that the PR detail panel can be opened via the topbar button
+   * when a task has an associated pull request, and renders PR content.
    *
    * Setup:
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
    *   Task A (with PR #101)
    */
-  test("auto-shows PR detail tab for task with associated PR", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("opens PR detail panel via topbar button", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
     // --- Seed workflow ---
@@ -102,15 +97,14 @@ test.describe("PR detail panel", () => {
     await session.waitForLoad();
     await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
 
-    // PR topbar button should appear after PR data syncs
+    // Verify PR topbar button appears with PR number
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prTopbarButton()).toContainText("#101");
 
-    // PR detail tab should auto-appear in the center group
-    await expect(session.prDetailTab()).toBeVisible({ timeout: 10_000 });
+    // Click PR topbar button to open the PR detail panel
+    await session.prTopbarButton().click();
 
-    // Click PR tab to verify it shows content
-    await session.prDetailTab().click();
+    // Verify PR detail panel renders with content
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
   });
 });
