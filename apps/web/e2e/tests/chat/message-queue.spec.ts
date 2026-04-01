@@ -255,7 +255,10 @@ test.describe("Task session queue", () => {
 
     // Type a long message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
-    const longText = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of scroll test content`).join("\n");
+    const longText = Array.from(
+      { length: 30 },
+      (_, i) => `Line ${i + 1} of scroll test content`,
+    ).join("\n");
     await typeWhileBusy(testPage, editor, longText);
 
     const submitBtn = testPage.getByTestId("submit-message-button");
