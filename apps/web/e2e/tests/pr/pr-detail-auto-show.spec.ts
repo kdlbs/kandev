@@ -62,13 +62,13 @@ test.describe("PR detail panel auto-show", () => {
     ]);
 
     // --- Create 2 tasks ---
-    const taskA = await apiClient.createTask(seedData.workspaceId, "PR Task", {
+    const taskA = await apiClient.createTask(seedData.workspaceId, "Auth Fix Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
-    const taskB = await apiClient.createTask(seedData.workspaceId, "No PR Task", {
+    const taskB = await apiClient.createTask(seedData.workspaceId, "Plain Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
@@ -99,15 +99,15 @@ test.describe("PR detail panel auto-show", () => {
     });
 
     // Wait for tasks to reach Done
-    await expect(kanban.taskCardInColumn("PR Task", doneStep.id)).toBeVisible({
+    await expect(kanban.taskCardInColumn("Auth Fix Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
-    await expect(kanban.taskCardInColumn("No PR Task", doneStep.id)).toBeVisible({
+    await expect(kanban.taskCardInColumn("Plain Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
     // --- Open Task A (has PR) ---
-    await kanban.taskCardInColumn("PR Task", doneStep.id).click();
+    await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -122,22 +122,22 @@ test.describe("PR detail panel auto-show", () => {
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
 
     // --- Switch to Task B (no PR) via sidebar ---
-    await session.clickTaskInSidebar("No PR Task");
+    await session.clickTaskInSidebar("Plain Task");
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })
-        .getByText("No PR Task", { exact: false }),
+        .getByText("Plain Task", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
 
     // PR detail tab should NOT be visible for task without PR
     await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
 
     // --- Switch back to Task A (has PR) ---
-    await session.clickTaskInSidebar("PR Task");
+    await session.clickTaskInSidebar("Auth Fix Task");
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })
-        .getByText("PR Task", { exact: false }),
+        .getByText("Auth Fix Task", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
 
     // PR detail tab should re-appear
