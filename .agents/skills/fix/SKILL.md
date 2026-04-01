@@ -35,7 +35,7 @@ Mark task 1 as in_progress.
 Before anything else, reproduce the bug reliably. Pick the right method based on where the bug lives:
 
 - **Backend** (API, logic, data): write a Go test that calls the function/endpoint and asserts the wrong behavior. Run with `go test -v -run TestName ./path/...`
-- **Frontend** (UI, state, interaction): write a Playwright E2E test using `/e2e` that navigates to the page and triggers the bug. Run with `make test-e2e-headed` to see it visually.
+- **Frontend** (UI, state, interaction): write a Playwright E2E test using `/e2e` that navigates to the page and triggers the bug. Run with `make test-e2e` to verify.
 - **Full-stack** (user flow breaks end-to-end): Playwright E2E test that exercises the full path from UI through API to DB and back.
 - **Unclear where it lives**: start by reading the code path from the reported symptom (a page, an error message, a wrong value) back to its source. Then write the test at the appropriate level.
 

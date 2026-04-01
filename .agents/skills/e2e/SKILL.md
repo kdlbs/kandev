@@ -42,10 +42,10 @@ Each worker gets an isolated backend, frontend, database, and mock agent — no 
 
 ## Run commands
 
+**Always run headless** (`make test-e2e`). Never use `--headed`, `e2e:headed`, or `test-e2e-headed` — headed mode requires a display and will fail in agent environments.
+
 ```bash
 make test-e2e                                                      # all tests, headless
-make test-e2e-headed                                               # with visible browser
-make test-e2e-ui                                                   # Playwright UI mode
 cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single file
 cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
 ```
