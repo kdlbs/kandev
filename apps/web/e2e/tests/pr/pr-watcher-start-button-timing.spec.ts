@@ -27,11 +27,7 @@ test.describe("PR watcher start button timing", () => {
     test.setTimeout(120_000);
 
     // --- Create a workflow step WITHOUT auto_start_agent ---
-    const reviewStep = await apiClient.createWorkflowStep(
-      seedData.workflowId,
-      "Review",
-      0,
-    );
+    const reviewStep = await apiClient.createWorkflowStep(seedData.workflowId, "Review", 0);
 
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -43,28 +39,24 @@ test.describe("PR watcher start button timing", () => {
     // The task has a checkout_branch and metadata.agent_profile_id so that
     // useAutoStartSession fires, but the backend downgrades to prepare
     // because the step lacks auto_start_agent.
-    await apiClient.createTask(
-      seedData.workspaceId,
-      "PR #42: Add feature",
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: reviewStep.id,
-        repositories: [
-          {
-            repository_id: seedData.repositoryId,
-            base_branch: "main",
-          },
-        ],
-        metadata: {
-          agent_profile_id: seedData.agentProfileId,
-          pr_number: 42,
-          pr_branch: "feature/add-feature",
-          pr_repo: "testorg/testrepo",
-          pr_author: "contributor",
+    await apiClient.createTask(seedData.workspaceId, "PR #42: Add feature", {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: reviewStep.id,
+      repositories: [
+        {
+          repository_id: seedData.repositoryId,
+          base_branch: "main",
         },
+      ],
+      metadata: {
+        agent_profile_id: seedData.agentProfileId,
+        pr_number: 42,
+        pr_branch: "feature/add-feature",
+        pr_repo: "testorg/testrepo",
+        pr_author: "contributor",
       },
-    );
+    });
 
     // --- Navigate to kanban and click the task ---
     const kanban = new KanbanPage(testPage);
