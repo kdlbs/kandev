@@ -24,6 +24,22 @@ func Detached(parent context.Context, stopCh <-chan struct{}, timeout time.Durat
 	return ctx, cancel
 }
 
+// DetachedNoTimeout returns a context that is only cancelled when stopCh closes.
+// Use for operations with no fixed deadline (e.g., agent prompts that can run for hours).
+func DetachedNoTimeout(parent context.Context, stopCh <-chan struct{}) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, cancel
+}
+
 // DetachedWithValues creates a detached context that copies deadline-insensitive values
 // from the parent context while starting fresh with no deadline.
 // Use sparingly - most values should be passed explicitly.

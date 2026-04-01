@@ -875,6 +875,15 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	// process (idle, no prompt). For agents with HistoryContextInjection, conversation history
 	// is injected into the user's first message.
 	if runErr == nil && running != nil && isActiveSessionState(session.State) {
+		if session.ErrorMessage != "" {
+			// Error-recovery state (set by handleRecoverableFailure): don't auto-resume.
+			// Let the user see the error and choose via action buttons.
+			resp.IsAgentRunning = false
+			resp.IsResumable = true
+			resp.NeedsResume = false
+			resp.ResumeReason = "error_recovery"
+			return resp, nil
+		}
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
 		resp.NeedsResume = true
@@ -990,6 +999,15 @@ func (s *Service) validateResumeEligibility(session *models.TaskSession, resp dt
 			resp.IsResumable = false
 			return resp
 		}
+	}
+
+	// Don't auto-resume sessions in error-recovery state.
+	if session.ErrorMessage != "" {
+		resp.IsAgentRunning = false
+		resp.IsResumable = true
+		resp.NeedsResume = false
+		resp.ResumeReason = "error_recovery"
+		return resp
 	}
 
 	resp.IsAgentRunning = false
