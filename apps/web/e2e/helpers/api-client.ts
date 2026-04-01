@@ -170,10 +170,6 @@ export class ApiClient {
     });
   }
 
-  async listWorkflows(workspaceId: string): Promise<ListWorkflowsResponse> {
-    return this.request("GET", `/api/v1/workspaces/${workspaceId}/workflows`);
-  }
-
   async reorderWorkflows(
     workspaceId: string,
     workflowIds: string[],
