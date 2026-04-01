@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -22,12 +23,19 @@ const DefaultFilePollInterval = 2 * time.Second
 // This prevents the monitor loop from hanging if git is blocked (e.g., index lock).
 const gitCommandTimeout = 10 * time.Second
 
+// maxConsecutiveGitFailures is the number of consecutive git command failures
+// before the polling loop gives up and stops. At 2-second intervals, 5 failures
+// means ~10 seconds — enough to rule out transient issues (index lock, brief GC race)
+// while stopping quickly enough to avoid log spam when git is permanently broken
+// (e.g., worktree .git reference points to a deleted gitdir after task archival).
+const maxConsecutiveGitFailures = 5
+
 // monitorLoop polls for file changes using file mtimes and quick git checks.
 // This is more efficient than fsnotify on macOS and avoids file descriptor exhaustion.
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
-	ticker := time.NewTicker(DefaultFilePollInterval)
+	ticker := time.NewTicker(wt.filePollInterval)
 	defer ticker.Stop()
 
 	// Initial update
@@ -37,7 +45,9 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// Cache the last known state (ignore error on initial fetch)
 	lastState, _ := wt.getWorkspaceState(ctx)
 
-	wt.logger.Info("file polling started", zap.Duration("interval", DefaultFilePollInterval))
+	wt.logger.Info("file polling started", zap.Duration("interval", wt.filePollInterval))
+
+	var consecutiveFailures int
 
 	for {
 		select {
@@ -60,10 +70,21 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 
 				// Git command failed for another reason - skip this cycle and retry on next tick.
 				// Don't update lastState so the change will be detected when git recovers.
+				consecutiveFailures++
+				if consecutiveFailures >= maxConsecutiveGitFailures {
+					wt.logger.Error("git commands failing repeatedly, stopping workspace monitor",
+						zap.String("workDir", wt.workDir),
+						zap.Int("consecutiveFailures", consecutiveFailures),
+						zap.Error(err))
+					return
+				}
 				wt.logger.Warn("failed to get workspace state, will retry next cycle",
+					zap.String("workDir", wt.workDir),
+					zap.Int("consecutiveFailures", consecutiveFailures),
 					zap.Error(err))
 				continue
 			}
+			consecutiveFailures = 0
 			if currentState.changed(lastState) {
 				lastState = currentState
 				wt.logger.Debug("workspace state changed, updating")
@@ -112,9 +133,12 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// to dirty files, we also include the mtime of each dirty file.
 	cmd := exec.CommandContext(gitCtx, "git", "diff-files", "--name-only")
 	cmd.Dir = wt.workDir
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
 	if err != nil {
-		return state, fmt.Errorf("git diff-files: %w", err)
+		return state, fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
+			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))
 	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
@@ -163,9 +187,12 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, er
 	// Get list of untracked files (excluding ignored)
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
 	cmd.Dir = wt.workDir
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git ls-files: %w", err)
+		return "", fmt.Errorf("git ls-files in %s: %w (stderr: %s)",
+			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))
 	}
 	if len(out) == 0 {
 		return "", nil // No untracked files is not an error

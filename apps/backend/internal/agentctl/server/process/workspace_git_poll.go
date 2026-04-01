@@ -32,6 +32,8 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		zap.String("initial_head", wt.cachedHeadSHA),
 		zap.String("initial_branch", wt.cachedBranchName))
 
+	var consecutiveFailures int
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -45,6 +47,25 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 					zap.String("workDir", wt.workDir))
 				return
 			}
+
+			// Quick git health check before running full change detection.
+			// If git is broken (e.g., worktree .git reference points to deleted gitdir),
+			// stop after maxConsecutiveGitFailures to avoid wasting CPU.
+			probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+			probeCmd.Dir = wt.workDir
+			if err := probeCmd.Run(); err != nil {
+				consecutiveFailures++
+				if consecutiveFailures >= maxConsecutiveGitFailures {
+					wt.logger.Error("git not functional, stopping git polling",
+						zap.String("workDir", wt.workDir),
+						zap.Int("consecutiveFailures", consecutiveFailures),
+						zap.Error(err))
+					return
+				}
+				continue
+			}
+			consecutiveFailures = 0
+
 			wt.checkGitChanges(ctx)
 		}
 	}
