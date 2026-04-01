@@ -43,7 +43,9 @@ type TerminalKeyHandlerOptions = {
 /** Handles app-level shortcuts and Cmd+Arrow→Home/End mapping for macOS. */
 function createKeyEventHandler(options: TerminalKeyHandlerOptions) {
   return (event: KeyboardEvent): boolean => {
-    if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))) {
+    if (
+      matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))
+    ) {
       event.preventDefault();
       if (event.type === "keydown" && options.onToggleBottomTerminal) {
         options.onToggleBottomTerminal();
