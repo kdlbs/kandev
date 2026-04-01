@@ -456,8 +456,9 @@ export function CommandPanel() {
   const searchShortcut = getShortcut("SEARCH", keyboardShortcuts);
   const fileSearchShortcut = getShortcut("FILE_SEARCH", keyboardShortcuts);
 
+  const commandPanelShortcut = getShortcut("COMMAND_PANEL", keyboardShortcuts);
   useKeyboardShortcut(searchShortcut, toggleCommands);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggleCommands);
+  useKeyboardShortcut(commandPanelShortcut, toggleCommands);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggleCommands);
   useKeyboardShortcut(fileSearchShortcut, openFileSearch);
 

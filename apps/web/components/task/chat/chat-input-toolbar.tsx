@@ -21,6 +21,9 @@ import { cn } from "@/lib/utils";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { formatShortcut } from "@/lib/keyboard/utils";
+import { useAppStore } from "@/components/state-provider";
 import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
@@ -156,9 +159,11 @@ function PlanToggleButton({
   planModeAvailable: boolean;
   onPlanModeChange: (enabled: boolean) => void;
 }) {
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
   const tooltip = planModeAvailable
-    ? "Toggle plan mode (Shift+Tab) — Agent collaborates on the plan without implementing changes"
-    : "Toggle plan layout (Shift+Tab) — View and edit the plan (agent cannot read/write it without MCP)";
+    ? `Toggle plan mode (${planModeShortcutLabel}) — Agent collaborates on the plan without implementing changes`
+    : `Toggle plan layout (${planModeShortcutLabel}) — View and edit the plan (agent cannot read/write it without MCP)`;
 
   return (
     <Tooltip>

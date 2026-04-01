@@ -7,8 +7,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { startReconnectLoop } from "./ws-reconnect";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { matchesShortcut } from "@/lib/keyboard/utils";
+import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { exposeBufferReader, clearBufferReader } from "./terminal-buffer-reader";
 
 // Debug flag - set to true to see detailed logs
@@ -36,12 +36,13 @@ export type TerminalInitOptions = {
 type TerminalKeyHandlerOptions = {
   onToggleBottomTerminal?: () => void;
   sendInput?: (data: string) => void;
+  keyboardShortcuts?: StoredShortcutOverrides;
 };
 
 /** Handles app-level shortcuts and Cmd+Arrow→Home/End mapping for macOS. */
 function createKeyEventHandler(options: TerminalKeyHandlerOptions) {
   return (event: KeyboardEvent): boolean => {
-    if (matchesShortcut(event, SHORTCUTS.BOTTOM_TERMINAL)) {
+    if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcuts))) {
       event.preventDefault();
       if (event.type === "keydown" && options.onToggleBottomTerminal) {
         options.onToggleBottomTerminal();
@@ -190,6 +191,7 @@ export function useTerminalInit({
   fontSize,
   onToggleBottomTerminal,
   sendInput,
+  keyboardShortcuts,
 }: TerminalInitHookOptions) {
   const refs = {
     xtermRef,
@@ -222,6 +224,7 @@ export function useTerminalInit({
           fontSize,
           onToggleBottomTerminal,
           sendInput,
+          keyboardShortcuts,
         });
         onReady();
         return true;

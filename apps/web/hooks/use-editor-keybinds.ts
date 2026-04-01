@@ -4,8 +4,8 @@ import { useEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { matchesShortcut } from "@/lib/keyboard/utils";
+import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import type { DockviewApi } from "dockview-react";
 
 function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
@@ -76,15 +76,13 @@ function isEditableTarget(e: KeyboardEvent): boolean {
   );
 }
 
-/** Returns true if the event matches Cmd/Ctrl + key (no shift). */
-function isCmdKey(e: KeyboardEvent, code: string): boolean {
-  return (e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === code;
-}
-
-function handleLayoutToggle(e: KeyboardEvent): boolean {
+function handleLayoutToggle(
+  e: KeyboardEvent,
+  overrides: StoredShortcutOverrides | undefined,
+): boolean {
   if (isEditableTarget(e)) return false;
 
-  if (isCmdKey(e, "KeyB")) {
+  if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {
     e.preventDefault();
     e.stopPropagation();
     useDockviewStore.getState().toggleSidebar();
@@ -98,13 +96,14 @@ function handleBottomTerminal(
   e: KeyboardEvent,
   appStore: ReturnType<typeof useAppStoreApi>,
   previousFocusRef: React.MutableRefObject<Element | null>,
+  overrides: StoredShortcutOverrides | undefined,
 ): boolean {
-  // Cmd/Ctrl+J — toggle bottom terminal panel
-  // Note: no isEditableTarget guard here. Ctrl+J is not a standard text
+  // Toggle bottom terminal panel (default: Cmd/Ctrl+J).
+  // Note: no isEditableTarget guard here. The default binding is not a standard text
   // editing shortcut, and we must preventDefault even when an xterm textarea
   // is focused — otherwise the un-prevented event causes escape-sequence
   // artifacts (e.g. trailing "R" from cursor-position reports during resize).
-  if (matchesShortcut(e, SHORTCUTS.BOTTOM_TERMINAL)) {
+  if (matchesShortcut(e, getShortcut("BOTTOM_TERMINAL", overrides))) {
     e.preventDefault();
     e.stopPropagation();
 
@@ -154,6 +153,8 @@ export function useEditorKeybinds() {
       const api = useDockviewStore.getState().api;
       if (!api) return;
 
+      const overrides = appStore.getState().userSettings.keyboardShortcuts;
+
       const isTabNav =
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
@@ -176,8 +177,8 @@ export function useEditorKeybinds() {
         return;
       }
 
-      if (handleLayoutToggle(e)) return;
-      handleBottomTerminal(e, appStore, previousFocusRef);
+      if (handleLayoutToggle(e, overrides)) return;
+      handleBottomTerminal(e, appStore, previousFocusRef, overrides);
     };
 
     // Use capture phase so we receive events before xterm.js

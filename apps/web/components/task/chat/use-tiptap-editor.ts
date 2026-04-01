@@ -8,6 +8,8 @@ import Text from "@tiptap/extension-text";
 import HardBreak from "@tiptap/extension-hard-break";
 import History from "@tiptap/extension-history";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { matchesShortcut } from "@/lib/keyboard/utils";
+import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Extension, isNodeEmpty } from "@tiptap/core";
@@ -15,6 +17,7 @@ import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
 import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
@@ -124,6 +127,8 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const sessionIdRef = useRef(opts.sessionId);
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcutsRef = useRef(keyboardShortcuts);
   useLayoutEffect(() => {
     onSubmitRef.current = opts.onSubmit;
     submitKeyRef.current = opts.submitKey;
@@ -133,6 +138,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     sessionIdRef.current = opts.sessionId;
     planModeEnabledRef.current = opts.planModeEnabled;
     onPlanModeChangeRef.current = opts.onPlanModeChange;
+    keyboardShortcutsRef.current = keyboardShortcuts;
   });
   return {
     onSubmitRef,
@@ -143,6 +149,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     sessionIdRef,
     planModeEnabledRef,
     onPlanModeChangeRef,
+    keyboardShortcutsRef,
   };
 }
 
@@ -162,13 +169,14 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     ref,
   } = opts;
   const refs = useTipTapRefs(opts);
-  const SubmitKeymap = useSubmitKeymap(
-    refs.disabledRef,
-    refs.submitKeyRef,
-    refs.onSubmitRef,
-    refs.planModeEnabledRef,
-    refs.onPlanModeChangeRef,
-  );
+  const SubmitKeymap = useSubmitKeymap({
+    disabledRef: refs.disabledRef,
+    submitKeyRef: refs.submitKeyRef,
+    onSubmitRef: refs.onSubmitRef,
+    planModeEnabledRef: refs.planModeEnabledRef,
+    onPlanModeChangeRef: refs.onPlanModeChangeRef,
+    keyboardShortcutsRef: refs.keyboardShortcutsRef,
+  });
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
   const editor = useEditor({
@@ -343,13 +351,22 @@ function syncEditorValue({
 
 // ── Submit keymap hook ──────────────────────────────────────────────
 
-function useSubmitKeymap(
-  disabledRef: React.RefObject<boolean | undefined>,
-  submitKeyRef: React.RefObject<"enter" | "cmd_enter">,
-  onSubmitRef: React.RefObject<(() => void) | undefined>,
-  planModeEnabledRef: React.RefObject<boolean>,
-  onPlanModeChangeRef: React.RefObject<((enabled: boolean) => void) | undefined>,
-) {
+function useSubmitKeymap(refs: {
+  disabledRef: React.RefObject<boolean | undefined>;
+  submitKeyRef: React.RefObject<"enter" | "cmd_enter">;
+  onSubmitRef: React.RefObject<(() => void) | undefined>;
+  planModeEnabledRef: React.RefObject<boolean>;
+  onPlanModeChangeRef: React.RefObject<((enabled: boolean) => void) | undefined>;
+  keyboardShortcutsRef: React.RefObject<StoredShortcutOverrides | undefined>;
+}) {
+  const {
+    disabledRef,
+    submitKeyRef,
+    onSubmitRef,
+    planModeEnabledRef,
+    onPlanModeChangeRef,
+    keyboardShortcutsRef,
+  } = refs;
   return useMemo(() => {
     return Extension.create({
       name: "submitKeymap",
@@ -371,11 +388,24 @@ function useSubmitKeymap(
             }
             return false;
           },
-          "Shift-Tab": () => {
-            onPlanModeChangeRef.current?.(!planModeEnabledRef.current);
-            return true;
-          },
         };
+      },
+      addProseMirrorPlugins() {
+        return [
+          new Plugin({
+            key: new PluginKey("planModeToggle"),
+            props: {
+              handleKeyDown: (_view, event) => {
+                const shortcut = getShortcut("TOGGLE_PLAN_MODE", keyboardShortcutsRef.current);
+                if (matchesShortcut(event, shortcut)) {
+                  onPlanModeChangeRef.current?.(!planModeEnabledRef.current);
+                  return true;
+                }
+                return false;
+              },
+            },
+          }),
+        ];
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

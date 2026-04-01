@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { IconLayoutKanban, IconGitBranch, IconList, IconPlus } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { linkToTasks } from "@/lib/links";
 import type { CommandItem } from "@/lib/commands/types";
+import { useAppStore } from "@/components/state-provider";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 
 type HomepageCommandsProps = {
   onCreateTask: () => void;
@@ -16,6 +17,8 @@ type HomepageCommandsProps = {
 export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
   const router = useRouter();
   const { onViewModeChange } = useKanbanDisplaySettings();
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const newTaskShortcut = getShortcut("NEW_TASK", keyboardShortcuts);
 
   const commands = useMemo<CommandItem[]>(
     () => [
@@ -24,7 +27,7 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
         label: "Create New Task",
         group: "Tasks",
         icon: <IconPlus className="size-3.5" />,
-        shortcut: SHORTCUTS.NEW_TASK,
+        shortcut: newTaskShortcut,
         keywords: ["new", "create", "task", "add"],
         action: onCreateTask,
         priority: 0,
@@ -63,7 +66,7 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
         action: () => router.push(linkToTasks()),
       },
     ],
-    [onCreateTask, router, onViewModeChange],
+    [onCreateTask, router, onViewModeChange, newTaskShortcut],
   );
 
   useRegisterCommands(commands);

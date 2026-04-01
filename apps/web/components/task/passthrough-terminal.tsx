@@ -110,6 +110,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   useTerminalInit({
     terminalRef: refs.terminalRef,
     xtermRef: refs.xtermRef,
@@ -125,6 +126,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     fontSize: terminalFontSize ?? undefined,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
+    keyboardShortcuts,
   });
 
   useWebSocketConnection({

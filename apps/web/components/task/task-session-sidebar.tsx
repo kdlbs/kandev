@@ -12,7 +12,7 @@ import { IconPlus } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
@@ -65,6 +65,8 @@ export const NewTaskButton = memo(function NewTaskButton({
 }: NewTaskButtonProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const newTaskShortcut = getShortcut("NEW_TASK", keyboardShortcuts);
   const commands = useMemo<CommandItem[]>(
     () => [
       {
@@ -72,13 +74,13 @@ export const NewTaskButton = memo(function NewTaskButton({
         label: "Create New Task",
         group: "Tasks",
         icon: <IconPlus className="size-3.5" />,
-        shortcut: SHORTCUTS.NEW_TASK,
+        shortcut: newTaskShortcut,
         keywords: ["new", "create", "task", "add"],
         action: () => setDialogOpen(true),
         priority: 0,
       },
     ],
-    [],
+    [newTaskShortcut],
   );
   useRegisterCommands(commands);
 

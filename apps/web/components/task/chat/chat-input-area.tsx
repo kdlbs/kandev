@@ -6,9 +6,9 @@ import { Button } from "@kandev/ui/button";
 import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useMessageHandler } from "@/hooks/use-message-handler";
 import { useAppStore } from "@/components/state-provider";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
 import {
   ChatInputContainer,
@@ -185,8 +185,9 @@ export function useChatPanelHandlers(
     chatInputRef.current?.focusInput();
   }, [chatInputRef]);
 
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   useKeyboardShortcut(
-    SHORTCUTS.FOCUS_INPUT,
+    getShortcut("FOCUS_INPUT", keyboardShortcuts),
     useCallback(
       (event: KeyboardEvent) => {
         const el = document.activeElement;
