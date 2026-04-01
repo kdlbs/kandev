@@ -141,6 +141,7 @@ export function useAutoPRPanel() {
           component: "pr-detail",
           title: "Pull Request",
           position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+          inactive: true,
         });
         handledRef.current.add(taskId);
       });
