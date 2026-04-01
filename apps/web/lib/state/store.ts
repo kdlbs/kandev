@@ -231,6 +231,7 @@ export type AppState = {
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  reorderWorkflowItems: (workflowIds: string[]) => void;
   setWorkflowSnapshot: (
     workflowId: string,
     data: import("./slices/kanban/types").WorkflowSnapshotData,
