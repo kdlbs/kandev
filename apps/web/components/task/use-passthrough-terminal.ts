@@ -36,13 +36,14 @@ export type TerminalInitOptions = {
 type TerminalKeyHandlerOptions = {
   onToggleBottomTerminal?: () => void;
   sendInput?: (data: string) => void;
-  keyboardShortcuts?: StoredShortcutOverrides;
+  /** Ref to keyboard shortcut overrides so the handler always reads the latest value. */
+  keyboardShortcutsRef?: React.MutableRefObject<StoredShortcutOverrides | undefined>;
 };
 
 /** Handles app-level shortcuts and Cmd+Arrow→Home/End mapping for macOS. */
 function createKeyEventHandler(options: TerminalKeyHandlerOptions) {
   return (event: KeyboardEvent): boolean => {
-    if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcuts))) {
+    if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))) {
       event.preventDefault();
       if (event.type === "keydown" && options.onToggleBottomTerminal) {
         options.onToggleBottomTerminal();
@@ -191,7 +192,7 @@ export function useTerminalInit({
   fontSize,
   onToggleBottomTerminal,
   sendInput,
-  keyboardShortcuts,
+  keyboardShortcutsRef,
 }: TerminalInitHookOptions) {
   const refs = {
     xtermRef,
@@ -224,7 +225,7 @@ export function useTerminalInit({
           fontSize,
           onToggleBottomTerminal,
           sendInput,
-          keyboardShortcuts,
+          keyboardShortcutsRef,
         });
         onReady();
         return true;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useCallback, useMemo, useState } from "react";
+import React, { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
@@ -111,6 +111,10 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcutsRef = useRef(keyboardShortcuts);
+  useEffect(() => {
+    keyboardShortcutsRef.current = keyboardShortcuts;
+  }, [keyboardShortcuts]);
   useTerminalInit({
     terminalRef: refs.terminalRef,
     xtermRef: refs.xtermRef,
@@ -126,7 +130,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     fontSize: terminalFontSize ?? undefined,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
-    keyboardShortcuts,
+    keyboardShortcutsRef,
   });
 
   useWebSocketConnection({
