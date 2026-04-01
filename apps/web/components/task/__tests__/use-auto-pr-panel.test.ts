@@ -7,7 +7,6 @@ describe("shouldAutoAddPRPanel", () => {
     panelExists: false,
     isRestoringLayout: false,
     isMaximized: false,
-    wasClosedByUser: false,
   };
 
   it("returns 'add' when task has PR and panel does not exist", () => {
@@ -30,10 +29,6 @@ describe("shouldAutoAddPRPanel", () => {
     expect(shouldAutoAddPRPanel({ ...base, isMaximized: true })).toBe("none");
   });
 
-  it("returns 'none' when user previously closed the panel for this task", () => {
-    expect(shouldAutoAddPRPanel({ ...base, wasClosedByUser: true })).toBe("none");
-  });
-
   it("returns 'add' when all conditions are met", () => {
     expect(
       shouldAutoAddPRPanel({
@@ -41,7 +36,6 @@ describe("shouldAutoAddPRPanel", () => {
         panelExists: false,
         isRestoringLayout: false,
         isMaximized: false,
-        wasClosedByUser: false,
       }),
     ).toBe("add");
   });

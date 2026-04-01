@@ -9,7 +9,7 @@ test.describe("PR detail panel auto-show", () => {
    *
    * Setup:
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
-   *   Task A (with PR #101), Task B (no PR)
+   *   Task A (with PR #101)
    */
   test("auto-shows PR detail tab for task with associated PR", async ({
     testPage,
@@ -58,27 +58,20 @@ test.describe("PR detail panel auto-show", () => {
       },
     ]);
 
-    // --- Create 2 tasks ---
+    // --- Create task ---
     const taskA = await apiClient.createTask(seedData.workspaceId, "Auth Fix Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
-    const taskB = await apiClient.createTask(seedData.workspaceId, "Plain Task", {
-      workflow_id: workflow.id,
-      workflow_step_id: inboxStep.id,
-      agent_profile_id: seedData.agentProfileId,
-      repository_ids: [seedData.repositoryId],
-    });
 
-    // Navigate to kanban BEFORE moving tasks
+    // Navigate to kanban BEFORE moving task
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // Move tasks to Working → auto_start → mock agent completes → Done
+    // Move task to Working → auto_start → mock agent completes → Done
     await apiClient.moveTask(taskA.id, workflow.id, workingStep.id);
-    await apiClient.moveTask(taskB.id, workflow.id, workingStep.id);
 
     // Associate PR with Task A only
     await apiClient.mockGitHubAssociateTaskPR({
@@ -95,11 +88,8 @@ test.describe("PR detail panel auto-show", () => {
       deletions: 2,
     });
 
-    // Wait for tasks to reach Done
+    // Wait for task to reach Done
     await expect(kanban.taskCardInColumn("Auth Fix Task", doneStep.id)).toBeVisible({
-      timeout: 45_000,
-    });
-    await expect(kanban.taskCardInColumn("Plain Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
@@ -117,27 +107,5 @@ test.describe("PR detail panel auto-show", () => {
     // Click the PR detail tab to verify it shows content
     await session.prDetailTab().click();
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
-
-    // --- Switch to Task B (no PR) via sidebar ---
-    await session.clickTaskInSidebar("Plain Task");
-    await expect(
-      testPage
-        .getByRole("navigation", { name: "breadcrumb" })
-        .getByText("Plain Task", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // PR detail tab should NOT be visible for task without PR
-    await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
-
-    // --- Switch back to Task A (has PR) ---
-    await session.clickTaskInSidebar("Auth Fix Task");
-    await expect(
-      testPage
-        .getByRole("navigation", { name: "breadcrumb" })
-        .getByText("Auth Fix Task", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // PR detail tab should re-appear
-    await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
   });
 });

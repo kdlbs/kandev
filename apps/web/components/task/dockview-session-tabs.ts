@@ -86,13 +86,11 @@ export function shouldAutoAddPRPanel(params: {
   panelExists: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
-  wasClosedByUser: boolean;
 }): "add" | "none" {
   if (!params.hasPR) return "none";
   if (params.panelExists) return "none";
   if (params.isRestoringLayout) return "none";
   if (params.isMaximized) return "none";
-  if (params.wasClosedByUser) return "none";
   return "add";
 }
 
@@ -112,63 +110,37 @@ export function useAutoPRPanel() {
     const tid = s.tasks.activeTaskId;
     return tid ? !!s.taskPRs.byTaskId[tid] : false;
   });
-  const closedForTaskRef = useRef<string | null>(null);
+  // Track which tasks have already been handled to avoid re-adding on every
+  // store update or task switch. Only auto-add once per task visit.
+  const handledRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    closedForTaskRef.current = null;
-  }, [taskId]);
+    if (!taskId || !hasPR) return;
+    if (handledRef.current.has(taskId)) return;
+    handledRef.current.add(taskId);
 
-  useEffect(() => {
-    if (!taskId) return;
     const api = useDockviewStore.getState().api;
     if (!api) return;
 
-    // Defer panel addition to avoid racing with layout restore operations
-    // (session switch, layout persistence). Double rAF matches the pattern
-    // used by setupChatPanelSafetyNet for the same reason.
+    // Defer to avoid racing with layout restore on initial load / session switch.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const dv = useDockviewStore.getState();
-        if (dv.isRestoringLayout) return;
+        if (useDockviewStore.getState().isRestoringLayout) return;
+        if (api.getPanel("pr-detail")) return;
+        if (useDockviewStore.getState().preMaximizeLayout !== null) return;
 
-        const action = shouldAutoAddPRPanel({
-          hasPR,
-          panelExists: !!api.getPanel("pr-detail"),
-          isRestoringLayout: dv.isRestoringLayout,
-          isMaximized: dv.preMaximizeLayout !== null,
-          wasClosedByUser: closedForTaskRef.current === taskId,
+        const { centerGroupId } = useDockviewStore.getState();
+        const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+
+        api.addPanel({
+          id: "pr-detail",
+          component: "pr-detail",
+          title: "Pull Request",
+          position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
         });
-
-        if (action === "add") {
-          const { centerGroupId } = useDockviewStore.getState();
-          const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
-
-          api.addPanel({
-            id: "pr-detail",
-            component: "pr-detail",
-            title: "Pull Request",
-            position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
-          });
-        } else if (!hasPR) {
-          // PR was disassociated or task switched — remove stale panel.
-          const existing = api.getPanel("pr-detail");
-          if (existing) api.removePanel(existing);
-        }
       });
     });
   }, [taskId, hasPR]);
-
-  useEffect(() => {
-    const api = useDockviewStore.getState().api;
-    if (!api || !taskId) return;
-
-    const disposable = api.onDidRemovePanel((panel) => {
-      if (panel.id === "pr-detail" && !useDockviewStore.getState().isRestoringLayout) {
-        closedForTaskRef.current = taskId;
-      }
-    });
-    return () => disposable.dispose();
-  }, [taskId]);
 }
 
 /**
