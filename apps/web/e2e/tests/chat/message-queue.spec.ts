@@ -234,6 +234,70 @@ test.describe("Task session queue", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
+  test("queue editor textarea scrolls when content is long", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue editor scroll test",
+    );
+
+    // Send a slow command to keep the agent busy.
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await testPage.waitForTimeout(500);
+
+    // Type a short message while agent is busy and queue it.
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await typeWhileBusy(testPage, editor, "short queued msg");
+
+    const submitBtn = testPage.getByTestId("submit-message-button");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
+    await submitBtn.click();
+
+    // Verify the queued indicator appears, then click edit.
+    const editBtn = testPage.getByTitle("Edit message");
+    await expect(editBtn).toBeVisible({ timeout: 10_000 });
+    await editBtn.click();
+
+    // The edit textarea should now be visible.
+    const textarea = testPage.getByTestId("queue-edit-textarea");
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+
+    // Fill via native setter + React event so the controlled component updates.
+    const longText = Array.from(
+      { length: 30 },
+      (_, i) => `Line ${i + 1} of scroll test content`,
+    ).join("\n");
+    await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(el, text);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, longText);
+
+    // Allow layout to settle after content change.
+    await testPage.waitForTimeout(300);
+
+    // Verify the textarea has a constrained max-height and is scrollable.
+    const metrics = await textarea.evaluate((el: HTMLTextAreaElement) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      maxHeight: getComputedStyle(el).maxHeight,
+      overflowY: getComputedStyle(el).overflowY,
+    }));
+
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    expect(metrics.maxHeight).toBe("200px");
+    expect(metrics.overflowY).toBe("auto");
+  });
+
   test("queue message with plan mode enabled via submit button", async ({
     testPage,
     apiClient,
