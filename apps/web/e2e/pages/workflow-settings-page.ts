@@ -78,6 +78,23 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId("step-delete-confirm-dialog");
   }
 
+  /** Returns the ordered names of all workflow cards on the page. */
+  async getWorkflowOrder(): Promise<string[]> {
+    const cards = this.page.locator('[data-testid^="workflow-card-"]');
+    const count = await cards.count();
+    const names: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const input = cards.nth(i).locator("input").first();
+      names.push(await input.inputValue());
+    }
+    return names;
+  }
+
+  /** The drag handle for a specific workflow card. */
+  dragHandle(workflowId: string): Locator {
+    return this.page.getByTestId(`workflow-drag-handle-${workflowId}`);
+  }
+
   /** Open the "Add Workflow" dialog and create a workflow. */
   async createWorkflow(name: string, templateName?: string) {
     await this.addWorkflowButton.click();

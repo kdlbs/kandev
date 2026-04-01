@@ -198,6 +198,16 @@ func (s *Service) ListWorkflows(ctx context.Context, workspaceID string) ([]*mod
 	return s.workflows.ListWorkflows(ctx, workspaceID)
 }
 
+// ReorderWorkflows updates sort_order for workflows within a workspace.
+func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
+	if err := s.workflows.ReorderWorkflows(ctx, workspaceID, workflowIDs); err != nil {
+		s.logger.Error("failed to reorder workflows", zap.String("workspace_id", workspaceID), zap.Error(err))
+		return err
+	}
+	s.logger.Info("reordered workflows", zap.String("workspace_id", workspaceID), zap.Int("count", len(workflowIDs)))
+	return nil
+}
+
 // Repository operations
 
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {

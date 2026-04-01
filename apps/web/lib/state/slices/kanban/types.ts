@@ -56,7 +56,7 @@ export type KanbanMultiState = {
 };
 
 export type WorkflowsState = {
-  items: Array<{ id: string; workspaceId: string; name: string; description?: string | null }>;
+  items: Array<{ id: string; workspaceId: string; name: string; description?: string | null; sortOrder?: number }>;
   activeId: string | null;
 };
 
@@ -75,6 +75,7 @@ export type KanbanSliceState = {
 export type KanbanSliceActions = {
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;

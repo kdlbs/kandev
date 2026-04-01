@@ -3,7 +3,22 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { IconDownload, IconLayoutColumns, IconPlus, IconUpload } from "@tabler/icons-react";
+import { IconDownload, IconGripVertical, IconLayoutColumns, IconPlus, IconUpload } from "@tabler/icons-react";
+import {
+  DndContext,
+  closestCenter,
+  type DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
@@ -17,6 +32,7 @@ import {
   updateWorkflowAction,
   exportAllWorkflowsAction,
   importWorkflowsAction,
+  reorderWorkflowsAction,
 } from "@/app/actions/workspaces";
 import type {
   Workflow,
@@ -273,57 +289,113 @@ function WorkflowSectionActions({ onExport, onImport, onAdd }: WorkflowSectionAc
 
 type WorkflowListProps = {
   workflowItems: Workflow[];
+  workspaceId: string;
   templateStepsById: Map<string, StepDefinition[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   onUpdate: (id: string, u: { name?: string; description?: string }) => void;
   onDelete: (id: string) => void;
   onSave: (id: string) => void;
   onCreated: (id: string, wf: Workflow) => void;
+  onReorder: (items: Workflow[]) => void;
 };
+
+function SortableWorkflowItem({
+  workflow,
+  children,
+}: {
+  workflow: Workflow;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: workflow.id,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      <div
+        className="absolute left-0 top-6 -ml-8 flex items-center cursor-grab active:cursor-grabbing z-10"
+        data-testid={`workflow-drag-handle-${workflow.id}`}
+        {...attributes}
+        {...listeners}
+      >
+        <IconGripVertical className="h-5 w-5 text-muted-foreground" />
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function WorkflowList({
   workflowItems,
+  workspaceId,
   templateStepsById,
   isWorkflowDirty,
   onUpdate,
   onDelete,
   onSave,
   onCreated,
+  onReorder,
 }: WorkflowListProps) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = workflowItems.findIndex((wf) => wf.id === active.id);
+    const newIndex = workflowItems.findIndex((wf) => wf.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(workflowItems, oldIndex, newIndex);
+    onReorder(reordered);
+    // Persist to backend (skip temp workflows)
+    const persistedIds = reordered.filter((wf) => !wf.id.startsWith("temp-")).map((wf) => wf.id);
+    if (persistedIds.length > 0) {
+      reorderWorkflowsAction(workspaceId, persistedIds).catch(() => {});
+    }
+  };
+
   return (
-    <div className="grid gap-3">
-      {workflowItems.map((workflow) => {
-        const isTempWorkflow = workflow.id.startsWith("temp-");
-        const templateSteps =
-          isTempWorkflow && workflow.workflow_template_id
-            ? (templateStepsById.get(workflow.workflow_template_id) ?? [])
-            : DEFAULT_CUSTOM_STEPS;
-        const initialWorkflowSteps =
-          isTempWorkflow && templateSteps.length
-            ? buildWorkflowSteps(workflow, templateSteps)
-            : undefined;
-        return (
-          <WorkflowCard
-            key={workflow.id}
-            workflow={workflow}
-            isWorkflowDirty={isWorkflowDirty(workflow)}
-            initialWorkflowSteps={initialWorkflowSteps}
-            templateStepCount={isTempWorkflow ? templateSteps.length : 0}
-            otherWorkflows={workflowItems.filter(
-              (w) => w.id !== workflow.id && !w.id.startsWith("temp-"),
-            )}
-            onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-            onDeleteWorkflow={async () => {
-              await onDelete(workflow.id);
-            }}
-            onSaveWorkflow={async () => {
-              await onSave(workflow.id);
-            }}
-            onWorkflowCreated={(created) => onCreated(workflow.id, created)}
-          />
-        );
-      })}
-    </div>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={workflowItems.map((wf) => wf.id)} strategy={verticalListSortingStrategy}>
+        <div className="grid gap-3 pl-8">
+          {workflowItems.map((workflow) => {
+            const isTempWorkflow = workflow.id.startsWith("temp-");
+            const templateSteps =
+              isTempWorkflow && workflow.workflow_template_id
+                ? (templateStepsById.get(workflow.workflow_template_id) ?? [])
+                : DEFAULT_CUSTOM_STEPS;
+            const initialWorkflowSteps =
+              isTempWorkflow && templateSteps.length
+                ? buildWorkflowSteps(workflow, templateSteps)
+                : undefined;
+            return (
+              <SortableWorkflowItem key={workflow.id} workflow={workflow}>
+                <WorkflowCard
+                  workflow={workflow}
+                  isWorkflowDirty={isWorkflowDirty(workflow)}
+                  initialWorkflowSteps={initialWorkflowSteps}
+                  templateStepCount={isTempWorkflow ? templateSteps.length : 0}
+                  otherWorkflows={workflowItems.filter(
+                    (w) => w.id !== workflow.id && !w.id.startsWith("temp-"),
+                  )}
+                  onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
+                  onDeleteWorkflow={async () => {
+                    await onDelete(workflow.id);
+                  }}
+                  onSaveWorkflow={async () => {
+                    await onSave(workflow.id);
+                  }}
+                  onWorkflowCreated={(created) => onCreated(workflow.id, created)}
+                />
+              </SortableWorkflowItem>
+            );
+          })}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -396,12 +468,14 @@ export function WorkspaceWorkflowsClient({
       >
         <WorkflowList
           workflowItems={page.workflowItems}
+          workspaceId={workspace.id}
           templateStepsById={page.templateStepsById}
           isWorkflowDirty={page.isWorkflowDirty}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
           onSave={page.handleSaveWorkflow}
           onCreated={page.handleWorkflowCreated}
+          onReorder={page.handleReorderWorkflows}
         />
       </SettingsSection>
       <WorkflowDialogs page={page} />
@@ -457,6 +531,14 @@ function useWorkspaceWorkflowsPage(
     handleSaveWorkflow,
   } = actions;
 
+  const handleReorderWorkflows = (reordered: Workflow[]) => {
+    setWorkflowItems(reordered);
+    setSavedWorkflowItems((prev) => {
+      const orderMap = new Map(reordered.map((wf, i) => [wf.id, i]));
+      return [...prev].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+    });
+  };
+
   const templateStepsById = useMemo(
     () => new Map(workflowTemplates.map((t) => [t.id, t.default_steps ?? []])),
     [workflowTemplates],
@@ -489,6 +571,7 @@ function useWorkspaceWorkflowsPage(
     handleDeleteWorkflow,
     handleWorkflowCreated,
     handleSaveWorkflow,
+    handleReorderWorkflows,
     workflowTemplates,
     templateStepsById,
   };

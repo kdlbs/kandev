@@ -30,6 +30,18 @@ export const createKanbanSlice: StateCreator<
         draft.workflows.activeId = workflows[0].id;
       }
     }),
+  reorderWorkflowItems: (workflowIds) =>
+    set((draft) => {
+      const byId = new Map(draft.workflows.items.map((w) => [w.id, w]));
+      const reordered = workflowIds
+        .map((id) => byId.get(id))
+        .filter((w): w is NonNullable<typeof w> => w != null);
+      // Append any items not in the reorder list (shouldn't happen, but defensive)
+      for (const item of draft.workflows.items) {
+        if (!workflowIds.includes(item.id)) reordered.push(item);
+      }
+      draft.workflows.items = reordered;
+    }),
   setActiveTask: (taskId) =>
     set((draft) => {
       draft.tasks.activeTaskId = taskId;

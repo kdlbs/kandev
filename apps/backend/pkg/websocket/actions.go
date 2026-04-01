@@ -10,7 +10,8 @@ const (
 	ActionWorkflowCreate = "workflow.create"
 	ActionWorkflowGet    = "workflow.get"
 	ActionWorkflowUpdate = "workflow.update"
-	ActionWorkflowDelete = "workflow.delete"
+	ActionWorkflowDelete  = "workflow.delete"
+	ActionWorkflowReorder = "workflow.reorder"
 
 	// Workspace actions
 	ActionWorkspaceList   = "workspace.list"

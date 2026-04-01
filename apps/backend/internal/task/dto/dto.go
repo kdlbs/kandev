@@ -13,6 +13,7 @@ type WorkflowDTO struct {
 	WorkspaceID string    `json:"workspace_id"`
 	Name        string    `json:"name"`
 	Description *string   `json:"description,omitempty"`
+	SortOrder   int       `json:"sort_order"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -333,6 +334,7 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 		WorkspaceID: workflow.WorkspaceID,
 		Name:        workflow.Name,
 		Description: description,
+		SortOrder:   workflow.SortOrder,
 		CreatedAt:   workflow.CreatedAt,
 		UpdatedAt:   workflow.UpdatedAt,
 	}

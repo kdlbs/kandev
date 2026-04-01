@@ -33,6 +33,7 @@ type WorkflowSelectorRowProps = {
   snapshots: Record<string, WorkflowSnapshotData>;
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
+  lastUsedWorkflowId?: string | null;
 };
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
@@ -40,6 +41,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   snapshots,
   selectedWorkflowId,
   onWorkflowChange,
+  lastUsedWorkflowId,
 }: WorkflowSelectorRowProps) {
   const [open, setOpen] = useState(false);
 
@@ -47,6 +49,16 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
     () => workflows.find((w) => w.id === selectedWorkflowId),
     [workflows, selectedWorkflowId],
   );
+
+  // Sort workflows: last-used first, then original order (which is already by sort_order)
+  const sortedWorkflows = useMemo(() => {
+    if (!lastUsedWorkflowId) return workflows;
+    return [...workflows].sort((a, b) => {
+      if (a.id === lastUsedWorkflowId) return -1;
+      if (b.id === lastUsedWorkflowId) return 1;
+      return 0;
+    });
+  }, [workflows, lastUsedWorkflowId]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -59,7 +71,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
       </PopoverTrigger>
       <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">
         <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">Workflow</div>
-        {workflows.map((wf) => {
+        {sortedWorkflows.map((wf) => {
           const isSelected = wf.id === selectedWorkflowId;
           const snapshot = snapshots[wf.id];
           const steps = snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];

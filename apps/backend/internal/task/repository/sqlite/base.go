@@ -156,6 +156,8 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
 		return err
 	}
+	// Add sort_order column to workflows for user-defined ordering (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 

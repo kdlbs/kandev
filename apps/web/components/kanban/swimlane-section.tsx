@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { SwimlaneHeader } from "./swimlane-header";
 
 export type SwimlaneSectionProps = {
@@ -9,6 +9,7 @@ export type SwimlaneSectionProps = {
   taskCount: number;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  dragHandleProps?: HTMLAttributes<HTMLDivElement>;
   children: ReactNode;
 };
 
@@ -17,6 +18,7 @@ export function SwimlaneSection({
   taskCount,
   isCollapsed,
   onToggleCollapse,
+  dragHandleProps,
   children,
 }: SwimlaneSectionProps) {
   return (
@@ -26,6 +28,7 @@ export function SwimlaneSection({
         taskCount={taskCount}
         isCollapsed={isCollapsed}
         onToggleCollapse={onToggleCollapse}
+        dragHandleProps={dragHandleProps}
       />
       {!isCollapsed && children}
     </div>

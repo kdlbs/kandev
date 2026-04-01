@@ -21,6 +21,17 @@ export async function fetchWorkflowSnapshot(workflowId: string, options?: ApiReq
   return fetchJson<WorkflowSnapshot>(`/api/v1/workflows/${workflowId}/snapshot`, options);
 }
 
+export async function reorderWorkflows(
+  workspaceId: string,
+  workflowIds: string[],
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ success: boolean }>(`/api/v1/workspaces/${workspaceId}/workflows/reorder`, {
+    ...options,
+    init: { method: "PUT", body: JSON.stringify({ workflow_ids: workflowIds }), ...(options?.init ?? {}) },
+  });
+}
+
 // Task operations
 export async function createTask(
   payload: {

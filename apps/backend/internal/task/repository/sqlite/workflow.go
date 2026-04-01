@@ -39,10 +39,20 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.CreatedAt = now
 	workflow.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.CreatedAt, workflow.UpdatedAt)
+	// Auto-assign sort_order as max+1 within the workspace
+	var maxOrder int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(MAX(sort_order), -1) FROM workflows WHERE workspace_id = ?`,
+	), workflow.WorkspaceID).Scan(&maxOrder)
+	if err != nil {
+		return fmt.Errorf("failed to get max sort_order: %w", err)
+	}
+	workflow.SortOrder = maxOrder + 1
+
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.SortOrder, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -53,9 +63,9 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 	var workflowTemplateID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, description, workflow_template_id, created_at, updated_at
+		SELECT id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at
 		FROM workflows WHERE id = ?
-	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.CreatedAt, &workflow.UpdatedAt)
+	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workflow not found: %s", id)
@@ -129,14 +139,14 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 // ListWorkflows returns all workflows
 func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
 	query := `
-		SELECT id, workspace_id, name, description, workflow_template_id, created_at, updated_at FROM workflows
+		SELECT id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at FROM workflows
 	`
 	var args []interface{}
 	if workspaceID != "" {
 		query += " WHERE workspace_id = ?"
 		args = append(args, workspaceID)
 	}
-	query += " ORDER BY created_at DESC"
+	query += " ORDER BY sort_order ASC, created_at ASC"
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
@@ -148,7 +158,7 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 	for rows.Next() {
 		workflow := &models.Workflow{}
 		var workflowTemplateID sql.NullString
-		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.CreatedAt, &workflow.UpdatedAt)
+		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -158,4 +168,21 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 		result = append(result, workflow)
 	}
 	return result, rows.Err()
+}
+
+// ReorderWorkflows updates sort_order for workflows within a workspace.
+func (r *Repository) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
+	for i, id := range workflowIDs {
+		result, err := r.db.ExecContext(ctx, r.db.Rebind(
+			`UPDATE workflows SET sort_order = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
+		), i, time.Now().UTC(), id, workspaceID)
+		if err != nil {
+			return fmt.Errorf("failed to update sort_order for workflow %s: %w", id, err)
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return fmt.Errorf("workflow not found in workspace: %s", id)
+		}
+	}
+	return nil
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -237,13 +237,24 @@ export const WorkflowSection = memo(function WorkflowSection({
   effectiveWorkflowId,
   onWorkflowChange,
 }: WorkflowSectionProps) {
+  const lastUsedRef = useRef<string | null>(null);
+
+  const handleWorkflowChange = useCallback(
+    (workflowId: string) => {
+      lastUsedRef.current = workflowId;
+      onWorkflowChange(workflowId);
+    },
+    [onWorkflowChange],
+  );
+
   if (!isCreateMode || workflows.length <= 1 || isTaskStarted) return null;
   return (
     <WorkflowSelectorRow
       workflows={workflows}
       snapshots={snapshots}
       selectedWorkflowId={effectiveWorkflowId ?? null}
-      onWorkflowChange={onWorkflowChange}
+      onWorkflowChange={handleWorkflowChange}
+      lastUsedWorkflowId={lastUsedRef.current}
     />
   );
 });

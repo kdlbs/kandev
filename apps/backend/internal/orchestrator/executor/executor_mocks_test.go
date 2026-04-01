@@ -357,6 +357,9 @@ func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error { 
 func (m *mockRepository) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
 	return nil, nil
 }
+func (m *mockRepository) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
+	return nil
+}
 
 // Message operations
 func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error {

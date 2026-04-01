@@ -56,6 +56,7 @@ type WorkflowRepository interface {
 	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	DeleteWorkflow(ctx context.Context, id string) error
 	ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error)
+	ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error
 }
 
 // MessageRepository handles message persistence and lookups.

@@ -101,3 +101,142 @@ func TestSQLiteRepository_ListWorkflows(t *testing.T) {
 		t.Errorf("expected 2 workflows, got %d", len(workflows))
 	}
 }
+
+func TestSQLiteRepository_WorkflowSortOrder(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	// Create workflows and verify auto-assigned sort_order
+	wf1 := &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "First"}
+	wf2 := &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Second"}
+	wf3 := &models.Workflow{ID: "wf-3", WorkspaceID: "ws-1", Name: "Third"}
+	_ = repo.CreateWorkflow(ctx, wf1)
+	_ = repo.CreateWorkflow(ctx, wf2)
+	_ = repo.CreateWorkflow(ctx, wf3)
+
+	if wf1.SortOrder != 0 {
+		t.Errorf("expected first workflow sort_order=0, got %d", wf1.SortOrder)
+	}
+	if wf2.SortOrder != 1 {
+		t.Errorf("expected second workflow sort_order=1, got %d", wf2.SortOrder)
+	}
+	if wf3.SortOrder != 2 {
+		t.Errorf("expected third workflow sort_order=2, got %d", wf3.SortOrder)
+	}
+
+	// Verify sort_order is persisted via Get
+	retrieved, _ := repo.GetWorkflow(ctx, "wf-2")
+	if retrieved.SortOrder != 1 {
+		t.Errorf("expected retrieved sort_order=1, got %d", retrieved.SortOrder)
+	}
+
+	// Verify ListWorkflows returns in sort_order
+	workflows, _ := repo.ListWorkflows(ctx, "ws-1")
+	if len(workflows) != 3 {
+		t.Fatalf("expected 3 workflows, got %d", len(workflows))
+	}
+	if workflows[0].Name != "First" || workflows[1].Name != "Second" || workflows[2].Name != "Third" {
+		t.Errorf("expected workflows in sort_order, got: %s, %s, %s",
+			workflows[0].Name, workflows[1].Name, workflows[2].Name)
+	}
+}
+
+func TestSQLiteRepository_ReorderWorkflows(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "First"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Second"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-3", WorkspaceID: "ws-1", Name: "Third"})
+
+	// Reorder: Third, First, Second
+	err := repo.ReorderWorkflows(ctx, "ws-1", []string{"wf-3", "wf-1", "wf-2"})
+	if err != nil {
+		t.Fatalf("failed to reorder workflows: %v", err)
+	}
+
+	workflows, _ := repo.ListWorkflows(ctx, "ws-1")
+	if len(workflows) != 3 {
+		t.Fatalf("expected 3 workflows, got %d", len(workflows))
+	}
+	if workflows[0].Name != "Third" || workflows[1].Name != "First" || workflows[2].Name != "Second" {
+		t.Errorf("expected reordered workflows [Third, First, Second], got: [%s, %s, %s]",
+			workflows[0].Name, workflows[1].Name, workflows[2].Name)
+	}
+
+	// Verify individual sort_order values
+	wf3, _ := repo.GetWorkflow(ctx, "wf-3")
+	wf1, _ := repo.GetWorkflow(ctx, "wf-1")
+	wf2, _ := repo.GetWorkflow(ctx, "wf-2")
+	if wf3.SortOrder != 0 {
+		t.Errorf("expected wf-3 sort_order=0, got %d", wf3.SortOrder)
+	}
+	if wf1.SortOrder != 1 {
+		t.Errorf("expected wf-1 sort_order=1, got %d", wf1.SortOrder)
+	}
+	if wf2.SortOrder != 2 {
+		t.Errorf("expected wf-2 sort_order=2, got %d", wf2.SortOrder)
+	}
+}
+
+func TestSQLiteRepository_ReorderWorkflows_InvalidID(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "First"})
+
+	err := repo.ReorderWorkflows(ctx, "ws-1", []string{"wf-1", "nonexistent"})
+	if err == nil {
+		t.Error("expected error for nonexistent workflow ID in reorder")
+	}
+}
+
+func TestSQLiteRepository_ReorderWorkflows_WrongWorkspace(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "First"})
+
+	// Try to reorder workflow from ws-1 in ws-2 — should fail
+	err := repo.ReorderWorkflows(ctx, "ws-2", []string{"wf-1"})
+	if err == nil {
+		t.Error("expected error when reordering workflow from wrong workspace")
+	}
+}
+
+func TestSQLiteRepository_WorkflowSortOrder_Isolation(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
+
+	// Create workflows in different workspaces — sort_order should be independent
+	wf1 := &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WS1 First"}
+	wf2 := &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "WS2 First"}
+	wf3 := &models.Workflow{ID: "wf-3", WorkspaceID: "ws-1", Name: "WS1 Second"}
+	_ = repo.CreateWorkflow(ctx, wf1)
+	_ = repo.CreateWorkflow(ctx, wf2)
+	_ = repo.CreateWorkflow(ctx, wf3)
+
+	if wf1.SortOrder != 0 {
+		t.Errorf("expected ws-1 first workflow sort_order=0, got %d", wf1.SortOrder)
+	}
+	if wf2.SortOrder != 0 {
+		t.Errorf("expected ws-2 first workflow sort_order=0, got %d", wf2.SortOrder)
+	}
+	if wf3.SortOrder != 1 {
+		t.Errorf("expected ws-1 second workflow sort_order=1, got %d", wf3.SortOrder)
+	}
+}

@@ -53,6 +53,7 @@ type Workflow struct {
 	Name               string    `json:"name"`
 	Description        string    `json:"description"`
 	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"`
+	SortOrder          int       `json:"sort_order"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

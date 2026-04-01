@@ -58,6 +58,7 @@ func (h *WorkflowHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workflows", h.httpCreateWorkflow)
 	api.PATCH("/workflows/:id", h.httpUpdateWorkflow)
 	api.DELETE("/workflows/:id", h.httpDeleteWorkflow)
+	api.PUT("/workspaces/:id/workflows/reorder", h.httpReorderWorkflows)
 }
 
 func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -66,6 +67,7 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionWorkflowGet, h.wsGetWorkflow)
 	dispatcher.RegisterFunc(ws.ActionWorkflowUpdate, h.wsUpdateWorkflow)
 	dispatcher.RegisterFunc(ws.ActionWorkflowDelete, h.wsDeleteWorkflow)
+	dispatcher.RegisterFunc(ws.ActionWorkflowReorder, h.wsReorderWorkflows)
 }
 
 func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string) (dto.ListWorkflowsResponse, error) {
@@ -399,6 +401,50 @@ func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message
 			}
 			return dto.SuccessResponse{Success: true}, nil
 		})
+}
+
+type httpReorderWorkflowsRequest struct {
+	WorkflowIDs []string `json:"workflow_ids"`
+}
+
+func (h *WorkflowHandlers) httpReorderWorkflows(c *gin.Context) {
+	workspaceID := c.Param("id")
+	var req httpReorderWorkflowsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	if len(req.WorkflowIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_ids is required"})
+		return
+	}
+	if err := h.service.ReorderWorkflows(c.Request.Context(), workspaceID, req.WorkflowIDs); err != nil {
+		h.logger.Error("failed to reorder workflows", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reorder workflows"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+func (h *WorkflowHandlers) wsReorderWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID string   `json:"workspace_id"`
+		WorkflowIDs []string `json:"workflow_ids"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	if len(req.WorkflowIDs) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_ids is required", nil)
+	}
+	if err := h.service.ReorderWorkflows(ctx, req.WorkspaceID, req.WorkflowIDs); err != nil {
+		h.logger.Error("failed to reorder workflows", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder workflows", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
 // getStepsForWorkflow returns workflow steps for a workflow as DTOs.

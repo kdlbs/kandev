@@ -135,6 +135,13 @@ export async function deleteWorkflowAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/workflows/${id}`, { method: "DELETE" });
 }
 
+export async function reorderWorkflowsAction(workspaceId: string, workflowIds: string[]) {
+  return fetchJson<{ success: boolean }>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/reorder`,
+    { method: "PUT", body: JSON.stringify({ workflow_ids: workflowIds }) },
+  );
+}
+
 export async function listRepositoriesAction(
   workspaceId: string,
   params?: { includeScripts?: boolean },
