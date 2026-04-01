@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { Repository, Executor, Branch } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
@@ -349,24 +349,6 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   ]);
 }
 
-/** Clear branch when switching from a non-local to a local executor (non-GitHub URL mode). */
-function useLocalExecutorBranchClearEffect(fs: DialogFormState, executors: Executor[]) {
-  const { executorId, useGitHubUrl, setBranch } = fs;
-  const prevExecutorTypeRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (!executorId) return;
-    const selected = executors.find((e) => e.id === executorId);
-    const currentType = selected?.type;
-    const prevType = prevExecutorTypeRef.current;
-    prevExecutorTypeRef.current = currentType;
-    // Only clear branch when actively switching to local from a different type,
-    // not on initial selection (when prevType is undefined).
-    if (currentType === "local" && !useGitHubUrl && prevType !== undefined && prevType !== "local") {
-      setBranch("");
-    }
-  }, [executorId, executors, useGitHubUrl, setBranch]);
-}
-
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading, branches } = args;
   const { agentProfiles, executors, workspaceDefaults, toast } = args;
@@ -377,5 +359,4 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useLocalBranchesEffect(fs, open, workspaceId, toast);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults });
   useGitHubUrlBranchesEffect(fs, open);
-  useLocalExecutorBranchClearEffect(fs, executors);
 }

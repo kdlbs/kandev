@@ -15,7 +15,7 @@ test.describe("Branch selector behavior with executor types", () => {
       test.skip(true, "No local executor available");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(localExec.id, "E2E Local Profile");
+    await apiClient.createExecutorProfile(localExec.id, "E2E Local Profile");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -33,13 +33,9 @@ test.describe("Branch selector behavior with executor types", () => {
     await executorSelector.click();
     await testPage.getByRole("option", { name: /E2E Local Profile/i }).click();
 
-    // Branch selector should be disabled and show "Uses current branch"
+    // Branch selector should be disabled when local executor is selected
     const branchSelector = testPage.getByTestId("branch-selector");
     await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
-    await expect(branchSelector).toContainText("Uses current branch");
-
-    // Cleanup
-    await apiClient.deleteExecutorProfile(localProfile.id);
   });
 
   test("branch selector re-enables when switching from local to worktree executor", async ({
@@ -54,12 +50,12 @@ test.describe("Branch selector behavior with executor types", () => {
       test.skip(true, "Need both local and worktree executors");
       return;
     }
+    await apiClient.createExecutorProfile(localExec.id, "E2E Local");
     const worktreeProfile = worktreeExec.profiles?.[0];
     if (!worktreeProfile) {
       test.skip(true, "No worktree profile available");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(localExec.id, "E2E Local");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -71,7 +67,7 @@ test.describe("Branch selector behavior with executor types", () => {
     await testPage.getByTestId("task-title-input").fill("Switch Executor Test");
     await testPage.getByTestId("task-description-input").fill("testing executor switch");
 
-    // Select local executor → branch should be disabled
+    // Select local executor -> branch should be disabled
     const executorSelector = testPage.getByTestId("executor-profile-selector");
     await executorSelector.click();
     await testPage.getByRole("option", { name: /E2E Local/i }).click();
@@ -79,14 +75,11 @@ test.describe("Branch selector behavior with executor types", () => {
     const branchSelector = testPage.getByTestId("branch-selector");
     await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
 
-    // Switch to worktree executor → branch should be enabled
+    // Switch to worktree executor -> branch should be enabled
     await executorSelector.click();
     await testPage.getByRole("option", { name: worktreeProfile.name }).click();
 
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
-
-    // Cleanup
-    await apiClient.deleteExecutorProfile(localProfile.id);
   });
 
   test("branch selector stays enabled for local executor with GitHub URL", async ({
@@ -113,10 +106,7 @@ test.describe("Branch selector behavior with executor types", () => {
       test.skip(true, "No local executor available");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(
-      localExec.id,
-      "E2E Local GitHub URL",
-    );
+    await apiClient.createExecutorProfile(localExec.id, "E2E Local GitHub URL");
 
     // Create a unique repo for this test
     const repoDir = `${backend.tmpDir}/repos/e2e-branch-gh`;
@@ -157,8 +147,5 @@ test.describe("Branch selector behavior with executor types", () => {
     // Branch selector should NOT be disabled (GitHub URL mode overrides)
     const branchSelector = testPage.getByTestId("branch-selector");
     await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
-
-    // Cleanup
-    await apiClient.deleteExecutorProfile(localProfile.id);
   });
 });
