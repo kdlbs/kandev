@@ -33,6 +33,7 @@ export const createKanbanSlice: StateCreator<
   setActiveTask: (taskId) =>
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
+      draft.tasks.activeSessionId = null;
     }),
   setActiveSession: (taskId, sessionId) =>
     set((draft) => {
