@@ -170,12 +170,19 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 	return result, rows.Err()
 }
 
-// ReorderWorkflows updates sort_order for workflows within a workspace.
+// ReorderWorkflows updates sort_order for workflows within a workspace using a transaction.
 func (r *Repository) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
 	for i, id := range workflowIDs {
-		result, err := r.db.ExecContext(ctx, r.db.Rebind(
+		result, err := tx.ExecContext(ctx, r.db.Rebind(
 			`UPDATE workflows SET sort_order = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-		), i, time.Now().UTC(), id, workspaceID)
+		), i, now, id, workspaceID)
 		if err != nil {
 			return fmt.Errorf("failed to update sort_order for workflow %s: %w", id, err)
 		}
@@ -184,5 +191,5 @@ func (r *Repository) ReorderWorkflows(ctx context.Context, workspaceID string, w
 			return fmt.Errorf("workflow not found in workspace: %s", id)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
