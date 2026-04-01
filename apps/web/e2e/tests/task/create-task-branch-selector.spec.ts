@@ -54,12 +54,12 @@ test.describe("Branch selector behavior with executor types", () => {
       test.skip(true, "Need both local and worktree executors");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(localExec.id, "E2E Local");
     const worktreeProfile = worktreeExec.profiles?.[0];
     if (!worktreeProfile) {
       test.skip(true, "No worktree profile available");
       return;
     }
+    const localProfile = await apiClient.createExecutorProfile(localExec.id, "E2E Local");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -81,7 +81,7 @@ test.describe("Branch selector behavior with executor types", () => {
 
     // Switch to worktree executor → branch should be enabled
     await executorSelector.click();
-    await testPage.getByRole("option", { name: new RegExp(worktreeProfile.name, "i") }).click();
+    await testPage.getByRole("option", { name: worktreeProfile.name }).click();
 
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
 
