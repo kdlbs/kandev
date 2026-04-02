@@ -88,6 +88,21 @@ func TestIsGitCryptSmudgeError(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "portuguese locale error",
+			output:   "error: filtro externo 'git-crypt smudge' falhou 1",
+			expected: true,
+		},
+		{
+			name:     "portuguese fatal with git-crypt smudge command",
+			output:   "fatal: tools/config.yml: filtro de mancha git-crypt smudge falhou",
+			expected: true,
+		},
+		{
+			name:     "german locale error",
+			output:   "Fehler: externer Filter 'git-crypt smudge' fehlgeschlagen",
+			expected: true,
+		},
+		{
 			name:     "unrelated git error",
 			output:   "fatal: pathspec 'foo' did not match any files",
 			expected: false,
@@ -100,6 +115,11 @@ func TestIsGitCryptSmudgeError(t *testing.T) {
 		{
 			name:     "branch checkout error",
 			output:   "fatal: 'main' is already checked out at '/path/to/worktree'",
+			expected: false,
+		},
+		{
+			name:     "only git-crypt without smudge",
+			output:   "git-crypt: some other error",
 			expected: false,
 		},
 	}
@@ -147,6 +167,35 @@ func TestUsesGitCrypt(t *testing.T) {
 	if !m.usesGitCrypt(tmpDir) {
 		t.Error("usesGitCrypt() should return true when .gitattributes has git-crypt")
 	}
+}
+
+func TestIsGitCryptUnlocked(t *testing.T) {
+	t.Run("returns false when dir does not exist", func(t *testing.T) {
+		if isGitCryptUnlocked("/nonexistent/git-crypt") {
+			t.Error("expected false for nonexistent directory")
+		}
+	})
+
+	t.Run("returns false when keys subdir is empty (locked)", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "keys"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if isGitCryptUnlocked(dir) {
+			t.Error("expected false for empty keys directory (locked repo)")
+		}
+	})
+
+	t.Run("returns true when keys subdir has entries (unlocked)", func(t *testing.T) {
+		dir := t.TempDir()
+		defaultKey := filepath.Join(dir, "keys", "default")
+		if err := os.MkdirAll(defaultKey, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if !isGitCryptUnlocked(dir) {
+			t.Error("expected true when keys directory has entries (unlocked repo)")
+		}
+	})
 }
 
 // ---------- E2E tests requiring git-crypt binary ----------
@@ -377,5 +426,90 @@ func TestUnlockGitCryptAndCheckout_ManualWorktree(t *testing.T) {
 	status := strings.TrimSpace(runGit(t, wtPath, "status", "--porcelain"))
 	if status != "" {
 		t.Errorf("worktree not clean after unlock+checkout: %s", status)
+	}
+}
+
+
+func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
+	skipIfNoGitCrypt(t)
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	repoPath := initGitCryptRepo(t)
+
+	// Export the key before locking (git-crypt lock removes it from .git/).
+	keyFile := filepath.Join(t.TempDir(), "exported.key")
+	exportCmd := exec.Command("git-crypt", "export-key", keyFile)
+	exportCmd.Dir = repoPath
+	if out, err := exportCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git-crypt export-key failed: %v\n%s", err, out)
+	}
+
+	// Lock the repo — removes keys, re-encrypts working tree files.
+	lockCmd := exec.Command("git-crypt", "lock")
+	lockCmd.Dir = repoPath
+	if out, err := lockCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git-crypt lock failed: %v\n%s", err, out)
+	}
+
+	// Verify the repo is locked (secret.txt should be encrypted binary).
+	secretContent, _ := os.ReadFile(filepath.Join(repoPath, "secret.txt"))
+	if strings.Contains(string(secretContent), "top-secret-value") {
+		t.Fatal("expected secret.txt to be encrypted after lock")
+	}
+
+	// Create a worktree from the locked repo — should succeed.
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "gc-locked-1",
+		SessionID:      "gc-locked-session-1",
+		TaskTitle:      "Git Crypt Locked Repo",
+		RepositoryID:   "repo-gc-locked",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+	})
+	if err != nil {
+		t.Fatalf("Create() with locked repo should succeed, got: %v", err)
+	}
+
+	// Public file must be present and readable.
+	pub, err := os.ReadFile(filepath.Join(wt.Path, "public.txt"))
+	if err != nil {
+		t.Fatalf("read public.txt: %v", err)
+	}
+	if strings.TrimSpace(string(pub)) != "public-value" {
+		t.Errorf("public.txt = %q, want %q", string(pub), "public-value")
+	}
+
+	// Encrypted file should exist but be binary (not decrypted).
+	secret, err := os.ReadFile(filepath.Join(wt.Path, "secret.txt"))
+	if err != nil {
+		t.Fatalf("read secret.txt: %v", err)
+	}
+	if strings.Contains(string(secret), "top-secret-value") {
+		t.Error("secret.txt should be encrypted in worktree of locked repo")
+	}
+
+	// Now unlock git-crypt in the worktree — this should work because
+	// no broken filters are configured.
+	unlockCmd := exec.Command("git-crypt", "unlock", keyFile)
+	unlockCmd.Dir = wt.Path
+	if out, unlockErr := unlockCmd.CombinedOutput(); unlockErr != nil {
+		t.Fatalf("git-crypt unlock in worktree should work, got: %v\n%s", unlockErr, out)
+	}
+
+	// After unlock, secret.txt should be decrypted.
+	secret, err = os.ReadFile(filepath.Join(wt.Path, "secret.txt"))
+	if err != nil {
+		t.Fatalf("read secret.txt after unlock: %v", err)
+	}
+	if strings.TrimSpace(string(secret)) != "top-secret-value" {
+		t.Errorf("secret.txt after unlock = %q, want %q", string(secret), "top-secret-value")
 	}
 }
