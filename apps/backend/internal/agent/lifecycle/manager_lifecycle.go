@@ -230,7 +230,8 @@ func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string
 	m.RemoveExecution(execution.ID)
 }
 
-// CleanupStaleExecutionBySessionID removes a stale execution from tracking without stopping it.
+// CleanupStaleExecutionBySessionID cleans up a stale execution: stops the runtime
+// instance, closes the client connection, and removes it from tracking.
 //
 // A "stale" execution is one where the agent process has stopped externally (crashed, killed,
 // or terminated outside of our control) but the execution is still tracked in memory.
@@ -242,16 +243,15 @@ func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string
 //   - When IsAgentRunningForSession returns false but execution exists
 //
 // This method performs cleanup:
-//  1. Closes the agentctl HTTP client connection
-//  2. Removes the execution from the in-memory tracking store
+//  1. Stops the runtime instance (workspace tracker, shell, etc.) via the executor backend
+//  2. Closes the agentctl HTTP client connection
+//  3. Removes the execution from the in-memory tracking store
 //
 // What this does NOT do:
-//   - Stop the agent process (assumed already stopped)
 //   - Clean up worktrees or containers (caller's responsibility)
 //   - Update database session state (caller's responsibility)
 //
-// This is safe to call even if the process is still running - it won't send kill signals.
-// Use StopAgent if you need to actively terminate a running agent.
+// Safe to call even if the process is already stopped — StopInstance is idempotent.
 //
 // Returns nil if no execution exists for the session (idempotent).
 func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
@@ -266,6 +266,12 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 
 	// End session trace span
 	execution.EndSessionSpan()
+
+	// Stop the runtime instance (workspace tracker, shell, etc.) to prevent leaked
+	// goroutines. Without this, the old agentctl instance keeps running when a new
+	// execution is created for the same session, causing git polling on deleted worktrees.
+	// This is idempotent — returns success if the instance is already gone.
+	m.stopAgentViaBackend(ctx, execution.ID, execution, "stale execution cleanup", false)
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {
