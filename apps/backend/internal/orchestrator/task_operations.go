@@ -873,33 +873,33 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		return s.validateResumeEligibility(session, resp), nil
 	}
 
-	// 4. No resume token, but session may still be startable as a fresh session
-	// if there's an ExecutorRunning record (worktree info) and session is in an active state.
-	// NeedsResume triggers the frontend to auto-resume, which launches agentctl and the agent
-	// process (idle, no prompt). For agents with HistoryContextInjection, conversation history
-	// is injected into the user's first message.
+	// 4. No resume token — check if session can be started fresh.
+	return evaluateFreshStartResume(session, running, runErr, resp), nil
+}
+
+// evaluateFreshStartResume checks whether a session without a resume token can be
+// started fresh. Sessions in error-recovery state (non-empty ErrorMessage) are marked
+// resumable but not auto-resumed, so the user sees the error and can choose via action buttons.
+func evaluateFreshStartResume(session *models.TaskSession, running *models.ExecutorRunning, runErr error, resp dto.TaskSessionStatusResponse) dto.TaskSessionStatusResponse {
 	if runErr == nil && running != nil && isActiveSessionState(session.State) {
 		if session.ErrorMessage != "" {
-			// Error-recovery state (set by handleRecoverableFailure): don't auto-resume.
-			// Let the user see the error and choose via action buttons.
 			resp.IsAgentRunning = false
 			resp.IsResumable = true
 			resp.NeedsResume = false
 			resp.ResumeReason = resumeReasonErrorRecovery
-			return resp, nil
+			return resp
 		}
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
 		resp.NeedsResume = true
 		resp.ResumeReason = "agent_not_running_fresh_start"
-		return resp, nil
+		return resp
 	}
-
 	resp.IsAgentRunning = false
 	resp.IsResumable = false
 	resp.NeedsResume = false
 	resp.NeedsWorkspaceRestore = canRestoreWorkspace(&resp)
-	return resp, nil
+	return resp
 }
 
 func (s *Service) populateExecutorStatusInfo(ctx context.Context, session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
