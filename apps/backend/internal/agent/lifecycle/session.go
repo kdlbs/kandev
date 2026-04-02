@@ -396,7 +396,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		}
 		acpAttachments := convertAttachments(attachments)
 		go func() {
-			promptCtx, cancel := appctx.DetachedNoTimeout(ctx, sm.stopCh)
+			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
 			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments)
 			if err != nil {
