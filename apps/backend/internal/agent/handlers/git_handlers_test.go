@@ -26,6 +26,17 @@ func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecy
 	return exec, ok
 }
 
+func (m *mockExecutionLookup) GetOrEnsureExecution(_ context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	if m.executions == nil {
+		return nil, fmt.Errorf("no execution for session %s", sessionID)
+	}
+	exec, ok := m.executions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("no execution for session %s", sessionID)
+	}
+	return exec, nil
+}
+
 // mockSessionReader implements SessionReader for testing.
 type mockSessionReader struct {
 	baseCommits  map[string]string

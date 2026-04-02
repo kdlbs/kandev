@@ -1193,14 +1193,24 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 	if err != nil {
 		return err
 	}
-	if baseCommit == "" {
-		s.logger.Debug("no base_commit available, skipping archive snapshot capture",
+
+	// Skip only if we have neither baseCommit nor baseBranch for merge-base calculation
+	if baseCommit == "" && baseBranch == "" {
+		s.logger.Debug("no base_commit or base_branch available, skipping archive snapshot capture",
 			zap.String("session_id", sessionID))
 		return nil
 	}
 
+	// Capture commits - baseBranch can be used for merge-base even if baseCommit is empty
 	if !s.captureArchiveCommits(ctx, sessionID, baseCommit, baseBranch) {
 		// Agent not running, skip diff capture as well
+		return nil
+	}
+
+	// Diff capture requires baseCommit
+	if baseCommit == "" {
+		s.logger.Debug("no base_commit available, skipping archive diff capture",
+			zap.String("session_id", sessionID))
 		return nil
 	}
 

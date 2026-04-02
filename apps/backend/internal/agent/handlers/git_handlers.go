@@ -25,6 +25,9 @@ type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, ope
 // ExecutionLookup provides access to running agent executions by session ID.
 type ExecutionLookup interface {
 	GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool)
+	// GetOrEnsureExecution returns an existing execution or creates one on-demand.
+	// Use this for workspace-oriented operations that should survive backend restarts.
+	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
 }
 
 // SessionReader is a minimal interface for reading session metadata.
@@ -651,15 +654,22 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	agentClient, err := h.getAgentCtlClient(req.SessionID)
+	// Use GetOrEnsureExecution to recover workspace after backend restarts.
+	// This is a workspace-oriented operation that doesn't require a running agent process.
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		if isSessionNotReadyError(err) {
-			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-				"commits": []any{},
-				"ready":   false,
-			})
-		}
-		return nil, err
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"commits": []any{},
+			"ready":   false,
+		})
+	}
+
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"commits": []any{},
+			"ready":   false,
+		})
 	}
 
 	// Look up base commit SHA and target branch from the session metadata
