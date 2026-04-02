@@ -35,7 +35,13 @@ func Detached(parent context.Context, stopCh <-chan struct{}, timeout time.Durat
 // from the parent context while starting fresh with no deadline.
 // Use sparingly - most values should be passed explicitly.
 func DetachedWithValues(parent context.Context, stopCh <-chan struct{}, timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 
 	go func() {
 		select {

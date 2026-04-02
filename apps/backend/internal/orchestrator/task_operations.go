@@ -882,7 +882,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 // resumable but not auto-resumed, so the user sees the error and can choose via action buttons.
 func evaluateFreshStartResume(session *models.TaskSession, running *models.ExecutorRunning, runErr error, resp dto.TaskSessionStatusResponse) dto.TaskSessionStatusResponse {
 	if runErr == nil && running != nil && isActiveSessionState(session.State) {
-		if session.ErrorMessage != "" {
+		if isErrorRecoveryState(session) {
 			resp.IsAgentRunning = false
 			resp.IsResumable = true
 			resp.NeedsResume = false
@@ -972,6 +972,14 @@ func isActiveSessionState(state models.TaskSessionState) bool {
 	return false
 }
 
+// isErrorRecoveryState returns true when a session is in WAITING_FOR_INPUT with
+// a non-empty ErrorMessage, indicating it was set by handleRecoverableFailure.
+func isErrorRecoveryState(session *models.TaskSession) bool {
+	return session != nil &&
+		session.State == models.TaskSessionStateWaitingForInput &&
+		session.ErrorMessage != ""
+}
+
 func shouldHealStuckStartingSession(session *models.TaskSession, running *models.ExecutorRunning) bool {
 	if session == nil || running == nil {
 		return false
@@ -1006,7 +1014,7 @@ func (s *Service) validateResumeEligibility(session *models.TaskSession, resp dt
 	}
 
 	// Don't auto-resume sessions in error-recovery state.
-	if session.ErrorMessage != "" {
+	if isErrorRecoveryState(session) {
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
 		resp.NeedsResume = false
