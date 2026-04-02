@@ -29,6 +29,10 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
+// resumeReasonErrorRecovery is the resume reason returned when a session is in
+// error-recovery state (WAITING_FOR_INPUT with a non-empty ErrorMessage).
+const resumeReasonErrorRecovery = "error_recovery"
+
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
@@ -881,7 +885,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 			resp.IsAgentRunning = false
 			resp.IsResumable = true
 			resp.NeedsResume = false
-			resp.ResumeReason = "error_recovery"
+			resp.ResumeReason = resumeReasonErrorRecovery
 			return resp, nil
 		}
 		resp.IsAgentRunning = false
@@ -1006,7 +1010,7 @@ func (s *Service) validateResumeEligibility(session *models.TaskSession, resp dt
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
 		resp.NeedsResume = false
-		resp.ResumeReason = "error_recovery"
+		resp.ResumeReason = resumeReasonErrorRecovery
 		return resp
 	}
 

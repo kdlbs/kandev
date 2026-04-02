@@ -1089,8 +1089,8 @@ func TestGetTaskSessionStatus_NoAutoResumeOnErrorRecovery(t *testing.T) {
 	if !resp.IsResumable {
 		t.Fatal("expected IsResumable=true so manual resume buttons still work")
 	}
-	if resp.ResumeReason != "error_recovery" {
-		t.Fatalf("expected ResumeReason=%q, got %q", "error_recovery", resp.ResumeReason)
+	if resp.ResumeReason != resumeReasonErrorRecovery {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonErrorRecovery, resp.ResumeReason)
 	}
 }
 
@@ -1189,7 +1189,7 @@ func TestGetTaskSessionStatus_NoAutoResumeWithResumeTokenOnError(t *testing.T) {
 	if !resp.IsResumable {
 		t.Fatal("expected IsResumable=true so manual resume buttons still work")
 	}
-	if resp.ResumeReason != "error_recovery" {
-		t.Fatalf("expected ResumeReason=%q, got %q", "error_recovery", resp.ResumeReason)
+	if resp.ResumeReason != resumeReasonErrorRecovery {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonErrorRecovery, resp.ResumeReason)
 	}
 }
