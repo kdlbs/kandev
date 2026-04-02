@@ -311,7 +311,12 @@ test.describe("Changes panel section ordering", () => {
 
     // PR files should be visible at the top
     const prFiles = testPage.getByTestId("pr-files-section");
+    const commits = testPage.getByTestId("commits-section");
     await expect(prFiles).toBeVisible({ timeout: 15_000 });
+    await expect(commits).toBeVisible({ timeout: 15_000 });
+
+    // PR files should appear above commits
+    await expectAbove(prFiles, commits);
 
     // No unstaged or staged sections
     await expect(testPage.getByTestId("unstaged-files-section")).not.toBeVisible();
