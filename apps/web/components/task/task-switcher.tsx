@@ -2,7 +2,27 @@
 
 import { memo, useMemo } from "react";
 import type { ComponentType } from "react";
-import { IconCircleCheck, IconCircleDashed, IconProgress } from "@tabler/icons-react";
+import {
+  IconCircleCheck,
+  IconCircleDashed,
+  IconProgress,
+  IconArrowRight,
+  IconPencil,
+  IconArchive,
+  IconTrash,
+  IconLoader,
+} from "@tabler/icons-react";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  ContextMenuShortcut,
+} from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { truncateRepoPath } from "@/lib/utils";
 import { TaskItem } from "./task-item";
@@ -27,6 +47,7 @@ type TaskSwitcherItem = {
   state?: TaskState;
   sessionState?: TaskSessionState;
   description?: string;
+  workflowId?: string;
   workflowStepId?: string;
   repositoryPath?: string;
   diffStats?: DiffStats;
@@ -40,15 +61,19 @@ type TaskSwitcherItem = {
   parentTaskTitle?: string;
 };
 
+type StepDef = { id: string; title: string; color?: string };
+
 type TaskSwitcherProps = {
   tasks: TaskSwitcherItem[];
-  steps: Array<{ id: string; title: string; color?: string }>;
+  steps: StepDef[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   deletingTaskId?: string | null;
   isLoading?: boolean;
 };
@@ -117,6 +142,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
 
 function TaskSwitcherSection({
   section,
+  stepsByWorkflowId,
   stepNameById,
   activeTaskId,
   selectedTaskId,
@@ -124,9 +150,11 @@ function TaskSwitcherSection({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onMoveToStep,
   deletingTaskId,
 }: {
   section: Section;
+  stepsByWorkflowId?: Record<string, StepDef[]>;
   stepNameById: Map<string, string>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -134,6 +162,7 @@ function TaskSwitcherSection({
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   deletingTaskId?: string | null;
 }) {
   if (section.tasks.length === 0) return null;
@@ -146,44 +175,143 @@ function TaskSwitcherSection({
         const repoLabel = task.repositoryPath ? truncateRepoPath(task.repositoryPath) : undefined;
         const stepName = task.workflowStepId ? stepNameById.get(task.workflowStepId) : undefined;
         return (
-          <TaskItem
+          <TaskItemWithContextMenu
             key={task.id}
-            title={task.title}
-            description={repoLabel}
-            stepName={stepName}
-            state={task.state}
-            sessionState={task.sessionState}
-            isArchived={task.isArchived}
-            isSelected={isSelected}
-            diffStats={task.diffStats}
-            isRemoteExecutor={task.isRemoteExecutor}
-            remoteExecutorType={task.remoteExecutorType}
-            remoteExecutorName={task.remoteExecutorName}
-            taskId={task.id}
-            primarySessionId={task.primarySessionId ?? null}
-            updatedAt={task.updatedAt}
-            parentTaskTitle={task.parentTaskTitle}
-            onClick={() => onSelectTask(task.id)}
-            onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
-            onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
-            onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
+            task={task}
+            steps={task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined}
+            onRenameTask={onRenameTask}
+            onArchiveTask={onArchiveTask}
+            onDeleteTask={onDeleteTask}
+            onMoveToStep={onMoveToStep}
             isDeleting={deletingTaskId === task.id}
-          />
+          >
+            <TaskItem
+              title={task.title}
+              description={repoLabel}
+              stepName={stepName}
+              state={task.state}
+              sessionState={task.sessionState}
+              isArchived={task.isArchived}
+              isSelected={isSelected}
+              diffStats={task.diffStats}
+              isRemoteExecutor={task.isRemoteExecutor}
+              remoteExecutorType={task.remoteExecutorType}
+              remoteExecutorName={task.remoteExecutorName}
+              taskId={task.id}
+              primarySessionId={task.primarySessionId ?? null}
+              updatedAt={task.updatedAt}
+              parentTaskTitle={task.parentTaskTitle}
+              onClick={() => onSelectTask(task.id)}
+              onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
+              onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
+              onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
+              isDeleting={deletingTaskId === task.id}
+            />
+          </TaskItemWithContextMenu>
         );
       })}
     </div>
   );
 }
 
+function TaskItemWithContextMenu({
+  task,
+  steps,
+  children,
+  onRenameTask,
+  onArchiveTask,
+  onDeleteTask,
+  onMoveToStep,
+  isDeleting,
+}: {
+  task: TaskSwitcherItem;
+  steps?: StepDef[];
+  children: React.ReactNode;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+  onArchiveTask?: (taskId: string) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  isDeleting?: boolean;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        {onRenameTask && (
+          <ContextMenuItem disabled={isDeleting} onClick={() => onRenameTask(task.id, task.title)}>
+            <IconPencil className="mr-2 h-4 w-4" />
+            Rename
+          </ContextMenuItem>
+        )}
+        {onArchiveTask && (
+          <ContextMenuItem disabled={isDeleting} onClick={() => onArchiveTask(task.id)}>
+            <IconArchive className="mr-2 h-4 w-4" />
+            Archive
+          </ContextMenuItem>
+        )}
+        {onMoveToStep && task.workflowId && steps && steps.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger disabled={isDeleting}>
+                <IconArrowRight className="mr-2 h-4 w-4" />
+                Move to
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-44">
+                {steps.map((step) => {
+                  const isCurrent = step.id === task.workflowStepId;
+                  return (
+                    <ContextMenuItem
+                      key={step.id}
+                      disabled={isCurrent}
+                      onClick={() => onMoveToStep(task.id, task.workflowId!, step.id)}
+                    >
+                      <span
+                        className="mr-2 h-2.5 w-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: step.color || "var(--muted-foreground)" }}
+                      />
+                      {step.title}
+                      {isCurrent && <ContextMenuShortcut>Current</ContextMenuShortcut>}
+                    </ContextMenuItem>
+                  );
+                })}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </>
+        )}
+        {onDeleteTask && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={() => onDeleteTask(task.id)}
+            >
+              {isDeleting ? (
+                <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <IconTrash className="mr-2 h-4 w-4" />
+              )}
+              Delete
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 export const TaskSwitcher = memo(function TaskSwitcher({
   tasks,
   steps,
+  stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
   onSelectTask,
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onMoveToStep,
   deletingTaskId,
   isLoading = false,
 }: TaskSwitcherProps) {
@@ -231,6 +359,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
         <TaskSwitcherSection
           key={section.label}
           section={section}
+          stepsByWorkflowId={stepsByWorkflowId}
           stepNameById={stepNameById}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
@@ -238,6 +367,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
+          onMoveToStep={onMoveToStep}
           deletingTaskId={deletingTaskId}
         />
       ))}
