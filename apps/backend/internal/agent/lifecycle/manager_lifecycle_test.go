@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -135,6 +137,105 @@ func TestManager_RemoveExecution(t *testing.T) {
 	// Remove non-existent should not panic
 	mgr.RemoveExecution("non-existent")
 }
+
+func TestManager_CleanupStaleExecution_StopsRuntimeInstance(t *testing.T) {
+	log := newTestRegistryLogger()
+	reg := newTestRegistry()
+	eventBus := &MockEventBus{}
+	credsMgr := &MockCredentialsManager{}
+	profileResolver := &MockProfileResolver{}
+
+	// Create executor registry with a mock backend that tracks StopInstance calls
+	execRegistry := NewExecutorRegistry(log)
+	mock := &mockStopTracker{name: "standalone"}
+	execRegistry.Register(mock)
+
+	mgr := NewManager(reg, eventBus, execRegistry, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+
+	execution := &AgentExecution{
+		ID:          "exec-1",
+		SessionID:   "session-1",
+		RuntimeName: "standalone",
+	}
+	mgr.executionStore.Add(execution)
+
+	err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify StopInstance was called on the backend
+	if !mock.stopCalled {
+		t.Error("expected StopInstance to be called on the executor backend")
+	}
+	if mock.stoppedInstanceID != "exec-1" {
+		t.Errorf("expected StopInstance with instance ID exec-1, got %q", mock.stoppedInstanceID)
+	}
+
+	// Verify execution was removed from store
+	if _, found := mgr.GetExecutionBySessionID("session-1"); found {
+		t.Error("expected execution to be removed from store")
+	}
+}
+
+func TestManager_CleanupStaleExecution_NoopForMissingSession(t *testing.T) {
+	mgr := newTestManager()
+
+	err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "non-existent")
+	if err != nil {
+		t.Fatalf("expected nil error for non-existent session, got: %v", err)
+	}
+}
+
+func TestManager_CleanupStaleExecution_SkipsStopWhenNoRuntime(t *testing.T) {
+	mgr := newTestManager() // no executor registry
+
+	execution := &AgentExecution{
+		ID:          "exec-1",
+		SessionID:   "session-1",
+		RuntimeName: "standalone",
+	}
+	mgr.executionStore.Add(execution)
+
+	err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should still remove from store even without executor registry
+	if _, found := mgr.GetExecutionBySessionID("session-1"); found {
+		t.Error("expected execution to be removed from store")
+	}
+}
+
+// mockStopTracker is a minimal ExecutorBackend that records StopInstance calls.
+type mockStopTracker struct {
+	name              executor.Name
+	stopCalled        bool
+	stoppedInstanceID string
+}
+
+func (m *mockStopTracker) Name() executor.Name { return m.name }
+func (m *mockStopTracker) HealthCheck(ctx context.Context) error {
+	return nil
+}
+func (m *mockStopTracker) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	return nil, nil
+}
+func (m *mockStopTracker) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	m.stopCalled = true
+	m.stoppedInstanceID = instance.InstanceID
+	return nil
+}
+func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+	return nil, nil
+}
+func (m *mockStopTracker) GetInteractiveRunner() *process.InteractiveRunner {
+	return nil
+}
+func (m *mockStopTracker) RequiresCloneURL() bool          { return false }
+func (m *mockStopTracker) ShouldApplyPreferredShell() bool { return false }
+func (m *mockStopTracker) IsAlwaysResumable() bool         { return false }
 
 func TestManager_StartStop(t *testing.T) {
 	mgr := newTestManager()
