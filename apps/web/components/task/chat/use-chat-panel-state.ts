@@ -61,18 +61,22 @@ type AutoApplyPlanLayoutOpts = {
   resolvedSessionId: string | null;
   taskId: string | null;
   sessionMetaPlanMode: boolean;
+  currentStepHasPlanMode: boolean;
   setActiveDocument: (sid: string, doc: ActiveDocument | null) => void;
   applyBuiltInPreset: (preset: BuiltInPreset) => void;
   setPlanMode: (sid: string, enabled: boolean) => void;
   addContextFile: (sid: string, file: { path: string; name: string }) => void;
 };
 
-/** Auto-apply plan layout when session metadata has plan_mode enabled. */
+/** Auto-apply plan layout when session metadata has plan_mode enabled AND the current
+ *  step actually configures enable_plan_mode. The step check guards against stale
+ *  sessionMetaPlanMode from deepMerge hydration preserving deleted metadata keys. */
 function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   const {
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
@@ -88,7 +92,10 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
       return;
     }
     if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
-    if (sessionMetaPlanMode) {
+    // Only auto-apply if both the session metadata AND the current step agree on plan mode.
+    // sessionMetaPlanMode can be stale (deepMerge hydration preserves deleted keys),
+    // so we cross-check with the step's actual configuration.
+    if (sessionMetaPlanMode && currentStepHasPlanMode) {
       autoAppliedPlanSessionRef.current = resolvedSessionId;
       setActiveDocument(resolvedSessionId, { type: "plan", taskId });
       applyBuiltInPreset("plan");
@@ -99,6 +106,7 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
@@ -127,6 +135,14 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
       ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
       : false,
   );
+  const currentStepHasPlanMode = useAppStore((s) => {
+    if (!taskId) return false;
+    const task = s.kanban.tasks.find((t) => t.id === taskId);
+    const stepId = task?.workflowStepId;
+    if (!stepId) return false;
+    const step = s.kanban.steps.find((st) => st.id === stepId);
+    return step?.events?.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false;
+  });
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
 
@@ -143,6 +159,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
