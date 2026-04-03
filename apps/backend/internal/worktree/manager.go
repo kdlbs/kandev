@@ -341,7 +341,11 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		if err != nil {
 			return nil, err
 		}
-		startPoint = req.CheckoutBranch
+		if fetchResult.StartPoint != "" {
+			startPoint = fetchResult.StartPoint
+		} else {
+			startPoint = req.CheckoutBranch
+		}
 	}
 
 	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, req, worktreePath, branchName, startPoint, baseRef)

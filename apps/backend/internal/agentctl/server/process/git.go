@@ -311,11 +311,7 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		return result, nil
 	}
 
-	args := []string{"push"}
-
-	if setUpstream {
-		args = append(args, "--set-upstream")
-	}
+	args := []string{"push", "--set-upstream"}
 
 	if force {
 		// Use --force-with-lease for safer force push
@@ -333,7 +329,7 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	}
 
 	result.Success = true
-	g.logger.Info("push completed", zap.String("branch", branch), zap.Bool("force", force), zap.Bool("set_upstream", setUpstream))
+	g.logger.Info("push completed", zap.String("branch", branch), zap.Bool("force", force))
 	return result, nil
 }
 
