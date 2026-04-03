@@ -291,6 +291,9 @@ type ChangesPanelBodyProps = {
   onUnstageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
+  onBulkStage: (paths: string[]) => void;
+  onBulkUnstage: (paths: string[]) => void;
+  onBulkDiscard: (paths: string[]) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -357,6 +360,9 @@ type TimelineProps = Pick<
   | "onUnstageAll"
   | "onStage"
   | "onUnstage"
+  | "onBulkStage"
+  | "onBulkUnstage"
+  | "onBulkDiscard"
   | "onPush"
   | "onForcePush"
 >;
@@ -396,6 +402,8 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           onStage={props.onStage}
           onUnstage={props.onUnstage}
           onDiscard={props.dialogs.handleDiscardClick}
+          onBulkStage={props.onBulkStage}
+          onBulkDiscard={props.onBulkDiscard}
         />
       )}
       {props.hasStaged && (
@@ -415,6 +423,8 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           onStage={props.onStage}
           onUnstage={props.onUnstage}
           onDiscard={props.dialogs.handleDiscardClick}
+          onBulkUnstage={props.onBulkUnstage}
+          onBulkDiscard={props.onBulkDiscard}
         />
       )}
     </>
@@ -610,6 +620,9 @@ const ChangesPanel = memo(function ChangesPanel({
         onUnstageAll={git.unstageAll}
         onStage={(path) => git.stageFile([path]).then(() => undefined)}
         onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
+        onBulkStage={(paths) => void git.stageFile(paths)}
+        onBulkUnstage={(paths) => void git.unstageFile(paths)}
+        onBulkDiscard={(paths) => void git.discard(paths)}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}
         stagedFileCount={staged.stagedFileCount}
