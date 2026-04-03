@@ -122,7 +122,7 @@ func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 
 func (c *Cloner) fetch(ctx context.Context, repoPath string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force")
+	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", "--no-tags")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath),
@@ -153,7 +153,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 	}
 
 	// Fallback: git clone with credential helper.
-	cmd := c.gitCmd(ctx, "clone", cloneURL, targetPath)
+	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", "--no-tags", "--single-branch", cloneURL, targetPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
@@ -164,7 +164,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 // automatically via the user's gh CLI session.
 func (c *Cloner) ghClone(ctx context.Context, owner, name, targetPath string) error {
 	nwo := owner + "/" + name
-	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath)
+	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath, "--", "--filter=blob:none", "--no-tags", "--single-branch")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

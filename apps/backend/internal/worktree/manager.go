@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout = 60 * time.Second
+	defaultGitFetchTimeout = 90 * time.Second
 	defaultGitPullTimeout  = 60 * time.Second
 )
 
@@ -443,10 +443,10 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		zap.String("repo_path", repoPath))
 
 	// Try to fetch from origin to get the latest version.
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, 30*time.Second)
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch+":"+branch)
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "--no-tags", "origin", branch+":"+branch)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 
@@ -454,7 +454,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 		// which is always safe regardless of worktree state.
 		if isFetchRefusedCheckedOut(outputStr) {
-			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch)
+			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "--no-tags", "origin", branch)
 			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
 				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
 					zap.String("branch", branch))
@@ -1272,7 +1272,7 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
-	fetchArgs := []string{"fetch", "origin"}
+	fetchArgs := []string{"fetch", "--no-tags", "origin"}
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
 	}
