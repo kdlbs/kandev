@@ -9,8 +9,15 @@ import (
 // Detached returns a new context that is not tied to the parent's cancellation
 // but inherits its values. Use this for operations that must outlive the request.
 // The returned context will be cancelled when the stop channel is closed or timeout expires.
+// A non-positive timeout creates a context with no deadline (cancelled only by stopCh).
 func Detached(parent context.Context, stopCh <-chan struct{}, timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 
 	// Propagate cancellation from stopCh
 	go func() {
@@ -28,7 +35,13 @@ func Detached(parent context.Context, stopCh <-chan struct{}, timeout time.Durat
 // from the parent context while starting fresh with no deadline.
 // Use sparingly - most values should be passed explicitly.
 func DetachedWithValues(parent context.Context, stopCh <-chan struct{}, timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 
 	go func() {
 		select {

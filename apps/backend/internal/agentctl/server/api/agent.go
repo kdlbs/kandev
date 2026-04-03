@@ -446,15 +446,17 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
-	// Pass ctx (which carries remote trace context) so acp.prompt spans become children of the session.
-	go func(parentCtx context.Context) {
-		promptCtx, cancel := context.WithTimeout(parentCtx, constants.PromptTimeout)
-		defer cancel()
-		if err := adapter.Prompt(promptCtx, req.Text, req.Attachments); err != nil {
+	// Use context.Background() so the prompt is NOT tied to the WebSocket connection
+	// lifetime. For remote executors, a temporary network glitch would otherwise kill
+	// the in-flight prompt even though the agent subprocess keeps running fine.
+	// The prompt completes naturally when the agent process exits (stdin/stdout close),
+	// the user cancels, or agentctl shuts down.
+	go func() {
+		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments); err != nil {
 			s.logger.Error("async prompt failed", zap.Error(err))
 			s.procMgr.SendErrorEvent(err.Error())
 		}
-	}(ctx)
+	}()
 
 	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
 
