@@ -211,10 +211,17 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     const client = getWebSocketClient();
     if (!client) return;
     const unsubscribe = client.subscribeSession(taskSessionId);
+
+    // Re-fetch messages after subscribing to close the gap between SSR
+    // (which may have run before the agent responded) and this subscription.
+    // Without this, fast-responding agents can complete a turn before the
+    // subscription is active, causing the response to never appear.
+    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+
     return () => {
       unsubscribe();
     };
-  }, [taskSessionId, connectionStatus]);
+  }, [taskSessionId, connectionStatus, store]);
 
   const terminalFetchRefs = useMemo(
     () => ({
