@@ -53,18 +53,20 @@ func hasGitCryptFilter(path string) bool {
 // unlockGitCryptAndCheckout sets up git-crypt decryption in a worktree created
 // with --no-checkout and then checks out the files.
 //
-// git-crypt unlock cannot be used directly because it refuses to run when the
-// working directory is not clean (which is always the case after --no-checkout).
-// Instead we manually replicate what git-crypt unlock does:
-//  1. Symlink the git-crypt key directory from the main repo (GIT_COMMON_DIR)
-//     into the worktree's own git directory so the smudge filter can find it.
+// If the main repository is unlocked (has keys), it replicates what git-crypt
+// unlock does so the worktree gets decrypted files:
+//  1. Symlink the git-crypt key directory from the main repo into the worktree.
 //  2. Configure the smudge/clean/diff filters in the worktree's local git config.
 //  3. Run git checkout to populate the working tree with decrypted files.
+//
+// If the main repository is locked (no keys), it skips the git-crypt setup and
+// checks out without decryption. Encrypted files will remain as binary blobs but
+// the worktree is still usable for non-encrypted files.
 func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath string) error {
 	m.logger.Debug("setting up git-crypt filters in worktree",
 		zap.String("worktree_path", worktreePath))
 
-	// Step 1: Resolve the worktree's git dir and the common dir (main repo .git).
+	// Resolve the worktree's git dir and the common dir (main repo .git).
 	commonDir, err := resolveGitDir(ctx, worktreePath, "--git-common-dir")
 	if err != nil {
 		return &GitCryptError{Op: "resolve-common-dir", Path: worktreePath, Output: "", Err: err}
@@ -74,19 +76,28 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		return &GitCryptError{Op: "resolve-git-dir", Path: worktreePath, Output: "", Err: err}
 	}
 
-	// Step 2: Symlink the git-crypt key directory into the worktree git dir.
+	// Check if the main repo has git-crypt unlocked (keys present).
 	src := filepath.Join(commonDir, "git-crypt")
-	dst := filepath.Join(gitDir, "git-crypt")
-	if err := symlinkGitCryptDir(src, dst); err != nil {
-		return &GitCryptError{Op: "symlink", Path: worktreePath, Output: "", Err: err}
+	unlocked := isGitCryptUnlocked(src)
+
+	if unlocked {
+		// Symlink the git-crypt key directory into the worktree git dir.
+		dst := filepath.Join(gitDir, "git-crypt")
+		if err := symlinkGitCryptDir(src, dst); err != nil {
+			return &GitCryptError{Op: "symlink", Path: worktreePath, Output: "", Err: err}
+		}
+
+		// Configure the smudge/clean/diff filters.
+		if err := configureGitCryptFilters(ctx, worktreePath); err != nil {
+			return &GitCryptError{Op: "config", Path: worktreePath, Output: "", Err: err}
+		}
+	} else {
+		m.logger.Warn("git-crypt is locked in main repository, checking out without decryption",
+			zap.String("common_dir", commonDir),
+			zap.String("worktree_path", worktreePath))
 	}
 
-	// Step 3: Configure the smudge/clean/diff filters.
-	if err := configureGitCryptFilters(ctx, worktreePath); err != nil {
-		return &GitCryptError{Op: "config", Path: worktreePath, Output: "", Err: err}
-	}
-
-	// Step 4: Checkout HEAD to populate the working tree with decrypted files.
+	// Checkout HEAD to populate the working tree.
 	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", ".")
 	checkoutCmd.Dir = worktreePath
 	if output, err := checkoutCmd.CombinedOutput(); err != nil {
@@ -102,8 +113,13 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		}
 	}
 
-	m.logger.Info("successfully set up git-crypt and checked out worktree",
-		zap.String("worktree_path", worktreePath))
+	if unlocked {
+		m.logger.Info("successfully set up git-crypt and checked out worktree",
+			zap.String("worktree_path", worktreePath))
+	} else {
+		m.logger.Info("checked out worktree without git-crypt decryption (repo is locked)",
+			zap.String("worktree_path", worktreePath))
+	}
 	return nil
 }
 
@@ -125,6 +141,7 @@ func resolveGitDir(ctx context.Context, worktreePath, flag string) (string, erro
 
 // symlinkGitCryptDir creates a symlink from src (main repo's .git/git-crypt)
 // to dst (worktree's git dir git-crypt). Skips if dst already exists.
+// Caller must verify src is valid (via isGitCryptUnlocked) before calling.
 func symlinkGitCryptDir(src, dst string) error {
 	if _, err := os.Stat(src); err != nil {
 		return fmt.Errorf("git-crypt key dir not found at %s: %w", src, err)
@@ -134,6 +151,18 @@ func symlinkGitCryptDir(src, dst string) error {
 		return nil
 	}
 	return os.Symlink(src, dst)
+}
+
+// isGitCryptUnlocked checks whether a git-crypt directory exists and contains
+// at least one key file (e.g. keys/default). Returns false if the directory
+// doesn't exist, has no keys/ subdir, or the keys/ subdir is empty (locked).
+func isGitCryptUnlocked(gitCryptDir string) bool {
+	keysDir := filepath.Join(gitCryptDir, "keys")
+	entries, err := os.ReadDir(keysDir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 // configureGitCryptFilters sets the smudge/clean/diff filters in the
@@ -172,9 +201,13 @@ func (e *GitCryptError) Unwrap() error {
 }
 
 // isGitCryptSmudgeError checks if a git error is caused by git-crypt smudge filter failure.
+// The detection is language-agnostic: git translates its own messages but the
+// filter name ("git-crypt smudge") always appears verbatim in the output.
 func isGitCryptSmudgeError(output string) bool {
 	lower := strings.ToLower(output)
-	return strings.Contains(lower, "smudge filter git-crypt failed") ||
-		strings.Contains(lower, "filter '\"git-crypt\" smudge' failed") ||
-		strings.Contains(lower, "filter 'git-crypt smudge' failed")
+	// Language-agnostic: look for the filter name which is never translated.
+	if strings.Contains(lower, "git-crypt") && strings.Contains(lower, "smudge") {
+		return true
+	}
+	return false
 }
