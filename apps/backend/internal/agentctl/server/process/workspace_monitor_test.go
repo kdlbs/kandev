@@ -51,7 +51,7 @@ func TestWorkspaceTracker_MonitorExitsWhenNoGitRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(plainDir)
+	t.Cleanup(func() { _ = os.RemoveAll(plainDir) })
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(plainDir, log)
