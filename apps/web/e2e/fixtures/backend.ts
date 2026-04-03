@@ -10,8 +10,10 @@ const KANDEV_BIN = path.join(BACKEND_DIR, "bin", "kandev");
 const STANDALONE_SERVER = path.join(WEB_DIR, ".next/standalone/web/server.js");
 const STANDALONE_STATIC_DIR = path.join(WEB_DIR, ".next/standalone/web/.next/static");
 const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
-const BACKEND_BASE_PORT = 18080;
-const FRONTEND_BASE_PORT = 13000;
+// Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
+const E2E_PORT_OFFSET = parseInt(process.env.E2E_PORT_OFFSET ?? String(process.pid % 100), 10);
+const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
+const FRONTEND_BASE_PORT = 13000 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
 
@@ -178,7 +180,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 
       // Give each worker its own agentctl port range, offset from the default
       // range (10001-10100) to avoid conflicts with a running dev instance.
-      const agentctlPortBase = 30001 + workerInfo.workerIndex * 50;
+      const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 50;
       const agentctlPortMax = agentctlPortBase + 49;
 
       const backendEnv = {
