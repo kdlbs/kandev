@@ -186,9 +186,9 @@ func (g *GitOperator) getCurrentBranch(ctx context.Context) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
-// getUpstreamRef returns the upstream tracking ref for the given branch, or "" if none is set.
-func (g *GitOperator) getUpstreamRef(ctx context.Context, branch string) string {
-	output, err := g.runGitCommand(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+// getUpstreamRef returns the current branch's upstream tracking ref, or "" if none is set.
+func (g *GitOperator) getUpstreamRef(ctx context.Context) string {
+	output, err := g.runGitCommand(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
 	if err != nil {
 		return ""
 	}
@@ -259,7 +259,7 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 	// Use upstream branch if set, otherwise fall back to default (main/master).
 	// This handles local branches that haven't been pushed to the remote yet.
 	pullBranch := branch
-	if upstream := g.getUpstreamRef(ctx, branch); upstream == "" {
+	if upstream := g.getUpstreamRef(ctx); upstream == "" {
 		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
 			pullBranch = defaultBranch
 		}
@@ -311,7 +311,11 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		return result, nil
 	}
 
-	args := []string{"push", "--set-upstream"}
+	args := []string{"push"}
+	shouldSetUpstream := setUpstream || g.getUpstreamRef(ctx) == ""
+	if shouldSetUpstream {
+		args = append(args, "--set-upstream")
+	}
 
 	if force {
 		// Use --force-with-lease for safer force push
@@ -329,7 +333,10 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	}
 
 	result.Success = true
-	g.logger.Info("push completed", zap.String("branch", branch), zap.Bool("force", force))
+	g.logger.Info("push completed",
+		zap.String("branch", branch),
+		zap.Bool("force", force),
+		zap.Bool("set_upstream", shouldSetUpstream))
 	return result, nil
 }
 
