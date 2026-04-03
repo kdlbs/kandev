@@ -40,7 +40,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 	safeFlags := []string{
 		"-m", "-M", "-n", "--set-upstream", "--all", "--porcelain", "--short",
 		"--abbrev-ref", "--symbolic-full-name", "--verify", "--no-patch",
-		"--format", "--format=", "--stat", "--numstat", "-p", "-A",
+		"--format", "--format=", "--stat", "--shortstat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
 		"--", // Path separator - everything after this is treated as paths, not flags

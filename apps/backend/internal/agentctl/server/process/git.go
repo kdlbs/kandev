@@ -1022,6 +1022,31 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	return result, nil
 }
 
+// parseStatSummary parses a git --shortstat / --stat summary line like
+// " 3 files changed, 10 insertions(+), 5 deletions(-)" and returns the counts.
+func parseStatSummary(summary string) (filesChanged, insertions, deletions int) {
+	if idx := strings.Index(summary, " file"); idx > 0 {
+		part := strings.TrimSpace(summary[:idx])
+		parts := strings.Fields(part)
+		if len(parts) > 0 {
+			_, _ = fmt.Sscanf(parts[len(parts)-1], "%d", &filesChanged)
+		}
+	}
+	if idx := strings.Index(summary, " insertion"); idx > 0 {
+		start := strings.LastIndex(summary[:idx], " ") + 1
+		if start > 0 && start < idx {
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &insertions)
+		}
+	}
+	if idx := strings.Index(summary, " deletion"); idx > 0 {
+		start := strings.LastIndex(summary[:idx], " ") + 1
+		if start > 0 && start < idx {
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &deletions)
+		}
+	}
+	return filesChanged, insertions, deletions
+}
+
 // getCommitStats returns the number of files changed, insertions, and deletions for a commit
 func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (filesChanged, insertions, deletions int) {
 	// git show --stat --format="" HEAD gives us the stat summary
@@ -1030,44 +1055,10 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 		return 0, 0, 0
 	}
 
-	// The last non-empty line contains the summary like:
-	// " 3 files changed, 10 insertions(+), 5 deletions(-)"
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) == 0 {
 		return 0, 0, 0
 	}
 
-	summary := lines[len(lines)-1]
-	// Parse: "N files changed, M insertions(+), K deletions(-)"
-	// Some variants may be missing insertions or deletions
-
-	// Match files changed
-	if idx := strings.Index(summary, " file"); idx > 0 {
-		part := strings.TrimSpace(summary[:idx])
-		// Get just the number
-		parts := strings.Fields(part)
-		if len(parts) > 0 {
-			_, _ = fmt.Sscanf(parts[len(parts)-1], "%d", &filesChanged)
-		}
-	}
-
-	// Match insertions
-	if idx := strings.Index(summary, " insertion"); idx > 0 {
-		// Find the number before " insertion"
-		start := strings.LastIndex(summary[:idx], " ") + 1
-		if start > 0 && start < idx {
-			_, _ = fmt.Sscanf(summary[start:idx], "%d", &insertions)
-		}
-	}
-
-	// Match deletions
-	if idx := strings.Index(summary, " deletion"); idx > 0 {
-		// Find the number before " deletion"
-		start := strings.LastIndex(summary[:idx], " ") + 1
-		if start > 0 && start < idx {
-			_, _ = fmt.Sscanf(summary[start:idx], "%d", &deletions)
-		}
-	}
-
-	return filesChanged, insertions, deletions
+	return parseStatSummary(lines[len(lines)-1])
 }
