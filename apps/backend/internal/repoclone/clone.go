@@ -156,7 +156,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 	}
 
 	// Fallback: git clone with credential helper.
-	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", gitNoTags, "--single-branch", cloneURL, targetPath)
+	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
@@ -167,7 +167,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 // automatically via the user's gh CLI session.
 func (c *Cloner) ghClone(ctx context.Context, owner, name, targetPath string) error {
 	nwo := owner + "/" + name
-	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath, "--", "--filter=blob:none", gitNoTags, "--single-branch")
+	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath, "--", "--filter=blob:none", gitNoTags)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
