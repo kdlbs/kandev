@@ -282,7 +282,15 @@ function initialChoice(opts: InitialChoiceOpts): AuthChoice {
   return "none";
 }
 
-const AGENT_LOGO_IDS = new Set(["claude_code", "auggie", "codex", "gemini", "copilot", "amp", "opencode"]);
+const AGENT_LOGO_IDS = new Set([
+  "claude_code",
+  "auggie",
+  "codex",
+  "gemini",
+  "copilot",
+  "amp",
+  "opencode",
+]);
 
 function AuthSection({
   spec,
