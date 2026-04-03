@@ -198,3 +198,41 @@ func TestMCPCreateTask_InvalidParentID_ReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeError, resp.Type)
 }
+
+func TestMCPCreateTask_StartAgentFalse_DoesNotRequireDescription(t *testing.T) {
+	ts, parentTaskID, _, _, _ := setupMCPTestServer(t)
+	defer ts.Close()
+
+	client := NewWSClient(t, ts.Server.URL)
+	defer client.Close()
+
+	// With start_agent=false, description should NOT be required for subtasks
+	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+		"parent_id":   parentTaskID,
+		"title":       "Subtask without description",
+		"start_agent": false, // Don't auto-start, so no description needed
+	})
+	require.NoError(t, err)
+
+	// Should succeed because start_agent=false means no agent needs the description
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "start_agent=false should allow subtask without description")
+}
+
+func TestMCPCreateTask_StartAgentTrue_RequiresDescription(t *testing.T) {
+	ts, parentTaskID, _, _, _ := setupMCPTestServer(t)
+	defer ts.Close()
+
+	client := NewWSClient(t, ts.Server.URL)
+	defer client.Close()
+
+	// With start_agent=true (default), description IS required for subtasks
+	resp, err := client.SendRequest("subtask-1", ws.ActionMCPCreateTask, map[string]interface{}{
+		"parent_id": parentTaskID,
+		"title":     "Subtask without description",
+		// start_agent defaults to true, description is required
+	})
+	require.NoError(t, err)
+
+	// Should fail because the sub-agent needs the description as initial prompt
+	assert.Equal(t, ws.MessageTypeError, resp.Type, "start_agent=true should require description for subtask")
+}

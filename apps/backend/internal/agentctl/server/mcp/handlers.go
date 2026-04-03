@@ -96,7 +96,15 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("workspace_id and workflow_id are required when creating a top-level task (no parent_id)"), nil
 		}
 
-		payload := map[string]string{
+		// Default start_agent to true if not provided
+		startAgent := true
+		if args := req.GetArguments(); args["start_agent"] != nil {
+			if v, ok := args["start_agent"].(bool); ok {
+				startAgent = v
+			}
+		}
+
+		payload := map[string]interface{}{
 			"parent_id":           parentID,
 			"workspace_id":        workspaceID,
 			"workflow_id":         workflowID,
@@ -105,7 +113,27 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"description":         req.GetString("description", ""),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
+			"start_agent":         startAgent,
 		}
+
+		// Add repository info for top-level tasks
+		repositoryID := req.GetString("repository_id", "")
+		localPath := req.GetString("local_path", "")
+		baseBranch := req.GetString("base_branch", "")
+		if repositoryID != "" || localPath != "" {
+			repo := map[string]string{}
+			if repositoryID != "" {
+				repo["repository_id"] = repositoryID
+			}
+			if localPath != "" {
+				repo["local_path"] = localPath
+			}
+			if baseBranch != "" {
+				repo["base_branch"] = baseBranch
+			}
+			payload["repositories"] = []map[string]string{repo}
+		}
+
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
