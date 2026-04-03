@@ -1,4 +1,6 @@
 import type { DockviewReadyEvent } from "dockview-react";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import { setSessionLayout } from "@/lib/local-storage";
@@ -73,7 +75,10 @@ export function setupLayoutPersistence(
   });
 }
 
-export function setupPortalCleanup(api: DockviewReadyEvent["api"]): void {
+export function setupPortalCleanup(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+): void {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isMax = useDockviewStore.getState().preMaximizeLayout !== null;
@@ -97,10 +102,13 @@ export function setupPortalCleanup(api: DockviewReadyEvent["api"]): void {
       });
     }
     const entry = panelPortalManager.get(panel.id);
+    // vscode is session-scoped so entry.sessionId is always set by PortalSlot.
     if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
-    if (entry?.component === "terminal" && entry.sessionId) {
+    // terminal is global (no entry.sessionId) — fall back to the active session.
+    if (entry?.component === "terminal") {
+      const terminalSessionId = entry.sessionId ?? appStore.getState().tasks.activeSessionId;
       const terminalId = entry.params.terminalId as string | undefined;
-      if (terminalId) stopUserShell(entry.sessionId, terminalId);
+      if (terminalId && terminalSessionId) stopUserShell(terminalSessionId, terminalId);
     }
     panelPortalManager.release(panel.id);
   });

@@ -1,66 +1,89 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
 
-const listeners = new Set<(sessionId: string) => void>();
+const listeners = new Set<(envKey: string) => void>();
 
-export function invalidateCumulativeDiffCache(sessionId: string) {
-  delete cumulativeDiffCache[sessionId];
-  listeners.forEach((fn) => fn(sessionId));
+/**
+ * Invalidate the cumulative diff cache for the given environment key.
+ * Callers should resolve sessionId → envKey before calling this.
+ */
+export function invalidateCumulativeDiffCache(envKey: string) {
+  delete cumulativeDiffCache[envKey];
+  listeners.forEach((fn) => fn(envKey));
 }
 
 export function useCumulativeDiff(sessionId: string | null) {
+  // Resolve to environment key so sessions sharing the same environment share the cache.
+  const envKey = useAppStore((state) => {
+    if (!sessionId) return null;
+    return state.environmentIdBySessionId[sessionId] ?? sessionId;
+  });
+
+  // Guard against stale responses after an environment switch.
+  const requestVersionRef = useRef(0);
+
   const [diff, setDiff] = useState<CumulativeDiff | null>(
-    sessionId ? (cumulativeDiffCache[sessionId] ?? null) : null,
+    envKey ? (cumulativeDiffCache[envKey] ?? null) : null,
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invalidationCount, setInvalidationCount] = useState(0);
 
   const fetchCumulativeDiff = useCallback(async () => {
-    if (!sessionId) return;
-    if (loadingState[sessionId]) return;
+    if (!sessionId || !envKey) return;
+    if (loadingState[envKey]) return;
 
     const client = getWebSocketClient();
     if (!client) return;
 
+    const version = ++requestVersionRef.current;
+
     setLoading(true);
-    loadingState[sessionId] = true;
+    loadingState[envKey] = true;
     setError(null);
 
     try {
+      // Backend routes by session_id, but we cache by envKey
       const response = await client.request<{ cumulative_diff?: CumulativeDiff }>(
         "session.cumulative_diff",
         { session_id: sessionId },
       );
 
+      // Discard if the environment changed while the request was in flight
+      if (version !== requestVersionRef.current) return;
+
       if (response?.cumulative_diff) {
-        cumulativeDiffCache[sessionId] = response.cumulative_diff;
+        cumulativeDiffCache[envKey] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
       }
     } catch (err) {
+      if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch cumulative diff");
     } finally {
-      setLoading(false);
-      loadingState[sessionId] = false;
+      if (version === requestVersionRef.current) {
+        setLoading(false);
+      }
+      loadingState[envKey] = false;
     }
-  }, [sessionId]);
+  }, [sessionId, envKey]);
 
   // Fetch on mount and when cache is invalidated
   useEffect(() => {
-    if (!sessionId) return;
+    if (!envKey) return;
     fetchCumulativeDiff();
-  }, [sessionId, invalidationCount, fetchCumulativeDiff]);
+  }, [envKey, invalidationCount, fetchCumulativeDiff]);
 
   // Subscribe to cache invalidation from WS handlers
   useEffect(() => {
-    if (!sessionId) return;
-    const handler = (invalidatedSessionId: string) => {
-      if (invalidatedSessionId === sessionId) {
+    if (!envKey) return;
+    const handler = (invalidatedEnvKey: string) => {
+      if (invalidatedEnvKey === envKey) {
         setInvalidationCount((c) => c + 1);
       }
     };
@@ -68,17 +91,17 @@ export function useCumulativeDiff(sessionId: string | null) {
     return () => {
       listeners.delete(handler);
     };
-  }, [sessionId]);
+  }, [envKey]);
 
-  // Sync cached state when sessionId changes
+  // Sync cached state when envKey changes
   useEffect(() => {
-    if (sessionId) {
-      setDiff(cumulativeDiffCache[sessionId] ?? null);
+    if (envKey) {
+      setDiff(cumulativeDiffCache[envKey] ?? null);
     } else {
       setDiff(null);
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [envKey]);
 
   return {
     diff,
