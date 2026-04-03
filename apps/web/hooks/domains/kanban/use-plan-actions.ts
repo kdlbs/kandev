@@ -4,7 +4,12 @@ import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
+import { useLayoutStore } from "@/lib/state/layout-store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+
+const PLAN_CONTEXT_PATH = "plan:context";
 
 const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_step"];
 
@@ -18,7 +23,11 @@ function useNextWorkflowStep(taskId: string | null) {
     return task?.workflowStepId ?? null;
   });
 
-  const [isMoving, setIsMoving] = useState(false);
+  // Track which step the user was on when they clicked proceed. isMoving is true
+  // while taskStepId still matches the step we're moving FROM. Once the WS event
+  // updates taskStepId, isMoving becomes false and the button is clickable again.
+  const [moveFromStepId, setMoveFromStepId] = useState<string | null>(null);
+  const isMoving = moveFromStepId != null && taskStepId === moveFromStepId;
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -51,21 +60,19 @@ function useNextWorkflowStep(taskId: string | null) {
 
   const proceed = useCallback(async () => {
     if (!taskId || !workflowId || !nextStep) return;
-    setIsMoving(true);
+    setMoveFromStepId(taskStepId);
     try {
       await moveTask(taskId, {
         workflow_id: workflowId,
         workflow_step_id: nextStep.id,
         position: 0,
       });
-      // Keep isMoving=true until the WS event updates taskStepId and
-      // proceedStepName becomes null, hiding the button entirely.
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
       toast({ description: "Failed to proceed to next step", variant: "error" });
-      setIsMoving(false);
+      setMoveFromStepId(null);
     }
-  }, [taskId, workflowId, nextStep, toast]);
+  }, [taskId, workflowId, nextStep, taskStepId, toast]);
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 
@@ -115,6 +122,24 @@ After completing the implementation, provide a summary of what was done.
   }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
 }
 
+/** Directly disable plan mode state + layout, bypassing the MCP availability guard. */
+function useDirectDisablePlanMode(resolvedSessionId: string | null) {
+  const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument);
+  const closeDocument = useLayoutStore((s) => s.closeDocument);
+  const removeContextFile = useContextFilesStore((s) => s.removeFile);
+  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+
+  return useCallback(() => {
+    if (!resolvedSessionId) return;
+    applyBuiltInPreset("default");
+    closeDocument(resolvedSessionId);
+    setActiveDocument(resolvedSessionId, null);
+    setPlanMode(resolvedSessionId, false);
+    removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
+  }, [resolvedSessionId, applyBuiltInPreset, closeDocument, setActiveDocument, setPlanMode, removeContextFile]);
+}
+
 export function usePlanActions(opts: {
   resolvedSessionId: string | null;
   taskId: string | null;
@@ -135,15 +160,16 @@ export function usePlanActions(opts: {
     isMoving,
   } = useNextWorkflowStep(opts.taskId);
 
-  const { planModeEnabled, handlePlanModeChange } = opts;
+  const disablePlanMode = useDirectDisablePlanMode(opts.resolvedSessionId);
+  const { planModeEnabled } = opts;
   // Disable plan mode before proceeding so the layout switches back to default
   // and the next step's auto-start prompt is visible in chat.
   const proceed = useCallback(() => {
     if (planModeEnabled) {
-      handlePlanModeChange(false);
+      disablePlanMode();
     }
     rawProceed();
-  }, [planModeEnabled, handlePlanModeChange, rawProceed]);
+  }, [planModeEnabled, disablePlanMode, rawProceed]);
 
   const implementPlanHandler =
     opts.planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;

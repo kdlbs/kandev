@@ -110,4 +110,97 @@ test.describe("Manual proceed to next workflow step", () => {
     // Session returns to idle in default (non-plan) mode
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
+
+  /**
+   * Regression test: the proceed button must re-enable after each step transition.
+   * Previously, isMoving stayed true after clicking proceed because the button
+   * reappeared (for the next step) before isMoving was reset.
+   *
+   * Workflow: Spec -> Work -> Review -> QA -> Done (all with auto_start_agent)
+   */
+  test("proceed button re-enables across multiple step transitions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Multi Step Proceed Workflow",
+    );
+
+    const stepNames = ["Spec", "Work", "Review", "QA", "Done"];
+    const steps: { id: string; name: string }[] = [];
+    for (let i = 0; i < stepNames.length; i++) {
+      const step = await apiClient.createWorkflowStep(workflow.id, stepNames[i], i);
+      steps.push({ id: step.id, name: stepNames[i] });
+    }
+
+    // Configure all steps except Done with auto_start_agent and a fast prompt
+    for (const step of steps.slice(0, -1)) {
+      await apiClient.updateWorkflowStep(step.id, {
+        prompt: `e2e:message("${step.name} done")\n{{task_prompt}}`,
+        events: {
+          on_enter: [{ type: "auto_start_agent" }],
+        },
+      });
+    }
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    // Create task in Spec step
+    await apiClient.createTask(seedData.workspaceId, "Multi Step Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: steps[0].id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("Multi Step Task", steps[0].id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Walk through each step transition: Spec -> Work -> Review -> QA -> Done
+    for (let i = 0; i < steps.length - 1; i++) {
+      const currentName = steps[i].name;
+      const nextName = steps[i + 1].name;
+
+      // Wait for agent to complete in current step
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      // Stepper shows current step
+      await expect(session.stepperStep(currentName)).toHaveAttribute("aria-current", "step", {
+        timeout: 10_000,
+      });
+
+      // Proceed button is visible AND enabled (not disabled by stale isMoving)
+      const proceedBtn = session.proceedNextStepButton();
+      await expect(proceedBtn).toBeVisible({ timeout: 10_000 });
+      await expect(proceedBtn).toBeEnabled({ timeout: 5_000 });
+
+      // Click proceed
+      await proceedBtn.click();
+
+      // Stepper updates to next step
+      await expect(session.stepperStep(nextName)).toHaveAttribute("aria-current", "step", {
+        timeout: 15_000,
+      });
+    }
+
+    // On Done step: proceed button should NOT be visible (final step)
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.proceedNextStepButton()).not.toBeVisible({ timeout: 5_000 });
+  });
 });
