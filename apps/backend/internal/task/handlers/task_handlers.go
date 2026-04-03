@@ -23,11 +23,18 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service      *service.Service
-	orchestrator OrchestratorStarter
-	repo         handlerRepo
-	planService  *service.PlanService
-	logger       *logger.Logger
+	service             *service.Service
+	orchestrator        OrchestratorStarter
+	repo                handlerRepo
+	planService         *service.PlanService
+	onTaskCreatedWithPR func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger              *logger.Logger
+}
+
+// SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL
+// in one of its repository inputs. The callback runs in a background goroutine.
+func (h *TaskHandlers) SetOnTaskCreatedWithPR(fn func(ctx context.Context, taskID, sessionID, prURL, branch string)) {
+	h.onTaskCreatedWithPR = fn
 }
 
 type OrchestratorStarter interface {
@@ -45,10 +52,11 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) {
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
+	return handlers
 }
 
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {

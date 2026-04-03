@@ -447,6 +447,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	resolvedStepID := taskDTO.WorkflowStepID
 	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID)
 
+	// Associate PR with task if any repository input contains a PR URL
+	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -470,6 +473,23 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 		})
 	}
 	return repos, true
+}
+
+// associatePRFromRepoInputs checks if any repository input contains a GitHub PR URL
+// (e.g., github.com/owner/repo/pull/123) and fires the onTaskCreatedWithPR callback
+// in a background goroutine to associate the PR with the newly created task.
+func (h *TaskHandlers) associatePRFromRepoInputs(taskID, sessionID string, repos []httpTaskRepositoryInput) {
+	if h.onTaskCreatedWithPR == nil {
+		return
+	}
+	for _, r := range repos {
+		if r.GitHubURL != "" && strings.Contains(r.GitHubURL, "/pull/") {
+			prURL := r.GitHubURL
+			branch := r.CheckoutBranch
+			go h.onTaskCreatedWithPR(context.Background(), taskID, sessionID, prURL, branch)
+			return // only one PR per task
+		}
+	}
 }
 
 // handlePostCreateTaskSession prepares or starts an agent session after a task is created,
