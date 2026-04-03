@@ -147,7 +147,7 @@ var ampPermSettings = map[string]PermissionSetting{
 
 func ampStaticModels() []Model {
 	return []Model{
-		{ID: "smart", Name: "Smart Mode", Description: "State-of-the-art models for maximum capability and autonomy", Provider: "amp", IsDefault: true, Source: "static"},
-		{ID: "deep", Name: "Deep Mode", Description: "Deep reasoning with extended thinking on complex problems", Provider: "amp", Source: "static"},
+		{ID: "smart", Name: "Smart Mode", Description: "State-of-the-art models for maximum capability and autonomy", Provider: "amp", IsDefault: true, Source: ModelSourceStatic},
+		{ID: "deep", Name: "Deep Mode", Description: "Deep reasoning with extended thinking on complex problems", Provider: "amp", Source: ModelSourceStatic},
 	}
 }

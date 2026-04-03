@@ -3,7 +3,7 @@ package models
 import "time"
 
 // UtilityAgent represents a configured utility agent for quick one-shot tasks.
-// It references an inference-capable agent (like claude-code, amp) by ID.
+// It references an inference-capable agent (like claude-acp, amp-acp) by ID.
 type UtilityAgent struct {
 	ID          string    `json:"id" db:"id"`
 	Name        string    `json:"name" db:"name"`

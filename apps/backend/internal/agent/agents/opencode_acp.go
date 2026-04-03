@@ -145,11 +145,11 @@ var opencodePermSettings = map[string]PermissionSetting{
 
 func opencodeStaticModels() []Model {
 	return []Model{
-		{ID: "opencode/gpt-5-nano", Name: "GPT-5 Nano", Description: "OpenAI GPT-5 Nano", Provider: "openai", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "anthropic/claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "anthropic/claude-opus-4-20250514", Name: "Claude Opus 4", Description: "Anthropic Claude Opus 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "openai/gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", ContextWindow: 200000, Source: "static"},
-		{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Description: "Google Gemini 2.5 Pro", Provider: "google", ContextWindow: 2000000, Source: "static"},
+		{ID: "opencode/gpt-5-nano", Name: "GPT-5 Nano", Description: "OpenAI GPT-5 Nano", Provider: ProviderOpenAI, ContextWindow: 200000, IsDefault: true, Source: ModelSourceStatic},
+		{ID: "anthropic/claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "anthropic/claude-opus-4-20250514", Name: "Claude Opus 4", Description: "Anthropic Claude Opus 4", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "openai/gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: ProviderOpenAI, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Description: "Google Gemini 2.5 Pro", Provider: ProviderGoogle, ContextWindow: 2000000, Source: ModelSourceStatic},
 	}
 }
 
@@ -181,7 +181,7 @@ func opencodeParseModels(output string) ([]Model, error) {
 			Name:      name,
 			Provider:  provider,
 			IsDefault: modelID == defaultModel,
-			Source:    "dynamic",
+			Source:    ModelSourceDynamic,
 		})
 	}
 	return models, nil

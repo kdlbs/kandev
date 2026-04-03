@@ -47,7 +47,7 @@ func (r *sqliteRepository) initSchema() error {
 			name TEXT NOT NULL UNIQUE,
 			description TEXT NOT NULL DEFAULT '',
 			prompt TEXT NOT NULL,
-			agent_id TEXT NOT NULL DEFAULT 'claude-code',
+			agent_id TEXT NOT NULL DEFAULT 'claude-acp',
 			model TEXT NOT NULL DEFAULT '',
 			builtin INTEGER NOT NULL DEFAULT 0,
 			enabled INTEGER NOT NULL DEFAULT 1,
