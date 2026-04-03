@@ -49,45 +49,32 @@ func TestLoadSuppression_MessageEventsAreSuppressed(t *testing.T) {
 	}
 }
 
-func TestLoadSuppression_AvailableCommandsSuppressedAndCaptured(t *testing.T) {
+func TestLoadSuppression_AvailableCommandsPassThroughDuringLoad(t *testing.T) {
 	a := newTestAdapter()
 	a.mu.Lock()
 	a.isLoadingSession = true
 	a.mu.Unlock()
 
-	// Send two AvailableCommandsUpdate notifications; only the last should be captured.
-	first := &acp.SessionAvailableCommandsUpdate{
-		AvailableCommands: []acp.AvailableCommand{
-			{Name: "old-cmd", Description: "stale command"},
+	// AvailableCommandsUpdate should NOT be suppressed during load —
+	// it may arrive after replay as a "ready" signal from the agent.
+	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
+		AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+			AvailableCommands: []acp.AvailableCommand{
+				{Name: "commit", Description: "Commit changes"},
+				{Name: "todo", Description: "Manage todos"},
+			},
 		},
-	}
-	second := &acp.SessionAvailableCommandsUpdate{
-		AvailableCommands: []acp.AvailableCommand{
-			{Name: "todo-write", Description: "Write todos"},
-			{Name: "commit", Description: "Commit changes"},
-		},
-	}
-
-	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{AvailableCommandsUpdate: first}))
-	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{AvailableCommandsUpdate: second}))
+	}))
 
 	events := drainEvents(a)
-	if len(events) != 0 {
-		t.Errorf("expected 0 events during load, got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event (AvailableCommands passes through during load), got %d", len(events))
 	}
-
-	a.mu.RLock()
-	captured := a.loadReplayAvailableCommands
-	a.mu.RUnlock()
-
-	if captured == nil {
-		t.Fatal("expected loadReplayAvailableCommands to be captured")
+	if events[0].Type != streams.EventTypeAvailableCommands {
+		t.Errorf("expected event type %q, got %q", streams.EventTypeAvailableCommands, events[0].Type)
 	}
-	if len(captured.AvailableCommands) != 2 {
-		t.Fatalf("expected 2 captured commands, got %d", len(captured.AvailableCommands))
-	}
-	if captured.AvailableCommands[0].Name != "todo-write" {
-		t.Errorf("expected last update to be captured, got name=%q", captured.AvailableCommands[0].Name)
+	if len(events[0].AvailableCommands) != 2 {
+		t.Errorf("expected 2 commands, got %d", len(events[0].AvailableCommands))
 	}
 }
 
@@ -183,7 +170,7 @@ func TestLoadSuppression_EventsPassThroughWhenNotLoading(t *testing.T) {
 	}
 }
 
-func TestLoadSuppression_CapturedStateReemittedAfterLoad(t *testing.T) {
+func TestLoadSuppression_PlanReemittedAfterLoad(t *testing.T) {
 	a := newTestAdapter()
 
 	// Simulate a load: set the flag and send replay notifications.
@@ -191,6 +178,7 @@ func TestLoadSuppression_CapturedStateReemittedAfterLoad(t *testing.T) {
 	a.isLoadingSession = true
 	a.mu.Unlock()
 
+	// AvailableCommandsUpdate passes through during load.
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
 			AvailableCommands: []acp.AvailableCommand{
@@ -198,6 +186,7 @@ func TestLoadSuppression_CapturedStateReemittedAfterLoad(t *testing.T) {
 			},
 		},
 	}))
+	// Plan is suppressed and captured.
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		Plan: &acp.SessionUpdatePlan{
 			Entries: []acp.PlanEntry{
@@ -206,24 +195,23 @@ func TestLoadSuppression_CapturedStateReemittedAfterLoad(t *testing.T) {
 		},
 	}))
 
-	// Verify nothing was emitted during load.
+	// Drain: only AvailableCommands should have passed through.
 	events := drainEvents(a)
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events during load, got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event during load (AvailableCommands), got %d", len(events))
+	}
+	if events[0].Type != streams.EventTypeAvailableCommands {
+		t.Errorf("expected event type %q, got %q", streams.EventTypeAvailableCommands, events[0].Type)
 	}
 
 	// Simulate what LoadSession() does after the RPC returns:
-	// read and clear the captured state, then re-emit it.
+	// read and clear the captured plan, clear the loading flag, then re-emit.
 	a.mu.Lock()
-	replayCommands := a.loadReplayAvailableCommands
 	replayPlan := a.loadReplayPlan
-	a.loadReplayAvailableCommands = nil
 	a.loadReplayPlan = nil
+	a.isLoadingSession = false
 	a.mu.Unlock()
 
-	if replayCommands != nil {
-		a.sendUpdate(*a.convertAvailableCommands("s1", replayCommands))
-	}
 	if replayPlan != nil {
 		entries := make([]PlanEntry, len(replayPlan.Entries))
 		for i, e := range replayPlan.Entries {
@@ -240,41 +228,69 @@ func TestLoadSuppression_CapturedStateReemittedAfterLoad(t *testing.T) {
 		})
 	}
 
-	// Now we should see exactly the re-emitted events.
+	// Now we should see the re-emitted plan.
 	events = drainEvents(a)
-	if len(events) != 2 {
-		t.Fatalf("expected 2 re-emitted events, got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 re-emitted event (Plan), got %d", len(events))
+	}
+	if events[0].Type != streams.EventTypePlan {
+		t.Errorf("expected event type %q, got %q", streams.EventTypePlan, events[0].Type)
+	}
+	if len(events[0].PlanEntries) != 1 || events[0].PlanEntries[0].Description != "implement feature" {
+		t.Errorf("unexpected plan entries: %+v", events[0].PlanEntries)
+	}
+	if events[0].PlanEntries[0].Status != "in_progress" {
+		t.Errorf("expected plan status 'in_progress', got %q", events[0].PlanEntries[0].Status)
 	}
 
-	// Verify available commands event.
-	if events[0].Type != streams.EventTypeAvailableCommands {
-		t.Errorf("expected event type %q, got %q", streams.EventTypeAvailableCommands, events[0].Type)
-	}
-	if len(events[0].AvailableCommands) != 1 || events[0].AvailableCommands[0].Name != "todo-write" {
-		t.Errorf("unexpected available commands: %+v", events[0].AvailableCommands)
-	}
-
-	// Verify plan event.
-	if events[1].Type != streams.EventTypePlan {
-		t.Errorf("expected event type %q, got %q", streams.EventTypePlan, events[1].Type)
-	}
-	if len(events[1].PlanEntries) != 1 || events[1].PlanEntries[0].Description != "implement feature" {
-		t.Errorf("unexpected plan entries: %+v", events[1].PlanEntries)
-	}
-	if events[1].PlanEntries[0].Status != "in_progress" {
-		t.Errorf("expected plan status 'in_progress', got %q", events[1].PlanEntries[0].Status)
-	}
-	if events[1].PlanEntries[0].Priority != "high" {
-		t.Errorf("expected plan priority 'high', got %q", events[1].PlanEntries[0].Priority)
-	}
-
-	// Verify captured state was cleared.
+	// Verify loading flag was cleared and captured state is empty.
 	a.mu.RLock()
-	if a.loadReplayAvailableCommands != nil {
-		t.Error("loadReplayAvailableCommands should be nil after re-emit")
+	if a.isLoadingSession {
+		t.Error("isLoadingSession should be false after load completes")
 	}
 	if a.loadReplayPlan != nil {
 		t.Error("loadReplayPlan should be nil after re-emit")
 	}
 	a.mu.RUnlock()
+}
+
+func TestLoadSuppression_PostReplayEventsPassThrough(t *testing.T) {
+	a := newTestAdapter()
+
+	// Simulate load and then clearing the flag (as LoadSession does).
+	a.mu.Lock()
+	a.isLoadingSession = true
+	a.mu.Unlock()
+
+	// Replay a message — should be suppressed.
+	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
+		AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{},
+	}))
+
+	events := drainEvents(a)
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events during load, got %d", len(events))
+	}
+
+	// Clear the flag (simulating LoadSession completion).
+	a.mu.Lock()
+	a.isLoadingSession = false
+	a.mu.Unlock()
+
+	// Post-replay AvailableCommandsUpdate should pass through.
+	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
+		AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+			AvailableCommands: []acp.AvailableCommand{
+				{Name: "commit", Description: "Commit changes"},
+			},
+		},
+	}))
+
+	events = drainEvents(a)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event after load cleared, got %d", len(events))
+	}
+	if events[0].Type != streams.EventTypeAvailableCommands {
+		t.Errorf("expected event type %q, got %q", streams.EventTypeAvailableCommands, events[0].Type)
+	}
 }

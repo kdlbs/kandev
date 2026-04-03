@@ -86,11 +86,11 @@ type Adapter struct {
 	// isLoadingSession is true during LoadSession() to suppress history replay notifications.
 	// ACP agents stream the entire conversation history during session/load which should
 	// not be emitted as new message events.
-	// During load, we capture the last AvailableCommandsUpdate and Plan so we can
-	// re-emit them as authoritative state after load completes.
-	isLoadingSession            bool
-	loadReplayAvailableCommands *acp.SessionAvailableCommandsUpdate
-	loadReplayPlan              *acp.SessionUpdatePlan
+	// During load, we capture the last Plan so we can re-emit it after load completes.
+	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
+	// "ready" signal, and the last one always wins in the frontend.
+	isLoadingSession bool
+	loadReplayPlan   *acp.SessionUpdatePlan
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
@@ -450,18 +450,17 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
 	}
 
-	// Re-emit available commands and plan captured during history replay.
-	// These are the authoritative final state from the replayed conversation.
+	// Re-emit plan captured during history replay and clear the loading flag.
+	// The ACP SDK guarantees all replay notifications are processed before
+	// LoadSession returns (via notificationWg.Wait), so captured state is complete.
+	// Clearing isLoadingSession here allows post-replay notifications (e.g.
+	// AvailableCommandsUpdate "ready" signals) to pass through normally.
 	a.mu.Lock()
-	replayCommands := a.loadReplayAvailableCommands
 	replayPlan := a.loadReplayPlan
-	a.loadReplayAvailableCommands = nil
 	a.loadReplayPlan = nil
+	a.isLoadingSession = false
 	a.mu.Unlock()
 
-	if replayCommands != nil {
-		a.sendUpdate(*a.convertAvailableCommands(sessionID, replayCommands))
-	}
 	if replayPlan != nil {
 		entries := make([]PlanEntry, len(replayPlan.Entries))
 		for i, e := range replayPlan.Entries {
@@ -803,24 +802,20 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 
 	if isLoading {
 		u := n.Update
-		// Capture last available commands and plan from replay so we can
-		// re-emit them as authoritative state after load completes.
+		// Capture the last Plan from replay so we can re-emit it after load completes.
 		a.mu.Lock()
-		if u.AvailableCommandsUpdate != nil {
-			a.loadReplayAvailableCommands = u.AvailableCommandsUpdate
-		}
 		if u.Plan != nil {
 			a.loadReplayPlan = u.Plan
 		}
 		a.mu.Unlock()
 
-		// Suppress all conversation history events during load.
-		// Authoritative initial state is emitted after LoadSession() completes
-		// via emitInitialModeState/emitSessionModels and the replay captures above.
+		// Suppress conversation history events during load.
+		// AvailableCommandsUpdate is intentionally NOT suppressed — it may arrive
+		// after the replay completes as a "ready" signal, and the frontend treats
+		// the last one as authoritative (last-write-wins).
 		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
 			u.ToolCall != nil || u.ToolCallUpdate != nil ||
-			u.Plan != nil || u.AvailableCommandsUpdate != nil ||
-			u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
+			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
 			a.logger.Debug("suppressing history replay notification during session load",
 				zap.String("session_id", string(n.SessionId)))
 			return
