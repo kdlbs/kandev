@@ -99,8 +99,10 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   const hasStaged = stagedFiles.length > 0;
   const hasCommits = commits.length > 0;
 
-  const stageAll = useCallback(async () => gitOps.stage(), [gitOps]);
-  const unstageAll = useCallback(async () => gitOps.unstage(), [gitOps]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on stable fn ref, not the whole gitOps object
+  const stageAll = useCallback(async () => gitOps.stage(), [gitOps.stage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on stable fn ref, not the whole gitOps object
+  const unstageAll = useCallback(async () => gitOps.unstage(), [gitOps.unstage]);
 
   const stageFile = useCallback(
     async (paths: string[]) => {
@@ -116,7 +118,8 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
         throw err;
       }
     },
-    [gitOps],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on stable fn ref, not the whole gitOps object
+    [gitOps.stage],
   );
 
   const unstageFile = useCallback(
@@ -133,7 +136,8 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
         throw err;
       }
     },
-    [gitOps],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on stable fn ref, not the whole gitOps object
+    [gitOps.unstage],
   );
 
   return {

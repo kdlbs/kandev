@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 // GitOperationResult matches the backend response
@@ -168,7 +168,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     [sessionId],
   );
 
-  const ops = buildGitOperationCallbacks(executeOperation);
+  const ops = useMemo(() => buildGitOperationCallbacks(executeOperation), [executeOperation]);
 
   return {
     ...ops,
