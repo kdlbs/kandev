@@ -17,6 +17,14 @@ import (
 func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	defer wt.wg.Done()
 
+	// If no valid git index was found at startup, git commands will fail.
+	// Exit immediately to avoid repeated rev-parse probes on a non-repo directory.
+	if wt.gitIndexPath == "" {
+		wt.logger.Warn("no valid git repository found, git polling not started",
+			zap.String("workDir", wt.workDir))
+		return
+	}
+
 	ticker := time.NewTicker(wt.gitPollInterval)
 	defer ticker.Stop()
 

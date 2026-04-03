@@ -35,6 +35,15 @@ const maxConsecutiveGitFailures = 5
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
+	// If no valid git index was found at startup, there's nothing to poll.
+	// Exit immediately to avoid spamming "git diff-files: exit status 128" warnings
+	// every poll cycle until the consecutive failure threshold is reached.
+	if wt.gitIndexPath == "" {
+		wt.logger.Warn("no valid git repository found, file monitor not polling",
+			zap.String("workDir", wt.workDir))
+		return
+	}
+
 	ticker := time.NewTicker(wt.filePollInterval)
 	defer ticker.Stop()
 
