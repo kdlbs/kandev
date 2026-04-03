@@ -20,6 +20,7 @@ import (
 const (
 	defaultGitFetchTimeout = 90 * time.Second
 	defaultGitPullTimeout  = 60 * time.Second
+	gitNoTags              = "--no-tags"
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -446,7 +447,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "--no-tags", "origin", branch+":"+branch)
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", branch+":"+branch)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 
@@ -454,7 +455,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 		// which is always safe regardless of worktree state.
 		if isFetchRefusedCheckedOut(outputStr) {
-			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "--no-tags", "origin", branch)
+			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", branch)
 			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
 				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
 					zap.String("branch", branch))
@@ -1272,7 +1273,7 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
-	fetchArgs := []string{"fetch", "--no-tags", "origin"}
+	fetchArgs := []string{"fetch", gitNoTags, "origin"}
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
 	}
