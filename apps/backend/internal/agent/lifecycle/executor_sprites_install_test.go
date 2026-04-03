@@ -83,7 +83,7 @@ func TestCollectAgentInstallScripts(t *testing.T) {
 	})
 
 	t.Run("agents from remote_credentials metadata", func(t *testing.T) {
-		credsJSON, _ := json.Marshal([]string{"agent:codex:env:OPENAI_API_KEY"})
+		credsJSON, _ := json.Marshal([]string{"agent:codex-acp:env:OPENAI_API_KEY"})
 		r := newSpritesExecutorWithAgents([]agents.Agent{claude, codex})
 		got := r.collectAgentInstallScripts(&ExecutorCreateRequest{
 			Metadata: map[string]interface{}{"remote_credentials": string(credsJSON)},
@@ -101,8 +101,8 @@ func TestCollectAgentInstallScripts(t *testing.T) {
 	})
 
 	t.Run("deduplicates agents from multiple sources", func(t *testing.T) {
-		credsJSON, _ := json.Marshal([]string{"agent:claude-code:files:0"})
-		secretsJSON, _ := json.Marshal(map[string]string{"agent:claude-code:env:KEY": "s1"})
+		credsJSON, _ := json.Marshal([]string{"agent:claude-acp:files:0"})
+		secretsJSON, _ := json.Marshal(map[string]string{"agent:claude-acp:env:KEY": "s1"})
 		r := newSpritesExecutorWithAgents([]agents.Agent{claude})
 		got := r.collectAgentInstallScripts(&ExecutorCreateRequest{
 			AgentConfig: claude,

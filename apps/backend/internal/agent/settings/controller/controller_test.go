@@ -345,7 +345,7 @@ func TestCommandPreviewResponse_DTO(t *testing.T) {
 	resp := dto.CommandPreviewResponse{
 		Supported:     true,
 		Command:       []string{"npx", "claude-acp", "--model", "gpt-4"},
-		CommandString: `npx claude-code --model gpt-4`,
+		CommandString: `npx claude-acp --model gpt-4`,
 	}
 
 	if !resp.Supported {

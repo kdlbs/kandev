@@ -87,7 +87,7 @@ func (a *OpenCodeACP) DefaultModel() string { return "opencode/gpt-5-nano" }
 func (a *OpenCodeACP) ListModels(ctx context.Context) (*ModelList, error) {
 	models, err := execAndParse(ctx, 30*time.Second, opencodeParseModels, "opencode", "models")
 	if err != nil {
-		return &ModelList{Models: opencodeStaticModels(), SupportsDynamic: true}, nil
+		return &ModelList{Models: opencodeStaticModels(), SupportsDynamic: false}, nil
 	}
 	return &ModelList{Models: models, SupportsDynamic: true}, nil
 }

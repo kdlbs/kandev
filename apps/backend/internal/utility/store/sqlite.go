@@ -83,6 +83,9 @@ func (r *sqliteRepository) initSchema() error {
 	// Add enabled column if it doesn't exist (migration for existing DBs)
 	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
 
+	// Migration: update removed agent IDs to their ACP replacements
+	_, _ = r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp' WHERE agent_id = 'claude-code'`)
+
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {
 		return fmt.Errorf("failed to seed built-in agents: %w", err)
