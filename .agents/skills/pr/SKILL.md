@@ -5,6 +5,8 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 # PR
 
+> **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) to create, edit, and view the PR. The goal is the same — the tool may differ.
+
 ## Available skills
 
 - **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.

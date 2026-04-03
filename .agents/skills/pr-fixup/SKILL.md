@@ -7,6 +7,8 @@ description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Cla
 
 Wait for CI and code review to complete on a pull request, fix any failures or valid comments, then push.
 
+> **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) for PR checks, comments, replies, and reviews. Some operations (reactions, resolving threads, fetching CI logs) may not be available in all environments — skip gracefully.
+
 ## Available skills and subagents
 
 - **`verify` subagent** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
