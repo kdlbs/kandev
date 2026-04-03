@@ -82,7 +82,7 @@ Before writing an E2E test, validate the feature works interactively using `play
 
 ### Start the dev environment
 
-Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports auto-offset from 18080 (backend) and 13000 (frontend) using `E2E_PORT_OFFSET` (derived from PID by default) — stay outside those ranges. Parallel E2E test runs are safe by default.
+Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports auto-offset from 18080 (backend) and 13000 (frontend) using `E2E_PORT_OFFSET` (derived from `PID % 30` by default) — stay outside those ranges. Parallel E2E test runs are safe by default.
 
 ```bash
 OFFSET=$((RANDOM % 100))
