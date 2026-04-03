@@ -667,8 +667,11 @@ export class ApiClient {
   async getTaskEnvironment(taskId: string): Promise<{
     id: string;
     task_id: string;
+    executor_type?: string;
     worktree_id?: string;
     worktree_path?: string;
+    container_id?: string;
+    sandbox_id?: string;
     status: string;
   } | null> {
     const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);

@@ -30,6 +30,7 @@ export type LaunchSessionRequest = {
   skip_message_record?: boolean;
   auto_start?: boolean;
   attachments?: MessageAttachment[];
+  fresh_environment?: boolean;
 };
 
 export type LaunchSessionResponse = {

@@ -41,6 +41,7 @@ type LaunchSessionRequest struct {
 	SkipMessageRecord bool                   `json:"skip_message_record,omitempty"`
 	AutoStart         bool                   `json:"auto_start,omitempty"`
 	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
+	FreshEnvironment  bool                   `json:"fresh_environment,omitempty"`
 }
 
 // LaunchSessionResponse is the unified response for session.launch.
@@ -133,6 +134,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.Attachments,
+		req.FreshEnvironment,
 	)
 	if err != nil {
 		return nil, err
@@ -175,6 +177,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
 		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.Attachments,
+		req.FreshEnvironment,
 	)
 	if err != nil {
 		return nil, err

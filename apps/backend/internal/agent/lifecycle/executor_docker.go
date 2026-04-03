@@ -121,6 +121,17 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("docker unavailable: %w", err)
 	}
 
+	// Try to reconnect to an existing container if one was provided
+	if existingContainerID := getMetadataString(req.Metadata, "container_id"); existingContainerID != "" {
+		instance, reconnectErr := r.reconnectToContainer(ctx, req, existingContainerID, dockerClient, containerMgr)
+		if reconnectErr == nil {
+			return instance, nil
+		}
+		r.logger.Warn("failed to reconnect to existing container, creating fresh",
+			zap.String("container_id", existingContainerID),
+			zap.Error(reconnectErr))
+	}
+
 	// Extract runtime-specific values from metadata
 	mainRepoGitDir := getMetadataString(req.Metadata, MetadataKeyMainRepoGitDir)
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
@@ -169,6 +180,59 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		ContainerID:   containerID,
 		ContainerIP:   containerIP,
 		WorkspacePath: "/workspace", // Docker mounts workspace to /workspace
+		Metadata:      metadata,
+	}, nil
+}
+
+// reconnectToContainer attempts to reconnect to an existing Docker container.
+// It restarts the container if stopped and creates a new agentctl instance inside it.
+func (r *DockerExecutor) reconnectToContainer(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	containerID string,
+	dockerClient *docker.Client,
+	containerMgr *ContainerManager,
+) (*ExecutorInstance, error) {
+	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
+	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+
+	containerCfg := ContainerConfig{
+		AgentConfig: req.AgentConfig,
+		TaskID:      req.TaskID,
+		SessionID:   req.SessionID,
+		InstanceID:  req.InstanceID,
+		Credentials: req.Env,
+		McpServers:  req.McpServers,
+	}
+
+	client, err := containerMgr.ReconnectContainer(ctx, containerID, containerCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	containerIP, _ := dockerClient.GetContainerIP(ctx, containerID)
+
+	metadata := make(map[string]interface{})
+	if worktreeID != "" {
+		metadata["worktree_id"] = worktreeID
+		metadata["worktree_path"] = req.WorkspacePath
+		metadata["worktree_branch"] = worktreeBranch
+	}
+
+	r.logger.Info("docker instance reconnected to existing container",
+		zap.String("instance_id", req.InstanceID),
+		zap.String("container_id", containerID),
+		zap.String("container_ip", containerIP))
+
+	return &ExecutorInstance{
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   string(r.Name()),
+		Client:        client,
+		ContainerID:   containerID,
+		ContainerIP:   containerIP,
+		WorkspacePath: "/workspace",
 		Metadata:      metadata,
 	}, nil
 }

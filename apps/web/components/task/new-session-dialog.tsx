@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -67,8 +68,23 @@ function useNewSessionDialogState(taskId: string) {
     );
     return executor?.name ?? null;
   });
+  const executorType = useAppStore((state) => {
+    if (!currentSession?.executor_id) return null;
+    const executor = state.executors.items.find(
+      (e: { id: string }) => e.id === currentSession.executor_id,
+    );
+    return (executor as { type?: string } | undefined)?.type ?? null;
+  });
 
-  return { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel };
+  return {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    executorType,
+  };
 }
 
 function activateNewSession(
@@ -104,12 +120,15 @@ function useSessionOptions(taskId: string) {
   }, [sessions, agentProfiles]);
 }
 
+const ENVIRONMENT_EXECUTOR_TYPES = new Set(["local_docker", "remote_docker", "sprites"]);
+
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
   defaultProfileId,
   executorId,
   executorLabel,
+  executorType,
   worktreeBranch,
   initialPrompt,
   agentProfiles,
@@ -120,6 +139,7 @@ function NewSessionForm({
   defaultProfileId: string;
   executorId: string;
   executorLabel: string | null;
+  executorType: string | null;
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
@@ -133,6 +153,8 @@ function NewSessionForm({
   const [contextValue, setContextValue] = useState("blank");
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [freshEnvironment, setFreshEnvironment] = useState(false);
+  const showFreshToggle = executorType != null && ENVIRONMENT_EXECUTOR_TYPES.has(executorType);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
     attachments,
@@ -196,6 +218,7 @@ function NewSessionForm({
           executorId,
           prompt,
           attachments: toMessageAttachments(attachments),
+          freshEnvironment: freshEnvironment || undefined,
         });
         const response = await launchSession(request);
         if (!response.session_id) {
@@ -229,6 +252,7 @@ function NewSessionForm({
       executorId,
       contextValue,
       initialPrompt,
+      freshEnvironment,
       agentProfiles,
       groupId,
       onClose,
@@ -243,6 +267,22 @@ function NewSessionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
+      {showFreshToggle && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="fresh-environment"
+            checked={freshEnvironment}
+            onCheckedChange={(checked) => setFreshEnvironment(checked === true)}
+            disabled={isCreating}
+          />
+          <label
+            htmlFor="fresh-environment"
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            Fresh environment — create a new container instead of reusing the existing one
+          </label>
+        </div>
+      )}
       {profileOptions.length > 1 && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
@@ -332,8 +372,15 @@ function NewSessionForm({
 }
 
 export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSessionDialogProps) {
-  const { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel } =
-    useNewSessionDialogState(taskId);
+  const {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    executorType,
+  } = useNewSessionDialogState(taskId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -349,6 +396,7 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
           defaultProfileId={currentSession?.agent_profile_id ?? ""}
           executorId={currentSession?.executor_id ?? ""}
           executorLabel={executorLabel}
+          executorType={executorType}
           worktreeBranch={worktreeBranch}
           initialPrompt={initialPrompt}
           agentProfiles={agentProfiles}

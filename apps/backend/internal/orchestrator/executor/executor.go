@@ -258,13 +258,14 @@ const McpModeConfig = "config"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID string
-	ExecutorID     string
-	Prompt         string
-	WorkflowStepID string
-	StartAgent     bool
-	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
-	Attachments    []v1.MessageAttachment
+	AgentProfileID   string
+	ExecutorID       string
+	Prompt           string
+	WorkflowStepID   string
+	StartAgent       bool
+	McpMode          string // MCP tool mode: McpModeConfig activates config-mode tools
+	Attachments      []v1.MessageAttachment
+	FreshEnvironment bool // Skip environment reuse, create fresh container/sandbox
 }
 
 // LaunchAgentResponse contains the result of launching an agent

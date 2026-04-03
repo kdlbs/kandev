@@ -219,6 +219,7 @@ func (s *Service) autoStartReviewTask(
 		evt.WorkflowStepID,
 		false,
 		nil,
+		false,
 	)
 	if err != nil {
 		s.logger.Error("failed to auto-start review task",
