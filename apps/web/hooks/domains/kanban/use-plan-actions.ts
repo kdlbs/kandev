@@ -137,7 +137,14 @@ function useDirectDisablePlanMode(resolvedSessionId: string | null) {
     setActiveDocument(resolvedSessionId, null);
     setPlanMode(resolvedSessionId, false);
     removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-  }, [resolvedSessionId, applyBuiltInPreset, closeDocument, setActiveDocument, setPlanMode, removeContextFile]);
+  }, [
+    resolvedSessionId,
+    applyBuiltInPreset,
+    closeDocument,
+    setActiveDocument,
+    setPlanMode,
+    removeContextFile,
+  ]);
 }
 
 export function usePlanActions(opts: {
