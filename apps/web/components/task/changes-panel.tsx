@@ -361,15 +361,25 @@ type TimelineProps = Pick<
   | "onForcePush"
 >;
 
-function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolean }) {
-  const hasCommitsToShow = props.hasCommitsToShow ?? props.hasCommits;
-  const showStaged = props.hasUnstaged || props.hasStaged;
-  const showCommits = props.hasStaged || props.hasCommits;
-  const showCommitsList = props.hasStaged || hasCommitsToShow;
-  // Only show bulk-action spinners when no individual files are pending
-  // (per-file ops set pendingStageFiles; bulk ops don't)
-  const isBulkOp = props.pendingStageFiles.size === 0;
+type WorkingTreeProps = Pick<
+  TimelineProps,
+  | "hasUnstaged"
+  | "hasStaged"
+  | "unstagedFiles"
+  | "stagedFiles"
+  | "pendingStageFiles"
+  | "loadingOperation"
+  | "dialogs"
+  | "onOpenDiffFile"
+  | "onEditFile"
+  | "onStageAll"
+  | "onUnstageAll"
+  | "onStage"
+  | "onUnstage"
+> & { isLastUnstaged: boolean; isLastStaged: boolean };
 
+function WorkingTreeSections(props: WorkingTreeProps) {
+  const isBulkOp = props.pendingStageFiles.size === 0;
   return (
     <>
       {props.hasUnstaged && (
@@ -377,7 +387,7 @@ function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolea
           variant="unstaged"
           files={props.unstagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={!showStaged}
+          isLast={props.isLastUnstaged}
           actionLabel="Stage all"
           isActionLoading={isBulkOp && props.loadingOperation === "stage"}
           onAction={props.onStageAll}
@@ -388,12 +398,12 @@ function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolea
           onDiscard={props.dialogs.handleDiscardClick}
         />
       )}
-      {showStaged && (
+      {props.hasStaged && (
         <FileListSection
           variant="staged"
           files={props.stagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={!showCommits}
+          isLast={props.isLastStaged}
           actionLabel="Commit"
           isActionLoading={props.loadingOperation === "commit"}
           onAction={props.dialogs.openCommitDialog}
@@ -407,9 +417,59 @@ function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolea
           onDiscard={props.dialogs.handleDiscardClick}
         />
       )}
+    </>
+  );
+}
+
+function ChangesPanelTimeline(props: TimelineProps) {
+  if (!props.hasAnything) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+        Your changed files will appear here
+      </div>
+    );
+  }
+
+  const mergedCommits = mergeCommits(props.commits, props.prCommits);
+  const hasMergedCommits = mergedCommits.length > 0;
+  const hasLocalChanges = props.hasUnstaged || props.hasStaged;
+  const showCommits = props.hasStaged || props.hasCommits;
+  const showCommitsList = props.hasStaged || hasMergedCommits;
+  const hasSomethingAfterStaged = (props.hasPRFiles && hasLocalChanges) || showCommitsList;
+
+  return (
+    <div className="flex flex-col">
+      {/* PR files first when no local working-tree changes */}
+      {props.hasPRFiles && !hasLocalChanges && (
+        <div data-testid="pr-files-section">
+          <PRFilesSection
+            files={props.prFiles}
+            isLast={!showCommitsList}
+            onOpenDiff={props.onOpenDiffFile}
+          />
+        </div>
+      )}
+
+      <WorkingTreeSections
+        {...props}
+        isLastUnstaged={!props.hasStaged && !hasSomethingAfterStaged}
+        isLastStaged={!hasSomethingAfterStaged}
+      />
+
+      {/* PR files after local changes when both exist */}
+      {props.hasPRFiles && hasLocalChanges && (
+        <div data-testid="pr-files-section">
+          <PRFilesSection
+            files={props.prFiles}
+            isLast={!showCommitsList}
+            onOpenDiff={props.onOpenDiffFile}
+          />
+        </div>
+      )}
+
       {showCommitsList && (
         <CommitsSection
-          commits={props.commits}
+          commits={mergedCommits}
           isLast={!showCommits}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
@@ -430,39 +490,6 @@ function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolea
           onForcePush={props.onForcePush}
         />
       )}
-    </>
-  );
-}
-
-function ChangesPanelTimeline(props: TimelineProps) {
-  if (!props.hasAnything) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        Your changed files will appear here
-      </div>
-    );
-  }
-
-  const mergedCommits = mergeCommits(props.commits, props.prCommits);
-  const hasMergedCommits = mergedCommits.length > 0;
-  const hasLocalChanges = props.hasUnstaged || props.hasStaged || hasMergedCommits;
-
-  return (
-    <div className="flex flex-col">
-      {props.hasPRFiles && (
-        <div data-testid="pr-files-section">
-          <PRFilesSection
-            files={props.prFiles}
-            isLast={!hasLocalChanges}
-            onOpenDiff={props.onOpenDiffFile}
-          />
-        </div>
-      )}
-      <TimelineLocalChanges
-        {...props}
-        commits={mergedCommits}
-        hasCommitsToShow={hasMergedCommits}
-      />
     </div>
   );
 }
