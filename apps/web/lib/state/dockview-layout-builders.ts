@@ -41,6 +41,23 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   return resolveGroupIds(api);
 }
 
+/**
+ * Resolve a fallback group position when the intended reference is stale.
+ * Tries the well-known center group, then any non-sidebar group, then the
+ * first group. Returns undefined if no groups exist (drops the position).
+ */
+function fallbackGroupPosition(api: DockviewApi): { referenceGroup: string } | undefined {
+  const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
+  if (centerGroup) return { referenceGroup: centerGroup.id };
+
+  const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
+  if (nonSidebarGroup) return { referenceGroup: nonSidebarGroup.id };
+
+  if (api.groups.length > 0) return { referenceGroup: api.groups[0].id };
+
+  return undefined;
+}
+
 export function focusOrAddPanel(
   api: DockviewApi,
   options: AddPanelOptions & { id: string },
@@ -51,27 +68,31 @@ export function focusOrAddPanel(
     if (!quiet) existing.api.setActive();
     return;
   }
-  // Guard: if the referenced group no longer exists (stale ID after layout
-  // transition), try the well-known center group, then the first non-sidebar
-  // group. Avoid falling back to the active panel's group because the user
-  // may have just clicked in the sidebar, which would place the new panel there.
+  // Guard: if the referenced group or panel no longer exists (stale ID after
+  // layout transition), fall back to a known group. Avoid the active panel's
+  // group because the user may have just clicked in the sidebar.
   const pos = options.position;
   if (pos && "referenceGroup" in pos) {
     const groupExists = api.groups.some((g) => g.id === pos.referenceGroup);
     if (!groupExists) {
-      const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
-      const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
-      if (centerGroup) {
-        options = { ...options, position: { ...pos, referenceGroup: centerGroup.id } };
-      } else if (nonSidebarGroup) {
-        options = { ...options, position: { ...pos, referenceGroup: nonSidebarGroup.id } };
-      } else if (api.groups.length > 0) {
-        options = { ...options, position: { ...pos, referenceGroup: api.groups[0].id } };
-      } else {
-        options = Object.fromEntries(
-          Object.entries(options).filter(([k]) => k !== "position"),
-        ) as typeof options;
-      }
+      const fallback = fallbackGroupPosition(api);
+      options = fallback
+        ? { ...options, position: { ...pos, ...fallback } }
+        : (Object.fromEntries(
+            Object.entries(options).filter(([k]) => k !== "position"),
+          ) as typeof options);
+    }
+  }
+
+  if (pos && "referencePanel" in pos) {
+    const refPanel = api.getPanel(pos.referencePanel as string);
+    if (!refPanel) {
+      const fallback = fallbackGroupPosition(api);
+      options = fallback
+        ? { ...options, position: fallback }
+        : (Object.fromEntries(
+            Object.entries(options).filter(([k]) => k !== "position"),
+          ) as typeof options);
     }
   }
 
