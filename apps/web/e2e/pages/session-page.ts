@@ -281,6 +281,14 @@ export class SessionPage {
     return this.page.getByTestId("pr-topbar-button");
   }
 
+  /** VCS split button primary action. Pass action to match a specific state. */
+  vcsPrimaryButton(action?: "commit" | "push" | "pr" | "rebase"): Locator {
+    if (action) {
+      return this.page.getByTestId(`vcs-primary-${action}`);
+    }
+    return this.page.locator('[data-testid^="vcs-primary-"]');
+  }
+
   /** PR detail panel (auto-shown when task has an associated PR). */
   prDetailPanel(): Locator {
     return this.page.getByTestId("pr-detail-panel");

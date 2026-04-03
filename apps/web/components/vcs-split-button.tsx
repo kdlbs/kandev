@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 
 import type { ReactNode } from "react";
 
@@ -34,8 +35,10 @@ function determinePrimaryAction(
   uncommittedFileCount: number,
   aheadCount: number,
   behindCount: number,
-): "commit" | "pr" | "rebase" {
+  hasOpenPR: boolean,
+): "commit" | "push" | "pr" | "rebase" {
   if (uncommittedFileCount > 0) return "commit";
+  if (aheadCount > 0 && hasOpenPR) return "push";
   if (aheadCount > 0) return "pr";
   if (behindCount > 0) return "rebase";
   return "commit";
@@ -75,6 +78,16 @@ function buildPrConfig(aheadCount: number, openPRDialog: () => void): PrimaryBut
   };
 }
 
+function buildPushConfig(aheadCount: number, handlePush: () => void): PrimaryButtonConfig {
+  return {
+    icon: <IconCloudUpload className="h-4 w-4" />,
+    label: "Push",
+    badge: aheadCount > 0 ? aheadCount : null,
+    tooltip: `Push ${aheadCount} commit${aheadCount !== 1 ? "s" : ""} to remote`,
+    onClick: handlePush,
+  };
+}
+
 function buildRebaseConfig(
   behindCount: number,
   baseBranch: string | undefined,
@@ -90,13 +103,14 @@ function buildRebaseConfig(
 }
 
 type PrimaryConfigArgs = {
-  primaryAction: "commit" | "pr" | "rebase";
+  primaryAction: "commit" | "push" | "pr" | "rebase";
   uncommittedFileCount: number;
   aheadCount: number;
   behindCount: number;
   baseBranch: string | undefined;
   openCommitDialog: () => void;
   openPRDialog: () => void;
+  handlePush: () => void;
   handleRebase: () => void;
 };
 
@@ -108,8 +122,10 @@ function buildPrimaryButtonConfig({
   baseBranch,
   openCommitDialog,
   openPRDialog,
+  handlePush,
   handleRebase,
 }: PrimaryConfigArgs): PrimaryButtonConfig {
+  if (primaryAction === "push") return buildPushConfig(aheadCount, handlePush);
   if (primaryAction === "pr") return buildPrConfig(aheadCount, openPRDialog);
   if (primaryAction === "rebase") return buildRebaseConfig(behindCount, baseBranch, handleRebase);
   return buildCommitConfig(uncommittedFileCount, openCommitDialog);
@@ -205,24 +221,8 @@ type VcsSplitButtonProps = {
   baseBranch?: string;
 };
 
-const VcsSplitButton = memo(function VcsSplitButton({
-  sessionId,
-  baseBranch,
-}: VcsSplitButtonProps) {
+function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
   const gitWithFeedback = useGitWithFeedback();
-  const git = useSessionGit(sessionId);
-  const { openCommitDialog, openPRDialog } = useVcsDialogs();
-
-  const currentBranch = git.branch;
-  const remoteBranch = git.remoteBranch;
-  const hasMatchingUpstream =
-    remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
-
-  const uncommittedFileCount = git.allFiles.length;
-  const aheadCount = git.ahead;
-  const behindCount = git.behind;
-  const isDisabled = git.isLoading || !sessionId;
-  const isGitLoading = git.isLoading;
 
   const handlePull = useCallback(() => {
     gitWithFeedback(() => git.pull(), "Pull");
@@ -245,7 +245,35 @@ const VcsSplitButton = memo(function VcsSplitButton({
     gitWithFeedback(() => git.merge(targetBranch), "Merge");
   }, [gitWithFeedback, git, baseBranch]);
 
-  const primaryAction = determinePrimaryAction(uncommittedFileCount, aheadCount, behindCount);
+  return { handlePull, handlePush, handleRebase, handleMerge };
+}
+
+const VcsSplitButton = memo(function VcsSplitButton({
+  sessionId,
+  baseBranch,
+}: VcsSplitButtonProps) {
+  const git = useSessionGit(sessionId);
+  const { openCommitDialog, openPRDialog } = useVcsDialogs();
+  const activePR = useActiveTaskPR();
+  const hasOpenPR = activePR?.state === "open";
+  const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
+
+  const currentBranch = git.branch;
+  const remoteBranch = git.remoteBranch;
+  const hasMatchingUpstream =
+    remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
+  const uncommittedFileCount = git.allFiles.length;
+  const aheadCount = git.ahead;
+  const behindCount = git.behind;
+  const isDisabled = git.isLoading || !sessionId;
+  const isGitLoading = git.isLoading;
+
+  const primaryAction = determinePrimaryAction(
+    uncommittedFileCount,
+    aheadCount,
+    behindCount,
+    hasOpenPR,
+  );
   const primaryButtonConfig = buildPrimaryButtonConfig({
     primaryAction,
     uncommittedFileCount,
@@ -254,6 +282,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     baseBranch,
     openCommitDialog,
     openPRDialog,
+    handlePush: () => handlePush(false),
     handleRebase,
   });
 
@@ -267,6 +296,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
             className="rounded-none border-0 cursor-pointer"
             onClick={primaryButtonConfig.onClick}
             disabled={isDisabled}
+            data-testid={`vcs-primary-${primaryAction}`}
           >
             {primaryButtonConfig.icon}
             {primaryButtonConfig.label}
