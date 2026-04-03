@@ -156,3 +156,28 @@ func (a *ClaudeACP) InferenceConfig() *InferenceConfig {
 func (a *ClaudeACP) InferenceModels() []InferenceModel {
 	return ModelsToInferenceModels(claudeCodeStaticModels())
 }
+
+var claudeCodePermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls via stdio protocol",
+		ApplyMethod: "stdio",
+	},
+	"dangerously_skip_permissions": {
+		Supported: true, Default: true, Label: "Skip Permissions", Description: "Bypass all permission checks (dangerous but fast for trusted tasks)",
+		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-skip-permissions",
+	},
+	"permission_policy": {
+		Supported: true, Default: false, Label: "Permission Policy", Description: "Control permission mode: autonomous (default), supervised (approve writes), plan (approve plan exit)",
+		ApplyMethod: "custom",
+	},
+}
+
+func claudeCodeStaticModels() []Model {
+	return []Model{
+		{ID: "claude-sonnet-4-6", ACPID: "sonnet", Name: "Sonnet 4.6", Description: "Latest Sonnet model for coding and everyday tasks", Provider: ProviderAnthropic, ContextWindow: 200000, IsDefault: true, Source: ModelSourceStatic},
+		{ID: "claude-sonnet-4-5", ACPID: "sonnet", Name: "Sonnet 4.5", Description: "Previous Sonnet generation with strong reasoning", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "claude-opus-4-6", ACPID: "default", Name: "Opus 4.6", Description: "Latest and most capable model for complex tasks", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "claude-opus-4-5", ACPID: "default", Name: "Opus 4.5", Description: "Most capable model for complex tasks", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+		{ID: "claude-haiku-4-5", ACPID: "haiku", Name: "Haiku 4.5", Description: "Fast and affordable model for simple tasks", Provider: ProviderAnthropic, ContextWindow: 200000, Source: ModelSourceStatic},
+	}
+}

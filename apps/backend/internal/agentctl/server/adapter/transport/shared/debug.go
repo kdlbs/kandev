@@ -30,12 +30,7 @@ var initializedFiles = make(map[string]bool)
 
 // Protocol constants for debug file naming
 const (
-	ProtocolACP        = "acp"
-	ProtocolStreamJSON = "streamjson"
-	ProtocolCodex      = "codex"
-	ProtocolOpenCode   = "opencode"
-	ProtocolAmp        = "amp"
-	ProtocolCopilot    = "copilot"
+	ProtocolACP = "acp"
 )
 
 // DebugEnabled reports whether agent message debug mode is active.

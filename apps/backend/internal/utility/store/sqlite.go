@@ -47,7 +47,7 @@ func (r *sqliteRepository) initSchema() error {
 			name TEXT NOT NULL UNIQUE,
 			description TEXT NOT NULL DEFAULT '',
 			prompt TEXT NOT NULL,
-			agent_id TEXT NOT NULL DEFAULT 'claude-code',
+			agent_id TEXT NOT NULL DEFAULT 'claude-acp',
 			model TEXT NOT NULL DEFAULT '',
 			builtin INTEGER NOT NULL DEFAULT 0,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -82,6 +82,11 @@ func (r *sqliteRepository) initSchema() error {
 
 	// Add enabled column if it doesn't exist (migration for existing DBs)
 	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
+
+	// Migration: update removed agent IDs to their ACP replacements
+	if _, err := r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp' WHERE agent_id = 'claude-code'`); err != nil {
+		return fmt.Errorf("failed to migrate utility agent IDs to ACP variants: %w", err)
+	}
 
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {

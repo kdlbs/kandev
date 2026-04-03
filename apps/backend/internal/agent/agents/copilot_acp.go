@@ -139,3 +139,32 @@ func (a *CopilotACP) InferenceConfig() *InferenceConfig {
 func (a *CopilotACP) InferenceModels() []InferenceModel {
 	return ModelsToInferenceModels(copilotStaticModels())
 }
+
+var copilotPermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve (YOLO mode)", Description: "Enable all tools, folders and urls without confirmation.",
+		ApplyMethod: "cli_flag", CLIFlag: "--yolo",
+	},
+}
+
+func copilotStaticModels() []Model {
+	return []Model{
+		{ID: "claude-sonnet-4.6", Name: "Claude Sonnet 4.6", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "claude-opus-4.6", Name: "Claude Opus 4.6", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "claude-opus-4.5", Name: "Claude Opus 4.5", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "claude-haiku-4.5", Name: "Claude Haiku 4.5", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Provider: ProviderAnthropic, Source: ModelSourceStatic},
+		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro (Preview)", Provider: ProviderGoogle, Source: ModelSourceStatic},
+		{ID: "gpt-5.4", Name: "GPT-5.4", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3-Codex", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2-Codex", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.2", Name: "GPT-5.2", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1-Codex-Max", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.1-codex", Name: "GPT-5.1-Codex", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.1", Name: "GPT-5.1", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1-Codex-Mini", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+		{ID: "gpt-5-mini", Name: "GPT-5 Mini", Provider: ProviderOpenAI, Source: ModelSourceStatic, IsDefault: true},
+		{ID: "gpt-4.1", Name: "GPT-4.1", Provider: ProviderOpenAI, Source: ModelSourceStatic},
+	}
+}

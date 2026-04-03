@@ -14,7 +14,10 @@ var ampACPLogoLight []byte
 //go:embed logos/amp_dark.svg
 var ampACPLogoDark []byte
 
-const ampACPPkg = "amp-acp"
+const (
+	ampACPPkg = "amp-acp"
+	ampPkg    = "@sourcegraph/amp@latest"
+)
 
 var (
 	_ Agent            = (*AmpACP)(nil)
@@ -133,4 +136,18 @@ func (a *AmpACP) InferenceConfig() *InferenceConfig {
 // InferenceModels returns models available for one-shot inference.
 func (a *AmpACP) InferenceModels() []InferenceModel {
 	return ModelsToInferenceModels(ampStaticModels())
+}
+
+var ampPermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve (Dangerously Allow All)", Description: "Automatically approve all tool calls including shell commands",
+		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-allow-all",
+	},
+}
+
+func ampStaticModels() []Model {
+	return []Model{
+		{ID: "smart", Name: "Smart Mode", Description: "State-of-the-art models for maximum capability and autonomy", Provider: "amp", IsDefault: true, Source: ModelSourceStatic},
+		{ID: "deep", Name: "Deep Mode", Description: "Deep reasoning with extended thinking on complex problems", Provider: "amp", Source: ModelSourceStatic},
+	}
 }

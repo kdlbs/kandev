@@ -16,9 +16,9 @@ func TestExtractAgentID(t *testing.T) {
 		methodID string
 		want     string
 	}{
-		{name: "full method ID", methodID: "agent:claude-code:env:ANTHROPIC_API_KEY", want: "claude-code"},
-		{name: "files method", methodID: "agent:claude-code:files:0", want: "claude-code"},
-		{name: "codex env", methodID: "agent:codex:env:OPENAI_API_KEY", want: "codex"},
+		{name: "full method ID", methodID: "agent:claude-acp:env:ANTHROPIC_API_KEY", want: "claude-acp"},
+		{name: "files method", methodID: "agent:claude-acp:files:0", want: "claude-acp"},
+		{name: "codex env", methodID: "agent:codex-acp:env:OPENAI_API_KEY", want: "codex-acp"},
 		{name: "two parts only", methodID: "agent:gemini", want: "gemini"},
 		{name: "non-agent prefix", methodID: "system:some-key:value", want: ""},
 		{name: "empty string", methodID: "", want: ""},
@@ -61,8 +61,8 @@ func newSpritesExecutorWithAgents(ags []agents.Agent) *SpritesExecutor {
 }
 
 func TestCollectAgentInstallScripts(t *testing.T) {
-	claude := &stubAgent{MockAgent: agents.NewMockAgent(), id: "claude-code", installScript: "npm i -g claude"}
-	codex := &stubAgent{MockAgent: agents.NewMockAgent(), id: "codex", installScript: "pip install codex"}
+	claude := &stubAgent{MockAgent: agents.NewMockAgent(), id: "claude-acp", installScript: "npm i -g claude"}
+	codex := &stubAgent{MockAgent: agents.NewMockAgent(), id: "codex-acp", installScript: "pip install codex"}
 	gemini := &stubAgent{MockAgent: agents.NewMockAgent(), id: "gemini", installScript: "gem install gemini"}
 
 	t.Run("no agents and no metadata returns empty", func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestCollectAgentInstallScripts(t *testing.T) {
 	})
 
 	t.Run("agents from remote_credentials metadata", func(t *testing.T) {
-		credsJSON, _ := json.Marshal([]string{"agent:codex:env:OPENAI_API_KEY"})
+		credsJSON, _ := json.Marshal([]string{"agent:codex-acp:env:OPENAI_API_KEY"})
 		r := newSpritesExecutorWithAgents([]agents.Agent{claude, codex})
 		got := r.collectAgentInstallScripts(&ExecutorCreateRequest{
 			Metadata: map[string]interface{}{"remote_credentials": string(credsJSON)},
@@ -101,8 +101,8 @@ func TestCollectAgentInstallScripts(t *testing.T) {
 	})
 
 	t.Run("deduplicates agents from multiple sources", func(t *testing.T) {
-		credsJSON, _ := json.Marshal([]string{"agent:claude-code:files:0"})
-		secretsJSON, _ := json.Marshal(map[string]string{"agent:claude-code:env:KEY": "s1"})
+		credsJSON, _ := json.Marshal([]string{"agent:claude-acp:files:0"})
+		secretsJSON, _ := json.Marshal(map[string]string{"agent:claude-acp:env:KEY": "s1"})
 		r := newSpritesExecutorWithAgents([]agents.Agent{claude})
 		got := r.collectAgentInstallScripts(&ExecutorCreateRequest{
 			AgentConfig: claude,

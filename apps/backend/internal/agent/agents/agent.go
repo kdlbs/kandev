@@ -86,6 +86,19 @@ const (
 	LogoDark
 )
 
+// Model source constants.
+const (
+	ModelSourceStatic  = "static"
+	ModelSourceDynamic = "dynamic"
+)
+
+// Model provider constants.
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
+	ProviderGoogle    = "google"
+)
+
 // Model describes a single model available for an agent.
 type Model struct {
 	ID            string `json:"id"`

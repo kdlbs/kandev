@@ -25,7 +25,7 @@ type AgentExecution struct {
 	TaskID          string
 	SessionID       string
 	AgentProfileID  string
-	AgentID         string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	AgentID         string // Agent type ID (e.g., "claude-acp", "codex-acp") — used for fallback auth methods
 	ContainerID     string
 	ContainerIP     string // IP address of the container for agentctl communication
 	WorkspacePath   string // Path to the workspace (worktree or repository path)
@@ -298,7 +298,7 @@ type AgentProfileInfo struct {
 	ProfileID                  string
 	ProfileName                string
 	AgentID                    string
-	AgentName                  string // e.g., "auggie", "claude", "codex"
+	AgentName                  string // e.g., "auggie", "claude-acp", "codex-acp"
 	Model                      string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
@@ -340,7 +340,7 @@ type WorkspaceInfo struct {
 	SessionID      string // Task session ID (from task_sessions table)
 	WorkspacePath  string // Path to the workspace/repository
 	AgentProfileID string // Optional - agent profile for the task
-	AgentID        string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	AgentID        string // Agent type ID (e.g., "auggie", "codex-acp") - required for runtime creation
 	ACPSessionID   string // Agent's session ID for conversation resumption (from session metadata)
 
 	// Executor-aware fields for correct runtime selection and remote reconnection

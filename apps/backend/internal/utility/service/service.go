@@ -201,7 +201,7 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 type PromptRequest struct {
 	UtilityID      string
 	ResolvedPrompt string
-	AgentCLI       string // The inference agent ID (e.g., "claude-code", "amp")
+	AgentCLI       string // The inference agent ID (e.g., "claude-acp", "amp-acp")
 	Model          string // The model to use
 }
 
