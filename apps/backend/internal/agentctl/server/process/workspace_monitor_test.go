@@ -43,6 +43,45 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTracker_MonitorExitsWhenNoGitRepo(t *testing.T) {
+	isolateTestGitEnv(t)
+
+	// Create a plain directory with no git repo — resolveGitIndexPath returns ""
+	plainDir, err := os.MkdirTemp("", "test-no-git-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(plainDir) })
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(plainDir, log)
+	// Use 500ms intervals so the 5-failure threshold takes ~2.5s.
+	// The fix should make monitorLoop exit immediately (well under 500ms).
+	wt.filePollInterval = 500 * time.Millisecond
+	wt.gitPollInterval = 500 * time.Millisecond
+
+	if wt.gitIndexPath != "" {
+		t.Fatalf("expected empty gitIndexPath for non-git directory, got %q", wt.gitIndexPath)
+	}
+
+	wt.Start(context.Background())
+
+	// monitorLoop should exit immediately without attempting git commands.
+	// Without the fix, it takes ~2.5s (5 failures × 500ms poll interval).
+	done := make(chan struct{})
+	go func() {
+		wt.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Both goroutines exited quickly — success
+	case <-time.After(1 * time.Second):
+		t.Fatal("workspace tracker did not stop promptly when started without a valid git repo")
+	}
+}
+
 func TestWorkspaceTracker_StopsWhenGitBroken(t *testing.T) {
 	isolateTestGitEnv(t)
 
