@@ -2,7 +2,6 @@ package process
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -11,12 +10,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// getCommitsSince returns commits from baseCommit (exclusive) to HEAD (inclusive)
+// getCommitsSince returns commits from baseCommit (exclusive) to HEAD (inclusive).
+// Uses --shortstat to fetch stats in a single git command instead of N+1 git-show calls.
 func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit string) []*types.GitCommitNotification {
-	// Get list of commits with metadata
-	// Format: SHA|ParentSHA|AuthorName|AuthorEmail|Subject|AuthorDateISO
+	// Use record/field separators to safely parse and --shortstat for inline stats.
+	// Output format per commit:
+	//   <SHA>\x1f<Parents>\x1f<AuthorName>\x1f<AuthorEmail>\x1f<Subject>\x1f<AuthorDateISO>\x1e
+	//    N files changed, M insertions(+), K deletions(-)
 	cmd := exec.CommandContext(ctx, "git", "log",
-		"--format=%H|%P|%an|%ae|%s|%aI",
+		"--format=%H\x1f%P\x1f%an\x1f%ae\x1f%s\x1f%aI\x1e",
+		"--shortstat",
 		baseCommit+"..HEAD")
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
@@ -32,23 +35,26 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 		return nil
 	}
 
-	lines := strings.Split(output, "\n")
-	commits := make([]*types.GitCommitNotification, 0, len(lines))
+	records := strings.Split(strings.TrimSuffix(output, "\x1e"), "\x1e")
+	commits := make([]*types.GitCommitNotification, 0, len(records))
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, record := range records {
+		record = strings.TrimSpace(record)
+		if record == "" {
 			continue
 		}
 
-		parts := strings.SplitN(line, "|", 6)
+		// Split into field line and optional stat line
+		lines := strings.SplitN(record, "\n", 2)
+		fieldLine := strings.TrimSpace(lines[0])
+
+		parts := strings.SplitN(fieldLine, "\x1f", 6)
 		if len(parts) < 6 {
 			continue
 		}
 
 		sha := parts[0]
 		parentSHA := parts[1]
-		// Handle multiple parents (merge commits) - just take the first
 		if idx := strings.Index(parentSHA, " "); idx > 0 {
 			parentSHA = parentSHA[:idx]
 		}
@@ -58,8 +64,13 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 			committedAt = time.Now().UTC()
 		}
 
-		// Get stats for this commit
-		filesChanged, insertions, deletions := wt.getCommitStats(ctx, sha)
+		var filesChanged, insertions, deletions int
+		if len(lines) > 1 {
+			statLine := strings.TrimSpace(lines[1])
+			if statLine != "" {
+				filesChanged, insertions, deletions = parseStatSummary(statLine)
+			}
+		}
 
 		commits = append(commits, &types.GitCommitNotification{
 			Timestamp:    time.Now(),
@@ -76,37 +87,4 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 	}
 
 	return commits
-}
-
-// getCommitStats returns the number of files changed, insertions, and deletions for a commit
-func (wt *WorkspaceTracker) getCommitStats(ctx context.Context, sha string) (filesChanged, insertions, deletions int) {
-	cmd := exec.CommandContext(ctx, "git", "show", "--stat", "--format=", sha)
-	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, 0, 0
-	}
-
-	// Parse the last line which contains summary like "3 files changed, 10 insertions(+), 5 deletions(-)"
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 {
-		return 0, 0, 0
-	}
-
-	summary := lines[len(lines)-1]
-	// Simple parsing - look for numbers before keywords
-	parts := strings.Fields(summary)
-	for i, part := range parts {
-		if strings.Contains(part, "file") && i > 0 {
-			_, _ = fmt.Sscanf(parts[i-1], "%d", &filesChanged)
-		}
-		if strings.Contains(part, "insertion") && i > 0 {
-			_, _ = fmt.Sscanf(parts[i-1], "%d", &insertions)
-		}
-		if strings.Contains(part, "deletion") && i > 0 {
-			_, _ = fmt.Sscanf(parts[i-1], "%d", &deletions)
-		}
-	}
-
-	return filesChanged, insertions, deletions
 }

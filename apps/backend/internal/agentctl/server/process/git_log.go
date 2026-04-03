@@ -46,14 +46,18 @@ const (
 
 // GetLog returns commits from baseCommit (exclusive) to HEAD (inclusive).
 // If baseCommit is empty, returns recent commits (limited by limit parameter).
+// Stats (files changed, insertions, deletions) are fetched in-band via --shortstat
+// to avoid an N+1 git-show call per commit.
 func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
 	result := &GitLogResult{
 		Commits: make([]*GitCommitInfo, 0),
 	}
 
-	// Build the git log command with non-printable separators
-	// %x1f = unit separator, %x1e = record separator
-	args := []string{"log", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI%x1e"}
+	// Build the git log command with non-printable separators and --shortstat.
+	// --shortstat appends a summary line after each commit record, so output looks like:
+	//   <fields>\x1e\n <stat summary>\n\n<fields>\x1e\n <stat summary>\n...
+	// We split on recordSep first, then extract the trailing stat line.
+	args := []string{"log", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI%x1e", "--shortstat"}
 
 	switch {
 	case baseCommit != "":
@@ -77,7 +81,8 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		return result, nil
 	}
 
-	// Split by record separator and parse each record
+	// Split by record separator and parse each record.
+	// With --shortstat the record separator is followed by a stat summary line.
 	records := strings.Split(strings.TrimSuffix(output, recordSep), recordSep)
 	for _, record := range records {
 		record = strings.TrimSpace(record)
@@ -85,20 +90,30 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 			continue
 		}
 
-		parts := strings.Split(record, fieldSep)
+		// The record may contain a trailing shortstat line after the commit fields.
+		// Split on newline: first line has the fields, remaining lines may have the stat summary.
+		lines := strings.SplitN(record, "\n", 2)
+		fieldLine := strings.TrimSpace(lines[0])
+
+		parts := strings.Split(fieldLine, fieldSep)
 		if len(parts) < 6 {
 			continue
 		}
 
 		sha := parts[0]
 		parentSHA := parts[1]
-		// Handle multiple parents (merge commits) - just take the first
 		if idx := strings.Index(parentSHA, " "); idx > 0 {
 			parentSHA = parentSHA[:idx]
 		}
 
-		// Get stats for this commit
-		filesChanged, insertions, deletions := g.getCommitStats(ctx, sha)
+		// Parse inline shortstat if present
+		var filesChanged, insertions, deletions int
+		if len(lines) > 1 {
+			statLine := strings.TrimSpace(lines[1])
+			if statLine != "" {
+				filesChanged, insertions, deletions = parseStatSummary(statLine)
+			}
+		}
 
 		result.Commits = append(result.Commits, &GitCommitInfo{
 			CommitSHA:     sha,

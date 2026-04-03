@@ -160,6 +160,11 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 
 	oldState := task.State
 
+	// Skip no-op state transitions to avoid duplicate events.
+	if oldState == state {
+		return task, nil
+	}
+
 	if err := s.tasks.UpdateTaskState(ctx, id, state); err != nil {
 		s.logger.Error("failed to update task state", zap.String("task_id", id), zap.Error(err))
 		return nil, err
