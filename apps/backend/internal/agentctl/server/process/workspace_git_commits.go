@@ -13,12 +13,10 @@ import (
 // getCommitsSince returns commits from baseCommit (exclusive) to HEAD (inclusive).
 // Uses --shortstat to fetch stats in a single git command instead of N+1 git-show calls.
 func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit string) []*types.GitCommitNotification {
-	// Use record/field separators to safely parse and --shortstat for inline stats.
-	// Output format per commit:
-	//   <SHA>\x1f<Parents>\x1f<AuthorName>\x1f<AuthorEmail>\x1f<Subject>\x1f<AuthorDateISO>\x1e
-	//    N files changed, M insertions(+), K deletions(-)
+	// Record separator (\x1e) placed BEFORE fields so --shortstat output stays
+	// within the same record:  \x1e<fields>\n <stat summary>\n\x1e<fields>\n...
 	cmd := exec.CommandContext(ctx, "git", "log",
-		"--format=%H\x1f%P\x1f%an\x1f%ae\x1f%s\x1f%aI\x1e",
+		"--format=\x1e%H\x1f%P\x1f%an\x1f%ae\x1f%s\x1f%aI",
 		"--shortstat",
 		baseCommit+"..HEAD")
 	cmd.Dir = wt.workDir
@@ -35,7 +33,7 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 		return nil
 	}
 
-	records := strings.Split(strings.TrimSuffix(output, "\x1e"), "\x1e")
+	records := strings.Split(output, "\x1e")
 	commits := make([]*types.GitCommitNotification, 0, len(records))
 
 	for _, record := range records {

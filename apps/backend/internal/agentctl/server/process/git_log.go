@@ -54,10 +54,11 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 	}
 
 	// Build the git log command with non-printable separators and --shortstat.
-	// --shortstat appends a summary line after each commit record, so output looks like:
-	//   <fields>\x1e\n <stat summary>\n\n<fields>\x1e\n <stat summary>\n...
-	// We split on recordSep first, then extract the trailing stat line.
-	args := []string{"log", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI%x1e", "--shortstat"}
+	// The record separator (%x1e) is placed BEFORE the fields so that --shortstat
+	// output (appended after the format) stays within the same record:
+	//   \x1e<fields>\n <stat summary>\n\x1e<fields>\n <stat summary>\n...
+	// Splitting on recordSep groups each commit's fields + stats together.
+	args := []string{"log", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI", "--shortstat"}
 
 	switch {
 	case baseCommit != "":
@@ -81,9 +82,8 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		return result, nil
 	}
 
-	// Split by record separator and parse each record.
-	// With --shortstat the record separator is followed by a stat summary line.
-	records := strings.Split(strings.TrimSuffix(output, recordSep), recordSep)
+	// Split by record separator. The first element is empty (separator is at the start).
+	records := strings.Split(output, recordSep)
 	for _, record := range records {
 		record = strings.TrimSpace(record)
 		if record == "" {
