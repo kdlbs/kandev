@@ -1,3 +1,4 @@
+import { useMemo, useState, useEffect } from "react";
 import { IconCheck, IconX, IconClock } from "@tabler/icons-react";
 import type { CheckRun } from "@/lib/types/github";
 import { CollapsibleSection, AddToContextButton, formatDuration, formatElapsed } from "./pr-shared";
@@ -79,6 +80,15 @@ export function ChecksSection({
   checks: CheckRun[];
   onAddAsContext: (message: string) => void;
 }) {
+  const hasRunning = useMemo(() => checks.some((c) => c.started_at && !c.completed_at), [checks]);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasRunning) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1_000);
+    return () => clearInterval(id);
+  }, [hasRunning]);
+
   const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks)}` : "";
   const hasFailed = checks.some(isFailedCheck);
 
@@ -98,6 +108,7 @@ export function ChecksSection({
         return (
           <div
             key={checkKey}
+            data-testid={`check-run-${check.name}`}
             className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30 flex items-center gap-2 text-xs"
           >
             <CheckStatusIcon check={check} />
@@ -115,7 +126,12 @@ export function ChecksSection({
             )}
             {label && <span className="text-[10px] text-muted-foreground shrink-0">{label}</span>}
             {duration && (
-              <span className="text-[10px] text-muted-foreground shrink-0">{duration}</span>
+              <span
+                data-testid={`check-duration-${check.name}`}
+                className="text-[10px] text-muted-foreground shrink-0"
+              >
+                {duration}
+              </span>
             )}
             {isFailedCheck(check) && (
               <div className="ml-auto shrink-0">
