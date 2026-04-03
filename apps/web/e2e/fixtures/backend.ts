@@ -11,7 +11,8 @@ const STANDALONE_SERVER = path.join(WEB_DIR, ".next/standalone/web/server.js");
 const STANDALONE_STATIC_DIR = path.join(WEB_DIR, ".next/standalone/web/.next/static");
 const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
 // Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
-const E2E_PORT_OFFSET = parseInt(process.env.E2E_PORT_OFFSET ?? String(process.pid % 100), 10);
+// Modulo 30 keeps agentctl ports under 65535 (30001 + 30*1000 = 60001 max)
+const E2E_PORT_OFFSET = parseInt(process.env.E2E_PORT_OFFSET ?? String(process.pid % 30), 10);
 const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
 const FRONTEND_BASE_PORT = 13000 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
