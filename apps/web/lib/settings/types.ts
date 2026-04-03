@@ -85,7 +85,7 @@ export type Environment = {
   buildConfig?: EnvironmentBuildConfig;
 };
 
-export type AgentType = "claude-code" | "codex" | "auggie";
+export type AgentType = "claude-acp" | "codex-acp" | "auggie";
 
 export type AgentProfile = {
   id: string;

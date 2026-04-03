@@ -241,7 +241,7 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 		GetAgentFn: func(ctx context.Context, id string) (*models.Agent, error) {
 			return &models.Agent{
 				ID:   "agent-456",
-				Name: "claude-code", // Agent name matches registry key
+				Name: "claude-acp", // Agent name matches registry key
 			}, nil
 		},
 	}
@@ -250,8 +250,8 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	reg := registry.NewRegistry(log)
 	err := reg.Register(&testAgent{
-		id:           "claude-code",
-		name:         "claude-code",
+		id:           "claude-acp",
+		name:         "claude-acp",
 		enabled:      true,
 		defaultModel: "claude-sonnet-4-20250514",
 	})

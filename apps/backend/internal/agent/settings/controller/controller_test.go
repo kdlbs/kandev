@@ -170,9 +170,9 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 
 func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 	agentList := map[string]agents.Agent{
-		"claude-code": &testAgent{
-			id:      "claude-code",
-			name:    "claude-code",
+		"claude-acp": &testAgent{
+			id:      "claude-acp",
+			name:    "claude-acp",
 			enabled: true,
 			runtime: &agents.RuntimeConfig{
 				Cmd:       agents.NewCommand("claude"),
@@ -211,7 +211,7 @@ func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 		CLIPassthrough:     true,
 	}
 
-	result, err := controller.PreviewAgentCommand(context.Background(), "claude-code", req)
+	result, err := controller.PreviewAgentCommand(context.Background(), "claude-acp", req)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
@@ -344,7 +344,7 @@ func TestBuildCommandString(t *testing.T) {
 func TestCommandPreviewResponse_DTO(t *testing.T) {
 	resp := dto.CommandPreviewResponse{
 		Supported:     true,
-		Command:       []string{"npx", "claude-code", "--model", "gpt-4"},
+		Command:       []string{"npx", "claude-acp", "--model", "gpt-4"},
 		CommandString: `npx claude-code --model gpt-4`,
 	}
 

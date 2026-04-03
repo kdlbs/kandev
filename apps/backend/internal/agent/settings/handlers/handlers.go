@@ -449,7 +449,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 }
 
 // httpGetAgentLogo serves agent SVG logos.
-// Note: :id here is the agent name (e.g. "claude-code"), not the UUID used by other /agents/:id routes.
+// Note: :id here is the agent name (e.g. "claude-acp"), not the UUID used by other /agents/:id routes.
 func (h *Handlers) httpGetAgentLogo(c *gin.Context) {
 	agentName := c.Param("id")
 	if agentName == "" {

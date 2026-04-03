@@ -9,7 +9,7 @@ type UtilityAgent struct {
 	Name        string    `json:"name" db:"name"`
 	Description string    `json:"description" db:"description"`
 	Prompt      string    `json:"prompt" db:"prompt"`
-	AgentID     string    `json:"agent_id" db:"agent_id"` // Reference to inference agent (e.g., "claude-code")
+	AgentID     string    `json:"agent_id" db:"agent_id"` // Reference to inference agent (e.g., "claude-acp")
 	Model       string    `json:"model" db:"model"`       // Model to use (e.g., "claude-haiku-4-5")
 	Builtin     bool      `json:"builtin" db:"builtin"`   // Built-in agents cannot be deleted
 	Enabled     bool      `json:"enabled" db:"enabled"`   // Whether agent is enabled

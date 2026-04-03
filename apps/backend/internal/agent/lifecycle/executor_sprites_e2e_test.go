@@ -551,8 +551,8 @@ func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 	})
 
 	t.Run("CodexAuth", func(t *testing.T) {
-		if !hasAgentFileCredential(credIDs, "codex") {
-			t.Skip("codex file auth credential not available on host")
+		if !hasAgentFileCredential(credIDs, "codex-acp") {
+			t.Skip("codex-acp file auth credential not available on host")
 		}
 		res := runSpriteCmd(t, client, localPort, log,
 			"npx -y @openai/codex exec \"hello\" 2>&1", 180*time.Second)

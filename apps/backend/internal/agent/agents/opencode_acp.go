@@ -2,10 +2,20 @@ package agents
 
 import (
 	"context"
+	_ "embed"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/pkg/agent"
 )
+
+//go:embed logos/opencode_light.svg
+var opencodeLogoLight []byte
+
+//go:embed logos/opencode_dark.svg
+var opencodeLogoDark []byte
+
+const opencodePkg = "opencode-ai@1.1.59"
 
 var (
 	_ Agent            = (*OpenCodeACP)(nil)
@@ -55,7 +65,6 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Same detection as SSE variant — both share the same binary
 	install := OSPaths{
 		Linux: []string{"~/.opencode", "~/.config/opencode"},
 		MacOS: []string{"~/.opencode", "~/.config/opencode", "~/Library/Application Support/ai.opencode.desktop"},
@@ -76,7 +85,11 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 func (a *OpenCodeACP) DefaultModel() string { return "opencode/gpt-5-nano" }
 
 func (a *OpenCodeACP) ListModels(ctx context.Context) (*ModelList, error) {
-	return (&OpenCode{}).ListModels(ctx)
+	models, err := execAndParse(ctx, 30*time.Second, opencodeParseModels, "opencode", "models")
+	if err != nil {
+		return &ModelList{Models: opencodeStaticModels(), SupportsDynamic: true}, nil
+	}
+	return &ModelList{Models: models, SupportsDynamic: true}, nil
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
@@ -121,4 +134,55 @@ func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 // InferenceModels returns models available for one-shot inference.
 func (a *OpenCodeACP) InferenceModels() []InferenceModel {
 	return ModelsToInferenceModels(opencodeStaticModels())
+}
+
+var opencodePermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls",
+		ApplyMethod: "env",
+	},
+}
+
+func opencodeStaticModels() []Model {
+	return []Model{
+		{ID: "opencode/gpt-5-nano", Name: "GPT-5 Nano", Description: "OpenAI GPT-5 Nano", Provider: "openai", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "anthropic/claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "anthropic/claude-opus-4-20250514", Name: "Claude Opus 4", Description: "Anthropic Claude Opus 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "openai/gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", ContextWindow: 200000, Source: "static"},
+		{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Description: "Google Gemini 2.5 Pro", Provider: "google", ContextWindow: 2000000, Source: "static"},
+	}
+}
+
+// opencodeParseModels parses "opencode models" output.
+// Format: one model ID per line, optionally in "provider/model" format.
+func opencodeParseModels(output string) ([]Model, error) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	models := make([]Model, 0, len(lines))
+	defaultModel := "opencode/gpt-5-nano"
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var provider, modelID, name string
+		if idx := strings.LastIndex(line, "/"); idx > 0 {
+			provider = line[:idx]
+			modelID = line
+			name = line[idx+1:]
+		} else {
+			modelID = line
+			name = line
+		}
+
+		models = append(models, Model{
+			ID:        modelID,
+			Name:      name,
+			Provider:  provider,
+			IsDefault: modelID == defaultModel,
+			Source:    "dynamic",
+		})
+	}
+	return models, nil
 }

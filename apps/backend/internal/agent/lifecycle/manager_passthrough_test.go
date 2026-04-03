@@ -93,7 +93,7 @@ func TestBuildPassthroughCommand(t *testing.T) {
 		{
 			name: "full resume with model + settings + resume flag",
 			agent: &testAgent{
-				id: "claude-code",
+				id: "claude-acp",
 				StandardPassthrough: agents.StandardPassthrough{
 					Cfg: agents.PassthroughConfig{
 						Supported:      true,

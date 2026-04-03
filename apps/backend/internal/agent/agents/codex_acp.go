@@ -145,3 +145,20 @@ func (a *CodexACP) InferenceConfig() *InferenceConfig {
 func (a *CodexACP) InferenceModels() []InferenceModel {
 	return ModelsToInferenceModels(codexStaticModels())
 }
+
+var codexPermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Skip approval requests from Codex",
+		ApplyMethod: "acp", CLIFlag: "--full-auto",
+	},
+}
+
+func codexStaticModels() []Model {
+	return []Model{
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", Description: "Most capable agentic coding model to date", Provider: "openai", ContextWindow: 400000, IsDefault: true, Source: "static"},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Frontier agentic coding model", Provider: "openai", ContextWindow: 200000, Source: "static"},
+		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", Description: "Codex-optimized flagship for deep and fast reasoning", Provider: "openai", ContextWindow: 200000, Source: "static"},
+		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Description: "Optimized for codex. Cheaper, faster, but less capable", Provider: "openai", ContextWindow: 200000, Source: "static"},
+		{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Latest frontier model with improvements across knowledge, reasoning and coding", Provider: "openai", ContextWindow: 200000, Source: "static"},
+	}
+}

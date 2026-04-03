@@ -46,16 +46,11 @@ func NewRegistry(log *logger.Logger) *Registry {
 func (r *Registry) LoadDefaults() {
 	all := []agents.Agent{
 		agents.NewAuggie(),
-		agents.NewClaudeCode(),
 		agents.NewClaudeACP(),
-		agents.NewCodex(),
 		agents.NewCodexACP(),
-		agents.NewCopilot(),
 		agents.NewCopilotACP(),
 		agents.NewGemini(),
-		agents.NewOpenCode(),
 		agents.NewOpenCodeACP(),
-		agents.NewAmp(),
 		agents.NewAmpACP(),
 		agents.NewMockAgent(),
 	}
