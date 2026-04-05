@@ -24,7 +24,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { truncateRepoPath } from "@/lib/utils";
+import { cn, truncateRepoPath } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 
 const SECTION_ICONS: Record<
@@ -270,10 +270,7 @@ function TaskItemWithContextMenu({
                     disabled={step.id === task.workflowStepId}
                     onClick={() => onMoveToStep(task.id, task.workflowId!, step.id)}
                   >
-                    <span
-                      className="block h-2 w-2 rounded-full shrink-0"
-                      style={stepDotStyle(step.color)}
-                    />
+                    <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color)} />
                     <span className="flex-1 truncate">{step.title}</span>
                     {step.id === task.workflowStepId && (
                       <span className="ml-auto text-[10px] text-muted-foreground">Current</span>
@@ -312,10 +309,6 @@ function cloneWithMenuOpen(
 ): React.ReactNode {
   if (isValidElement(children)) return cloneElement(children, { menuOpen });
   return children;
-}
-
-function stepDotStyle(color?: string): React.CSSProperties {
-  return { backgroundColor: color || "hsl(var(--muted-foreground))" };
 }
 
 export const TaskSwitcher = memo(function TaskSwitcher({
