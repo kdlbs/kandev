@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { cloneElement, isValidElement, memo, useMemo, useState } from "react";
 import type { ComponentType } from "react";
 import {
   IconCircleCheck,
@@ -8,6 +8,7 @@ import {
   IconProgress,
   IconArrowRight,
   IconPencil,
+  IconCopy,
   IconArchive,
   IconTrash,
   IconLoader,
@@ -21,7 +22,6 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-  ContextMenuShortcut,
 } from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { truncateRepoPath } from "@/lib/utils";
@@ -202,9 +202,6 @@ function TaskSwitcherSection({
               updatedAt={task.updatedAt}
               parentTaskTitle={task.parentTaskTitle}
               onClick={() => onSelectTask(task.id)}
-              onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
-              onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
-              onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
               isDeleting={deletingTaskId === task.id}
             />
           </TaskItemWithContextMenu>
@@ -226,17 +223,20 @@ function TaskItemWithContextMenu({
 }: {
   task: TaskSwitcherItem;
   steps?: StepDef[];
-  children: React.ReactNode;
+  children: React.ReactElement<{ menuOpen?: boolean }>;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   isDeleting?: boolean;
 }) {
+  const [contextOpen, setContextOpen] = useState(false);
+  const menuOpen = contextOpen || isDeleting === true;
+
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setContextOpen}>
       <ContextMenuTrigger asChild>
-        <div>{children}</div>
+        <div>{cloneWithMenuOpen(children, menuOpen)}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         {onRenameTask && (
@@ -245,6 +245,10 @@ function TaskItemWithContextMenu({
             Rename
           </ContextMenuItem>
         )}
+        <ContextMenuItem disabled={isDeleting}>
+          <IconCopy className="mr-2 h-4 w-4" />
+          Duplicate
+        </ContextMenuItem>
         {onArchiveTask && (
           <ContextMenuItem disabled={isDeleting} onClick={() => onArchiveTask(task.id)}>
             <IconArchive className="mr-2 h-4 w-4" />
@@ -260,23 +264,22 @@ function TaskItemWithContextMenu({
                 Move to
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-44">
-                {steps.map((step) => {
-                  const isCurrent = step.id === task.workflowStepId;
-                  return (
-                    <ContextMenuItem
-                      key={step.id}
-                      disabled={isCurrent}
-                      onClick={() => onMoveToStep(task.id, task.workflowId!, step.id)}
-                    >
-                      <span
-                        className="mr-2 h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: step.color || "var(--muted-foreground)" }}
-                      />
-                      {step.title}
-                      {isCurrent && <ContextMenuShortcut>Current</ContextMenuShortcut>}
-                    </ContextMenuItem>
-                  );
-                })}
+                {steps.map((step) => (
+                  <ContextMenuItem
+                    key={step.id}
+                    disabled={step.id === task.workflowStepId}
+                    onClick={() => onMoveToStep(task.id, task.workflowId!, step.id)}
+                  >
+                    <span
+                      className="block h-2 w-2 rounded-full shrink-0"
+                      style={stepDotStyle(step.color)}
+                    />
+                    <span className="flex-1 truncate">{step.title}</span>
+                    {step.id === task.workflowStepId && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">Current</span>
+                    )}
+                  </ContextMenuItem>
+                ))}
               </ContextMenuSubContent>
             </ContextMenuSub>
           </>
@@ -301,6 +304,18 @@ function TaskItemWithContextMenu({
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+function cloneWithMenuOpen(
+  children: React.ReactElement<{ menuOpen?: boolean }>,
+  menuOpen: boolean,
+): React.ReactNode {
+  if (isValidElement(children)) return cloneElement(children, { menuOpen });
+  return children;
+}
+
+function stepDotStyle(color?: string): React.CSSProperties {
+  return { backgroundColor: color || "hsl(var(--muted-foreground))" };
 }
 
 export const TaskSwitcher = memo(function TaskSwitcher({
