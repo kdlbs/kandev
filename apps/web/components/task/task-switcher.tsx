@@ -268,7 +268,9 @@ function TaskItemWithContextMenu({
                   <ContextMenuItem
                     key={step.id}
                     disabled={step.id === task.workflowStepId}
-                    onClick={() => onMoveToStep(task.id, task.workflowId!, step.id)}
+                    onClick={() =>
+                      requestAnimationFrame(() => onMoveToStep(task.id, task.workflowId!, step.id))
+                    }
                   >
                     <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color)} />
                     <span className="flex-1 truncate">{step.title}</span>
