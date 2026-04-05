@@ -61,9 +61,9 @@ export function FileRow({
   const { folder, file: name } = splitPath(file.path);
 
   const handleClick = (e: React.MouseEvent) => {
+    if (e.button === 2) return;
     if (onSelect) {
       onSelect(file.path, e);
-      // On plain click (no modifier), also open diff
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
         onOpenDiff(file.path);
       }
@@ -79,7 +79,7 @@ export function FileRow({
       data-selected={isSelected ? "true" : "false"}
       className={cn(
         "group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 cursor-pointer",
-        isSelected ? "bg-accent/60" : "hover:bg-muted/60",
+        isSelected ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
       )}
       onClick={handleClick}
     >

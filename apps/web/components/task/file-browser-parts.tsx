@@ -150,10 +150,11 @@ function getTreeNodeRowClass(
 ) {
   return cn(
     "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
-    "hover:bg-muted",
+    isSelected
+      ? "bg-accent text-accent-foreground hover:bg-accent/80 [&_span]:text-accent-foreground"
+      : "hover:bg-muted",
     isActive && !isSelected && "bg-muted",
     isActiveFolder && !isSelected && "bg-muted/50",
-    isSelected && "bg-accent",
     isDragging && isSelected && "opacity-50",
     isDropTarget && "bg-accent/40 ring-1 ring-accent",
   );
@@ -246,6 +247,8 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
   const rename = useFileRename(node, tree, setTree, onRenameFile);
 
   const handleClick = (e: React.MouseEvent) => {
+    // Ignore right-clicks — let the context menu handle those
+    if (e.button === 2) return;
     if (props.onSelect) {
       props.onSelect(node.path, e);
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
