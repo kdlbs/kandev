@@ -245,7 +245,7 @@ function TaskItemWithContextMenu({
             Rename
           </ContextMenuItem>
         )}
-        <ContextMenuItem disabled={isDeleting}>
+        <ContextMenuItem disabled>
           <IconCopy className="mr-2 h-4 w-4" />
           Duplicate
         </ContextMenuItem>
