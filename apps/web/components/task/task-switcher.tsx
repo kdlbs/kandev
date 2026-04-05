@@ -235,7 +235,9 @@ function TaskItemWithContextMenu({
 }) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild>
+        <div>{children}</div>
+      </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         {onRenameTask && (
           <ContextMenuItem disabled={isDeleting} onClick={() => onRenameTask(task.id, task.title)}>
