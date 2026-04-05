@@ -231,10 +231,11 @@ function TaskItemWithContextMenu({
   isDeleting?: boolean;
 }) {
   const [contextOpen, setContextOpen] = useState(false);
+  const [menuKey, setMenuKey] = useState(0);
   const menuOpen = contextOpen || isDeleting === true;
 
   return (
-    <ContextMenu onOpenChange={setContextOpen}>
+    <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
       <ContextMenuTrigger asChild>
         <div>{cloneWithMenuOpen(children, menuOpen)}</div>
       </ContextMenuTrigger>
@@ -256,32 +257,16 @@ function TaskItemWithContextMenu({
           </ContextMenuItem>
         )}
         {onMoveToStep && task.workflowId && steps && steps.length > 0 && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuSub>
-              <ContextMenuSubTrigger disabled={isDeleting}>
-                <IconArrowRight className="mr-2 h-4 w-4" />
-                Move to
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-44">
-                {steps.map((step) => (
-                  <ContextMenuItem
-                    key={step.id}
-                    disabled={step.id === task.workflowStepId}
-                    onClick={() =>
-                      requestAnimationFrame(() => onMoveToStep(task.id, task.workflowId!, step.id))
-                    }
-                  >
-                    <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color)} />
-                    <span className="flex-1 truncate">{step.title}</span>
-                    {step.id === task.workflowStepId && (
-                      <span className="ml-auto text-[10px] text-muted-foreground">Current</span>
-                    )}
-                  </ContextMenuItem>
-                ))}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-          </>
+          <MoveToStepSubmenu
+            steps={steps}
+            currentStepId={task.workflowStepId}
+            disabled={isDeleting}
+            onSelect={(stepId) => {
+              setContextOpen(false);
+              setMenuKey((k) => k + 1);
+              onMoveToStep(task.id, task.workflowId!, stepId);
+            }}
+          />
         )}
         {onDeleteTask && (
           <>
@@ -302,6 +287,48 @@ function TaskItemWithContextMenu({
         )}
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+function MoveToStepSubmenu({
+  steps,
+  currentStepId,
+  disabled,
+  onSelect,
+}: {
+  steps: StepDef[];
+  currentStepId?: string;
+  disabled?: boolean;
+  onSelect: (stepId: string) => void;
+}) {
+  return (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={disabled}>
+          <IconArrowRight className="mr-2 h-4 w-4" />
+          Move to
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-44">
+          {steps.map((step) => (
+            <ContextMenuItem
+              key={step.id}
+              disabled={step.id === currentStepId}
+              onSelect={(e) => {
+                e.preventDefault();
+                onSelect(step.id);
+              }}
+            >
+              <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color)} />
+              <span className="flex-1 truncate">{step.title}</span>
+              {step.id === currentStepId && (
+                <span className="ml-auto text-[10px] text-muted-foreground">Current</span>
+              )}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    </>
   );
 }
 
