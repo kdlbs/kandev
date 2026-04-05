@@ -1,11 +1,10 @@
 "use client";
 
-import { memo, useState } from "react";
-import { IconLoader2, IconSubtask } from "@tabler/icons-react";
+import { memo } from "react";
+import { IconDots, IconLoader2, IconSubtask } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { TaskItemMenu } from "./task-item-menu";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 
 type DiffStats = {
@@ -27,11 +26,7 @@ type TaskItemProps = {
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
-  onRename?: () => void;
-  onDuplicate?: () => void;
-  onReview?: () => void;
-  onArchive?: () => void;
-  onDelete?: () => void;
+  menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
   primarySessionId?: string | null;
@@ -153,18 +148,12 @@ export const TaskItem = memo(function TaskItem({
   remoteExecutorType,
   remoteExecutorName,
   updatedAt,
-  onRename,
-  onDuplicate,
-  onReview,
-  onArchive,
-  onDelete,
+  menuOpen = false,
   isDeleting,
   taskId,
   primarySessionId,
   parentTaskTitle,
 }: TaskItemProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress =
     state === "IN_PROGRESS" ||
@@ -202,7 +191,7 @@ export const TaskItem = memo(function TaskItem({
         parentTaskTitle={parentTaskTitle}
       />
 
-      {/* Right side: step name + meta, or action buttons on hover */}
+      {/* Right side: step name + meta, or 3-dot button on hover */}
       <div className="relative flex items-center shrink-0">
         <TaskItemMeta
           effectiveMenuOpen={effectiveMenuOpen}
@@ -218,31 +207,46 @@ export const TaskItem = memo(function TaskItem({
           updatedAt={updatedAt}
         />
 
-        <div
-          className={cn(
-            "absolute right-0 flex items-center gap-0.5",
-            "transition-opacity duration-100",
-            effectiveMenuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <TaskItemMenu
-            open={effectiveMenuOpen}
-            onOpenChange={(open) => {
-              if (!open && isDeleting) return;
-              setMenuOpen(open);
-            }}
-            onRename={onRename}
-            onDuplicate={onDuplicate}
-            onReview={onReview}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            isDeleting={isDeleting}
-          />
-        </div>
+        <TaskMenuButton visible={effectiveMenuOpen} />
       </div>
     </div>
   );
 });
+
+/** 3-dot button that triggers the wrapping ContextMenu */
+function TaskMenuButton({ visible }: { visible: boolean }) {
+  return (
+    <div
+      className={cn(
+        "absolute right-0 flex items-center gap-0.5 transition-opacity duration-100",
+        visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+      )}
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex h-6 w-6 items-center justify-center rounded-md cursor-pointer",
+          "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          e.currentTarget.dispatchEvent(
+            new MouseEvent("contextmenu", {
+              bubbles: true,
+              clientX: e.clientX,
+              clientY: e.clientY,
+            }),
+          );
+        }}
+        aria-label="Task actions"
+      >
+        <IconDots className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 /** Step badge or "Archived" badge */
 function TaskItemStepBadge({ isArchived, stepName }: { isArchived?: boolean; stepName?: string }) {
