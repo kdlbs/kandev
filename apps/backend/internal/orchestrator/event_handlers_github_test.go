@@ -54,6 +54,11 @@ func (m *mockGitHubService) UpdatePRWatchBranch(_ context.Context, _, branch str
 	m.updatedBranch = branch
 	return nil
 }
+func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _, branch string) error {
+	m.updateBranchCalls++
+	m.updatedBranch = branch
+	return nil
+}
 func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
 	m.updatePRNumberCalls++
 	m.updatedPRNumber = prNumber

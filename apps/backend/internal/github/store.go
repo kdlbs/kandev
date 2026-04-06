@@ -187,6 +187,15 @@ func (s *Store) UpdatePRWatchBranch(ctx context.Context, id, branch string) erro
 	return err
 }
 
+// UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
+// preventing races with concurrent PR association.
+func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
+		branch, time.Now().UTC(), id)
+	return err
+}
+
 // --- TaskPR operations ---
 
 // CreateTaskPR associates a PR with a task.

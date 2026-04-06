@@ -213,6 +213,11 @@ func (s *Service) UpdatePRWatchBranch(ctx context.Context, id, branch string) er
 	return s.store.UpdatePRWatchBranch(ctx, id, branch)
 }
 
+// UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
+func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
+	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
+}
+
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
 func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)

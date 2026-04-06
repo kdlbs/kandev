@@ -25,6 +25,7 @@ type GitHubService interface {
 	EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, repo, branch string) (*github.PRWatch, error)
 	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
 	UpdatePRWatchBranch(ctx context.Context, id, branch string) error
+	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
@@ -323,9 +324,18 @@ func (s *Service) detectPushAndAssociatePR(
 				zap.Duration("delay", delay))
 			continue
 		}
+		s.logger.Info("PR found after push, associating with task",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Int("pr_number", foundPR.Number),
+			zap.String("branch", branch))
 		s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
 		return
 	}
+	s.logger.Warn("exhausted all retries, no PR found after push",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("branch", branch))
 }
 
 // searchPRForExistingWatch handles the case where a PR watch exists with pr_number=0
@@ -336,8 +346,9 @@ func (s *Service) searchPRForExistingWatch(
 	sessionID, taskID, branch string,
 ) {
 	// Update branch if the agent switched branches since the watch was created.
+	// Use the atomic variant to guard against a concurrent PR association.
 	if watch.Branch != branch {
-		if err := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, branch); err != nil {
+		if err := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, branch); err != nil {
 			s.logger.Warn("failed to update PR watch branch",
 				zap.String("watch_id", watch.ID),
 				zap.String("old_branch", watch.Branch),
@@ -569,6 +580,12 @@ func (s *Service) ListTasksNeedingPRWatch(ctx context.Context) ([]github.TaskBra
 		return nil, nil
 	}
 	return s.buildTaskBranchList(ctx, store)
+}
+
+// ResolveBranchForSession returns the current branch for a task+session.
+// This is used by the poller to detect branch renames on existing PR watches.
+func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string {
+	return s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
 }
 
 // buildTaskBranchList queries sessions with branches, filters out those with

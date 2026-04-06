@@ -12,32 +12,19 @@ import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { cn } from "@kandev/ui/lib/utils";
 
-/** Auto-activate the changes panel in the right sidebar, or quietly add to center if missing. */
+/** Auto-activate the changes panel only when it lives in the right sidebar. */
 function autoActivateChangesPanel(): void {
-  const { api, rightTopGroupId, centerGroupId } = useDockviewStore.getState();
+  const { api, rightTopGroupId } = useDockviewStore.getState();
   if (!api) return;
 
   const panel = api.getPanel("changes");
+  // Only auto-focus when the panel is in the right sidebar.
+  // When it's in the center group (e.g. plan mode layout), never steal focus
+  // from the active chat/session panel.
   if (panel && panel.group.id === rightTopGroupId) {
     panel.api.setActive();
-    return;
-  }
-
-  if (!panel) {
-    focusOrAddPanel(
-      api,
-      {
-        id: "changes",
-        component: "changes",
-        tabComponent: "changesTab",
-        title: "Changes",
-        position: { referenceGroup: centerGroupId },
-      },
-      true,
-    );
   }
 }
 
@@ -55,9 +42,16 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
+  // gitStatus is undefined until the first WS git-status event arrives,
+  // which marks the end of the initial data load for this session.
+  const gitStatusLoaded = gitStatus !== undefined;
+
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Armed once we know the initial git data has settled. Until then, any
+  // 0→N transition is treated as an initial load, not a real new change.
+  const initializedRef = useRef(false);
 
   const [isFlashing, setIsFlashing] = useState(false);
   const [badgeCount, setBadgeCount] = useState(0);
@@ -85,7 +79,13 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     const increased = totalCount > prev && totalCount > 0;
     const decreased = totalCount < prev;
 
-    if (increased && prev === 0) {
+    // Auto-activate when changes appear for the first time (0 → N), but only
+    // after initial git data has settled.  gitStatusLoaded is false until the
+    // first WS git-status event arrives, guaranteeing data has loaded before we
+    // arm auto-activate (handles both page-refresh and clean-session cases).
+    if (!initializedRef.current) {
+      if (gitStatusLoaded) initializedRef.current = true;
+    } else if (increased && prev === 0) {
       autoActivateChangesPanel();
     }
 
@@ -100,7 +100,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       const unseen = Math.max(0, totalCount - seenCountRef.current);
       requestAnimationFrame(() => setBadgeCount(unseen));
     }
-  }, [totalCount, api]);
+  }, [totalCount, api, gitStatusLoaded]);
 
   // Cleanup flash timer on unmount
   useEffect(() => {

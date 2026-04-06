@@ -62,6 +62,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
 
+	// Update PR watch branch if the user changed branches (e.g. renamed)
+	s.syncPRWatchBranch(ctx, data.SessionID, data.Status.Branch)
+
 	// Push detection: when ahead goes from >0 to 0, a push happened
 	s.trackPushAndAssociatePR(ctx, data)
 }
@@ -79,12 +82,46 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 	}
 	// Push detected: ahead went from >0 to 0
 	if data.Status.Ahead == 0 && data.Status.RemoteBranch != "" {
+		s.logger.Info("git push detected, starting PR association",
+			zap.String("session_id", data.SessionID),
+			zap.String("task_id", data.TaskID),
+			zap.String("branch", data.Status.Branch))
 		go s.detectPushAndAssociatePR(
 			context.Background(),
 			data.SessionID,
 			data.TaskID,
 			data.Status.Branch,
 		)
+	}
+}
+
+// syncPRWatchBranch updates the PR watch branch if the live git branch
+// differs from what's stored (e.g. user renamed the branch).
+// Only updates watches that haven't found a PR yet (pr_number=0).
+func (s *Service) syncPRWatchBranch(ctx context.Context, sessionID, liveBranch string) {
+	if s.githubService == nil || liveBranch == "" {
+		return
+	}
+	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get PR watch for branch sync",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if watch == nil || watch.PRNumber != 0 {
+		return
+	}
+	if watch.Branch == liveBranch {
+		return
+	}
+	s.logger.Info("PR watch branch changed, updating from git status",
+		zap.String("session_id", sessionID),
+		zap.String("old_branch", watch.Branch),
+		zap.String("new_branch", liveBranch))
+	if updateErr := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, liveBranch); updateErr != nil {
+		s.logger.Error("failed to update PR watch branch",
+			zap.String("session_id", sessionID), zap.Error(updateErr))
 	}
 }
 

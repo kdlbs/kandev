@@ -199,12 +199,20 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 
 // mockTaskBranchProvider implements TaskBranchProvider for testing.
 type mockTaskBranchProvider struct {
-	tasks []TaskBranchInfo
-	err   error
+	tasks    []TaskBranchInfo
+	err      error
+	branches map[string]string // sessionID -> branch
 }
 
 func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]TaskBranchInfo, error) {
 	return m.tasks, m.err
+}
+
+func (m *mockTaskBranchProvider) ResolveBranchForSession(_ context.Context, _, sessionID string) string {
+	if m.branches != nil {
+		return m.branches[sessionID]
+	}
+	return ""
 }
 
 func TestReconcileWatches_CreatesWatchesForTasks(t *testing.T) {
@@ -357,5 +365,139 @@ func TestCheckSinglePRWatch_OpenPR_NoChange_NoSync(t *testing.T) {
 	}
 	if remainingWatch == nil {
 		t.Error("expected PR watch to still exist")
+	}
+}
+
+func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Create a watch with pr_number=0 on old branch.
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "myorg",
+		Repo:      "myrepo",
+		PRNumber:  0,
+		Branch:    "old-branch",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	// Provider resolves a different branch for this session.
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{
+			"s1": "new-branch",
+		},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	// Verify the watch branch was updated.
+	updated, err := store.GetPRWatchBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated == nil {
+		t.Fatal("expected PR watch to exist")
+	}
+	if updated.Branch != "new-branch" {
+		t.Errorf("expected branch %q, got %q", "new-branch", updated.Branch)
+	}
+}
+
+func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "myorg",
+		Repo:      "myrepo",
+		PRNumber:  0,
+		Branch:    "same-branch",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{
+			"s1": "same-branch",
+		},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	updated, _ := store.GetPRWatchBySession(ctx, "s1")
+	if updated.Branch != "same-branch" {
+		t.Errorf("expected branch unchanged, got %q", updated.Branch)
+	}
+}
+
+func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Watch that already found a PR (pr_number > 0).
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "myorg",
+		Repo:      "myrepo",
+		PRNumber:  42,
+		Branch:    "old-branch",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{
+			"s1": "new-branch",
+		},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	// Branch should NOT be updated because PR was already found.
+	updated, _ := store.GetPRWatchBySession(ctx, "s1")
+	if updated.Branch != "old-branch" {
+		t.Errorf("expected branch unchanged for PR watch, got %q", updated.Branch)
+	}
+}
+
+func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "myorg",
+		Repo:      "myrepo",
+		PRNumber:  0,
+		Branch:    "old-branch",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	// Provider returns empty string (can't resolve).
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	updated, _ := store.GetPRWatchBySession(ctx, "s1")
+	if updated.Branch != "old-branch" {
+		t.Errorf("expected branch unchanged when resolver returns empty, got %q", updated.Branch)
 	}
 }
