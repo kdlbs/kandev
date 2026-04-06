@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 
 type DiffStats = {
   additions: number;
@@ -182,7 +183,7 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5 group-hover:pr-5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <span className="truncate">{title}</span>
+        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
