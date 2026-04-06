@@ -26,9 +26,12 @@ type TaskBranchInfo struct {
 	Branch    string
 }
 
-// TaskBranchProvider lists tasks that should have PR watches.
+// TaskBranchProvider lists tasks that should have PR watches and resolves branches.
 type TaskBranchProvider interface {
 	ListTasksNeedingPRWatch(ctx context.Context) ([]TaskBranchInfo, error)
+	// ResolveBranchForSession returns the current branch for a task+session pair.
+	// Used to detect branch renames and update stale PR watches.
+	ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string
 }
 
 // Poller runs background loops for PR monitoring and review queue checking.
@@ -231,11 +234,17 @@ func (p *Poller) SetTaskBranchProvider(provider TaskBranchProvider) {
 	p.taskBranchProvider = provider
 }
 
-// reconcileWatches ensures PR watches exist for all tasks that need them.
+// reconcileWatches ensures PR watches exist for all tasks that need them,
+// and refreshes stale branches on existing watches that haven't found a PR yet.
 func (p *Poller) reconcileWatches(ctx context.Context) {
 	if p.taskBranchProvider == nil {
 		return
 	}
+
+	// 1. Refresh branches on existing pr_number=0 watches (branch may have changed).
+	p.refreshStaleBranches(ctx)
+
+	// 2. Create new watches for sessions that don't have one.
 	tasks, err := p.taskBranchProvider.ListTasksNeedingPRWatch(ctx)
 	if err != nil {
 		p.logger.Error("failed to list tasks needing PR watch", zap.Error(err))
@@ -247,6 +256,35 @@ func (p *Poller) reconcileWatches(ctx context.Context) {
 		); ensureErr != nil {
 			p.logger.Error("failed to ensure PR watch",
 				zap.String("session_id", task.SessionID), zap.Error(ensureErr))
+		}
+	}
+}
+
+// refreshStaleBranches re-resolves branches for watches that haven't found a PR yet.
+// If the user renamed/changed the branch, the watch is updated so the next poll
+// searches on the correct branch.
+func (p *Poller) refreshStaleBranches(ctx context.Context) {
+	watches, err := p.service.ListActivePRWatches(ctx)
+	if err != nil {
+		return
+	}
+	for _, watch := range watches {
+		if watch.PRNumber != 0 {
+			continue // already found a PR, branch is correct
+		}
+		currentBranch := p.taskBranchProvider.ResolveBranchForSession(
+			ctx, watch.TaskID, watch.SessionID,
+		)
+		if currentBranch == "" || currentBranch == watch.Branch {
+			continue
+		}
+		p.logger.Info("PR watch branch changed, updating",
+			zap.String("session_id", watch.SessionID),
+			zap.String("old_branch", watch.Branch),
+			zap.String("new_branch", currentBranch))
+		if updateErr := p.service.UpdatePRWatchBranch(ctx, watch.ID, currentBranch); updateErr != nil {
+			p.logger.Error("failed to update PR watch branch",
+				zap.String("watch_id", watch.ID), zap.Error(updateErr))
 		}
 	}
 }

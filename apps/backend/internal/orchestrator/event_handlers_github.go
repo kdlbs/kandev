@@ -323,9 +323,18 @@ func (s *Service) detectPushAndAssociatePR(
 				zap.Duration("delay", delay))
 			continue
 		}
+		s.logger.Info("PR found after push, associating with task",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Int("pr_number", foundPR.Number),
+			zap.String("branch", branch))
 		s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
 		return
 	}
+	s.logger.Warn("exhausted all retries, no PR found after push",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("branch", branch))
 }
 
 // searchPRForExistingWatch handles the case where a PR watch exists with pr_number=0
@@ -569,6 +578,12 @@ func (s *Service) ListTasksNeedingPRWatch(ctx context.Context) ([]github.TaskBra
 		return nil, nil
 	}
 	return s.buildTaskBranchList(ctx, store)
+}
+
+// ResolveBranchForSession returns the current branch for a task+session.
+// This is used by the poller to detect branch renames on existing PR watches.
+func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string {
+	return s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
 }
 
 // buildTaskBranchList queries sessions with branches, filters out those with

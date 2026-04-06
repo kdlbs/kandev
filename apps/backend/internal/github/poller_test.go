@@ -199,12 +199,20 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 
 // mockTaskBranchProvider implements TaskBranchProvider for testing.
 type mockTaskBranchProvider struct {
-	tasks []TaskBranchInfo
-	err   error
+	tasks    []TaskBranchInfo
+	err      error
+	branches map[string]string // sessionID -> branch
 }
 
 func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]TaskBranchInfo, error) {
 	return m.tasks, m.err
+}
+
+func (m *mockTaskBranchProvider) ResolveBranchForSession(_ context.Context, _, sessionID string) string {
+	if m.branches != nil {
+		return m.branches[sessionID]
+	}
+	return ""
 }
 
 func TestReconcileWatches_CreatesWatchesForTasks(t *testing.T) {
