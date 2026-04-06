@@ -72,52 +72,53 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				continue
 			}
 
-			// Quick state check using mtime + diff-files
-			currentState, err := wt.getWorkspaceState(ctx)
-			if err != nil {
-				// Check if the work directory has been deleted (e.g., worktree removed
-				// after task was archived or PR branch was deleted). If so, stop the
-				// tracker to avoid spamming warnings every poll cycle.
-				if !wt.workDirExists() {
-					atomic.StoreInt32(&wt.monitorRunning, 0)
-					wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
-						zap.String("workDir", wt.workDir))
-					return
-				}
-
-				// Git command failed for another reason - skip this cycle and retry on next tick.
-				// Don't update lastState so the change will be detected when git recovers.
-				consecutiveFailures++
-				atomic.StoreInt32(&wt.monitorRunning, 0)
-				if consecutiveFailures >= maxConsecutiveGitFailures {
-					wt.logger.Error("git commands failing repeatedly, stopping workspace monitor",
-						zap.String("workDir", wt.workDir),
-						zap.Int("consecutiveFailures", consecutiveFailures),
-						zap.Error(err))
-					return
-				}
-				wt.logger.Warn("failed to get workspace state, will retry next cycle",
-					zap.String("workDir", wt.workDir),
-					zap.Int("consecutiveFailures", consecutiveFailures),
-					zap.Error(err))
-				continue
-			}
-			consecutiveFailures = 0
-			if currentState.changed(lastState) {
-				lastState = currentState
-				wt.logger.Debug("workspace state changed, updating")
-
-				// Update git status (includes diff data) and file list, then notify subscribers
-				wt.tryUpdateGitStatus(ctx)
-				wt.updateFiles(ctx)
-				wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
-					Timestamp: time.Now(),
-					Operation: types.FileOpRefresh,
-				})
-			}
+			stop := wt.monitorTick(ctx, &lastState, &consecutiveFailures)
 			atomic.StoreInt32(&wt.monitorRunning, 0)
+			if stop {
+				return
+			}
 		}
 	}
+}
+
+// monitorTick runs a single monitor cycle: checks workspace state and triggers
+// updates if changes are detected. Returns true if the loop should stop.
+func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
+	currentState, err := wt.getWorkspaceState(ctx)
+	if err != nil {
+		if !wt.workDirExists() {
+			wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
+				zap.String("workDir", wt.workDir))
+			return true
+		}
+
+		*consecutiveFailures++
+		if *consecutiveFailures >= maxConsecutiveGitFailures {
+			wt.logger.Error("git commands failing repeatedly, stopping workspace monitor",
+				zap.String("workDir", wt.workDir),
+				zap.Int("consecutiveFailures", *consecutiveFailures),
+				zap.Error(err))
+			return true
+		}
+		wt.logger.Warn("failed to get workspace state, will retry next cycle",
+			zap.String("workDir", wt.workDir),
+			zap.Int("consecutiveFailures", *consecutiveFailures),
+			zap.Error(err))
+		return false
+	}
+	*consecutiveFailures = 0
+	if currentState.changed(*lastState) {
+		*lastState = currentState
+		wt.logger.Debug("workspace state changed, updating")
+
+		wt.tryUpdateGitStatus(ctx)
+		wt.updateFiles(ctx)
+		wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
+			Timestamp: time.Now(),
+			Operation: types.FileOpRefresh,
+		})
+	}
+	return false
 }
 
 // workspaceState holds quick-check state for detecting workspace changes.

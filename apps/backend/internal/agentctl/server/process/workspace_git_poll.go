@@ -56,37 +56,44 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 				continue
 			}
 
-			// Stop polling if the work directory was deleted (worktree removed)
-			if !wt.workDirExists() {
-				atomic.StoreInt32(&wt.gitPollRunning, 0)
-				wt.logger.Warn("work directory no longer exists, stopping git polling",
-					zap.String("workDir", wt.workDir))
+			stop := wt.gitPollTick(ctx, &consecutiveFailures)
+			atomic.StoreInt32(&wt.gitPollRunning, 0)
+			if stop {
 				return
 			}
-
-			// Quick git health check before running full change detection.
-			// If git is broken (e.g., worktree .git reference points to deleted gitdir),
-			// stop after maxConsecutiveGitFailures to avoid wasting CPU.
-			probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-			probeCmd.Dir = wt.workDir
-			if err := probeCmd.Run(); err != nil {
-				consecutiveFailures++
-				atomic.StoreInt32(&wt.gitPollRunning, 0)
-				if consecutiveFailures >= maxConsecutiveGitFailures {
-					wt.logger.Error("git not functional, stopping git polling",
-						zap.String("workDir", wt.workDir),
-						zap.Int("consecutiveFailures", consecutiveFailures),
-						zap.Error(err))
-					return
-				}
-				continue
-			}
-			consecutiveFailures = 0
-
-			wt.checkGitChanges(ctx)
-			atomic.StoreInt32(&wt.gitPollRunning, 0)
 		}
 	}
+}
+
+// gitPollTick runs a single git poll cycle: checks for manual git operations
+// (commits, branch switches, staging). Returns true if the loop should stop.
+func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures *int) bool {
+	if !wt.workDirExists() {
+		wt.logger.Warn("work directory no longer exists, stopping git polling",
+			zap.String("workDir", wt.workDir))
+		return true
+	}
+
+	// Quick git health check before running full change detection.
+	// If git is broken (e.g., worktree .git reference points to deleted gitdir),
+	// stop after maxConsecutiveGitFailures to avoid wasting CPU.
+	probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+	probeCmd.Dir = wt.workDir
+	if err := probeCmd.Run(); err != nil {
+		*consecutiveFailures++
+		if *consecutiveFailures >= maxConsecutiveGitFailures {
+			wt.logger.Error("git not functional, stopping git polling",
+				zap.String("workDir", wt.workDir),
+				zap.Int("consecutiveFailures", *consecutiveFailures),
+				zap.Error(err))
+			return true
+		}
+		return false
+	}
+	*consecutiveFailures = 0
+
+	wt.checkGitChanges(ctx)
+	return false
 }
 
 // getHeadSHA returns the current HEAD commit SHA
