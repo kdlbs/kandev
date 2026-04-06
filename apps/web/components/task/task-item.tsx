@@ -77,7 +77,10 @@ function TaskStateIcon({
 }) {
   if (isInProgress) {
     return (
-      <IconCircleDashed className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin" />
+      <IconCircleDashed
+        data-testid="task-state-running"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
+      />
     );
   }
   const isReview =
@@ -88,9 +91,19 @@ function TaskStateIcon({
     state === "REVIEW" ||
     state === "COMPLETED";
   if (isReview) {
-    return <IconCircleCheck className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500" />;
+    return (
+      <IconCircleCheck
+        data-testid="task-state-review"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+      />
+    );
   }
-  return <IconCircleDashed className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />;
+  return (
+    <IconCircleDashed
+      data-testid="task-state-backlog"
+      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40"
+    />
+  );
 }
 
 function TaskItemStatsRow({

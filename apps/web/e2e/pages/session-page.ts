@@ -1,5 +1,12 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
+/** Maps old state-section labels to the new per-task state icon data-testid. */
+function sectionLabelToStateTestId(label: string): string {
+  if (label === "Running") return "task-state-running";
+  if (label === "Turn Finished") return "task-state-review";
+  return "task-state-backlog";
+}
+
 export class SessionPage {
   readonly chat: Locator;
   readonly sidebar: Locator;
@@ -131,17 +138,25 @@ export class SessionPage {
     return this.sidebar.getByText(title, { exact: false });
   }
 
-  /** Sidebar section header (e.g. "Turn Finished", "Running", "Backlog"). */
+  /**
+   * Sidebar state indicator — returns the first icon matching the given state label.
+   * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
+   */
   sidebarSection(label: string): Locator {
-    return this.sidebar.getByTestId(`sidebar-section-${label}`);
+    const testId = sectionLabelToStateTestId(label);
+    return this.sidebar.getByTestId(testId).first();
   }
 
-  /** Task title scoped to a specific sidebar section (Turn Finished, Running, Backlog). */
+  /**
+   * Task item in the sidebar matching both a title and a state label.
+   * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
+   */
   taskInSection(title: string, sectionLabel: string): Locator {
+    const testId = sectionLabelToStateTestId(sectionLabel);
     return this.sidebar
-      .getByTestId(`sidebar-section-${sectionLabel}`)
-      .locator("..")
-      .getByText(title, { exact: false });
+      .getByTestId("sidebar-task-item")
+      .filter({ has: this.page.getByText(title, { exact: false }) })
+      .filter({ has: this.page.getByTestId(testId) });
   }
 
   /** Agent STARTING or RUNNING status indicator. */
