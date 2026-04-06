@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI checks and automated reviews (CodeRabbit, Greptile) on a PR, fix failures and address comments, then push.
+description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Claude) on a PR, fix failures and address comments, then push.
 ---
 
 # PR Fixup
@@ -73,9 +73,9 @@ Mark task 2 as completed.
 
 Mark task 3 as in_progress.
 
-Check if CodeRabbit and Greptile have posted or are generating reviews.
+Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
 
-**Bot usernames:** `coderabbitai`, `greptile-apps[bot]`
+**Bot usernames:** `coderabbitai`, `greptile-apps[bot]`, `claude[bot]`
 
 **CodeRabbit — stop waiting if:**
 - A comment contains `<!-- rate limited by coderabbit.ai -->` — rate-limited, won't review.
@@ -83,6 +83,10 @@ Check if CodeRabbit and Greptile have posted or are generating reviews.
 
 **Greptile — stop waiting if:**
 - A review from `greptile-apps[bot]` exists (posts via the GitHub review API, not issue comments).
+
+**Claude — stop waiting if:**
+- A review from `claude[bot]` exists (posts via the GitHub review API with inline review comments).
+- The `claude-review` check in `gh pr checks` has completed (regardless of conclusion).
 
 **Keep polling if:**
 - A bot hasn't commented yet AND `gh pr checks` shows its check is still `pending`.
@@ -93,6 +97,8 @@ Poll every **30 seconds**, cap at **10 minutes**. Fetch both issue comments and 
 gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "coderabbitai") | {author: .author.login, body: .body}'
 # Greptile posts reviews (with inline review comments)
 gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "greptile-apps[bot]") | {user: .user.login, state: .state}'
+# Claude posts reviews (with inline review comments)
+gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "claude[bot]") | {user: .user.login, state: .state}'
 ```
 
 Mark task 3 as completed.
@@ -131,7 +137,7 @@ Mark task 4 as completed.
 
 Mark task 5 as in_progress.
 
-Fetch all review comments — human reviewers, CodeRabbit, and Greptile:
+Fetch all review comments — human reviewers, CodeRabbit, Greptile, and Claude:
 
 ```bash
 gh pr view <number> --json reviews,comments
