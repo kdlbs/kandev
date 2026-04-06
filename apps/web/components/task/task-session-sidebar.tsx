@@ -148,6 +148,28 @@ function getGitStatusForTask(
   return gitStatusByEnvId[envKey];
 }
 
+/** Resolve diff stats for a task, falling back to direct git status when sessions aren't loaded. */
+function resolveDiffStats(
+  sessionDiffStats: { additions: number; deletions: number } | undefined,
+  task: { primarySessionId?: string | null },
+  envIdBySessionId: Record<string, string>,
+  gitStatusByEnvId: Record<string, GitStatusEntry>,
+): { additions: number; deletions: number } | undefined {
+  if (sessionDiffStats) return sessionDiffStats;
+  if (!task.primarySessionId) return undefined;
+  const gs = getGitStatusForTask(task, envIdBySessionId, gitStatusByEnvId);
+  if (!gs) return undefined;
+  const a = gs.branch_additions ?? 0;
+  const d = gs.branch_deletions ?? 0;
+  return a > 0 || d > 0 ? { additions: a, deletions: d } : undefined;
+}
+
+/** Format PR info for display, capitalising the state. */
+function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | undefined {
+  if (!pr?.state) return undefined;
+  return { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) };
+}
+
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
@@ -174,15 +196,12 @@ function toSidebarItem(
   // Diff stats: prefer session-based computation, fall back to direct git status lookup
   // via primarySessionId. Sessions may not be loaded yet, but git status arrives via
   // the bulk WS subscription using primarySessionId from the kanban task.
-  let diffStats = sessionInfo.diffStats;
-  if (!diffStats && task.primarySessionId) {
-    const gs = getGitStatusForTask(task, ctx.envIdBySessionId, ctx.gitStatusByEnvId);
-    if (gs) {
-      const a = gs.branch_additions ?? 0;
-      const d = gs.branch_deletions ?? 0;
-      if (a > 0 || d > 0) diffStats = { additions: a, deletions: d };
-    }
-  }
+  const diffStats = resolveDiffStats(
+    sessionInfo.diffStats,
+    task,
+    ctx.envIdBySessionId,
+    ctx.gitStatusByEnvId,
+  );
 
   return {
     id: task.id,
@@ -203,9 +222,7 @@ function toSidebarItem(
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
-    prInfo: pr?.state
-      ? { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) }
-      : undefined,
+    prInfo: toPrInfo(pr),
   };
 }
 
@@ -316,10 +333,7 @@ function useSidebarData(workspaceId: string | null) {
   // Stable list of primary session IDs for the bulk-subscribe effect.
   // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
   const primarySessionIds = useMemo(
-    () =>
-      allTasks
-        .map((t) => t.primarySessionId)
-        .filter((id): id is string => id != null),
+    () => allTasks.map((t) => t.primarySessionId).filter((id): id is string => id != null),
     [allTasks],
   );
 

@@ -228,7 +228,6 @@ function RepoGroupSection({
     <div>
       <RepoGroupHeader
         label={group.label}
-
         count={totalCount}
         isCollapsed={isCollapsed}
         onToggle={() => setIsCollapsed((v) => !v)}
@@ -373,6 +372,91 @@ function cloneWithMenuOpen(
   return children;
 }
 
+/** Partition root tasks into multi-repo, per-repo, and unassigned buckets. */
+function partitionRootTasks(rootTasks: TaskSwitcherItem[]): {
+  multiRepoTasks: TaskSwitcherItem[];
+  byRepo: Map<string, TaskSwitcherItem[]>;
+  unassigned: TaskSwitcherItem[];
+} {
+  const multiRepoTasks: TaskSwitcherItem[] = [];
+  const byRepo = new Map<string, TaskSwitcherItem[]>();
+  const unassigned: TaskSwitcherItem[] = [];
+  for (const task of rootTasks) {
+    if (task.repositories && task.repositories.length > 1) {
+      multiRepoTasks.push(task);
+    } else if (task.repositoryPath) {
+      const arr = byRepo.get(task.repositoryPath) ?? [];
+      arr.push(task);
+      byRepo.set(task.repositoryPath, arr);
+    } else {
+      unassigned.push(task);
+    }
+  }
+  return { multiRepoTasks, byRepo, unassigned };
+}
+
+/** Build sorted repo groups from partitioned task buckets. */
+function buildRepoGroups(
+  multiRepoTasks: TaskSwitcherItem[],
+  byRepo: Map<string, TaskSwitcherItem[]>,
+  unassigned: TaskSwitcherItem[],
+): RepoGroup[] {
+  const result: RepoGroup[] = [];
+  if (multiRepoTasks.length > 0) {
+    result.push({
+      key: "multi-repo",
+      label: "Multi-repo",
+      isMultiRepo: true,
+      tasks: [...multiRepoTasks].sort(sortByStateThenCreated),
+    });
+  }
+  for (const [slug, groupTasks] of byRepo) {
+    result.push({ key: slug, label: slug, tasks: [...groupTasks].sort(sortByStateThenCreated) });
+  }
+  if (unassigned.length > 0) {
+    // In single-repo workspaces, merge unassigned tasks into the repo group
+    // so every task appears under a meaningful label instead of "Unassigned".
+    const singleRepoGroup =
+      byRepo.size === 1 && multiRepoTasks.length === 0
+        ? result.find((g) => g.key !== "multi-repo")
+        : undefined;
+    if (singleRepoGroup) {
+      singleRepoGroup.tasks.push(...[...unassigned].sort(sortByStateThenCreated));
+    } else {
+      result.push({
+        key: "unassigned",
+        label: "Unassigned",
+        tasks: [...unassigned].sort(sortByStateThenCreated),
+      });
+    }
+  }
+  return result;
+}
+
+/** Group tasks by repository, separating sub-tasks from root tasks. */
+function groupTasksIntoRepos(tasks: TaskSwitcherItem[]): {
+  groups: RepoGroup[];
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+} {
+  const allTaskIds = new Set(tasks.map((t) => t.id));
+  const subMap = new Map<string, TaskSwitcherItem[]>();
+  const rootTasks: TaskSwitcherItem[] = [];
+  for (const t of tasks) {
+    if (t.parentTaskId && allTaskIds.has(t.parentTaskId)) {
+      const arr = subMap.get(t.parentTaskId) ?? [];
+      arr.push(t);
+      subMap.set(t.parentTaskId, arr);
+    } else {
+      rootTasks.push(t);
+    }
+  }
+  const { multiRepoTasks, byRepo, unassigned } = partitionRootTasks(rootTasks);
+  return {
+    groups: buildRepoGroups(multiRepoTasks, byRepo, unassigned),
+    subTasksByParentId: subMap,
+  };
+}
+
 export const TaskSwitcher = memo(function TaskSwitcher({
   tasks,
   stepsByWorkflowId,
@@ -386,69 +470,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   deletingTaskId,
   isLoading = false,
 }: TaskSwitcherProps) {
-  const { groups, subTasksByParentId } = useMemo(() => {
-    const allTaskIds = new Set(tasks.map((t) => t.id));
-
-    const subMap = new Map<string, TaskSwitcherItem[]>();
-    const rootTasks: TaskSwitcherItem[] = [];
-    for (const t of tasks) {
-      if (t.parentTaskId && allTaskIds.has(t.parentTaskId)) {
-        const arr = subMap.get(t.parentTaskId) ?? [];
-        arr.push(t);
-        subMap.set(t.parentTaskId, arr);
-      } else {
-        rootTasks.push(t);
-      }
-    }
-
-    const multiRepoTasks: TaskSwitcherItem[] = [];
-    const byRepo = new Map<string, TaskSwitcherItem[]>();
-    const unassigned: TaskSwitcherItem[] = [];
-
-    for (const task of rootTasks) {
-      if (task.repositories && task.repositories.length > 1) {
-        multiRepoTasks.push(task);
-      } else if (task.repositoryPath) {
-        const arr = byRepo.get(task.repositoryPath) ?? [];
-        arr.push(task);
-        byRepo.set(task.repositoryPath, arr);
-      } else {
-        unassigned.push(task);
-      }
-    }
-
-    const result: RepoGroup[] = [];
-    if (multiRepoTasks.length > 0) {
-      result.push({
-        key: "multi-repo",
-        label: "Multi-repo",
-        isMultiRepo: true,
-        tasks: [...multiRepoTasks].sort(sortByStateThenCreated),
-      });
-    }
-    for (const [slug, groupTasks] of byRepo) {
-      result.push({ key: slug, label: slug, tasks: [...groupTasks].sort(sortByStateThenCreated) });
-    }
-    if (unassigned.length > 0) {
-      // In single-repo workspaces, merge unassigned tasks into the repo group
-      // so every task appears under a meaningful label instead of "Unassigned".
-      const singleRepoGroup =
-        byRepo.size === 1 && multiRepoTasks.length === 0
-          ? result.find((g) => g.key !== "multi-repo")
-          : undefined;
-      if (singleRepoGroup) {
-        singleRepoGroup.tasks.push(...[...unassigned].sort(sortByStateThenCreated));
-      } else {
-        result.push({
-          key: "unassigned",
-          label: "Unassigned",
-          tasks: [...unassigned].sort(sortByStateThenCreated),
-        });
-      }
-    }
-
-    return { groups: result, subTasksByParentId: subMap };
-  }, [tasks]);
+  const { groups, subTasksByParentId } = useMemo(() => groupTasksIntoRepos(tasks), [tasks]);
 
   if (isLoading) return <TaskSwitcherSkeleton />;
   if (tasks.length === 0) {

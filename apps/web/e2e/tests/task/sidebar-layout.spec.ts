@@ -12,7 +12,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Sidebar layout — repo groups", () => {
-  test("tasks grouped by repository with header showing letter avatar and count", async ({
+  test("tasks grouped by repository with header showing label and count", async ({
     testPage,
     apiClient,
     seedData,
@@ -48,7 +48,7 @@ test.describe("Sidebar layout — repo groups", () => {
     await expect(anyGroupHeader.first()).toBeVisible({ timeout: 10_000 });
 
     // A group header should contain a task count greater than zero
-    const countText = anyGroupHeader.first().locator("span").nth(2);
+    const countText = anyGroupHeader.first().locator("span").nth(1);
     const count = await countText.innerText();
     expect(Number(count)).toBeGreaterThan(0);
   });
@@ -72,28 +72,29 @@ test.describe("Sidebar layout — repo groups", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Find the first non-Unassigned repo group header (the one for the seeded repo)
-    const groupHeader = session.sidebar
-      .locator("[data-testid^='sidebar-repo-group-']")
-      .filter({ hasNot: session.sidebar.locator("[data-testid='sidebar-repo-group-Unassigned']") })
-      .first();
+    // In single-repo workspaces, unassigned tasks merge into the repo group,
+    // so both tasks should be in the same group.
+    const groupHeader = session.sidebar.locator("[data-testid^='sidebar-repo-group-']").first();
     await expect(groupHeader).toBeVisible({ timeout: 10_000 });
 
-    // Task should be visible before collapsing — scoped to the text of the task
+    // Both tasks should be visible before collapsing
     await expect(session.sidebar.getByText("Collapsible Task Alpha")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.sidebar.getByText("Collapsible Nav Task")).toBeVisible({
       timeout: 10_000,
     });
 
     // Collapse the group
     await groupHeader.click();
 
-    // After collapsing, the task in that repo group should not be visible
+    // After collapsing, both tasks should be hidden
     await expect(session.sidebar.getByText("Collapsible Task Alpha")).not.toBeVisible({
       timeout: 5_000,
     });
-
-    // The unassigned task is in a different group and should still be visible
-    await expect(session.sidebar.getByText("Collapsible Nav Task")).toBeVisible({ timeout: 5_000 });
+    await expect(session.sidebar.getByText("Collapsible Nav Task")).not.toBeVisible({
+      timeout: 5_000,
+    });
 
     // Expand again
     await groupHeader.click();
@@ -102,19 +103,24 @@ test.describe("Sidebar layout — repo groups", () => {
     });
   });
 
-  test("unassigned group shown for tasks with no repository", async ({
+  test("tasks without repository merge into single repo group instead of Unassigned", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // Create a task without a repository
-    await apiClient.createTask(seedData.workspaceId, "Unassigned Task One", {
+    // Create a task with the repo and one without
+    await apiClient.createTask(seedData.workspaceId, "Repo Task One", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.createTask(seedData.workspaceId, "No Repo Task One", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       // no repository_ids
     });
 
-    const task = await apiClient.createTask(seedData.workspaceId, "Unassigned Nav Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "No Repo Nav Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -122,13 +128,17 @@ test.describe("Sidebar layout — repo groups", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // The "Unassigned" group header should be visible
+    // In a single-repo workspace, no "Unassigned" group should appear
     const unassignedGroup = session.sidebar.getByTestId("sidebar-repo-group-Unassigned");
-    await expect(unassignedGroup).toBeVisible({ timeout: 10_000 });
+    await expect(unassignedGroup).not.toBeVisible({ timeout: 5_000 });
 
-    // The unassigned task should appear in that group
-    // After the group header, tasks are siblings in the DOM
-    await expect(session.sidebar.getByText("Unassigned Task One")).toBeVisible({ timeout: 5_000 });
+    // Both tasks should be visible in the sidebar (under the repo group)
+    await expect(session.sidebar.getByText("Repo Task One", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.sidebar.getByText("No Repo Task One", { exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
   });
 });
 
