@@ -1258,12 +1258,14 @@ func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string
 	}
 
 	metadata := map[string]interface{}{
-		"timestamp": status.Timestamp,
-		"modified":  status.Modified,
-		"added":     status.Added,
-		"deleted":   status.Deleted,
-		"untracked": status.Untracked,
-		"renamed":   status.Renamed,
+		"timestamp":        status.Timestamp,
+		"modified":         status.Modified,
+		"added":            status.Added,
+		"deleted":          status.Deleted,
+		"untracked":        status.Untracked,
+		"renamed":          status.Renamed,
+		"branch_additions": status.BranchAdditions,
+		"branch_deletions": status.BranchDeletions,
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{

@@ -22,6 +22,8 @@ export type GitStatusData = {
   ahead: number;
   behind: number;
   files: Record<string, FileInfo>;
+  branch_additions?: number;
+  branch_deletions?: number;
 };
 
 // Git commit data

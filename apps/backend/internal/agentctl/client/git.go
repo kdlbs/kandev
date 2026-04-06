@@ -415,9 +415,11 @@ type GitStatusResult struct {
 	Deleted      []string               `json:"deleted"`
 	Untracked    []string               `json:"untracked"`
 	Renamed      []string               `json:"renamed"`
-	Files        map[string]interface{} `json:"files"`
-	Timestamp    string                 `json:"timestamp"`
-	Error        string                 `json:"error,omitempty"`
+	Files           map[string]interface{} `json:"files"`
+	Timestamp       string                 `json:"timestamp"`
+	BranchAdditions int                    `json:"branch_additions,omitempty"`
+	BranchDeletions int                    `json:"branch_deletions,omitempty"`
+	Error           string                 `json:"error,omitempty"`
 }
 
 // GetGitStatus gets the current git status from the workspace.
