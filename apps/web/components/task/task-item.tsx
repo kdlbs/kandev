@@ -111,13 +111,14 @@ function TaskItemStatsRow({
         <span className="text-muted-foreground/50">#{prInfo.number}</span>
       )}
       {stepLabel && (
-        <span className="rounded border border-muted-foreground/20 px-1 py-px text-[10px] text-muted-foreground/50 leading-tight">
+        <span className="ml-auto rounded border border-muted-foreground/20 px-1 py-px text-[10px] text-muted-foreground/50 leading-tight">
           {stepLabel}
         </span>
       )}
     </span>
   );
 }
+
 
 function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
   return (
