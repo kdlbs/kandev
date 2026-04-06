@@ -2,7 +2,6 @@
 
 import { cloneElement, isValidElement, memo, useMemo, useState } from "react";
 import {
-  IconGitBranch,
   IconChevronDown,
   IconArrowRight,
   IconPencil,
@@ -123,18 +122,15 @@ function TaskSwitcherSkeleton() {
 
 function RepoGroupHeader({
   label,
-  isMultiRepo,
   count,
   isCollapsed,
   onToggle,
 }: {
   label: string;
-  isMultiRepo?: boolean;
   count: number;
   isCollapsed: boolean;
   onToggle: () => void;
 }) {
-  const letter = label[0].toUpperCase();
   return (
     <button
       type="button"
@@ -142,9 +138,6 @@ function RepoGroupHeader({
       data-testid={`sidebar-repo-group-${label}`}
       className="flex w-full items-center gap-2 bg-background px-3 py-1.5 cursor-pointer hover:bg-foreground/[0.03]"
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-foreground/10 text-[10px] font-semibold text-foreground">
-        {isMultiRepo ? <IconGitBranch className="h-3 w-3" /> : letter}
-      </span>
       <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/80">
         {label}
       </span>
@@ -231,7 +224,7 @@ function RepoGroupSection({
     <div>
       <RepoGroupHeader
         label={group.label}
-        isMultiRepo={group.isMultiRepo}
+
         count={totalCount}
         isCollapsed={isCollapsed}
         onToggle={() => setIsCollapsed((v) => !v)}
@@ -433,11 +426,21 @@ export const TaskSwitcher = memo(function TaskSwitcher({
       result.push({ key: slug, label: slug, tasks: [...groupTasks].sort(sortByStateThenCreated) });
     }
     if (unassigned.length > 0) {
-      result.push({
-        key: "unassigned",
-        label: "Unassigned",
-        tasks: [...unassigned].sort(sortByStateThenCreated),
-      });
+      // In single-repo workspaces, merge unassigned tasks into the repo group
+      // so every task appears under a meaningful label instead of "Unassigned".
+      const singleRepoGroup =
+        byRepo.size === 1 && multiRepoTasks.length === 0
+          ? result.find((g) => g.key !== "multi-repo")
+          : undefined;
+      if (singleRepoGroup) {
+        singleRepoGroup.tasks.push(...[...unassigned].sort(sortByStateThenCreated));
+      } else {
+        result.push({
+          key: "unassigned",
+          label: "Unassigned",
+          tasks: [...unassigned].sort(sortByStateThenCreated),
+        });
+      }
     }
 
     return { groups: result, subTasksByParentId: subMap };

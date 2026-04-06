@@ -137,6 +137,17 @@ export const NewTaskButton = memo(function NewTaskButton({
   );
 });
 
+/** Look up git status directly via primarySessionId, bypassing the session list. */
+function getGitStatusForTask(
+  task: { primarySessionId?: string | null },
+  envIdBySessionId: Record<string, string>,
+  gitStatusByEnvId: Record<string, GitStatusEntry>,
+): GitStatusEntry | undefined {
+  if (!task.primarySessionId) return undefined;
+  const envKey = envIdBySessionId[task.primarySessionId] ?? task.primarySessionId;
+  return gitStatusByEnvId[envKey];
+}
+
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
@@ -147,7 +158,6 @@ function toSidebarItem(
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, TaskPR | undefined>;
     titleById: Map<string, string>;
-    defaultRepoSlug: string | undefined;
   },
 ) {
   const sessionInfo = getSessionInfoForTask(
@@ -160,6 +170,20 @@ function toSidebarItem(
     sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   const pr = ctx.taskPRsByTaskId[task.id];
+
+  // Diff stats: prefer session-based computation, fall back to direct git status lookup
+  // via primarySessionId. Sessions may not be loaded yet, but git status arrives via
+  // the bulk WS subscription using primarySessionId from the kanban task.
+  let diffStats = sessionInfo.diffStats;
+  if (!diffStats && task.primarySessionId) {
+    const gs = getGitStatusForTask(task, ctx.envIdBySessionId, ctx.gitStatusByEnvId);
+    if (gs) {
+      const a = gs.branch_additions ?? 0;
+      const d = gs.branch_deletions ?? 0;
+      if (a > 0 || d > 0) diffStats = { additions: a, deletions: d };
+    }
+  }
+
   return {
     id: task.id,
     title: task.title,
@@ -168,8 +192,8 @@ function toSidebarItem(
     description: task.description,
     workflowId: task._workflowId,
     workflowStepId: task.workflowStepId as string | undefined,
-    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : (repoSlug ?? ctx.defaultRepoSlug),
-    diffStats: sessionInfo.diffStats,
+    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
+    diffStats,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
@@ -260,12 +284,6 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
-    // In single-repo workspaces, tasks with no explicit repositoryId still belong
-    // to that repository — use its slug as a fallback so they're not grouped as "Unassigned".
-    const defaultRepoSlug =
-      repositories.length === 1
-        ? (repositorySlugById.get(repositories[0].id) ?? undefined)
-        : undefined;
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const mapCtx = {
       sessionsByTaskId,
@@ -274,7 +292,6 @@ function useSidebarData(workspaceId: string | null) {
       repositorySlugById,
       taskPRsByTaskId: taskPRsByTaskId as Record<string, TaskPR | undefined>,
       titleById,
-      defaultRepoSlug,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
