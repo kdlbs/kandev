@@ -23,6 +23,11 @@ test.describe("Changes panel focus behavior", () => {
       seedData.workspaceId,
       "Focus test task",
       seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
     );
     const session = new SessionPage(testPage);
     await session.goto(task.id);
@@ -40,7 +45,7 @@ test.describe("Changes panel focus behavior", () => {
     await expect(session.changes.getByText("test commit")).toBeVisible({ timeout: 10_000 });
 
     // Switch back to chat tab — this is the tab that should be active after refresh
-    await session.clickTab(/Opus|Mock|Chat/);
+    await session.clickSessionChatTab();
     await expect(session.chat).toBeVisible({ timeout: 5_000 });
 
     // Refresh the page
@@ -48,9 +53,9 @@ test.describe("Changes panel focus behavior", () => {
     await session.waitForLoad();
 
     // Wait for the git data to load (changes tab should show count)
-    await expect(
-      testPage.locator(".dv-default-tab:has-text('Changes')"),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.locator(".dv-default-tab:has-text('Changes')")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // The chat/session panel should be the active tab, NOT changes
     const changesTab = testPage.locator(".dv-default-tab:has-text('Changes')");
@@ -76,6 +81,11 @@ test.describe("Changes panel focus behavior", () => {
       seedData.workspaceId,
       "Center group focus test",
       seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
     );
     const session = new SessionPage(testPage);
     await session.goto(task.id);
@@ -97,9 +107,9 @@ test.describe("Changes panel focus behavior", () => {
     await apiClient.gitCommit(task.primarySessionId!, "new commit");
 
     // Wait for the changes badge to update
-    await expect(
-      testPage.locator(".dv-default-tab:has-text('Changes')"),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.locator(".dv-default-tab:has-text('Changes')")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Wait a bit for any async auto-activate to fire
     await testPage.waitForTimeout(2_000);

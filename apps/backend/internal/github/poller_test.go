@@ -368,7 +368,6 @@ func TestCheckSinglePRWatch_OpenPR_NoChange_NoSync(t *testing.T) {
 	}
 }
 
-
 func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()

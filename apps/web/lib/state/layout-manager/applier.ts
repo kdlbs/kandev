@@ -36,7 +36,11 @@ export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
   return {
     sidebarGroupId: findGroupId(api, SIDEBAR_GROUP, "sidebar"),
     centerGroupId: findGroupId(api, CENTER_GROUP, "chat"),
-    rightTopGroupId: findGroupId(api, RIGHT_TOP_GROUP, "changes"),
+    // Always use the well-known constant — do NOT fall back to the "changes"
+    // panel's current group. In plan mode the "changes" panel moves into the
+    // center group; a panel-based fallback would return the center group ID and
+    // defeat the auto-focus guard in changes-tab.tsx.
+    rightTopGroupId: RIGHT_TOP_GROUP,
     rightBottomGroupId: findGroupId(api, RIGHT_BOTTOM_GROUP, TERMINAL_DEFAULT_ID),
   };
 }

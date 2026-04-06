@@ -42,11 +42,15 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
+  // gitStatus is undefined until the first WS git-status event arrives,
+  // which marks the end of the initial data load for this session.
+  const gitStatusLoaded = gitStatus !== undefined;
+
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track whether this is the initial data load (page refresh).
-  // Skip auto-activate until data has been loaded at least once.
+  // Armed once we know the initial git data has settled. Until then, any
+  // 0→N transition is treated as an initial load, not a real new change.
   const initializedRef = useRef(false);
 
   const [isFlashing, setIsFlashing] = useState(false);
@@ -76,12 +80,11 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     const decreased = totalCount < prev;
 
     // Auto-activate when changes appear for the first time (0 → N), but only
-    // after initial data has loaded.  On page refresh, hooks start with
-    // totalCount=0, then async data arrives making it >0.  We must not
-    // treat that initial load as "new changes".  Wait until we've seen
-    // real data at least once before arming the auto-activate.
+    // after initial git data has settled.  gitStatusLoaded is false until the
+    // first WS git-status event arrives, guaranteeing data has loaded before we
+    // arm auto-activate (handles both page-refresh and clean-session cases).
     if (!initializedRef.current) {
-      if (totalCount > 0) initializedRef.current = true;
+      if (gitStatusLoaded) initializedRef.current = true;
     } else if (increased && prev === 0) {
       autoActivateChangesPanel();
     }
@@ -97,7 +100,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       const unseen = Math.max(0, totalCount - seenCountRef.current);
       requestAnimationFrame(() => setBadgeCount(unseen));
     }
-  }, [totalCount, api]);
+  }, [totalCount, api, gitStatusLoaded]);
 
   // Cleanup flash timer on unmount
   useEffect(() => {

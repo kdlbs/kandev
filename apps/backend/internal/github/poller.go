@@ -282,7 +282,7 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 			zap.String("session_id", watch.SessionID),
 			zap.String("old_branch", watch.Branch),
 			zap.String("new_branch", currentBranch))
-		if updateErr := p.service.UpdatePRWatchBranch(ctx, watch.ID, currentBranch); updateErr != nil {
+		if updateErr := p.service.UpdatePRWatchBranchIfSearching(ctx, watch.ID, currentBranch); updateErr != nil {
 			p.logger.Error("failed to update PR watch branch",
 				zap.String("watch_id", watch.ID), zap.Error(updateErr))
 		}

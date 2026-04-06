@@ -103,7 +103,13 @@ func (s *Service) syncPRWatchBranch(ctx context.Context, sessionID, liveBranch s
 		return
 	}
 	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
-	if err != nil || watch == nil || watch.PRNumber != 0 {
+	if err != nil {
+		s.logger.Warn("failed to get PR watch for branch sync",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if watch == nil || watch.PRNumber != 0 {
 		return
 	}
 	if watch.Branch == liveBranch {
@@ -113,7 +119,7 @@ func (s *Service) syncPRWatchBranch(ctx context.Context, sessionID, liveBranch s
 		zap.String("session_id", sessionID),
 		zap.String("old_branch", watch.Branch),
 		zap.String("new_branch", liveBranch))
-	if updateErr := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, liveBranch); updateErr != nil {
+	if updateErr := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, liveBranch); updateErr != nil {
 		s.logger.Error("failed to update PR watch branch",
 			zap.String("session_id", sessionID), zap.Error(updateErr))
 	}
