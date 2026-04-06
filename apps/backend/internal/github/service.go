@@ -964,6 +964,12 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 			continue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				// Task already deleted; clean up the orphaned dedup record.
+				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+				deleted++
+				continue
+			}
 			s.logger.Warn("failed to delete review PR task",
 				zap.String("task_id", rpt.TaskID), zap.Error(err))
 			continue
