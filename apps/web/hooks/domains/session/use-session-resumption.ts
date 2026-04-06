@@ -204,45 +204,56 @@ interface UseSessionResumptionReturn {
  * When a sessionId is provided (from URL), it checks the session status
  * and automatically resumes if needed.
  */
-export function useSessionResumption(
+type SessionResetAndCheckResult = {
+  sessionStatus: SessionStatus | null;
+};
+
+/** Extracted effects: reset state on session/task change, auto-check/resume, and remote retry. */
+function useSessionResetAndCheck(
   taskId: string | null,
   sessionId: string | null,
-): UseSessionResumptionReturn {
-  const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [worktreePath, setWorktreePath] = useState<string | null>(null);
-  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
-  const connectionStatus = useAppStore((state) => state.connection.status);
-  const session = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
-  );
-  const setTaskSession = useAppStore((state) => state.setTaskSession);
-  const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
+  connectionStatus: string,
+  session: { started_at?: string; updated_at?: string } | null,
+  setters: ResumeStateSetter,
+): SessionResetAndCheckResult {
+  const [sessionStatusState, setSessionStatus] = useState<{
+    id: string | null;
+    status: SessionStatus | null;
+  }>({ id: sessionId, status: null });
+  // Reset sessionStatus when sessionId changes (derived, not in effect)
+  const sessionStatus = sessionStatusState.id === sessionId ? sessionStatusState.status : null;
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
+  const activeSessionRef = useRef(sessionId);
 
-  const setters: ResumeStateSetter = {
-    setResumptionState,
-    setError,
-    setWorktreePath,
-    setWorktreeBranch,
-    setTaskSession,
-    setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
-  };
-
+  // Reset all local state when session or task changes to prevent stale data
+  // from a previous session leaking into the new one (e.g. topbar branch).
   useEffect(() => {
+    activeSessionRef.current = sessionId;
     hasAttemptedResume.current = false;
     remoteStatusRetryCount.current = 0;
-  }, [sessionId, taskId]);
+    setters.setResumptionState("idle");
+    setters.setError(null);
+    setters.setWorktreePath(null);
+    setters.setWorktreeBranch(null);
+  }, [sessionId, taskId]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional reset on dep change
 
   // Check session status and auto-resume if needed
   useEffect(() => {
     if (!taskId || !sessionId || connectionStatus !== "connected" || hasAttemptedResume.current)
       return;
     hasAttemptedResume.current = true;
-    checkAndResume({ taskId, sessionId, session, setSessionStatus, setters });
-  }, [taskId, sessionId, connectionStatus, setTaskSession, session]); // eslint-disable-line react-hooks/exhaustive-deps
+    const guardedSetters = buildGuardedSetters(activeSessionRef, sessionId, setters);
+    checkAndResume({
+      taskId,
+      sessionId,
+      session,
+      setSessionStatus: (s) => {
+        if (activeSessionRef.current === sessionId) setSessionStatus({ id: sessionId, status: s });
+      },
+      setters: guardedSetters,
+    });
+  }, [taskId, sessionId, connectionStatus, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Freshly created remote sessions may return status before runtime metadata is available.
   // Retry a few times so topbar/tooltips can show remote details without manual refresh.
@@ -261,7 +272,7 @@ export function useSessionResumption(
           task_id: taskId,
           session_id: sessionId,
         });
-        setSessionStatus(nextStatus);
+        setSessionStatus({ id: sessionId, status: nextStatus });
       } catch {
         // Best-effort refresh only.
       }
@@ -269,6 +280,65 @@ export function useSessionResumption(
 
     return () => window.clearTimeout(timer);
   }, [taskId, sessionId, connectionStatus, sessionStatus]);
+
+  return { sessionStatus };
+}
+
+/** Wrap state setters with a guard that prevents stale async callbacks from updating state. */
+function buildGuardedSetters(
+  activeSessionRef: React.RefObject<string | null>,
+  capturedSessionId: string,
+  setters: ResumeStateSetter,
+): ResumeStateSetter {
+  const guard = () => activeSessionRef.current === capturedSessionId;
+  return {
+    ...setters,
+    setResumptionState: (s) => {
+      if (guard()) setters.setResumptionState(s);
+    },
+    setError: (e) => {
+      if (guard()) setters.setError(e);
+    },
+    setWorktreePath: (p) => {
+      if (guard()) setters.setWorktreePath(p);
+    },
+    setWorktreeBranch: (b) => {
+      if (guard()) setters.setWorktreeBranch(b);
+    },
+  };
+}
+
+export function useSessionResumption(
+  taskId: string | null,
+  sessionId: string | null,
+): UseSessionResumptionReturn {
+  const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [worktreePath, setWorktreePath] = useState<string | null>(null);
+  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const session = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
+  );
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
+
+  const setters: ResumeStateSetter = {
+    setResumptionState,
+    setError,
+    setWorktreePath,
+    setWorktreeBranch,
+    setTaskSession,
+    setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
+  };
+
+  const { sessionStatus } = useSessionResetAndCheck(
+    taskId,
+    sessionId,
+    connectionStatus,
+    session,
+    setters,
+  );
 
   // Manual resume function
   const resumeSession = useCallback(async (): Promise<boolean> => {
