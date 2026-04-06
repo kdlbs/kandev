@@ -215,7 +215,7 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 	// Prioritize worktree changes as they represent the current state.
 	switch {
 	case indexStatus == '?' && workTreeStatus == '?':
-		fileInfo.Status = "untracked"
+		fileInfo.Status = fileStatusUntracked
 		fileInfo.Staged = false
 		update.Untracked = append(update.Untracked, filePath)
 	case workTreeStatus == 'D':

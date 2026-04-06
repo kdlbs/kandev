@@ -19,8 +19,9 @@ const DefaultGitPollInterval = 3 * time.Second
 
 // fileStatus constants for FileInfo.Status values.
 const (
-	fileStatusDeleted  = "deleted"
-	fileStatusModified = "modified"
+	fileStatusDeleted   = "deleted"
+	fileStatusModified  = "modified"
+	fileStatusUntracked = "untracked"
 )
 
 // WorkspaceTracker monitors workspace changes and provides real-time updates.

@@ -203,7 +203,7 @@ function toSidebarItem(
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
-    prInfo: pr
+    prInfo: pr?.state
       ? { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) }
       : undefined,
   };

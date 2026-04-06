@@ -51,7 +51,7 @@ type StepDef = { id: string; title: string; color?: string };
 
 type TaskSwitcherProps = {
   tasks: TaskSwitcherItem[];
-  steps: StepDef[];
+  steps?: StepDef[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -85,7 +85,11 @@ function classifyTask(
   sessionState: TaskSessionState | undefined,
   taskState?: TaskState,
 ): "review" | "in_progress" | "backlog" {
-  if (!sessionState) return "backlog";
+  if (!sessionState) {
+    if (TASK_STATE_REVIEW.has(taskState)) return "review";
+    if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
+    return "backlog";
+  }
   if (sessionState === "STARTING" && taskState) {
     if (TASK_STATE_REVIEW.has(taskState)) return "review";
     if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";

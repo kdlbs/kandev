@@ -56,7 +56,7 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *ty
 
 	// Add untracked file line counts (not included in git diff output).
 	for _, fileInfo := range update.Files {
-		if fileInfo.Status == "untracked" {
+		if fileInfo.Status == fileStatusUntracked {
 			additions += fileInfo.Additions
 		}
 	}
@@ -167,7 +167,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 // lines as additions, so the diff viewer can display their full content.
 func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update *types.GitStatusUpdate) {
 	for filePath, fileInfo := range update.Files {
-		if fileInfo.Status != "untracked" {
+		if fileInfo.Status != fileStatusUntracked {
 			continue
 		}
 		catCmd := exec.CommandContext(ctx, "cat", filePath)

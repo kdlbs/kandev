@@ -21,8 +21,6 @@ type DiffStats = {
 
 type TaskItemProps = {
   title: string;
-  description?: string;
-  stepName?: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
   isArchived?: boolean;
@@ -41,7 +39,6 @@ type TaskItemProps = {
   isSubTask?: boolean;
   repositories?: string[];
   prInfo?: { number: number; state: string };
-  hasDiffStats?: boolean;
 };
 
 function formatRelativeTime(dateString: string): string {
