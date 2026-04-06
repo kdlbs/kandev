@@ -304,7 +304,7 @@ function TopBarRight({
 }: {
   activeSessionId?: string | null;
   baseBranch?: string;
-  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
+  gitStatus: { ahead: number; behind: number };
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
