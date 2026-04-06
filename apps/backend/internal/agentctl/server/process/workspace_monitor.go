@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -65,6 +66,12 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 		case <-wt.stopCh:
 			return
 		case <-ticker.C:
+			// Skip this tick if the previous cycle is still running (prevents process pile-up
+			// when git commands take longer than the poll interval on large repos).
+			if !atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
+				continue
+			}
+
 			// Quick state check using mtime + diff-files
 			currentState, err := wt.getWorkspaceState(ctx)
 			if err != nil {
@@ -72,6 +79,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				// after task was archived or PR branch was deleted). If so, stop the
 				// tracker to avoid spamming warnings every poll cycle.
 				if !wt.workDirExists() {
+					atomic.StoreInt32(&wt.monitorRunning, 0)
 					wt.logger.Warn("work directory no longer exists, stopping workspace tracker",
 						zap.String("workDir", wt.workDir))
 					return
@@ -80,6 +88,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				// Git command failed for another reason - skip this cycle and retry on next tick.
 				// Don't update lastState so the change will be detected when git recovers.
 				consecutiveFailures++
+				atomic.StoreInt32(&wt.monitorRunning, 0)
 				if consecutiveFailures >= maxConsecutiveGitFailures {
 					wt.logger.Error("git commands failing repeatedly, stopping workspace monitor",
 						zap.String("workDir", wt.workDir),
@@ -99,13 +108,14 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				wt.logger.Debug("workspace state changed, updating")
 
 				// Update git status (includes diff data) and file list, then notify subscribers
-				wt.updateGitStatus(ctx)
+				wt.tryUpdateGitStatus(ctx)
 				wt.updateFiles(ctx)
 				wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
 					Timestamp: time.Now(),
 					Operation: types.FileOpRefresh,
 				})
 			}
+			atomic.StoreInt32(&wt.monitorRunning, 0)
 		}
 	}
 }

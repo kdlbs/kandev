@@ -50,6 +50,14 @@ type WorkspaceTracker struct {
 	filePollInterval time.Duration
 	gitPollInterval  time.Duration
 
+	// Overlap guards: prevent tick pile-up when git commands take longer than the poll interval.
+	monitorRunning int32 // atomic; 1 if monitorLoop tick is in progress
+	gitPollRunning int32 // atomic; 1 if pollGitChanges tick is in progress
+
+	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
+	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
+	updateMu sync.Mutex
+
 	// Control
 	stopCh     chan struct{}
 	wg         sync.WaitGroup

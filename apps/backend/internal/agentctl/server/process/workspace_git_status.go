@@ -11,7 +11,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// updateGitStatus updates the git status
+// updateGitStatus updates the git status. Callers must coordinate access
+// via updateMu — use tryUpdateGitStatus for polling loops, RefreshGitStatus
+// for user-triggered operations.
 func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
@@ -27,9 +29,23 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	wt.notifyWorkspaceStreamGitStatus(status)
 }
 
+// tryUpdateGitStatus attempts a non-blocking git status update. If another
+// update is already in progress (from the other polling loop or an explicit
+// refresh), the call is skipped — the running update will produce the same result.
+func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) {
+	if !wt.updateMu.TryLock() {
+		return
+	}
+	defer wt.updateMu.Unlock()
+	wt.updateGitStatus(ctx)
+}
+
 // RefreshGitStatus forces a git status refresh and notifies subscribers.
 // Useful after index-only changes (stage/unstage) that the file watcher won't detect.
+// Uses a blocking lock so user-triggered operations always complete.
 func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
+	wt.updateMu.Lock()
+	defer wt.updateMu.Unlock()
 	wt.updateGitStatus(ctx)
 }
 

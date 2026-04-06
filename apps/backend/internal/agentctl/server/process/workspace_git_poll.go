@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -49,8 +50,15 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		case <-wt.stopCh:
 			return
 		case <-ticker.C:
+			// Skip this tick if the previous cycle is still running (prevents process pile-up
+			// when git commands take longer than the poll interval on large repos).
+			if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+				continue
+			}
+
 			// Stop polling if the work directory was deleted (worktree removed)
 			if !wt.workDirExists() {
+				atomic.StoreInt32(&wt.gitPollRunning, 0)
 				wt.logger.Warn("work directory no longer exists, stopping git polling",
 					zap.String("workDir", wt.workDir))
 				return
@@ -63,6 +71,7 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 			probeCmd.Dir = wt.workDir
 			if err := probeCmd.Run(); err != nil {
 				consecutiveFailures++
+				atomic.StoreInt32(&wt.gitPollRunning, 0)
 				if consecutiveFailures >= maxConsecutiveGitFailures {
 					wt.logger.Error("git not functional, stopping git polling",
 						zap.String("workDir", wt.workDir),
@@ -75,6 +84,7 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 			consecutiveFailures = 0
 
 			wt.checkGitChanges(ctx)
+			atomic.StoreInt32(&wt.gitPollRunning, 0)
 		}
 	}
 }
@@ -104,9 +114,11 @@ func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
 
 // getGitStatusHash returns a hash of the git status porcelain output.
 // This is used to detect changes to the git index (staging/unstaging) that don't
-// change HEAD. The hash includes both the status codes and file paths.
+// change HEAD. Uses --untracked-files=no because untracked file monitoring is
+// already handled by monitorLoop via git ls-files. This avoids the expensive
+// directory traversal that --untracked-files=all performs on large repos.
 func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=no")
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -144,7 +156,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 		wt.gitStateMu.Unlock()
 
 		wt.logger.Debug("git index changed (staging/unstaging detected)")
-		wt.updateGitStatus(ctx)
+		wt.tryUpdateGitStatus(ctx)
 		return
 	}
 
@@ -165,7 +177,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 		}
 
 		// In detached HEAD state, just update git status
-		wt.updateGitStatus(ctx)
+		wt.tryUpdateGitStatus(ctx)
 		return
 	}
 
@@ -241,7 +253,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 	}
 
 	// Update and broadcast git status
-	wt.updateGitStatus(ctx)
+	wt.tryUpdateGitStatus(ctx)
 }
 
 // handleBranchSwitch handles a branch switch event by calculating the new base commit
@@ -273,7 +285,7 @@ func (wt *WorkspaceTracker) handleBranchSwitch(ctx context.Context, previousBran
 	}
 
 	// Update and broadcast git status to reflect the new branch
-	wt.updateGitStatus(ctx)
+	wt.tryUpdateGitStatus(ctx)
 }
 
 // getBaseCommitForBranch calculates the base commit (merge-base) for a given branch.
