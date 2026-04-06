@@ -1242,6 +1242,54 @@ func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseComm
 	return true
 }
 
+// captureGitStatusSnapshot fetches the current git status from agentctl and saves it
+// as a DB snapshot. Called when a session completes so the status is available when
+// clients subscribe later (e.g. sidebar showing diff stats for inactive sessions).
+func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string) {
+	status, err := s.agentManager.GetGitStatus(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to capture git status snapshot",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if status == nil || !status.Success {
+		return
+	}
+
+	metadata := map[string]interface{}{
+		"timestamp": status.Timestamp,
+		"modified":  status.Modified,
+		"added":     status.Added,
+		"deleted":   status.Deleted,
+		"untracked": status.Untracked,
+		"renamed":   status.Renamed,
+	}
+
+	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		SessionID:    sessionID,
+		SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch:       status.Branch,
+		RemoteBranch: status.RemoteBranch,
+		HeadCommit:   status.HeadCommit,
+		BaseCommit:   status.BaseCommit,
+		Ahead:        status.Ahead,
+		Behind:       status.Behind,
+		Files:        status.Files,
+		TriggeredBy:  "agent_completed",
+		Metadata:     metadata,
+	}); err != nil {
+		s.logger.Warn("failed to save git status snapshot",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	s.logger.Debug("saved git status snapshot on agent completion",
+		zap.String("session_id", sessionID),
+		zap.String("branch", status.Branch))
+}
+
 // captureArchiveDiff fetches and saves the cumulative diff from baseCommit to the working tree
 // (including uncommitted/unstaged changes).
 func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit string) {
