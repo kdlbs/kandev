@@ -233,6 +233,7 @@ export const TaskItem = memo(function TaskItem({
     <div
       role="button"
       tabIndex={0}
+      data-testid="sidebar-task-item"
       onClick={onClick}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
       className={cn(
