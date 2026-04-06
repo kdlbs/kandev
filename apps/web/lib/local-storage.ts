@@ -406,6 +406,24 @@ export function removeSessionMaximizeState(sessionId: string): void {
   }
 }
 
+// PR panel "offered" flag — tracks whether the auto-show PR panel was offered
+// for a session. If offered and then closed by the user, we respect the dismissal.
+const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
+
+export function wasPRPanelOffered(sessionId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
+}
+
+export function markPRPanelOffered(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";

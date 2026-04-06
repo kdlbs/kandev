@@ -32,12 +32,7 @@ export type SessionSwitchParams = {
 function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
   const toRemove = api.panels.filter((p) => {
     const comp = p.api.component;
-    if (
-      comp === "file-editor" ||
-      comp === "diff-viewer" ||
-      comp === "commit-detail" ||
-      comp === "pr-detail"
-    ) {
+    if (comp === "file-editor" || comp === "diff-viewer" || comp === "commit-detail") {
       return true;
     }
     // Remove session chat tabs that belong to a different session.

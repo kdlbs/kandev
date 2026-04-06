@@ -100,7 +100,6 @@ const SESSION_SCOPED_COMPONENTS = new Set([
   "vscode",
   "commit-detail",
   "diff-viewer",
-  "pr-detail",
 ]);
 
 /**

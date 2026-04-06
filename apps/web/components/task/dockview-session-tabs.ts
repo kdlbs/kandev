@@ -4,6 +4,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
+import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -80,17 +81,20 @@ export function setupChatPanelSafetyNet(
 // Auto-show PR detail panel
 // ---------------------------------------------------------------------------
 
-/** Pure decision function for whether the PR panel should be auto-added. */
+/** Pure decision function for whether the PR panel should be auto-added or removed. */
 export function shouldAutoAddPRPanel(params: {
   hasPR: boolean;
   panelExists: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
-}): "add" | "none" {
+  wasOffered: boolean;
+}): "add" | "remove" | "none" {
+  if (!params.hasPR && params.panelExists) return "remove";
   if (!params.hasPR) return "none";
   if (params.panelExists) return "none";
   if (params.isRestoringLayout) return "none";
   if (params.isMaximized) return "none";
+  if (params.wasOffered) return "none";
   return "add";
 }
 
@@ -99,54 +103,61 @@ export function shouldAutoAddPRPanel(params: {
  * has an associated pull request. The panel is added as a background tab
  * (the session/agent tab stays focused).
  *
- * Reads task ID and PR state from the app store internally.
- *
- * Tracks per-task dismissal: if the user manually closes the PR panel,
- * it won't be re-added for the same task until they navigate away and back.
+ * Dismissal is persisted to sessionStorage: if the user closes the PR panel,
+ * it won't be re-added for that session — even after a page refresh.
  */
 export function useAutoPRPanel() {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const hasPR = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
     return tid ? !!s.taskPRs.byTaskId[tid] : false;
   });
-  // Subscribe to dockview API readiness so the effect re-runs when API appears.
   const hasApi = useDockviewStore((s) => !!s.api);
-  // Track which tasks have already been handled to avoid re-adding on every
-  // store update or task switch. Only auto-add once per task visit.
-  const handledRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!taskId || !hasPR || !hasApi) return;
-    if (handledRef.current.has(taskId)) return;
+    if (!taskId || !hasApi || !sessionId) return;
 
-    // Defer to avoid racing with layout restore on initial load / session switch.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const api = useDockviewStore.getState().api;
         if (!api) return;
-        if (useDockviewStore.getState().isRestoringLayout) return;
-        if (useDockviewStore.getState().preMaximizeLayout !== null) return;
-        if (api.getPanel("pr-detail")) {
-          // Panel exists from a restored layout — just mark as handled.
-          handledRef.current.add(taskId);
+
+        const decision = shouldAutoAddPRPanel({
+          hasPR,
+          panelExists: !!api.getPanel("pr-detail"),
+          isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
+          isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
+          wasOffered: wasPRPanelOffered(sessionId),
+        });
+
+        if (decision === "remove") {
+          api.getPanel("pr-detail")?.api.close();
           return;
         }
 
-        const { centerGroupId } = useDockviewStore.getState();
-        const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+        if (decision === "add") {
+          const { centerGroupId } = useDockviewStore.getState();
+          const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+          api.addPanel({
+            id: "pr-detail",
+            component: "pr-detail",
+            title: "Pull Request",
+            position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+            inactive: true,
+          });
+          markPRPanelOffered(sessionId);
+          return;
+        }
 
-        api.addPanel({
-          id: "pr-detail",
-          component: "pr-detail",
-          title: "Pull Request",
-          position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
-          inactive: true,
-        });
-        handledRef.current.add(taskId);
+        // "none" — panel already present or conditions not met.
+        // Mark as offered if the panel exists (e.g. restored from saved layout).
+        if (hasPR && api.getPanel("pr-detail")) {
+          markPRPanelOffered(sessionId);
+        }
       });
     });
-  }, [taskId, hasPR, hasApi]);
+  }, [taskId, hasPR, hasApi, sessionId]);
 }
 
 /**

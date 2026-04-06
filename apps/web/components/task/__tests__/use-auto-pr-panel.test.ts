@@ -7,6 +7,7 @@ describe("shouldAutoAddPRPanel", () => {
     panelExists: false,
     isRestoringLayout: false,
     isMaximized: false,
+    wasOffered: false,
   };
 
   it("returns 'add' when task has PR and panel does not exist", () => {
@@ -15,6 +16,10 @@ describe("shouldAutoAddPRPanel", () => {
 
   it("returns 'none' when task has no PR", () => {
     expect(shouldAutoAddPRPanel({ ...base, hasPR: false })).toBe("none");
+  });
+
+  it("returns 'remove' when task has no PR but panel exists", () => {
+    expect(shouldAutoAddPRPanel({ ...base, hasPR: false, panelExists: true })).toBe("remove");
   });
 
   it("returns 'none' when panel already exists", () => {
@@ -29,6 +34,10 @@ describe("shouldAutoAddPRPanel", () => {
     expect(shouldAutoAddPRPanel({ ...base, isMaximized: true })).toBe("none");
   });
 
+  it("returns 'none' when panel was already offered and dismissed", () => {
+    expect(shouldAutoAddPRPanel({ ...base, wasOffered: true })).toBe("none");
+  });
+
   it("returns 'add' when all conditions are met", () => {
     expect(
       shouldAutoAddPRPanel({
@@ -36,6 +45,7 @@ describe("shouldAutoAddPRPanel", () => {
         panelExists: false,
         isRestoringLayout: false,
         isMaximized: false,
+        wasOffered: false,
       }),
     ).toBe("add");
   });

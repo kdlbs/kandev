@@ -24,6 +24,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "vscode",
   "changes",
   "files",
+  "pr-detail",
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -37,6 +38,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "terminal",
   "browser",
   "vscode",
+  "pr-detail",
 ]);
 
 /** Default panel configurations for known panels. */
@@ -53,6 +55,7 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
     title: "Terminal",
     params: { terminalId: "shell-default" },
   },
+  "pr-detail": { component: "pr-detail", title: "Pull Request" },
 };
 
 /** Create a LayoutPanel from the registry by ID. */
