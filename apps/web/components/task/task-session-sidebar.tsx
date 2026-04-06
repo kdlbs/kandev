@@ -27,6 +27,8 @@ import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 
 // Set to true to render mock data covering all sidebar edge cases (prototype mode)
 const MOCK_SIDEBAR = false;
@@ -294,6 +296,16 @@ function useSidebarData(workspaceId: string | null) {
     archivedState,
   ]);
 
+  // Stable list of primary session IDs for the bulk-subscribe effect.
+  // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
+  const primarySessionIds = useMemo(
+    () =>
+      allTasks
+        .map((t) => t.primarySessionId)
+        .filter((id): id is string => id != null),
+    [allTasks],
+  );
+
   return {
     activeTaskId,
     selectedTaskId,
@@ -301,7 +313,7 @@ function useSidebarData(workspaceId: string | null) {
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
-    sessionsByTaskId,
+    primarySessionIds,
   };
 }
 
@@ -523,6 +535,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
   useAllWorkflowSnapshots(workspaceId);
+  useRepositories(workspaceId);
+  useWorkspacePRs(workspaceId);
 
   const {
     activeTaskId,
@@ -531,23 +545,19 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
-    sessionsByTaskId,
+    primarySessionIds,
   } = useSidebarData(workspaceId);
 
   // Subscribe to all primary sessions when connected so the backend sends an immediate
   // git status snapshot for each — this makes diff stats visible without clicking into a task.
   const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
-    if (connectionStatus !== "connected") return;
+    if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
     const client = getWebSocketClient();
     if (!client) return;
-    const ids = Object.values(sessionsByTaskId)
-      .flat()
-      .filter((s) => s.is_primary)
-      .map((s) => s.id);
-    const unsubscribes = ids.map((id) => client.subscribeSession(id));
+    const unsubscribes = primarySessionIds.map((id) => client.subscribeSession(id));
     return () => unsubscribes.forEach((u) => u());
-  }, [sessionsByTaskId, connectionStatus]);
+  }, [primarySessionIds, connectionStatus]);
 
   const {
     deletingTaskId,
