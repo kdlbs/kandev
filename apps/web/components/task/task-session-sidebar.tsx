@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import type { TaskState, TaskSession, TaskSessionState, Repository, Task } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
@@ -25,6 +25,7 @@ import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 
 // Set to true to render mock data covering all sidebar edge cases (prototype mode)
@@ -144,6 +145,7 @@ function toSidebarItem(
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, TaskPR | undefined>;
     titleById: Map<string, string>;
+    defaultRepoSlug: string | undefined;
   },
 ) {
   const sessionInfo = getSessionInfoForTask(
@@ -164,7 +166,7 @@ function toSidebarItem(
     description: task.description,
     workflowId: task._workflowId,
     workflowStepId: task.workflowStepId as string | undefined,
-    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
+    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : (repoSlug ?? ctx.defaultRepoSlug),
     diffStats: sessionInfo.diffStats,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
@@ -256,6 +258,12 @@ function useSidebarData(workspaceId: string | null) {
           : repo.local_path,
       ]),
     );
+    // In single-repo workspaces, tasks with no explicit repositoryId still belong
+    // to that repository — use its slug as a fallback so they're not grouped as "Unassigned".
+    const defaultRepoSlug =
+      repositories.length === 1
+        ? (repositorySlugById.get(repositories[0].id) ?? undefined)
+        : undefined;
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const mapCtx = {
       sessionsByTaskId,
@@ -264,6 +272,7 @@ function useSidebarData(workspaceId: string | null) {
       repositorySlugById,
       taskPRsByTaskId: taskPRsByTaskId as Record<string, TaskPR | undefined>,
       titleById,
+      defaultRepoSlug,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
@@ -292,6 +301,7 @@ function useSidebarData(workspaceId: string | null) {
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
+    sessionsByTaskId,
   };
 }
 
@@ -521,7 +531,24 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
+    sessionsByTaskId,
   } = useSidebarData(workspaceId);
+
+  // Subscribe to all primary sessions when connected so the backend sends an immediate
+  // git status snapshot for each — this makes diff stats visible without clicking into a task.
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const ids = Object.values(sessionsByTaskId)
+      .flat()
+      .filter((s) => s.is_primary)
+      .map((s) => s.id);
+    const unsubscribes = ids.map((id) => client.subscribeSession(id));
+    return () => unsubscribes.forEach((u) => u());
+  }, [sessionsByTaskId, connectionStatus]);
+
   const {
     deletingTaskId,
     preparingTaskId,
