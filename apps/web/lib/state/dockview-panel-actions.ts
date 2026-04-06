@@ -155,7 +155,7 @@ export function buildExtraPanelActions(get: StoreGet) {
     },
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     openInternalVscode: (_goto: { file: string; line: number; col: number } | null) => {
-      const { api } = get();
+      const { api, centerGroupId } = get();
       if (!api) return;
       const existing = api.getPanel("vscode");
       if (existing) {
@@ -166,7 +166,7 @@ export function buildExtraPanelActions(get: StoreGet) {
         id: "vscode",
         component: "vscode",
         title: "VS Code",
-        position: { referencePanel: "chat", direction: "right" },
+        position: { referenceGroup: centerGroupId },
       });
     },
     addPlanPanel: (groupId?: string) => {

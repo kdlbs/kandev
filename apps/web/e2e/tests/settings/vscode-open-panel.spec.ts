@@ -78,17 +78,12 @@ test.describe("VS Code open panel", () => {
   });
 
   /**
-   * Regression test for: "dockview: referencePanel 'chat' does not exist"
+   * Regression test for VS Code panel placement.
    *
-   * When opening the embedded VS Code panel via the top-bar editor button,
-   * the dockview layout must not throw if the 'chat' reference panel is absent.
+   * Adding the VS Code panel via the dockview "+" menu must place it in the
+   * center group (alongside agent sessions), not in the right sidebar.
    */
-  test("opens VS Code panel via Open Editor without referencePanel error", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // Track page errors to catch the dockview referencePanel exception
+  test("opens VS Code panel in the center group", async ({ testPage, apiClient, seedData }) => {
     const pageErrors: Error[] = [];
     testPage.on("pageerror", (err) => pageErrors.push(err));
 
@@ -99,14 +94,21 @@ test.describe("VS Code open panel", () => {
       "VSCode Open Panel Test",
     );
 
-    // Click the main "Open editor" button (the IconCode button in EditorsMenu).
-    // The tooltip reads "Open editor", so target the button inside that wrapper.
-    const editorBtn = testPage.locator("button:has(.tabler-icon-code)").first();
-    await expect(editorBtn).toBeEnabled({ timeout: 10_000 });
-    await editorBtn.click();
+    // Open the "+" dropdown in the center group header and click "VS Code"
+    await session.addPanelButton().click();
+    await testPage.getByRole("menuitem", { name: "VS Code" }).click();
 
     // Assert: VS Code tab appears in dockview
     await expect(session.vscodeTab()).toBeVisible({ timeout: 10_000 });
+
+    // Assert: VS Code tab is in the center group (same tab bar as the session),
+    // not in the right sidebar.
+    const centerTabBar = testPage.locator(
+      ".dv-tabs-and-actions-container:has(.dv-default-tab:has-text('VS Code'))",
+    );
+    await expect(centerTabBar.locator("[data-testid^='session-tab-']")).toBeVisible({
+      timeout: 5_000,
+    });
 
     // Assert: "Starting VS Code Server" progress text is visible while booting
     await expect(testPage.getByText("Starting VS Code Server")).toBeVisible({ timeout: 30_000 });
