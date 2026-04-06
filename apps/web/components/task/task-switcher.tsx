@@ -106,8 +106,7 @@ function statePriority(task: TaskSwitcherItem): number {
 
 function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
   return (
-    statePriority(a) - statePriority(b) ||
-    (a.createdAt ?? "").localeCompare(b.createdAt ?? "")
+    statePriority(a) - statePriority(b) || (a.createdAt ?? "").localeCompare(b.createdAt ?? "")
   );
 }
 
@@ -390,7 +389,6 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   deletingTaskId,
   isLoading = false,
 }: TaskSwitcherProps) {
-
   const { groups, subTasksByParentId } = useMemo(() => {
     const allTaskIds = new Set(tasks.map((t) => t.id));
 
@@ -471,4 +469,3 @@ export const TaskSwitcher = memo(function TaskSwitcher({
     </div>
   );
 });
-

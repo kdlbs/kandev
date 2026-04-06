@@ -76,7 +76,9 @@ function TaskStateIcon({
   isInProgress: boolean;
 }) {
   if (isInProgress) {
-    return <IconCircleDashed className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin" />;
+    return (
+      <IconCircleDashed className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin" />
+    );
   }
   const isReview =
     sessionState === "WAITING_FOR_INPUT" ||
@@ -104,9 +106,7 @@ function TaskItemStatsRow({
       {updatedAt && (
         <span className="text-muted-foreground/50">{formatRelativeTime(updatedAt)}</span>
       )}
-      {prInfo && (
-        <span className="text-muted-foreground/50">#{prInfo.number}</span>
-      )}
+      {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
     </span>
   );
 }
@@ -173,7 +173,9 @@ function TaskItemContent({
   reserveMenuSpace: boolean;
 }) {
   return (
-    <div className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}>
+    <div
+      className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}
+    >
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
@@ -227,7 +229,8 @@ export const TaskItem = memo(function TaskItem({
     state === "SCHEDULING" ||
     sessionState === "STARTING" ||
     sessionState === "RUNNING";
-  const hasDiffStats = !isInProgress && !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const hasDiffStats =
+    !isInProgress && !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
     <div

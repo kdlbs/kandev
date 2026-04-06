@@ -175,7 +175,9 @@ function toSidebarItem(
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
-    prInfo: pr ? { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) } : undefined,
+    prInfo: pr
+      ? { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) }
+      : undefined,
   };
 }
 
@@ -191,14 +193,23 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
   return {
     id: s.archivedTaskId!,
     title: s.archivedTaskTitle ?? "Archived task",
-    state: undefined, sessionState: undefined, description: undefined,
-    workflowId: undefined, workflowStepId: undefined,
+    state: undefined,
+    sessionState: undefined,
+    description: undefined,
+    workflowId: undefined,
+    workflowStepId: undefined,
     repositoryPath: s.archivedTaskRepositoryPath,
-    diffStats: undefined, isRemoteExecutor: false,
-    remoteExecutorType: undefined, remoteExecutorName: undefined,
-    primarySessionId: null, updatedAt: s.archivedTaskUpdatedAt,
-    createdAt: undefined, isArchived: true,
-    parentTaskTitle: undefined, parentTaskId: undefined, prInfo: undefined,
+    diffStats: undefined,
+    isRemoteExecutor: false,
+    remoteExecutorType: undefined,
+    remoteExecutorName: undefined,
+    primarySessionId: null,
+    updatedAt: s.archivedTaskUpdatedAt,
+    createdAt: undefined,
+    isArchived: true,
+    parentTaskTitle: undefined,
+    parentTaskId: undefined,
+    prInfo: undefined,
   };
 }
 
@@ -255,7 +266,11 @@ function useSidebarData(workspaceId: string | null) {
       titleById,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
-    if (archivedState.isArchived && archivedState.archivedTaskId && !items.some((t) => t.id === archivedState.archivedTaskId)) {
+    if (
+      archivedState.isArchived &&
+      archivedState.archivedTaskId &&
+      !items.some((t) => t.id === archivedState.archivedTaskId)
+    ) {
       items.unshift(buildArchivedItem(archivedState));
     }
     return items;

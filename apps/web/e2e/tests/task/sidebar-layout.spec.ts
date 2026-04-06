@@ -218,11 +218,7 @@ test.describe("Sidebar layout — context menu", () => {
 });
 
 test.describe("Sidebar layout — active task highlight", () => {
-  test("selected task has visual selection state", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("selected task has visual selection state", async ({ testPage, apiClient, seedData }) => {
     const taskA = await apiClient.createTask(seedData.workspaceId, "Highlight Task A", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
