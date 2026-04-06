@@ -216,7 +216,10 @@ function useSessionResetAndCheck(
   session: { started_at?: string; updated_at?: string } | null,
   setters: ResumeStateSetter,
 ): SessionResetAndCheckResult {
-  const [sessionStatusState, setSessionStatus] = useState<{ id: string | null; status: SessionStatus | null }>({ id: sessionId, status: null });
+  const [sessionStatusState, setSessionStatus] = useState<{
+    id: string | null;
+    status: SessionStatus | null;
+  }>({ id: sessionId, status: null });
   // Reset sessionStatus when sessionId changes (derived, not in effect)
   const sessionStatus = sessionStatusState.id === sessionId ? sessionStatusState.status : null;
   const hasAttemptedResume = useRef(false);
