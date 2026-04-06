@@ -1,5 +1,32 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import fs from "node:fs";
+import path from "node:path";
+import { execSync } from "node:child_process";
+
+/** Minimal git helper for E2E tests - runs git commands in the test repository. */
+class GitHelper {
+  constructor(
+    private repoDir: string,
+    private env: NodeJS.ProcessEnv,
+  ) {}
+
+  exec(cmd: string): string {
+    return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
+  }
+
+  createFile(name: string, content: string) {
+    fs.writeFileSync(path.join(this.repoDir, name), content);
+  }
+
+  stageAll() {
+    this.exec("git add -A");
+  }
+
+  commit(message: string) {
+    this.exec(`git commit -m "${message}"`);
+  }
+}
 
 test.describe("Changes panel focus behavior", () => {
   /**
@@ -15,8 +42,20 @@ test.describe("Changes panel focus behavior", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(90_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
 
     // Create a task and wait for the agent to be ready
     const task = await apiClient.createTaskWithAgent(
@@ -29,15 +68,15 @@ test.describe("Changes panel focus behavior", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
-    await session.goto(task.id);
     await session.waitForLoad();
-    await session.waitForAgentReady();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // Create a file and commit so there are existing changes
-    await apiClient.writeFile(task.primarySessionId!, "test-file.txt", "hello world");
-    await apiClient.gitStage(task.primarySessionId!, ["test-file.txt"]);
-    await apiClient.gitCommit(task.primarySessionId!, "test commit");
+    git.createFile("test-file.txt", "hello world");
+    git.stageAll();
+    git.commit("test commit");
 
     // Wait for the changes panel to show the commit
     await session.clickTab("Changes");
@@ -74,8 +113,20 @@ test.describe("Changes panel focus behavior", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(90_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -87,10 +138,10 @@ test.describe("Changes panel focus behavior", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
-    await session.goto(task.id);
     await session.waitForLoad();
-    await session.waitForAgentReady();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // Toggle plan mode — this moves changes into the center group
     await session.togglePlanMode();
@@ -102,9 +153,9 @@ test.describe("Changes panel focus behavior", () => {
     await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
     // Create new changes — this would previously trigger auto-activate
-    await apiClient.writeFile(task.primarySessionId!, "new-file.txt", "new content");
-    await apiClient.gitStage(task.primarySessionId!, ["new-file.txt"]);
-    await apiClient.gitCommit(task.primarySessionId!, "new commit");
+    git.createFile("new-file.txt", "new content");
+    git.stageAll();
+    git.commit("new commit");
 
     // Wait for the changes badge to update
     await expect(testPage.locator(".dv-default-tab:has-text('Changes')")).toBeVisible({

@@ -346,8 +346,9 @@ func (s *Service) searchPRForExistingWatch(
 	sessionID, taskID, branch string,
 ) {
 	// Update branch if the agent switched branches since the watch was created.
+	// Use the atomic variant to guard against a concurrent PR association.
 	if watch.Branch != branch {
-		if err := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, branch); err != nil {
+		if err := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, branch); err != nil {
 			s.logger.Warn("failed to update PR watch branch",
 				zap.String("watch_id", watch.ID),
 				zap.String("old_branch", watch.Branch),
