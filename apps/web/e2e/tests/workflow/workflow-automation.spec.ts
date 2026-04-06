@@ -617,8 +617,9 @@ test.describe("Workflow automation", () => {
     expect(sessions.total).toBe(1);
     expect(sessions.sessions[0].state).toBe("CREATED");
 
-    // The chat should show the empty state — no agent messages
-    await expect(testPage.getByText("No messages yet")).toBeVisible();
+    // The agent was NOT started — the "Start agent" button should be visible,
+    // confirming the auto-start was blocked for this non-auto-start step.
+    await expect(testPage.getByTestId("task-description-start-button")).toBeVisible();
 
     // Stepper shows Waiting as current step (task didn't move)
     await expect(session.stepperStep("Waiting")).toHaveAttribute("aria-current", "step", {
