@@ -8,7 +8,11 @@ export type SessionInfo = {
 
 type GitStatusMap = Record<
   string,
-  { files?: Record<string, { additions?: number; deletions?: number }> }
+  {
+    files?: Record<string, { additions?: number; deletions?: number }>;
+    branch_additions?: number;
+    branch_deletions?: number;
+  }
 >;
 
 export function getSessionInfoForTask(
@@ -30,13 +34,24 @@ export function getSessionInfoForTask(
   const sessionState = latestSession.state as TaskSessionState | undefined;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
-  if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
-  let additions = 0;
-  let deletions = 0;
-  for (const file of Object.values(gitStatus.files)) {
-    additions += file.additions ?? 0;
-    deletions += file.deletions ?? 0;
+  if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState };
+
+  // Prefer branch-level totals (full branch diff vs merge-base) when available.
+  // Fall back to summing per-file counts for backwards compat with older agents.
+  let additions: number;
+  let deletions: number;
+  if (gitStatus.branch_additions !== undefined || gitStatus.branch_deletions !== undefined) {
+    additions = gitStatus.branch_additions ?? 0;
+    deletions = gitStatus.branch_deletions ?? 0;
+  } else {
+    additions = 0;
+    deletions = 0;
+    for (const file of Object.values(gitStatus.files ?? {})) {
+      additions += file.additions ?? 0;
+      deletions += file.deletions ?? 0;
+    }
   }
+
   const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
   return { diffStats, updatedAt, sessionState };
 }

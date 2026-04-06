@@ -242,8 +242,7 @@ export const TaskItem = memo(function TaskItem({
     state === "SCHEDULING" ||
     sessionState === "STARTING" ||
     sessionState === "RUNNING";
-  const hasDiffStats =
-    !isInProgress && !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
     <div

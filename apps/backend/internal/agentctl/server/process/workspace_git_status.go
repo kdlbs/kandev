@@ -73,6 +73,9 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
 	wt.enrichWithDiffData(ctx, &update)
 
+	// Compute full branch totals vs merge-base (committed + staged + unstaged + untracked)
+	wt.enrichWithBranchDiff(ctx, &update)
+
 	return update, nil
 }
 

@@ -62,6 +62,8 @@ export type GitStatusEntry = {
   behind: number;
   files: Record<string, FileInfo>;
   timestamp: string | null;
+  branch_additions?: number;
+  branch_deletions?: number;
 };
 
 export type GitStatusState = {
