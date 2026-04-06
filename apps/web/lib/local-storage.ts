@@ -412,7 +412,11 @@ const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
 
 export function wasPRPanelOffered(sessionId: string): boolean {
   if (typeof window === "undefined") return false;
-  return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
+  try {
+    return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function markPRPanelOffered(sessionId: string): void {
@@ -614,6 +618,7 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
   // Session-keyed storage — clean all sessions belonging to the task
   for (const sessionId of sessionIds) {
     removeSessionMaximizeState(sessionId);
+    removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
