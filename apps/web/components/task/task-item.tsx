@@ -41,7 +41,7 @@ type TaskItemProps = {
   isSubTask?: boolean;
   repositories?: string[];
   prInfo?: { number: number; state: string };
-  stepLabel?: string;
+  hasDiffStats?: boolean;
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -91,17 +91,14 @@ function TaskStateIcon({
   return <IconCircleDashed className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />;
 }
 
-
 function TaskItemStatsRow({
   updatedAt,
   prInfo,
-  stepLabel,
 }: {
   updatedAt?: string;
   prInfo?: { number: number; state: string };
-  stepLabel?: string;
 }) {
-  if (!updatedAt && !prInfo && !stepLabel) return null;
+  if (!updatedAt && !prInfo) return null;
   return (
     <span className="flex items-center gap-1.5 text-[11px]">
       {updatedAt && (
@@ -110,15 +107,9 @@ function TaskItemStatsRow({
       {prInfo && (
         <span className="text-muted-foreground/50">#{prInfo.number}</span>
       )}
-      {stepLabel && (
-        <span className="ml-auto rounded border border-muted-foreground/20 px-1 py-px text-[10px] text-muted-foreground/50 leading-tight">
-          {stepLabel}
-        </span>
-      )}
     </span>
   );
 }
-
 
 function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
   return (
@@ -167,7 +158,7 @@ function TaskItemContent({
   repositories,
   updatedAt,
   prInfo,
-  stepLabel,
+  reserveMenuSpace,
 }: {
   title: string;
   taskId?: string;
@@ -179,10 +170,10 @@ function TaskItemContent({
   repositories?: string[];
   updatedAt?: string;
   prInfo?: { number: number; state: string };
-  stepLabel?: string;
+  reserveMenuSpace: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5 group-hover:pr-5">
+    <div className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}>
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
@@ -205,7 +196,7 @@ function TaskItemContent({
           {repositories.join(" · ")}
         </span>
       )}
-      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} stepLabel={stepLabel} />
+      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} />
     </div>
   );
 }
@@ -229,7 +220,6 @@ export const TaskItem = memo(function TaskItem({
   isSubTask,
   repositories,
   prInfo,
-  stepLabel,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress =
@@ -275,7 +265,7 @@ export const TaskItem = memo(function TaskItem({
         repositories={repositories}
         updatedAt={updatedAt}
         prInfo={prInfo}
-        stepLabel={stepLabel}
+        reserveMenuSpace={!hasDiffStats}
       />
       {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
       <TaskMenuButton visible={effectiveMenuOpen} />

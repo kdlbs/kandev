@@ -194,7 +194,6 @@ function RepoGroupSection({
   function renderItem(task: TaskSwitcherItem, isSubTask?: boolean) {
     const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
     const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
-    const currentStep = taskSteps?.find((s) => s.id === task.workflowStepId);
     return (
       <TaskItemWithContextMenu
         key={task.id}
@@ -221,7 +220,6 @@ function RepoGroupSection({
           updatedAt={task.updatedAt}
           repositories={task.repositories}
           prInfo={task.prInfo}
-          stepLabel={currentStep?.title}
           isSubTask={isSubTask}
           onClick={() => onSelectTask(task.id)}
           isDeleting={deletingTaskId === task.id}
