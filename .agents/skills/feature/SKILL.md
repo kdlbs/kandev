@@ -13,7 +13,7 @@ The following skills and subagents are available in this repo to delegate work t
 
 - **`/tdd`** — Implement changes using Test-Driven Development (Red-Green-Refactor). Delegate implementation tasks to this.
 - **`/e2e`** — Write and run Playwright E2E tests using TDD. Use for the final wave when the full feature needs end-to-end coverage.
-- **`qa` subagent** — Verify a feature works and review code quality. Traces wiring, tests edge cases, checks for security and architecture issues.
+- **`code-review` subagent** — Review changed code for quality, security, and architecture compliance. Also verifies the feature works: traces wiring, tests edge cases, and writes tests for gaps.
 - **`verify` subagent** — Run fmt, typecheck, test, and lint across the monorepo, then fix any issues found.
 - **`simplify` subagent** — Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting.
 - **`/record`** — Record architectural decisions or save implementation plans for future reference.
@@ -30,7 +30,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 2. **Explore the codebase** — Find similar patterns, relevant architecture, integration points
 3. **Design the solution** — Propose approaches with trade-offs, get user approval before implementing
 4. **Implement with TDD** — Break into waves, implement test-first, delegate where possible
-5. **QA and review** — Verify the feature works, review code quality, simplify
+5. **Code review and QA** — Review code quality, verify the feature works, simplify
 6. **Record** — Save any architectural decisions or insights for future sessions
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — each phase produces context that the next phase needs. Designing without exploring leads to solutions that fight the codebase. Implementing without design approval wastes time on the wrong approach.
@@ -153,14 +153,14 @@ Mark task 4 as completed when all implementation sub-tasks pass their quality ga
 
 ---
 
-## Phase 5: QA and review
+## Phase 5: Code review and QA
 
 Mark task 5 as in_progress.
 
-1. Delegate to the `qa` subagent to verify the feature works and review code quality. It will:
-   - Trace the wiring (exports used, APIs called, data flows)
-   - Test the happy path and try to break it (boundary values, error paths, concurrency)
+1. Delegate to the `code-review` subagent to review changes and verify the feature works. It will:
    - Review changed code for quality, security, and architecture compliance
+   - Trace the wiring (exports used, APIs called, data flows)
+   - Try to break it (boundary values, error paths, concurrency)
    - Write tests for any gaps found
 2. Delegate to the `simplify` subagent to clean up the implementation
 3. Delegate to the `verify` subagent to run fmt, typecheck, test, and lint
