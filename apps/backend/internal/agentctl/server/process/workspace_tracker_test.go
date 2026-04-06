@@ -272,6 +272,69 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 	}
 }
 
+// TestGetGitStatus_AheadBehindAfterRebase verifies that ahead/behind counts
+// reflect divergence from the base branch (origin/main), not the remote tracking
+// branch. After a rebase, the remote tracking branch has stale SHAs, so comparing
+// against it produces inflated counts.
+func TestGetGitStatus_AheadBehindAfterRebase(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	// Create a feature branch with upstream tracking
+	runGit(t, repoDir, "checkout", "-b", "feature-rebase")
+	runGit(t, repoDir, "push", "-u", "origin", "feature-rebase")
+
+	// Make 2 commits on the feature branch
+	writeFile(t, repoDir, "feature1.txt", "feature 1")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "Feature commit 1")
+
+	writeFile(t, repoDir, "feature2.txt", "feature 2")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "Feature commit 2")
+
+	// Push feature commits so remote tracking branch has them
+	runGit(t, repoDir, "push")
+
+	// Switch to main, add commits, push
+	runGit(t, repoDir, "checkout", "main")
+	for i := 0; i < 5; i++ {
+		writeFile(t, repoDir, "main"+string(rune('0'+i))+".txt", "main content")
+		runGit(t, repoDir, "add", ".")
+		runGit(t, repoDir, "commit", "-m", "Main commit")
+	}
+	runGit(t, repoDir, "push")
+
+	// Switch back to feature and rebase onto main
+	runGit(t, repoDir, "checkout", "feature-rebase")
+	runGit(t, repoDir, "fetch", "origin")
+	runGit(t, repoDir, "rebase", "origin/main")
+
+	// Now: local feature-rebase has 2 feature commits on top of main (rebased)
+	// But origin/feature-rebase still points to old pre-rebase commits
+	// git rev-list --left-right --count feature-rebase...origin/feature-rebase
+	// would show ~7 ahead (2 rebased + 5 main commits), not 2
+
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("failed to get git status: %v", err)
+	}
+
+	// Should be 2 ahead of origin/main (the 2 feature commits)
+	if status.Ahead != 2 {
+		t.Errorf("expected ahead=2, got %d", status.Ahead)
+	}
+
+	// Should be 0 behind origin/main (just rebased)
+	if status.Behind != 0 {
+		t.Errorf("expected behind=0, got %d", status.Behind)
+	}
+}
+
 // TestFilterLocalCommits_PullAndResetScenario tests the exact scenario where:
 // 1. Session starts at commit X
 // 2. Upstream (origin/main) gets new commits

@@ -25,10 +25,10 @@ type GitStatusUpdate struct {
 	// Renamed contains paths of renamed files.
 	Renamed []string `json:"renamed"`
 
-	// Ahead is the number of commits ahead of the remote branch.
+	// Ahead is the number of commits ahead of the base branch (origin/main).
 	Ahead int `json:"ahead"`
 
-	// Behind is the number of commits behind the remote branch.
+	// Behind is the number of commits behind the base branch (origin/main).
 	Behind int `json:"behind"`
 
 	// Branch is the current local branch name.

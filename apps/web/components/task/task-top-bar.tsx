@@ -251,13 +251,15 @@ function TopBarLeft({
 /** Ahead/Behind commit status badges */
 function GitAheadBehindBadges({
   gitStatus,
+  baseBranch,
 }: {
-  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
+  gitStatus: { ahead: number; behind: number };
+  baseBranch?: string;
 }) {
   const ahead = gitStatus?.ahead ?? 0;
   const behind = gitStatus?.behind ?? 0;
   if (ahead === 0 && behind === 0) return null;
-  const remoteBranch = gitStatus?.remote_branch || "remote";
+  const compareRef = baseBranch || "main";
   return (
     <div className="flex items-center gap-1">
       {ahead > 0 && (
@@ -268,7 +270,7 @@ function GitAheadBehindBadges({
             </span>
           </TooltipTrigger>
           <TooltipContent>
-            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of {remoteBranch}
+            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of {compareRef}
           </TooltipContent>
         </Tooltip>
       )}
@@ -280,7 +282,7 @@ function GitAheadBehindBadges({
             </span>
           </TooltipTrigger>
           <TooltipContent>
-            {behind} commit{behind !== 1 ? "s" : ""} behind {remoteBranch}
+            {behind} commit{behind !== 1 ? "s" : ""} behind {compareRef}
           </TooltipContent>
         </Tooltip>
       )}
@@ -329,7 +331,7 @@ function TopBarRight({
           </TooltipContent>
         </Tooltip>
       )}
-      <GitAheadBehindBadges gitStatus={gitStatus} />
+      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>

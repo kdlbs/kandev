@@ -126,24 +126,21 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	return nil
 }
 
-// getAheadBehindCounts populates the Ahead/Behind fields relative to the tracking or
-// origin branch. Falls back to origin/main then origin/master when no upstream is set.
+// getAheadBehindCounts populates the Ahead/Behind fields relative to the base branch
+// (origin/main or origin/master). Always compares against the base branch rather than
+// the remote tracking branch, because after a rebase the tracking branch has stale
+// commit SHAs that produce inflated counts.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate) {
-	// Use remote branch if available, otherwise fall back to origin/main or origin/master
-	// This handles worktree branches that don't have an upstream tracking branch set
-	compareRef := update.RemoteBranch
-	if compareRef == "" {
-		// Try origin/main first, then origin/master
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/main")
+	// Always compare against the base branch (origin/main or origin/master).
+	// Using the remote tracking branch (origin/<feature-branch>) gives wrong counts
+	// after rebase because rebased commits have new SHAs.
+	var compareRef string
+	for _, candidate := range []string{"origin/main", "origin/master"} {
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
 		checkCmd.Dir = wt.workDir
 		if err := checkCmd.Run(); err == nil {
-			compareRef = "origin/main"
-		} else {
-			checkCmd2 := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/master")
-			checkCmd2.Dir = wt.workDir
-			if err := checkCmd2.Run(); err == nil {
-				compareRef = "origin/master"
-			}
+			compareRef = candidate
+			break
 		}
 	}
 	if compareRef == "" {
