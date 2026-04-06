@@ -180,11 +180,31 @@ func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *ty
 	return nil
 }
 
+// unquoteGitPath strips git's C-style quoting from paths that contain spaces or
+// special characters. Git wraps such paths in double quotes in porcelain output
+// (e.g. "path with spaces/file.md"). Go's strconv.Unquote handles the same
+// escaping rules (backslash sequences for tabs, newlines, quotes, etc.).
+func unquoteGitPath(p string) string {
+	if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
+		if unquoted, err := strconv.Unquote(p); err == nil {
+			return unquoted
+		}
+	}
+	return p
+}
+
 // applyPorcelainLine parses a single git status --porcelain line and updates the status update.
 func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitStatusUpdate) {
 	indexStatus := line[0]    // Staged status (X)
 	workTreeStatus := line[1] // Unstaged status (Y)
-	filePath := strings.TrimSpace(line[3:])
+	rawPath := strings.TrimSpace(line[3:])
+
+	// For renames the format is "old -> new" (each part may be independently
+	// quoted), so we must split first and unquote each part separately.
+	filePath := rawPath
+	if indexStatus != 'R' {
+		filePath = unquoteGitPath(rawPath)
+	}
 
 	fileInfo := types.FileInfo{Path: filePath}
 
@@ -223,10 +243,11 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 	case indexStatus == 'R':
 		fileInfo.Status = "renamed"
 		fileInfo.Staged = true
-		// Renamed files have format "old -> new"
-		if idx := strings.Index(filePath, " -> "); idx != -1 {
-			fileInfo.OldPath = filePath[:idx]
-			fileInfo.Path = filePath[idx+4:]
+		// Renamed files have format "old -> new"; each part may be quoted independently.
+		if idx := strings.Index(rawPath, " -> "); idx != -1 {
+			fileInfo.OldPath = unquoteGitPath(rawPath[:idx])
+			filePath = unquoteGitPath(rawPath[idx+4:])
+			fileInfo.Path = filePath
 		}
 		update.Renamed = append(update.Renamed, filePath)
 	}

@@ -214,6 +214,77 @@ test.describe("Git Changes Panel", () => {
   });
 
   /**
+   * Verifies that files with spaces in their path are shown correctly in the
+   * Changes panel and that their diff content is visible (not "No changes").
+   * Regression test for: git status --porcelain quotes paths with spaces,
+   * and the backend must unquote them so diff lookups succeed.
+   */
+  test("shows modified files with spaces in path", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Spaces Profile");
+
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Spaces Test", profile.id, {
+      description: "Testing paths with spaces",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, "Git Spaces Test");
+
+    // Set up git helper
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Create a file inside a directory with spaces
+    const dirWithSpaces = path.join(repoDir, "path with spaces");
+    fs.mkdirSync(dirWithSpaces, { recursive: true });
+    fs.writeFileSync(path.join(dirWithSpaces, "file.md"), "initial content");
+    git.stageAll();
+    git.commit("Add file with spaces in path");
+
+    // Modify the file to create an unstaged change
+    fs.writeFileSync(path.join(dirWithSpaces, "file.md"), "modified content");
+
+    // Click the Changes tab
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+
+    // The file should appear in the unstaged section with its unquoted path
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("file.md")).toBeVisible({ timeout: 15_000 });
+
+    // Click the file to open its diff and verify content is shown
+    await session.changes.getByText("file.md").click();
+
+    // Verify the diff viewer shows actual diff content (not empty / "No changes").
+    // Pierre Diffs renders in a shadow DOM — check all diffs-container elements.
+    await testPage.waitForFunction(
+      (searchText: string) => {
+        for (const container of document.querySelectorAll("diffs-container")) {
+          const shadow = container.shadowRoot;
+          if (shadow?.textContent?.includes(searchText)) return true;
+        }
+        return false;
+      },
+      "modified content",
+      { timeout: 30_000 },
+    );
+  });
+
+  /**
    * Verifies that commits appear in the commits section after committing staged files.
    * This tests the full flow: create file → stage → commit → verify in UI.
    */

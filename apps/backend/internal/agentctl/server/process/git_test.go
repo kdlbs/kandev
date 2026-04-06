@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,5 +49,41 @@ func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	after := strings.TrimSpace(runGit(t, suffixedDir, "rev-parse", "--abbrev-ref", "@{upstream}"))
 	if after != "origin/feature/pr-branch" {
 		t.Fatalf("upstream after push = %q, want %q", after, "origin/feature/pr-branch")
+	}
+}
+
+func TestParseCommitDiff_PathsWithSpaces(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+
+	// Create a file with spaces in its path, commit it, then verify parseCommitDiff
+	// extracts the correct unquoted file path.
+	dir := filepath.Join(repoDir, "path with spaces")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	writeFile(t, dir, "file.md", "hello world\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add spaced path")
+	sha := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.ShowCommit(context.Background(), sha)
+	if err != nil {
+		t.Fatalf("ShowCommit error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("ShowCommit failed: %+v", result)
+	}
+
+	expectedPath := "path with spaces/file.md"
+	if _, exists := result.Files[expectedPath]; !exists {
+		keys := make([]string, 0, len(result.Files))
+		for k := range result.Files {
+			keys = append(keys, k)
+		}
+		t.Errorf("expected Files to contain key %q, got keys: %v", expectedPath, keys)
 	}
 }

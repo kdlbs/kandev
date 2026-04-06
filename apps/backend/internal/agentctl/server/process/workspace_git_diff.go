@@ -37,7 +37,9 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *
 		if line == "" {
 			continue
 		}
-		parts := strings.Fields(line)
+		// numstat uses tab-separated values: <added>\t<deleted>\t<path>
+		// Split by tab (not whitespace) to preserve spaces in file paths.
+		parts := strings.SplitN(line, "\t", 3)
 		if len(parts) < 3 {
 			continue
 		}
@@ -85,7 +87,8 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 		if line == "" {
 			continue
 		}
-		parts := strings.Fields(line)
+		// numstat uses tab-separated values: <added>\t<deleted>\t<path>
+		parts := strings.SplitN(line, "\t", 3)
 		if len(parts) < 3 {
 			continue
 		}

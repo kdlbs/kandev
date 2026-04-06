@@ -299,15 +299,15 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 		}
 
 		header := lines[0]
-		// Extract path from "diff --git a/path b/path"
-		headerParts := strings.Split(header, " ")
-		if len(headerParts) < 4 {
+		// Extract path from "diff --git a/<path> b/<path>".
+		// We cannot split by space because paths may contain spaces.
+		// Instead, strip the known prefix and find the " b/" separator.
+		pathsPart := strings.TrimPrefix(header, "diff --git ")
+		bIdx := strings.Index(pathsPart, " b/")
+		if bIdx == -1 {
 			continue
 		}
-
-		// Get the b/path part and remove the "b/" prefix
-		bPath := headerParts[len(headerParts)-1]
-		filePath := strings.TrimPrefix(bPath, "b/")
+		filePath := pathsPart[bIdx+3:]
 
 		// Determine file status from diff content
 		status := fileStatusModified
