@@ -180,9 +180,9 @@ function TaskItemContent({
   stepLabel?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight line-clamp-1">
-        {title}
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5 group-hover:pr-5">
+      <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
+        <span className="truncate">{title}</span>
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
