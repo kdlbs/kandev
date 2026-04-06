@@ -295,6 +295,7 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 - Provider pattern for DI; stderr for logs, stdout for ACP only
 - Pass context through chains; event bus for cross-component comm
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
+- **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
 
 ### Frontend
 - **Data:** SSR fetch → hydrate → read store. Never fetch in components
