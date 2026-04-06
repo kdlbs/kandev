@@ -21,7 +21,8 @@ export type DevOptions = {
 
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
-  const dbPath = path.join(repoRoot, "apps", "backend", "kandev.db");
+  const dbPath =
+    process.env.KANDEV_DATABASE_PATH || path.join(repoRoot, "apps", "backend", "kandev.db");
 
   const extra: Record<string, string> = {
     KANDEV_DATABASE_PATH: dbPath,
