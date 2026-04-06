@@ -12,32 +12,19 @@ import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { cn } from "@kandev/ui/lib/utils";
 
-/** Auto-activate the changes panel in the right sidebar, or quietly add to center if missing. */
+/** Auto-activate the changes panel only when it lives in the right sidebar. */
 function autoActivateChangesPanel(): void {
-  const { api, rightTopGroupId, centerGroupId } = useDockviewStore.getState();
+  const { api, rightTopGroupId } = useDockviewStore.getState();
   if (!api) return;
 
   const panel = api.getPanel("changes");
+  // Only auto-focus when the panel is in the right sidebar.
+  // When it's in the center group (e.g. plan mode layout), never steal focus
+  // from the active chat/session panel.
   if (panel && panel.group.id === rightTopGroupId) {
     panel.api.setActive();
-    return;
-  }
-
-  if (!panel) {
-    focusOrAddPanel(
-      api,
-      {
-        id: "changes",
-        component: "changes",
-        tabComponent: "changesTab",
-        title: "Changes",
-        position: { referenceGroup: centerGroupId },
-      },
-      true,
-    );
   }
 }
 
@@ -58,6 +45,9 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether this is the initial data load (page refresh).
+  // Skip auto-activate until data has been loaded at least once.
+  const initializedRef = useRef(false);
 
   const [isFlashing, setIsFlashing] = useState(false);
   const [badgeCount, setBadgeCount] = useState(0);
@@ -85,7 +75,14 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     const increased = totalCount > prev && totalCount > 0;
     const decreased = totalCount < prev;
 
-    if (increased && prev === 0) {
+    // Auto-activate when changes appear for the first time (0 → N), but only
+    // after initial data has loaded.  On page refresh, hooks start with
+    // totalCount=0, then async data arrives making it >0.  We must not
+    // treat that initial load as "new changes".  Wait until we've seen
+    // real data at least once before arming the auto-activate.
+    if (!initializedRef.current) {
+      if (totalCount > 0) initializedRef.current = true;
+    } else if (increased && prev === 0) {
       autoActivateChangesPanel();
     }
 
