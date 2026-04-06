@@ -12,6 +12,7 @@ Systematic bug fixing: reproduce the problem, find the root cause, apply a minim
 - **`/tdd`** — Use for implementing the fix with a regression test (Red-Green-Refactor).
 - **`/e2e`** — Use when the bug is in a user-facing flow and needs a Playwright regression test.
 - **`/verify`** — Run after fixing to ensure nothing else broke.
+- **`/record`** — Record architectural decisions or insights discovered during the fix.
 
 ---
 
@@ -23,6 +24,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
 3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
 4. **Verify** — Run full verification, check for similar patterns elsewhere
+5. **Record** — Save any architectural decisions or insights for future sessions
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
 
@@ -91,6 +93,20 @@ Mark task 4 as in_progress.
 3. If the same category of bug could occur elsewhere, grep for similar patterns and flag them
 
 Mark task 4 as completed.
+
+---
+
+## Phase 5: Record
+
+Mark task 5 as in_progress.
+
+Check if the fix revealed any insights worth recording for future sessions:
+
+1. If the root cause exposed an architectural gap or non-obvious constraint, run `/record decision`
+2. If you discovered a pattern that would help debug similar issues, save it
+3. If nothing worth recording, skip this phase
+
+Mark task 5 as completed.
 
 ---
 
