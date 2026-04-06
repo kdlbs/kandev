@@ -73,7 +73,6 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			}
 
 			stop := wt.monitorTick(ctx, &lastState, &consecutiveFailures)
-			atomic.StoreInt32(&wt.monitorRunning, 0)
 			if stop {
 				return
 			}
@@ -83,7 +82,10 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 
 // monitorTick runs a single monitor cycle: checks workspace state and triggers
 // updates if changes are detected. Returns true if the loop should stop.
+// The deferred flag reset ensures monitorRunning is cleared even on panic.
 func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
+	defer atomic.StoreInt32(&wt.monitorRunning, 0)
+
 	currentState, err := wt.getWorkspaceState(ctx)
 	if err != nil {
 		if !wt.workDirExists() {

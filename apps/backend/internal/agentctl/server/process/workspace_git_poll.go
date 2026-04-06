@@ -57,7 +57,6 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 			}
 
 			stop := wt.gitPollTick(ctx, &consecutiveFailures)
-			atomic.StoreInt32(&wt.gitPollRunning, 0)
 			if stop {
 				return
 			}
@@ -67,7 +66,10 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 
 // gitPollTick runs a single git poll cycle: checks for manual git operations
 // (commits, branch switches, staging). Returns true if the loop should stop.
+// The deferred flag reset ensures gitPollRunning is cleared even on panic.
 func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures *int) bool {
+	defer atomic.StoreInt32(&wt.gitPollRunning, 0)
+
 	if !wt.workDirExists() {
 		wt.logger.Warn("work directory no longer exists, stopping git polling",
 			zap.String("workDir", wt.workDir))
