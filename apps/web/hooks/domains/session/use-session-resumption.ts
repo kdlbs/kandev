@@ -221,6 +221,10 @@ export function useSessionResumption(
   const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
+  // Guard ref: tracks the current sessionId so stale async callbacks (from a
+  // previous session's checkAndResume) don't overwrite state for the new session.
+  const activeSessionRef = useRef(sessionId);
+  activeSessionRef.current = sessionId;
 
   const setters: ResumeStateSetter = {
     setResumptionState,
@@ -231,9 +235,16 @@ export function useSessionResumption(
     setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
   };
 
+  // Reset all local state when session or task changes to prevent stale data
+  // from a previous session leaking into the new one (e.g. topbar branch).
   useEffect(() => {
     hasAttemptedResume.current = false;
     remoteStatusRetryCount.current = 0;
+    setResumptionState("idle");
+    setSessionStatus(null);
+    setError(null);
+    setWorktreePath(null);
+    setWorktreeBranch(null);
   }, [sessionId, taskId]);
 
   // Check session status and auto-resume if needed
@@ -241,7 +252,32 @@ export function useSessionResumption(
     if (!taskId || !sessionId || connectionStatus !== "connected" || hasAttemptedResume.current)
       return;
     hasAttemptedResume.current = true;
-    checkAndResume({ taskId, sessionId, session, setSessionStatus, setters });
+    // Capture the sessionId at call time to guard against stale callbacks
+    const capturedSessionId = sessionId;
+    const guardedSetters: ResumeStateSetter = {
+      ...setters,
+      setResumptionState: (s) => {
+        if (activeSessionRef.current === capturedSessionId) setResumptionState(s);
+      },
+      setError: (e) => {
+        if (activeSessionRef.current === capturedSessionId) setError(e);
+      },
+      setWorktreePath: (p) => {
+        if (activeSessionRef.current === capturedSessionId) setWorktreePath(p);
+      },
+      setWorktreeBranch: (b) => {
+        if (activeSessionRef.current === capturedSessionId) setWorktreeBranch(b);
+      },
+    };
+    checkAndResume({
+      taskId,
+      sessionId,
+      session,
+      setSessionStatus: (s) => {
+        if (activeSessionRef.current === capturedSessionId) setSessionStatus(s);
+      },
+      setters: guardedSetters,
+    });
   }, [taskId, sessionId, connectionStatus, setTaskSession, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Freshly created remote sessions may return status before runtime metadata is available.

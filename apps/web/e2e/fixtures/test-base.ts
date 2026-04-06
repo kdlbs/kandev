@@ -14,6 +14,8 @@ export type SeedData = {
   steps: WorkflowStep[];
   repositoryId: string;
   agentProfileId: string;
+  /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
+  worktreeExecutorProfileId: string;
 };
 
 export const test = backendFixture.extend<
@@ -64,6 +66,14 @@ export const test = backendFixture.extend<
         throw new Error("E2E seed failed: no agent profile available");
       }
 
+      // Find the worktree executor's profile so tests can opt in to worktree-based sessions.
+      const { executors } = await apiClient.listExecutors();
+      const worktreeExec = executors.find((e) => e.type === "worktree");
+      const worktreeExecutorProfileId = worktreeExec?.profiles?.[0]?.id;
+      if (!worktreeExecutorProfileId) {
+        throw new Error("E2E seed failed: no worktree executor profile available");
+      }
+
       await use({
         workspaceId: workspace.id,
         workflowId: workflow.id,
@@ -71,6 +81,7 @@ export const test = backendFixture.extend<
         steps: sorted,
         repositoryId: repo.id,
         agentProfileId,
+        worktreeExecutorProfileId,
       });
     },
     { scope: "worker" },

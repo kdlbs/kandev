@@ -190,7 +190,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         KANDEV_MOCK_AGENT: "only",
         KANDEV_MOCK_GITHUB: "true",
         KANDEV_DOCKER_ENABLED: "false",
-        KANDEV_WORKTREE_ENABLED: "false",
+        KANDEV_WORKTREE_ENABLED: "true",
         KANDEV_WORKTREE_BASEPATH: worktreeBase,
         KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
