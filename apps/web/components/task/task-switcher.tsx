@@ -421,7 +421,9 @@ function buildRepoGroups(
         ? result.find((g) => g.key !== "multi-repo")
         : undefined;
     if (singleRepoGroup) {
-      singleRepoGroup.tasks.push(...[...unassigned].sort(sortByStateThenCreated));
+      singleRepoGroup.tasks = [...singleRepoGroup.tasks, ...unassigned].sort(
+        sortByStateThenCreated,
+      );
     } else {
       result.push({
         key: "unassigned",

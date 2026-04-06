@@ -593,9 +593,11 @@ type GitStatusResult struct {
 	Deleted      []string               `json:"deleted"`
 	Untracked    []string               `json:"untracked"`
 	Renamed      []string               `json:"renamed"`
-	Files        map[string]interface{} `json:"files"`
-	Timestamp    string                 `json:"timestamp"`
-	Error        string                 `json:"error,omitempty"`
+	Files           map[string]interface{} `json:"files"`
+	Timestamp       string                 `json:"timestamp"`
+	BranchAdditions int                    `json:"branch_additions,omitempty"`
+	BranchDeletions int                    `json:"branch_deletions,omitempty"`
+	Error           string                 `json:"error,omitempty"`
 }
 
 // handleGitStatus handles GET /api/v1/git/status
@@ -638,8 +640,10 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		Deleted:      status.Deleted,
 		Untracked:    status.Untracked,
 		Renamed:      status.Renamed,
-		Files:        filesMap,
-		Timestamp:    status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		Files:           filesMap,
+		Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		BranchAdditions: status.BranchAdditions,
+		BranchDeletions: status.BranchDeletions,
 	})
 }
 
