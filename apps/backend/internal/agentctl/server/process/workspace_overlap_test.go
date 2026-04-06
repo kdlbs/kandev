@@ -149,10 +149,7 @@ func TestRefreshGitStatus_BlocksUntilLockAvailable(t *testing.T) {
 
 	// Wait for completion
 	deadline := time.After(2 * time.Second)
-	for {
-		if atomic.LoadInt32(&refreshCompleted) == 1 {
-			break
-		}
+	for atomic.LoadInt32(&refreshCompleted) != 1 {
 		select {
 		case <-deadline:
 			t.Fatal("RefreshGitStatus did not complete after lock was released")
@@ -197,12 +194,8 @@ func TestUpdateMu_PreventsConcurrentUpdates(t *testing.T) {
 			if wt.updateMu.TryLock() {
 				current := atomic.AddInt32(&concurrentCount, 1)
 				atomic.AddInt32(&totalUpdates, 1)
-				// Track peak concurrency
-				for {
-					old := atomic.LoadInt32(&maxConcurrent)
-					if current <= old || atomic.CompareAndSwapInt32(&maxConcurrent, old, current) {
-						break
-					}
+				// Track peak concurrency (CAS loop)
+				for old := atomic.LoadInt32(&maxConcurrent); current > old && !atomic.CompareAndSwapInt32(&maxConcurrent, old, current); old = atomic.LoadInt32(&maxConcurrent) {
 				}
 				// Simulate work
 				time.Sleep(10 * time.Millisecond)
