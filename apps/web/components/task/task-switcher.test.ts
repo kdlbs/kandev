@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { classifyTask } from "./task-classify";
-import {
-  statePriority,
-  sortByStateThenCreated,
-  type TaskSwitcherItem,
-} from "./task-switcher";
+import { statePriority, sortByStateThenCreated, type TaskSwitcherItem } from "./task-switcher";
 
 const EARLY = "2026-01-01T00:00:00Z";
 

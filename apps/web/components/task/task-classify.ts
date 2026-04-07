@@ -16,7 +16,10 @@ const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS"]);
 
 export type TaskBucket = "review" | "in_progress" | "backlog";
 
-export function classifyTask(sessionState: TaskSessionState | undefined, taskState?: TaskState): TaskBucket {
+export function classifyTask(
+  sessionState: TaskSessionState | undefined,
+  taskState?: TaskState,
+): TaskBucket {
   if (!sessionState) {
     if (TASK_STATE_REVIEW.has(taskState)) return "review";
     if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
