@@ -525,43 +525,20 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 }
 
 // persistResumeState updates session and executor running records after a successful resume launch.
-//
-// Silent resume: when resuming a session that was previously WAITING_FOR_INPUT,
-// we deliberately do NOT bump the session state to STARTING and do NOT bump
-// updated_at. The user has not initiated any new work — the agent process is
-// merely being re-attached after a backend restart or page reload. Bumping
-// either field would cause the task to transiently jump to the top of the
-// "in progress" bucket in the sidebar before settling back, since the frontend
-// orders by updated_at and groups by sessionState.
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	silentResume := startAgent && session.State == models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	session.ErrorMessage = ""
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+		session.CompletedAt = nil
+	}
 
-	if silentResume {
-		// Persist only the runtime IDs; leave state, error_message, and
-		// updated_at untouched so the sidebar does not reorder.
-		session.AgentExecutionID = resp.AgentExecutionID
-		session.ContainerID = resp.ContainerID
-		if err := e.repo.UpdateTaskSessionRuntimeFields(ctx, session.ID, resp.AgentExecutionID, resp.ContainerID); err != nil {
-			e.logger.Error("failed to update task session runtime fields for silent resume",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.Error(err))
-		}
-	} else {
-		session.AgentExecutionID = resp.AgentExecutionID
-		session.ContainerID = resp.ContainerID
-		session.ErrorMessage = ""
-		if startAgent {
-			session.State = models.TaskSessionStateStarting
-			session.CompletedAt = nil
-		}
-
-		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-			e.logger.Error("failed to update task session for resume",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.Error(err))
-		}
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update task session for resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
 	}
 
 	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)

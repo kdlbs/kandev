@@ -625,45 +625,17 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	now := time.Now().UTC()
 	completedAt := now.Add(-time.Hour)
 
-	t.Run("silent resume from WAITING_FOR_INPUT keeps state and updated_at", func(t *testing.T) {
-		original := now.Add(-2 * time.Hour)
+	t.Run("sets STARTING when startAgent is true", func(t *testing.T) {
 		session := &models.TaskSession{
 			ID:          "session-1",
 			TaskID:      "task-1",
 			State:       models.TaskSessionStateWaitingForInput,
 			CompletedAt: &completedAt,
-			UpdatedAt:   original,
-		}
-		repo.sessions[session.ID] = session
-
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1", ContainerID: "ctr-1"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
-
-		if session.State != models.TaskSessionStateWaitingForInput {
-			t.Errorf("expected state WAITING_FOR_INPUT (silent resume), got %s", session.State)
-		}
-		if !session.UpdatedAt.Equal(original) {
-			t.Errorf("expected updated_at unchanged, got %v", session.UpdatedAt)
-		}
-		if session.AgentExecutionID != "exec-1" {
-			t.Errorf("expected AgentExecutionID exec-1, got %q", session.AgentExecutionID)
-		}
-		if session.ContainerID != "ctr-1" {
-			t.Errorf("expected ContainerID ctr-1, got %q", session.ContainerID)
-		}
-	})
-
-	t.Run("sets STARTING when startAgent is true and prior state is not WAITING_FOR_INPUT", func(t *testing.T) {
-		session := &models.TaskSession{
-			ID:          "session-1b",
-			TaskID:      "task-1",
-			State:       models.TaskSessionStateCreated,
-			CompletedAt: &completedAt,
 			UpdatedAt:   now,
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1b"}
+		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
 		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
 
 		if session.State != models.TaskSessionStateStarting {

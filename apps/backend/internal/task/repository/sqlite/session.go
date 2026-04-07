@@ -379,25 +379,6 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 	return nil
 }
 
-// UpdateTaskSessionRuntimeFields updates only the agent_execution_id and
-// container_id columns of a session WITHOUT touching state, error_message, or
-// updated_at. Used by silent resume paths so a re-attach does not bump
-// updated_at (which would reorder tasks in the sidebar) or transiently
-// transition the session through STARTING.
-func (r *Repository) UpdateTaskSessionRuntimeFields(ctx context.Context, sessionID, agentExecutionID, containerID string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET agent_execution_id = ?, container_id = ? WHERE id = ?
-	`), agentExecutionID, containerID, sessionID)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("agent session not found: %s", sessionID)
-	}
-	return nil
-}
-
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
 	now := time.Now().UTC()

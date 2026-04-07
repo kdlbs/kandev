@@ -27,7 +27,6 @@ type executorStore interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
-	UpdateTaskSessionRuntimeFields(ctx context.Context, sessionID, agentExecutionID, containerID string) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error

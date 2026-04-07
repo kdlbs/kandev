@@ -192,9 +192,6 @@ func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskI
 func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	return nil
 }
-func (m *mockRepository) UpdateTaskSessionRuntimeFields(ctx context.Context, sessionID, agentExecutionID, containerID string) error {
-	return nil
-}
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
 }
