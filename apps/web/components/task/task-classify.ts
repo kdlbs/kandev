@@ -12,7 +12,7 @@ const REVIEW_STATES = new Set<TaskSessionState>([
 ]);
 const IN_PROGRESS_STATES = new Set<TaskSessionState>(["RUNNING"]);
 const TASK_STATE_REVIEW = new Set<TaskState | undefined>(["REVIEW", "COMPLETED"]);
-const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS"]);
+const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS", "SCHEDULING"]);
 
 export type TaskBucket = "review" | "in_progress" | "backlog";
 
