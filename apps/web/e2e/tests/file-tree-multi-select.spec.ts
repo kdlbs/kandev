@@ -114,18 +114,19 @@ test.describe("File Tree Multi-Select", () => {
     const alphaNode = session.fileTreeNode("alpha.ts");
     await expect(alphaNode).toBeVisible({ timeout: 15_000 });
 
-    // Click first file - should select it
-    await alphaNode.click();
+    // Ctrl-click first file to select it
+    const mod = MODIFIER === "Meta" ? "Meta" : ("Control" as const);
+    await alphaNode.click({ modifiers: [mod] });
     await expect(alphaNode).toHaveAttribute("data-selected", "true");
 
     // Ctrl-click second file - both should be selected
     const betaNode = session.fileTreeNode("beta.ts");
-    await betaNode.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
+    await betaNode.click({ modifiers: [mod] });
     await expect(alphaNode).toHaveAttribute("data-selected", "true");
     await expect(betaNode).toHaveAttribute("data-selected", "true");
 
     // Ctrl-click first file again to deselect
-    await alphaNode.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
+    await alphaNode.click({ modifiers: [mod] });
     await expect(alphaNode).toHaveAttribute("data-selected", "false");
     await expect(betaNode).toHaveAttribute("data-selected", "true");
   });

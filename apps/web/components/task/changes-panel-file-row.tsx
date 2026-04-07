@@ -39,7 +39,7 @@ type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
   isSelected?: boolean;
-  onSelect?: (path: string, e: React.MouseEvent) => void;
+  onSelect?: (path: string, e: React.MouseEvent) => boolean;
   onOpenDiff: (path: string) => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
@@ -62,12 +62,8 @@ export function FileRow({
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
-    if (onSelect) {
-      onSelect(file.path, e);
-      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        onOpenDiff(file.path);
-      }
-    } else {
+    const consumed = onSelect?.(file.path, e);
+    if (!consumed) {
       onOpenDiff(file.path);
     }
   };

@@ -114,12 +114,13 @@ test.describe("Changes Panel Multi-Select", () => {
     await expect(fileA).toBeVisible({ timeout: 15_000 });
     await expect(fileB).toBeVisible({ timeout: 15_000 });
 
-    // Click first file
-    await fileA.click();
+    // Ctrl-click first file to select
+    const mod = MODIFIER === "Meta" ? "Meta" : ("Control" as const);
+    await fileA.click({ modifiers: [mod] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
 
-    // Ctrl-click second file
-    await fileB.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
+    // Ctrl-click second file — both should be selected
+    await fileB.click({ modifiers: [mod] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
     await expect(fileB).toHaveAttribute("data-selected", "true");
 
@@ -162,8 +163,9 @@ test.describe("Changes Panel Multi-Select", () => {
     await expect(fileB).toBeVisible({ timeout: 15_000 });
 
     // Select both via ctrl-click
-    await fileA.click();
-    await fileB.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
+    const mod = MODIFIER === "Meta" ? "Meta" : ("Control" as const);
+    await fileA.click({ modifiers: [mod] });
+    await fileB.click({ modifiers: [mod] });
 
     // Click bulk stage
     await session.changesBulkStageButton().click();

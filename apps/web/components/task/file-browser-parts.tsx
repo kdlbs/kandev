@@ -50,7 +50,7 @@ type TreeNodeItemProps = {
   onCancelCreate: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelected?: boolean;
-  onSelect?: (path: string, e: React.MouseEvent) => void;
+  onSelect?: (path: string, e: React.MouseEvent) => boolean;
   isDragging?: boolean;
   dragOverPath?: string | null;
   onDragStart?: (path: string, e: React.DragEvent) => void;
@@ -247,14 +247,9 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
   const rename = useFileRename(node, tree, setTree, onRenameFile);
 
   const handleClick = (e: React.MouseEvent) => {
-    // Ignore right-clicks — let the context menu handle those
     if (e.button === 2) return;
-    if (props.onSelect) {
-      props.onSelect(node.path, e);
-      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        handleTreeNodeClick(node, onToggleExpand, onOpenFile);
-      }
-    } else {
+    const consumed = props.onSelect?.(node.path, e);
+    if (!consumed) {
       handleTreeNodeClick(node, onToggleExpand, onOpenFile);
     }
   };
@@ -376,7 +371,7 @@ type FileBrowserContentAreaProps = {
   onRetry: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelected?: (path: string) => boolean;
-  onSelect?: (path: string, e: React.MouseEvent) => void;
+  onSelect?: (path: string, e: React.MouseEvent) => boolean;
   isDragging?: boolean;
   dragOverPath?: string | null;
   onDragStart?: (path: string, e: React.DragEvent) => void;

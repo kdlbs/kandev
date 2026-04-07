@@ -10,7 +10,8 @@ type UseMultiSelectOptions = {
 type UseMultiSelectReturn = {
   selectedPaths: Set<string>;
   isSelected: (path: string) => boolean;
-  handleClick: (path: string, event: React.MouseEvent) => void;
+  /** Returns true if the click was consumed by selection (modifier key held). */
+  handleClick: (path: string, event: React.MouseEvent) => boolean;
   selectAll: () => void;
   clearSelection: () => void;
   setSelectedPaths: (paths: Set<string>) => void;
@@ -23,8 +24,6 @@ export function useMultiSelect({
   const [rawSelection, setRawSelection] = useState<Set<string>>(new Set());
   const lastClickedRef = useRef<string | null>(null);
 
-  // Derive the effective selection by pruning paths not in items.
-  // This is computed during render (not in an effect) so it's always consistent.
   const itemSet = useMemo(() => new Set(items), [items]);
   const selectedPaths = useMemo(() => {
     if (rawSelection.size === 0) return rawSelection;
@@ -52,9 +51,18 @@ export function useMultiSelect({
   );
 
   const handleClick = useCallback(
-    (path: string, event: React.MouseEvent) => {
+    (path: string, event: React.MouseEvent): boolean => {
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
       const isShift = event.shiftKey;
+
+      // Plain click: clear selection and let the caller handle the action
+      if (!isCtrlOrMeta && !isShift) {
+        if (rawSelection.size > 0) {
+          setRawSelection(new Set());
+          onSelectionChange?.(new Set());
+        }
+        return false;
+      }
 
       setRawSelection((prev) => {
         let next: Set<string>;
@@ -73,7 +81,8 @@ export function useMultiSelect({
               next.add(items[i]);
             }
           }
-        } else if (isCtrlOrMeta) {
+        } else {
+          // Ctrl/Cmd+click: toggle individual item
           next = new Set(prev);
           if (next.has(path)) {
             next.delete(path);
@@ -81,16 +90,16 @@ export function useMultiSelect({
             next.add(path);
           }
           lastClickedRef.current = path;
-        } else {
-          next = new Set([path]);
-          lastClickedRef.current = path;
         }
 
         onSelectionChange?.(next);
         return next;
       });
+
+      // Selection consumed the click — don't perform original action
+      return true;
     },
-    [items, onSelectionChange],
+    [items, rawSelection, onSelectionChange],
   );
 
   const selectAll = useCallback(() => {
