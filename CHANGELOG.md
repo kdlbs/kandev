@@ -2,6 +2,22 @@
 
 All notable changes to Kandev.
 
+## 0.29 - 2026-04-07
+
+### Features
+
+- redesign task sidebar with repo-grouped layout and diff stats ([#550](https://github.com/kdlbs/kandev/pull/550))
+
+### Bug Fixes
+
+- prevent git process pile-up causing excessive CPU usage ([#554](https://github.com/kdlbs/kandev/pull/554))
+- handle file paths with spaces in git status and diff parsing ([#552](https://github.com/kdlbs/kandev/pull/552))
+- clean up orphaned review PR dedup records when task is already deleted ([#551](https://github.com/kdlbs/kandev/pull/551))
+- changed branch and auto focus changes panel ([#549](https://github.com/kdlbs/kandev/pull/549))
+- persist PR panel dismissal across page refreshes ([#547](https://github.com/kdlbs/kandev/pull/547))
+- respect KANDEV_DATABASE_PATH env var in dev mode ([#548](https://github.com/kdlbs/kandev/pull/548))
+- reset stale topbar branch when navigating between tasks ([#546](https://github.com/kdlbs/kandev/pull/546))
+
 ## 0.28 - 2026-04-06
 
 ### Features
