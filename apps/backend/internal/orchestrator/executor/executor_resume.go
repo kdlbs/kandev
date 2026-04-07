@@ -560,6 +560,11 @@ func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string,
 			// Writing the same state would still bump updated_at and cause the
 			// task to jump in the sidebar during a silent resume.
 			currentTask, getErr := e.repo.GetTask(updCtx, taskID)
+			if getErr != nil {
+				e.logger.Debug("could not read task state before REVIEW update on resume; falling back to update",
+					zap.String("task_id", taskID),
+					zap.Error(getErr))
+			}
 			if getErr == nil && currentTask != nil && currentTask.State == v1.TaskStateReview {
 				e.logger.Debug("task already in REVIEW after resume; skipping state update",
 					zap.String("task_id", taskID),
