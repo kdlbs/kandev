@@ -6,6 +6,8 @@ import {
   type TaskSwitcherItem,
 } from "./task-switcher";
 
+const EARLY = "2026-01-01T00:00:00Z";
+
 function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
   return { id: "t", title: "t", ...overrides };
 }
@@ -33,12 +35,12 @@ describe("sortByStateThenCreated (regression: silent resume reorder)", () => {
     const running = task({
       id: "running",
       sessionState: "RUNNING",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: EARLY,
     });
     const waiting = task({
       id: "waiting",
       sessionState: "WAITING_FOR_INPUT",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: EARLY,
     });
 
     expect(statePriority(waiting)).toBeLessThan(statePriority(running));
@@ -56,7 +58,7 @@ describe("sortByStateThenCreated (regression: silent resume reorder)", () => {
     const a = task({
       id: "a-old-waiting",
       sessionState: "WAITING_FOR_INPUT",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: EARLY,
     });
     const b = task({
       id: "b-newer-resuming",
@@ -85,7 +87,7 @@ describe("sortByStateThenCreated (regression: silent resume reorder)", () => {
     const older = task({
       id: "older",
       sessionState: "WAITING_FOR_INPUT",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: EARLY,
     });
     const newer = task({
       id: "newer",
