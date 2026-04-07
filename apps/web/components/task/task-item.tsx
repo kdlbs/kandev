@@ -57,6 +57,20 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+// A task whose workflow state is REVIEW or COMPLETED must not render as
+// "running" when its session transiently cycles through STARTING/RUNNING
+// (e.g. during an agent auto-resume after a backend restart). The visible
+// state should follow the workflow, not the transient session lifecycle.
+function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
+  if (state === "REVIEW" || state === "COMPLETED") return false;
+  return (
+    state === "IN_PROGRESS" ||
+    state === "SCHEDULING" ||
+    sessionState === "STARTING" ||
+    sessionState === "RUNNING"
+  );
+}
+
 function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
@@ -234,11 +248,7 @@ export const TaskItem = memo(function TaskItem({
   prInfo,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const isInProgress =
-    state === "IN_PROGRESS" ||
-    state === "SCHEDULING" ||
-    sessionState === "STARTING" ||
-    sessionState === "RUNNING";
+  const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
