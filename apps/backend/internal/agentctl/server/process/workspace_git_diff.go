@@ -20,6 +20,51 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 	wt.enrichUntrackedFileDiffs(ctx, update)
 }
 
+// enrichWithBranchDiff computes the total additions/deletions for the entire branch
+// vs the merge-base, covering committed + staged + unstaged changes in one pass.
+// Untracked file line counts (already computed) are added on top.
+// The result is stored in BranchAdditions/BranchDeletions for the sidebar display.
+func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *types.GitStatusUpdate) {
+	if update.BaseCommit == "" {
+		return
+	}
+
+	// git diff --numstat <merge-base> covers committed + staged + unstaged changes.
+	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", update.BaseCommit)
+	numstatCmd.Dir = wt.workDir
+	numstatOut, err := numstatCmd.Output()
+	if err != nil {
+		wt.logger.Debug("enrichWithBranchDiff: numstat failed", zap.Error(err))
+		return
+	}
+
+	var additions, deletions int
+	for _, line := range strings.Split(string(numstatOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		a, _ := strconv.Atoi(parts[0])
+		d, _ := strconv.Atoi(parts[1])
+		additions += a
+		deletions += d
+	}
+
+	// Add untracked file line counts (not included in git diff output).
+	for _, fileInfo := range update.Files {
+		if fileInfo.Status == fileStatusUntracked {
+			additions += fileInfo.Additions
+		}
+	}
+
+	update.BranchAdditions = additions
+	update.BranchDeletions = deletions
+}
+
 // enrichWithUnstagedDiff populates additions/deletions and diff content for files
 // with unstaged changes by comparing the worktree against baseRef.
 func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
@@ -122,7 +167,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 // lines as additions, so the diff viewer can display their full content.
 func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update *types.GitStatusUpdate) {
 	for filePath, fileInfo := range update.Files {
-		if fileInfo.Status != "untracked" {
+		if fileInfo.Status != fileStatusUntracked {
 			continue
 		}
 		catCmd := exec.CommandContext(ctx, "cat", filePath)

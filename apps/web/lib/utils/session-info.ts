@@ -8,8 +8,31 @@ export type SessionInfo = {
 
 type GitStatusMap = Record<
   string,
-  { files?: Record<string, { additions?: number; deletions?: number }> }
+  {
+    files?: Record<string, { additions?: number; deletions?: number }>;
+    branch_additions?: number;
+    branch_deletions?: number;
+  }
 >;
+
+function computeDiffStats(
+  gitStatus: GitStatusMap[string],
+): { additions: number; deletions: number } | undefined {
+  let additions: number;
+  let deletions: number;
+  if (gitStatus.branch_additions !== undefined || gitStatus.branch_deletions !== undefined) {
+    additions = gitStatus.branch_additions ?? 0;
+    deletions = gitStatus.branch_deletions ?? 0;
+  } else {
+    additions = 0;
+    deletions = 0;
+    for (const file of Object.values(gitStatus.files ?? {})) {
+      additions += file.additions ?? 0;
+      deletions += file.deletions ?? 0;
+    }
+  }
+  return additions === 0 && deletions === 0 ? undefined : { additions, deletions };
+}
 
 export function getSessionInfoForTask(
   taskId: string,
@@ -26,17 +49,14 @@ export function getSessionInfoForTask(
   if (!latestSession) {
     return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
   }
-  const updatedAt = latestSession.updated_at;
+  // Empty string means the session was created from a WS event without timestamps;
+  // return undefined so callers fall through to task.updatedAt/createdAt instead.
+  const updatedAt = latestSession.updated_at || undefined;
   const sessionState = latestSession.state as TaskSessionState | undefined;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
-  if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
-  let additions = 0;
-  let deletions = 0;
-  for (const file of Object.values(gitStatus.files)) {
-    additions += file.additions ?? 0;
-    deletions += file.deletions ?? 0;
-  }
-  const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
+  if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState };
+
+  const diffStats = computeDiffStats(gitStatus);
   return { diffStats, updatedAt, sessionState };
 }

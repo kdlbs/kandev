@@ -89,6 +89,9 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
 	wt.enrichWithDiffData(ctx, &update)
 
+	// Compute full branch totals vs merge-base (committed + staged + unstaged + untracked)
+	wt.enrichWithBranchDiff(ctx, &update)
+
 	return update, nil
 }
 
@@ -228,7 +231,7 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 	// Prioritize worktree changes as they represent the current state.
 	switch {
 	case indexStatus == '?' && workTreeStatus == '?':
-		fileInfo.Status = "untracked"
+		fileInfo.Status = fileStatusUntracked
 		fileInfo.Staged = false
 		update.Untracked = append(update.Untracked, filePath)
 	case workTreeStatus == 'D':

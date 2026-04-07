@@ -32,6 +32,7 @@ func buildTaskEventPayload(task *models.Task) map[string]interface{} {
 		"state":            string(task.State),
 		"priority":         task.Priority,
 		"position":         task.Position,
+		"created_at":       task.CreatedAt.Format(time.RFC3339Nano),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":     task.IsEphemeral,
 	}

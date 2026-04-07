@@ -32,6 +32,8 @@ const gitEventHandlers: GitEventHandlers = {
       behind: event.status.behind,
       files: event.status.files,
       timestamp: event.timestamp,
+      branch_additions: event.status.branch_additions,
+      branch_deletions: event.status.branch_deletions,
     });
     // Invalidate cumulative diff cache when files change
     invalidateCumulativeDiffCache(event.session_id);

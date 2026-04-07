@@ -208,18 +208,20 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
-	Branch       string      `json:"branch"`
-	RemoteBranch string      `json:"remote_branch,omitempty"`
-	HeadCommit   string      `json:"head_commit,omitempty"`
-	BaseCommit   string      `json:"base_commit,omitempty"`
-	Modified     []string    `json:"modified"`
-	Added        []string    `json:"added"`
-	Deleted      []string    `json:"deleted"`
-	Untracked    []string    `json:"untracked"`
-	Renamed      []string    `json:"renamed"`
-	Ahead        int         `json:"ahead"`
-	Behind       int         `json:"behind"`
-	Files        interface{} `json:"files,omitempty"`
+	Branch          string      `json:"branch"`
+	RemoteBranch    string      `json:"remote_branch,omitempty"`
+	HeadCommit      string      `json:"head_commit,omitempty"`
+	BaseCommit      string      `json:"base_commit,omitempty"`
+	Modified        []string    `json:"modified"`
+	Added           []string    `json:"added"`
+	Deleted         []string    `json:"deleted"`
+	Untracked       []string    `json:"untracked"`
+	Renamed         []string    `json:"renamed"`
+	Ahead           int         `json:"ahead"`
+	Behind          int         `json:"behind"`
+	Files           interface{} `json:"files,omitempty"`
+	BranchAdditions int         `json:"branch_additions,omitempty"`
+	BranchDeletions int         `json:"branch_deletions,omitempty"`
 }
 
 type GitCommitData struct {

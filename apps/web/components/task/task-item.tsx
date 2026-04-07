@@ -1,11 +1,18 @@
 "use client";
 
 import { memo } from "react";
-import { IconDots, IconLoader2, IconSubtask } from "@tabler/icons-react";
+import {
+  IconCircleCheck,
+  IconCircleDashed,
+  IconDots,
+  IconGitPullRequest,
+} from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 
 type DiffStats = {
   additions: number;
@@ -14,8 +21,6 @@ type DiffStats = {
 
 type TaskItemProps = {
   title: string;
-  description?: string;
-  stepName?: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
   isArchived?: boolean;
@@ -31,9 +36,11 @@ type TaskItemProps = {
   taskId?: string;
   primarySessionId?: string | null;
   parentTaskTitle?: string;
+  isSubTask?: boolean;
+  repositories?: string[];
+  prInfo?: { number: number; state: string };
 };
 
-// Helper to format relative time
 function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -56,88 +63,158 @@ function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?:
   onClick?.();
 }
 
-function TaskItemTitle({
-  title,
-  description,
-  taskId,
-  parentTaskTitle,
+function TaskStateIcon({
+  sessionState,
+  state,
+  isInProgress,
 }: {
-  title: string;
-  description?: string;
-  taskId?: string;
-  parentTaskTitle?: string;
+  sessionState?: TaskSessionState;
+  state?: TaskState;
+  isInProgress: boolean;
 }) {
+  if (isInProgress) {
+    return (
+      <IconCircleDashed
+        data-testid="task-state-running"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
+      />
+    );
+  }
+  const isReview =
+    sessionState === "WAITING_FOR_INPUT" ||
+    sessionState === "COMPLETED" ||
+    sessionState === "FAILED" ||
+    sessionState === "CANCELLED" ||
+    state === "REVIEW" ||
+    state === "COMPLETED";
+  if (isReview) {
+    return (
+      <IconCircleCheck
+        data-testid="task-state-review"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+      />
+    );
+  }
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <span className="flex items-center gap-1 line-clamp-1 min-w-0 text-[13px] font-medium text-foreground">
-        {title}
-        {taskId && <PRTaskIcon taskId={taskId} />}
-      </span>
-      {parentTaskTitle && (
-        <span className="text-[10px] text-muted-foreground/60 truncate flex items-center gap-0.5">
-          <IconSubtask className="h-2.5 w-2.5 shrink-0" />
-          {parentTaskTitle}
-        </span>
+    <IconCircleDashed
+      data-testid="task-state-backlog"
+      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40"
+    />
+  );
+}
+
+function TaskItemStatsRow({
+  updatedAt,
+  prInfo,
+}: {
+  updatedAt?: string;
+  prInfo?: { number: number; state: string };
+}) {
+  if (!updatedAt && !prInfo) return null;
+  return (
+    <span className="flex items-center gap-1.5 text-[11px]">
+      {updatedAt && (
+        <span className="text-muted-foreground/50">{formatRelativeTime(updatedAt)}</span>
       )}
-      {description && (
-        <span className="text-[11px] text-muted-foreground/60 truncate">{description}</span>
+      {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
+    </span>
+  );
+}
+
+function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
+  return (
+    <div
+      className={cn(
+        "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
+        menuOpen ? "opacity-0" : "group-hover:opacity-0",
       )}
+    >
+      <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
+      <span className="text-rose-500">-{diffStats.deletions}</span>
     </div>
   );
 }
 
-function TaskItemMeta({
-  effectiveMenuOpen,
-  isRemoteExecutor,
+/** Shows PR icon from store (real data) or from prInfo prop (prototype/mock). */
+function TaskPRIcon({
   taskId,
-  primarySessionId,
-  remoteExecutorName,
-  remoteExecutorType,
-  isArchived,
-  stepName,
-  isInProgress,
-  diffStats,
-  updatedAt,
+  prInfo,
 }: {
-  effectiveMenuOpen: boolean;
-  isRemoteExecutor?: boolean;
   taskId?: string;
-  primarySessionId?: string | null;
-  remoteExecutorName?: string;
+  prInfo?: { number: number; state: string };
+}) {
+  const storePr = useAppStore((s) => (taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null));
+  if (storePr) return <PRTaskIcon taskId={taskId!} />;
+  if (!prInfo) return null;
+  const state = prInfo.state.toLowerCase();
+  let color = "text-muted-foreground";
+  if (state === "merged") color = "text-purple-500";
+  else if (state === "closed") color = "text-red-500";
+  return (
+    <span className={cn("inline-flex items-center shrink-0", color)}>
+      <IconGitPullRequest className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function TaskItemContent({
+  title,
+  taskId,
+  isRemoteExecutor,
+  remoteExecutorType,
+  remoteExecutorName,
+  primarySessionId,
+  isArchived,
+  repositories,
+  updatedAt,
+  prInfo,
+  reserveMenuSpace,
+}: {
+  title: string;
+  taskId?: string;
+  isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
+  remoteExecutorName?: string;
+  primarySessionId?: string | null;
   isArchived?: boolean;
-  stepName?: string;
-  isInProgress: boolean;
-  diffStats?: DiffStats;
+  repositories?: string[];
   updatedAt?: string;
+  prInfo?: { number: number; state: string };
+  reserveMenuSpace: boolean;
 }) {
   return (
     <div
-      className={cn(
-        "flex flex-col items-end gap-0.5 transition-opacity duration-100",
-        effectiveMenuOpen ? "opacity-0" : "group-hover:opacity-0",
-      )}
+      className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}
     >
-      <div className="flex items-center gap-1">
+      <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
+        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
             sessionId={primarySessionId ?? null}
             fallbackName={remoteExecutorName ?? remoteExecutorType}
-            iconClassName="h-3.5 w-3.5 text-muted-foreground/80"
+            iconClassName="h-3 w-3 text-muted-foreground/60"
           />
         )}
-        <TaskItemStepBadge isArchived={isArchived} stepName={stepName} />
-      </div>
-      <TaskItemRightMeta isInProgress={isInProgress} diffStats={diffStats} updatedAt={updatedAt} />
+        {isArchived && (
+          <span className="rounded px-1 py-px text-[10px] bg-amber-500/15 text-amber-500">
+            Archived
+          </span>
+        )}
+      </span>
+      {repositories && repositories.length > 1 && (
+        <span className="truncate text-[11px] text-muted-foreground/50">
+          {repositories.join(" · ")}
+        </span>
+      )}
+      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} />
     </div>
   );
 }
 
 export const TaskItem = memo(function TaskItem({
   title,
-  description,
-  stepName,
   state,
   sessionState,
   isArchived,
@@ -152,7 +229,9 @@ export const TaskItem = memo(function TaskItem({
   isDeleting,
   taskId,
   primarySessionId,
-  parentTaskTitle,
+  isSubTask,
+  repositories,
+  prInfo,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress =
@@ -160,65 +239,58 @@ export const TaskItem = memo(function TaskItem({
     state === "SCHEDULING" ||
     sessionState === "STARTING" ||
     sessionState === "RUNNING";
-  const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
     <div
       role="button"
       tabIndex={0}
+      data-testid="sidebar-task-item"
       onClick={onClick}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
       className={cn(
-        "group relative flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none cursor-pointer",
-        "transition-colors duration-75",
-        "hover:bg-foreground/[0.05]",
+        "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+        "transition-colors duration-75 hover:bg-foreground/[0.05]",
         isSelected && "bg-primary/10",
+        isSubTask ? "pl-8" : "pl-3",
       )}
     >
-      {/* Selection indicator */}
       <div
         className={cn(
           "absolute left-0 top-0 bottom-0 w-[2px] transition-opacity",
           isSelected ? "bg-primary opacity-100" : "opacity-0",
         )}
       />
-
-      {/* Content */}
-      <TaskItemTitle
+      {isSubTask && (
+        <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
+          ↳
+        </span>
+      )}
+      <TaskStateIcon sessionState={sessionState} state={state} isInProgress={isInProgress} />
+      <TaskItemContent
         title={title}
-        description={description}
         taskId={taskId}
-        parentTaskTitle={parentTaskTitle}
+        isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorType={remoteExecutorType}
+        remoteExecutorName={remoteExecutorName}
+        primarySessionId={primarySessionId}
+        isArchived={isArchived}
+        repositories={repositories}
+        updatedAt={updatedAt}
+        prInfo={prInfo}
+        reserveMenuSpace={!hasDiffStats}
       />
-
-      {/* Right side: step name + meta, or 3-dot button on hover */}
-      <div className="relative flex items-center shrink-0">
-        <TaskItemMeta
-          effectiveMenuOpen={effectiveMenuOpen}
-          isRemoteExecutor={isRemoteExecutor}
-          taskId={taskId}
-          primarySessionId={primarySessionId}
-          remoteExecutorName={remoteExecutorName}
-          remoteExecutorType={remoteExecutorType}
-          isArchived={isArchived}
-          stepName={stepName}
-          isInProgress={isInProgress}
-          diffStats={hasDiffStats ? diffStats : undefined}
-          updatedAt={updatedAt}
-        />
-
-        <TaskMenuButton visible={effectiveMenuOpen} />
-      </div>
+      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
+      <TaskMenuButton visible={effectiveMenuOpen} />
     </div>
   );
 });
 
-/** 3-dot button that triggers the wrapping ContextMenu */
 function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "absolute right-0 flex items-center gap-0.5 transition-opacity duration-100",
+        "absolute right-1 inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
         visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
       )}
     >
@@ -246,52 +318,4 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
       </button>
     </div>
   );
-}
-
-/** Step badge or "Archived" badge */
-function TaskItemStepBadge({ isArchived, stepName }: { isArchived?: boolean; stepName?: string }) {
-  if (isArchived) {
-    return (
-      <span className="text-[10px] text-muted-foreground/70 bg-amber-500/15 text-amber-500 px-1.5 py-px rounded-[6px]">
-        Archived
-      </span>
-    );
-  }
-  if (stepName) {
-    return (
-      <span className="text-[10px] text-muted-foreground/70 bg-foreground/[0.06] px-1.5 py-px rounded-[6px]">
-        {stepName}
-      </span>
-    );
-  }
-  return null;
-}
-
-/** Right-side meta: spinner, diff stats, or relative time */
-function TaskItemRightMeta({
-  isInProgress,
-  diffStats,
-  updatedAt,
-}: {
-  isInProgress: boolean;
-  diffStats?: DiffStats;
-  updatedAt?: string;
-}) {
-  if (isInProgress) {
-    return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-  }
-  if (diffStats) {
-    return (
-      <span className="text-[11px] font-mono text-muted-foreground">
-        <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
-        <span className="text-rose-500">-{diffStats.deletions}</span>
-      </span>
-    );
-  }
-  if (updatedAt) {
-    return (
-      <span className="text-[11px] text-muted-foreground/60">{formatRelativeTime(updatedAt)}</span>
-    );
-  }
-  return null;
 }

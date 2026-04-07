@@ -322,6 +322,10 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		}
 	}
 
+	// Capture a git status snapshot before cleanup so it can be served
+	// when clients subscribe to this session later (sidebar diff stats, etc.).
+	s.captureGitStatusSnapshot(ctx, data.SessionID)
+
 	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }

@@ -45,6 +45,14 @@ type GitStatusUpdate struct {
 
 	// Files contains detailed information about each changed file.
 	Files map[string]FileInfo `json:"files,omitempty"`
+
+	// BranchAdditions is the total number of added lines across all changes on
+	// this branch compared to the merge-base (committed + staged + unstaged + untracked).
+	BranchAdditions int `json:"branch_additions,omitempty"`
+
+	// BranchDeletions is the total number of deleted lines across all changes on
+	// this branch compared to the merge-base (committed + staged + unstaged).
+	BranchDeletions int `json:"branch_deletions,omitempty"`
 }
 
 // FileInfo represents detailed information about a file's git status.
