@@ -1089,6 +1089,12 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
+	// Drop the in-memory git snapshot throttle entry — the session will
+	// never receive another git event, so its cache slot is dead weight.
+	if s.gitSnapshotCache != nil {
+		s.gitSnapshotCache.forget(sessionID)
+	}
+
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
