@@ -22,6 +22,11 @@ import (
 // changed. Writes still happen immediately when the status hash changes.
 const gitSnapshotPersistInterval = 30 * time.Second
 
+// gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
+// backend with many sessions can't grow it without limit. When the cache is
+// full and a new session arrives, the oldest entry by lastWrite is evicted.
+const gitSnapshotCacheMaxEntries = 4096
+
 type gitSnapshotCacheEntry struct {
 	hash      string
 	lastWrite time.Time
@@ -31,12 +36,16 @@ type gitSnapshotCacheEntry struct {
 // table. It is process-local — first event after a restart will rewrite the
 // row, which is fine because UpsertLatestLiveGitSnapshot is idempotent.
 type gitSnapshotCache struct {
-	mu   sync.Mutex
-	byID map[string]gitSnapshotCacheEntry
+	mu      sync.Mutex
+	byID    map[string]gitSnapshotCacheEntry
+	maxSize int
 }
 
 func newGitSnapshotCache() *gitSnapshotCache {
-	return &gitSnapshotCache{byID: make(map[string]gitSnapshotCacheEntry)}
+	return &gitSnapshotCache{
+		byID:    make(map[string]gitSnapshotCacheEntry),
+		maxSize: gitSnapshotCacheMaxEntries,
+	}
 }
 
 // shouldWrite returns true if the new hash should be persisted now. Writes
@@ -47,11 +56,40 @@ func (c *gitSnapshotCache) shouldWrite(sessionID, hash string, now time.Time) bo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	prev, ok := c.byID[sessionID]
-	if !ok || prev.hash != hash || now.Sub(prev.lastWrite) >= gitSnapshotPersistInterval {
-		c.byID[sessionID] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
-		return true
+	if ok && prev.hash == hash && now.Sub(prev.lastWrite) < gitSnapshotPersistInterval {
+		return false
 	}
-	return false
+	if !ok && c.maxSize > 0 && len(c.byID) >= c.maxSize {
+		c.evictOldestLocked()
+	}
+	c.byID[sessionID] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
+	return true
+}
+
+// evictOldestLocked drops the entry with the oldest lastWrite. Caller must
+// hold c.mu. O(n) over the cache; only invoked when the cache is full, which
+// is rare in practice.
+func (c *gitSnapshotCache) evictOldestLocked() {
+	var oldestID string
+	var oldestAt time.Time
+	for id, entry := range c.byID {
+		if oldestID == "" || entry.lastWrite.Before(oldestAt) {
+			oldestID = id
+			oldestAt = entry.lastWrite
+		}
+	}
+	if oldestID != "" {
+		delete(c.byID, oldestID)
+	}
+}
+
+// forget removes a session's cached entry. Called when a session is deleted
+// so the cache doesn't retain stale state for sessions that will never
+// receive another git event.
+func (c *gitSnapshotCache) forget(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byID, sessionID)
 }
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
