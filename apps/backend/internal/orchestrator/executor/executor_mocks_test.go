@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/client"
@@ -224,6 +225,9 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Mimic the SQLite repo, which sets UpdatedAt to the current time on every
+	// full-row update regardless of whether anything actually changed.
+	session.UpdatedAt = time.Now().UTC()
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return nil
@@ -233,6 +237,16 @@ func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.setSessionPrimaryCalls = append(m.setSessionPrimaryCalls, sessionID)
+	return nil
+}
+
+func (m *mockRepository) UpdateTaskSessionRuntimeFields(ctx context.Context, sessionID, agentExecutionID, containerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if session, ok := m.sessions[sessionID]; ok {
+		session.AgentExecutionID = agentExecutionID
+		session.ContainerID = containerID
+	}
 	return nil
 }
 
@@ -271,6 +285,12 @@ func (m *mockRepository) CreateTaskSessionWorktree(ctx context.Context, worktree
 }
 
 func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+		t.UpdatedAt = time.Now().UTC()
+	}
 	return nil
 }
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }

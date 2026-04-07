@@ -525,20 +525,43 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 }
 
 // persistResumeState updates session and executor running records after a successful resume launch.
+//
+// Silent resume: when resuming a session that was previously WAITING_FOR_INPUT,
+// we deliberately do NOT bump the session state to STARTING and do NOT bump
+// updated_at. The user has not initiated any new work — the agent process is
+// merely being re-attached after a backend restart or page reload. Bumping
+// either field would cause the task to transiently jump to the top of the
+// "in progress" bucket in the sidebar before settling back, since the frontend
+// orders by updated_at and groups by sessionState.
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
-	session.ErrorMessage = ""
-	if startAgent {
-		session.State = models.TaskSessionStateStarting
-		session.CompletedAt = nil
-	}
+	silentResume := startAgent && session.State == models.TaskSessionStateWaitingForInput
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to update task session for resume",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
+	if silentResume {
+		// Persist only the runtime IDs; leave state, error_message, and
+		// updated_at untouched so the sidebar does not reorder.
+		session.AgentExecutionID = resp.AgentExecutionID
+		session.ContainerID = resp.ContainerID
+		if err := e.repo.UpdateTaskSessionRuntimeFields(ctx, session.ID, resp.AgentExecutionID, resp.ContainerID); err != nil {
+			e.logger.Error("failed to update task session runtime fields for silent resume",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
+	} else {
+		session.AgentExecutionID = resp.AgentExecutionID
+		session.ContainerID = resp.ContainerID
+		session.ErrorMessage = ""
+		if startAgent {
+			session.State = models.TaskSessionStateStarting
+			session.CompletedAt = nil
+		}
+
+		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+			e.logger.Error("failed to update task session for resume",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
 	}
 
 	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)
@@ -556,7 +579,15 @@ func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string,
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
 		// Agent resumed successfully - sync task state with session state.
 		if session.State == models.TaskSessionStateWaitingForInput {
-			if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateReview); updateErr != nil {
+			// Avoid bumping task.updated_at if the task is already in REVIEW.
+			// Writing the same state would still bump updated_at and cause the
+			// task to jump in the sidebar during a silent resume.
+			currentTask, getErr := e.repo.GetTask(updCtx, taskID)
+			if getErr == nil && currentTask != nil && currentTask.State == v1.TaskStateReview {
+				e.logger.Debug("task already in REVIEW after resume; skipping state update",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID))
+			} else if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateReview); updateErr != nil {
 				e.logger.Warn("failed to update task state to REVIEW after resume",
 					zap.String("task_id", taskID),
 					zap.Error(updateErr))

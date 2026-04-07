@@ -102,13 +102,13 @@ function classifyTask(
 
 function statePriority(task: TaskSwitcherItem): number {
   const bucket = classifyTask(task.sessionState, task.state);
-  if (bucket === "in_progress") return 0;
-  if (bucket === "review") return 1;
+  if (bucket === "review") return 0;
+  if (bucket === "in_progress") return 1;
   return 2;
 }
 
 function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
-  // State first, then newest createdAt first (descending)
+  // Review (turn finished) first, then in_progress, then backlog; newest createdAt within bucket
   return (
     statePriority(a) - statePriority(b) || (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
   );

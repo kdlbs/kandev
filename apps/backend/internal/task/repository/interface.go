@@ -90,6 +90,7 @@ type SessionRepository interface {
 	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionRuntimeFields(ctx context.Context, sessionID, agentExecutionID, containerID string) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ClearSessionExecutionID(ctx context.Context, id string) error
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
