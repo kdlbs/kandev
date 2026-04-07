@@ -65,10 +65,9 @@ test.describe("Session resume — task state stability", () => {
     let polls = 0;
     while (Date.now() < deadline) {
       const runningCount = await runningLocator.count();
-      expect(
-        runningCount,
-        `task flickered into Running bucket during resume (poll ${polls})`,
-      ).toBe(0);
+      expect(runningCount, `task flickered into Running bucket during resume (poll ${polls})`).toBe(
+        0,
+      );
       polls++;
       const idle = await session
         .idleInput()

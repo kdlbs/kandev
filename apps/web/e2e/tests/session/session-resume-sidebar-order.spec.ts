@@ -47,15 +47,11 @@ test.describe("Session sidebar — sort order", () => {
     });
     await apiClient.updateTaskState(review.id, "REVIEW");
 
-    const inProgress = await apiClient.createTask(
-      seedData.workspaceId,
-      "Newer Running Fixture",
-      {
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    const inProgress = await apiClient.createTask(seedData.workspaceId, "Newer Running Fixture", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
     await apiClient.updateTaskState(inProgress.id, "IN_PROGRESS");
 
     // Open the anchor session so the sidebar is visible.
