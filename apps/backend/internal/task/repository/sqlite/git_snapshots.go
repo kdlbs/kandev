@@ -95,25 +95,12 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 		snapshot.CreatedAt = time.Now().UTC()
 	}
 
-	filesJSON := "{}"
-	if snapshot.Files != nil {
-		filesBytes, err := json.Marshal(snapshot.Files)
-		if err != nil {
-			return fmt.Errorf("failed to serialize git snapshot files: %w", err)
-		}
-		filesJSON = string(filesBytes)
+	filesJSON, metadataJSON, err := serializeSnapshotJSON(snapshot)
+	if err != nil {
+		return err
 	}
 
-	metadataJSON := "{}"
-	if snapshot.Metadata != nil {
-		metadataBytes, err := json.Marshal(snapshot.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to serialize git snapshot metadata: %w", err)
-		}
-		metadataJSON = string(metadataBytes)
-	}
-
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
 			id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			ahead, behind, files, triggered_by, metadata, created_at
