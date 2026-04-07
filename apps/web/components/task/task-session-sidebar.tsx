@@ -217,8 +217,7 @@ function toSidebarItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
-    updatedAt:
-      sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt ?? new Date().toISOString(),
+    updatedAt: sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt,
     createdAt: task.createdAt,
     isArchived: false as boolean,
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
@@ -250,7 +249,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     remoteExecutorType: undefined,
     remoteExecutorName: undefined,
     primarySessionId: null,
-    updatedAt: s.archivedTaskUpdatedAt ?? new Date().toISOString(),
+    updatedAt: s.archivedTaskUpdatedAt,
     createdAt: undefined,
     isArchived: true,
     parentTaskTitle: undefined,

@@ -227,6 +227,88 @@ test.describe("Sidebar layout — context menu", () => {
   });
 });
 
+test.describe("Sidebar layout — task timestamps and sorting", () => {
+  test("every task row shows a relative timestamp on second line", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Create three tasks
+    await apiClient.createTask(seedData.workspaceId, "Timestamp Task A", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.createTask(seedData.workspaceId, "Timestamp Task B", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Timestamp Task C", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Every sidebar task row should contain a relative time string ("now", "ago", etc.)
+    const taskRows = session.sidebar.locator("[data-testid='sidebar-task-item']");
+    await expect(taskRows).toHaveCount(3, { timeout: 10_000 });
+
+    for (let i = 0; i < 3; i++) {
+      const text = await taskRows.nth(i).innerText();
+      // Should contain "now" or "ago" — formatRelativeTime always produces one of these
+      expect(text, `task row ${i} text=${JSON.stringify(text)}`).toMatch(/now|ago/);
+    }
+  });
+
+  test("tasks are sorted by createdAt descending (newest first) within state bucket", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Create three tasks in order; each should appear above the previous
+    const taskOldest = await apiClient.createTask(seedData.workspaceId, "Sort Task Oldest", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    // Small delay so timestamps differ
+    await new Promise((r) => setTimeout(r, 50));
+    await apiClient.createTask(seedData.workspaceId, "Sort Task Middle", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    await apiClient.createTask(seedData.workspaceId, "Sort Task Newest", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${taskOldest.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const taskRows = session.sidebar.locator("[data-testid='sidebar-task-item']");
+    await expect(taskRows).toHaveCount(3, { timeout: 10_000 });
+
+    // Within the same state bucket (all backlog), newest should be first
+    const titles = await Promise.all(
+      [0, 1, 2].map(async (i) => (await taskRows.nth(i).innerText()).split("\n")[0]),
+    );
+    const newestIdx = titles.findIndex((t) => t.includes("Newest"));
+    const middleIdx = titles.findIndex((t) => t.includes("Middle"));
+    const oldestIdx = titles.findIndex((t) => t.includes("Oldest"));
+    expect(newestIdx).toBeLessThan(middleIdx);
+    expect(middleIdx).toBeLessThan(oldestIdx);
+  });
+});
+
 test.describe("Sidebar layout — active task highlight", () => {
   test("selected task has visual selection state", async ({ testPage, apiClient, seedData }) => {
     const taskA = await apiClient.createTask(seedData.workspaceId, "Highlight Task A", {

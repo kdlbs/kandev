@@ -108,8 +108,9 @@ function statePriority(task: TaskSwitcherItem): number {
 }
 
 function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
+  // State first, then newest createdAt first (descending)
   return (
-    statePriority(a) - statePriority(b) || (a.createdAt ?? "").localeCompare(b.createdAt ?? "")
+    statePriority(a) - statePriority(b) || (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
   );
 }
 
