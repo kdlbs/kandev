@@ -81,7 +81,7 @@ const IN_PROGRESS_STATES = new Set<TaskSessionState>(["RUNNING"]);
 const TASK_STATE_REVIEW = new Set<TaskState | undefined>(["REVIEW", "COMPLETED"]);
 const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS"]);
 
-function classifyTask(
+export function classifyTask(
   sessionState: TaskSessionState | undefined,
   taskState?: TaskState,
 ): "review" | "in_progress" | "backlog" {
@@ -100,14 +100,14 @@ function classifyTask(
   return "backlog";
 }
 
-function statePriority(task: TaskSwitcherItem): number {
+export function statePriority(task: TaskSwitcherItem): number {
   const bucket = classifyTask(task.sessionState, task.state);
   if (bucket === "review") return 0;
   if (bucket === "in_progress") return 1;
   return 2;
 }
 
-function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
+export function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
   // Review (turn finished) first, then in_progress, then backlog; newest createdAt within bucket
   return (
     statePriority(a) - statePriority(b) || (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
