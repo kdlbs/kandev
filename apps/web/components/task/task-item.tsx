@@ -90,14 +90,7 @@ function TaskStateIcon({
       />
     );
   }
-  const isReview =
-    sessionState === "WAITING_FOR_INPUT" ||
-    sessionState === "COMPLETED" ||
-    sessionState === "FAILED" ||
-    sessionState === "CANCELLED" ||
-    state === "REVIEW" ||
-    state === "COMPLETED";
-  if (isReview) {
+  if (classifyTask(sessionState, state) === "review") {
     return (
       <IconCircleCheck
         data-testid="task-state-review"
