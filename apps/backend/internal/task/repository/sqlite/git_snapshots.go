@@ -12,6 +12,80 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// TriggeredByLiveMonitor identifies snapshots written by the orchestrator's live
+// git status persistence path. Used to scope the upsert in
+// UpsertLatestLiveGitSnapshot so we don't disturb archive/completion snapshots.
+const TriggeredByLiveMonitor = "live_monitor"
+
+// UpsertLatestLiveGitSnapshot keeps at most one cached "live monitor" snapshot
+// per session by deleting any previous live row and inserting the new one in a
+// single transaction. This is the cache that backs the sidebar diff badge for
+// tasks whose executor isn't currently running.
+func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
+	if snapshot == nil {
+		return fmt.Errorf("snapshot is nil")
+	}
+	snapshot.SnapshotType = models.SnapshotTypeStatusUpdate
+	snapshot.TriggeredBy = TriggeredByLiveMonitor
+	if snapshot.ID == "" {
+		snapshot.ID = uuid.New().String()
+	}
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = time.Now().UTC()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_session_git_snapshots
+		WHERE session_id = ? AND snapshot_type = ? AND triggered_by = ?
+	`), snapshot.SessionID, string(models.SnapshotTypeStatusUpdate), TriggeredByLiveMonitor); err != nil {
+		return fmt.Errorf("delete previous live snapshot: %w", err)
+	}
+
+	filesJSON, metadataJSON, err := serializeSnapshotJSON(snapshot)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_session_git_snapshots (
+			id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			ahead, behind, files, triggered_by, metadata, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), snapshot.ID, snapshot.SessionID, string(snapshot.SnapshotType), snapshot.Branch,
+		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
+		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt); err != nil {
+		return fmt.Errorf("insert live snapshot: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func serializeSnapshotJSON(snapshot *models.GitSnapshot) (string, string, error) {
+	filesJSON := "{}"
+	if snapshot.Files != nil {
+		b, err := json.Marshal(snapshot.Files)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to serialize git snapshot files: %w", err)
+		}
+		filesJSON = string(b)
+	}
+	metadataJSON := "{}"
+	if snapshot.Metadata != nil {
+		b, err := json.Marshal(snapshot.Metadata)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to serialize git snapshot metadata: %w", err)
+		}
+		metadataJSON = string(b)
+	}
+	return filesJSON, metadataJSON, nil
+}
+
 // CreateGitSnapshot inserts a new git snapshot into the database.
 func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	if snapshot.ID == "" {

@@ -403,18 +403,18 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit string) (*Cum
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success      bool                   `json:"success"`
-	Branch       string                 `json:"branch"`
-	RemoteBranch string                 `json:"remote_branch"`
-	HeadCommit   string                 `json:"head_commit"`
-	BaseCommit   string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead        int                    `json:"ahead"`
-	Behind       int                    `json:"behind"`
-	Modified     []string               `json:"modified"`
-	Added        []string               `json:"added"`
-	Deleted      []string               `json:"deleted"`
-	Untracked    []string               `json:"untracked"`
-	Renamed      []string               `json:"renamed"`
+	Success         bool                   `json:"success"`
+	Branch          string                 `json:"branch"`
+	RemoteBranch    string                 `json:"remote_branch"`
+	HeadCommit      string                 `json:"head_commit"`
+	BaseCommit      string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead           int                    `json:"ahead"`
+	Behind          int                    `json:"behind"`
+	Modified        []string               `json:"modified"`
+	Added           []string               `json:"added"`
+	Deleted         []string               `json:"deleted"`
+	Untracked       []string               `json:"untracked"`
+	Renamed         []string               `json:"renamed"`
 	Files           map[string]interface{} `json:"files"`
 	Timestamp       string                 `json:"timestamp"`
 	BranchAdditions int                    `json:"branch_additions,omitempty"`

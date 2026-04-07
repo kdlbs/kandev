@@ -145,6 +145,7 @@ type sessionExecutorStore interface {
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
+	UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
@@ -203,6 +204,10 @@ type Service struct {
 
 	// Push tracker: sessionID -> last known ahead count
 	pushTracker sync.Map
+
+	// gitSnapshotCache throttles per-session writes of the live git status
+	// snapshot (used by handleGitStatusUpdate -> persistGitStatusSnapshot).
+	gitSnapshotCache *gitSnapshotCache
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
@@ -283,6 +288,7 @@ func NewService(
 		scheduler:                    sched,
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
+		gitSnapshotCache:             newGitSnapshotCache(),
 	}
 
 	// Wire executor state changes through the orchestrator so events are published

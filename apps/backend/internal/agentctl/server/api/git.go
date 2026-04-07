@@ -581,18 +581,18 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success      bool                   `json:"success"`
-	Branch       string                 `json:"branch"`
-	RemoteBranch string                 `json:"remote_branch"`
-	HeadCommit   string                 `json:"head_commit"`
-	BaseCommit   string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead        int                    `json:"ahead"`
-	Behind       int                    `json:"behind"`
-	Modified     []string               `json:"modified"`
-	Added        []string               `json:"added"`
-	Deleted      []string               `json:"deleted"`
-	Untracked    []string               `json:"untracked"`
-	Renamed      []string               `json:"renamed"`
+	Success         bool                   `json:"success"`
+	Branch          string                 `json:"branch"`
+	RemoteBranch    string                 `json:"remote_branch"`
+	HeadCommit      string                 `json:"head_commit"`
+	BaseCommit      string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead           int                    `json:"ahead"`
+	Behind          int                    `json:"behind"`
+	Modified        []string               `json:"modified"`
+	Added           []string               `json:"added"`
+	Deleted         []string               `json:"deleted"`
+	Untracked       []string               `json:"untracked"`
+	Renamed         []string               `json:"renamed"`
 	Files           map[string]interface{} `json:"files"`
 	Timestamp       string                 `json:"timestamp"`
 	BranchAdditions int                    `json:"branch_additions,omitempty"`
@@ -628,18 +628,18 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GitStatusResult{
-		Success:      true,
-		Branch:       status.Branch,
-		RemoteBranch: status.RemoteBranch,
-		HeadCommit:   status.HeadCommit,
-		BaseCommit:   status.BaseCommit,
-		Ahead:        status.Ahead,
-		Behind:       status.Behind,
-		Modified:     status.Modified,
-		Added:        status.Added,
-		Deleted:      status.Deleted,
-		Untracked:    status.Untracked,
-		Renamed:      status.Renamed,
+		Success:         true,
+		Branch:          status.Branch,
+		RemoteBranch:    status.RemoteBranch,
+		HeadCommit:      status.HeadCommit,
+		BaseCommit:      status.BaseCommit,
+		Ahead:           status.Ahead,
+		Behind:          status.Behind,
+		Modified:        status.Modified,
+		Added:           status.Added,
+		Deleted:         status.Deleted,
+		Untracked:       status.Untracked,
+		Renamed:         status.Renamed,
 		Files:           filesMap,
 		Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
 		BranchAdditions: status.BranchAdditions,
