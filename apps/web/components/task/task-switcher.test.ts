@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { classifyTask } from "./task-classify";
 import {
-  classifyTask,
   statePriority,
   sortByStateThenCreated,
   type TaskSwitcherItem,

@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 
 type DiffStats = {
@@ -57,18 +58,13 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-// A task whose workflow state is REVIEW or COMPLETED must not render as
-// "running" when its session transiently cycles through STARTING/RUNNING
-// (e.g. during an agent auto-resume after a backend restart). The visible
-// state should follow the workflow, not the transient session lifecycle.
+// Delegates to the shared classifier in task-switcher so the sidebar bucket
+// and the per-task running spinner always agree. A task whose workflow state
+// is REVIEW or COMPLETED must not render as "running" when its session
+// transiently cycles through STARTING/RUNNING (e.g. during an agent auto-
+// resume after a backend restart).
 function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
-  if (state === "REVIEW" || state === "COMPLETED") return false;
-  return (
-    state === "IN_PROGRESS" ||
-    state === "SCHEDULING" ||
-    sessionState === "STARTING" ||
-    sessionState === "RUNNING"
-  );
+  return classifyTask(sessionState, state) === "in_progress";
 }
 
 function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {

@@ -22,6 +22,7 @@ import {
 } from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
+import { classifyTask } from "./task-classify";
 import { TaskItem } from "./task-item";
 
 export type TaskSwitcherItem = {
@@ -70,35 +71,6 @@ type RepoGroup = {
   isMultiRepo?: boolean;
   tasks: TaskSwitcherItem[];
 };
-
-const REVIEW_STATES = new Set<TaskSessionState>([
-  "WAITING_FOR_INPUT",
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-]);
-const IN_PROGRESS_STATES = new Set<TaskSessionState>(["RUNNING"]);
-const TASK_STATE_REVIEW = new Set<TaskState | undefined>(["REVIEW", "COMPLETED"]);
-const TASK_STATE_IN_PROGRESS = new Set<TaskState | undefined>(["IN_PROGRESS"]);
-
-export function classifyTask(
-  sessionState: TaskSessionState | undefined,
-  taskState?: TaskState,
-): "review" | "in_progress" | "backlog" {
-  if (!sessionState) {
-    if (TASK_STATE_REVIEW.has(taskState)) return "review";
-    if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
-    return "backlog";
-  }
-  if (sessionState === "STARTING" && taskState) {
-    if (TASK_STATE_REVIEW.has(taskState)) return "review";
-    if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
-    return "backlog";
-  }
-  if (REVIEW_STATES.has(sessionState)) return "review";
-  if (IN_PROGRESS_STATES.has(sessionState)) return "in_progress";
-  return "backlog";
-}
 
 export function statePriority(task: TaskSwitcherItem): number {
   const bucket = classifyTask(task.sessionState, task.state);

@@ -57,11 +57,14 @@ test.describe("Session resume — task state stability", () => {
     await session.waitForLoad();
 
     // 3. Continuously assert the task NEVER appears in the Running bucket
-    //    across the full resume window. Poll tightly until the agent is
-    //    idle again to catch any transient flicker that a single post-
-    //    resume assertion would miss.
+    //    across a fixed 10s window after reload. The composer stays visible
+    //    throughout a silent resume (the fix intentionally keeps the
+    //    workflow state stable), so we cannot use idleInput visibility as
+    //    a stop signal — we must poll for a fixed duration to catch any
+    //    transient flicker the backend may still emit while reconnecting.
     const runningLocator = session.taskInSection("Resume Stable", "Running");
-    const deadline = Date.now() + 30_000;
+    const probeWindowMs = 10_000;
+    const deadline = Date.now() + probeWindowMs;
     let polls = 0;
     while (Date.now() < deadline) {
       const runningCount = await runningLocator.count();
@@ -69,16 +72,10 @@ test.describe("Session resume — task state stability", () => {
         0,
       );
       polls++;
-      const idle = await session
-        .idleInput()
-        .isVisible()
-        .catch(() => false);
-      if (idle) break;
-      await testPage.waitForTimeout(50);
+      await testPage.waitForTimeout(100);
     }
-    // Ensure we actually polled for a meaningful window — not just exited
-    // immediately before the resume even started.
-    expect(polls).toBeGreaterThan(2);
+    // Ensure we actually polled meaningfully across the window.
+    expect(polls).toBeGreaterThanOrEqual(50);
 
     // 4. Final settled state: still Turn Finished, not Running.
     await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });

@@ -550,39 +550,14 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	}
 }
 
-// startAgentProcessOnResume starts the agent process asynchronously after a session resume,
-// syncing the task state (REVIEW or unchanged) on success.
+// startAgentProcessOnResume starts the agent process asynchronously after a session resume.
+// Task state is managed by workflow triggers and stream handlers elsewhere; this callback
+// just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		// Agent resumed successfully - sync task state with session state.
-		if session.State == models.TaskSessionStateWaitingForInput {
-			// Avoid bumping task.updated_at if the task is already in REVIEW.
-			// Writing the same state would still bump updated_at and cause the
-			// task to jump in the sidebar during a silent resume.
-			currentTask, getErr := e.repo.GetTask(updCtx, taskID)
-			if getErr != nil {
-				e.logger.Debug("could not read task state before REVIEW update on resume; falling back to update",
-					zap.String("task_id", taskID),
-					zap.Error(getErr))
-			}
-			if getErr == nil && currentTask != nil && currentTask.State == v1.TaskStateReview {
-				e.logger.Debug("task already in REVIEW after resume; skipping state update",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID))
-			} else if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateReview); updateErr != nil {
-				e.logger.Warn("failed to update task state to REVIEW after resume",
-					zap.String("task_id", taskID),
-					zap.Error(updateErr))
-			} else {
-				e.logger.Debug("task state synced to REVIEW after resume (session waiting for input)",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID))
-			}
-		} else {
-			e.logger.Debug("agent resumed successfully, task state unchanged",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.String("session_state", string(session.State)))
-		}
+		e.logger.Debug("agent resumed successfully",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("session_state", string(session.State)))
 	})
 }
