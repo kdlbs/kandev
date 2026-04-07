@@ -49,7 +49,9 @@ export function getSessionInfoForTask(
   if (!latestSession) {
     return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
   }
-  const updatedAt = latestSession.updated_at;
+  // Empty string means the session was created from a WS event without timestamps;
+  // return undefined so callers fall through to task.updatedAt/createdAt instead.
+  const updatedAt = latestSession.updated_at || undefined;
   const sessionState = latestSession.state as TaskSessionState | undefined;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
