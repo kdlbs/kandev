@@ -209,6 +209,13 @@ export class ApiClient {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
   }
 
+  async updateTaskState(
+    taskId: string,
+    state: "BACKLOG" | "IN_PROGRESS" | "REVIEW" | "COMPLETED",
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { state });
+  }
+
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
     return this.request("GET", "/api/v1/agents");
   }
