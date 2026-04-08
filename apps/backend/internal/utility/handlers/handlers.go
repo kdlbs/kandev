@@ -203,16 +203,6 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	// Execute via agentctl using inference agent
 	resp, err := h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
 	if err != nil {
-		if errors.Is(err, lifecycle.ErrInferenceAgentIDRequired) {
-			h.logger.Warn("execute prompt: missing agent_id",
-				zap.String("call_id", callID))
-			_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-			c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{
-				CallID: callID,
-				Error:  err.Error(),
-			})
-			return
-		}
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
