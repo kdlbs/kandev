@@ -2,11 +2,17 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
+
+// ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
+// without an agent ID. Callers should treat this as a client validation error
+// (HTTP 400) rather than a server-side failure.
+var ErrInferenceAgentIDRequired = errors.New("agent_id is required")
 
 // ExecuteInferencePrompt executes an inference prompt via an active session's agentctl.
 // It looks up the inference config from the agent registry and passes it to agentctl.
@@ -15,7 +21,7 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("session_id is required")
 	}
 	if agentID == "" {
-		return nil, fmt.Errorf("agent_id is required")
+		return nil, ErrInferenceAgentIDRequired
 	}
 
 	// Get inference agent from registry

@@ -962,6 +962,11 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repo
 	if m.scriptMsgHandler == nil || m.repoProvider == nil {
 		return nil
 	}
+	if wt.RepositoryID == "" {
+		// Nothing to set up without a linked repository; upstream may not
+		// always populate this field.
+		return nil
+	}
 	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
 	if err != nil {
 		m.logger.Warn("failed to fetch repository for setup script",
