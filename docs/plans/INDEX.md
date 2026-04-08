@@ -6,4 +6,4 @@ Create new plans via `/record plan` or manually following the format below.
 
 | Plan | Status | Date | PR |
 |------|--------|------|----|
-| [Prepare-env UX race fix](2026-04-prepare-env-ux-race-fix.md) | implemented | 2026-04-08 | _tbd_ |
+| [Prepare-env UX race fix](2026-04-prepare-env-ux-race-fix.md) | implemented | 2026-04-08 | #564 |

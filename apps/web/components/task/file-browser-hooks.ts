@@ -321,12 +321,16 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   // We deliberately do NOT depend on `agentctlStatus.isReady` here — that would
   // re-run the reset effect and wipe the tree whenever agentctl restarts. The
   // sibling effect below handles the ready transition without resetting state.
-  const agentctlReadyAtMountRef = useRef(agentctlStatus.isReady);
-  agentctlReadyAtMountRef.current = agentctlStatus.isReady;
+  // Stable ref mirroring the latest `agentctlStatus.isReady` value. Read inside
+  // the reset effect below without adding it to the deps — depending on it
+  // would re-run the reset effect (and wipe the tree) on every ready-flip.
+  // The sibling effect further down handles the ready transition instead.
+  const agentctlIsReadyRef = useRef(agentctlStatus.isReady);
+  agentctlIsReadyRef.current = agentctlStatus.isReady;
   useEffect(() => {
     setTree(null);
     setIsLoadingTree(true);
-    setLoadState(agentctlReadyAtMountRef.current ? "loading" : "waiting");
+    setLoadState(agentctlIsReadyRef.current ? "loading" : "waiting");
     setLoadError(null);
     retryAttemptRef.current = 0;
     clearRetryTimer();
@@ -338,7 +342,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     // sibling effect (below) will trigger it as soon as readiness flips true.
     // This prevents the retry budget from being burned while a long prepare
     // script (e.g. slow git fetch) blocks agentctl from coming up.
-    if (agentctlReadyAtMountRef.current) {
+    if (agentctlIsReadyRef.current) {
       void loadTree({ resetRetry: true });
     } else {
       setIsLoadingTree(false);
@@ -349,7 +353,10 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   }, [clearRetryTimer, loadTree, effectiveResetKey]);
 
   useEffect(() => {
-    if (!agentctlStatus.isReady || loadState === "loaded") return;
+    // Only fire on the waiting → ready transition. Skip while a load is
+    // already in progress or has completed, so the effect doesn't re-invoke
+    // `loadTree` each time `loadState` itself ticks forward.
+    if (!agentctlStatus.isReady || loadState === "loaded" || loadState === "loading") return;
     void loadTree({ resetRetry: true });
   }, [agentctlStatus.isReady, loadState, loadTree]);
 

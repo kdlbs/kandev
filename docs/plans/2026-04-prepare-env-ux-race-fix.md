@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-08
 **Status:** implemented
-**PR:** _tbd_
+**PR:** #564
 **Decision:** ADR-0002 (E2E git shim for slow operations)
 
 ## Problem
