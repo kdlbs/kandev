@@ -418,7 +418,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
-    branch: computed.isLocalExecutor && !fs.useGitHubUrl ? "" : fs.branch,
+    branch: fs.branch,
     agentProfileId: fs.agentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
