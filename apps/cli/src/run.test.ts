@@ -198,7 +198,7 @@ describe("attachRingBuffer", () => {
     expect(read()).toBe("hello world");
   });
 
-  it("trims old data once maxBytes is exceeded, keeping the tail", () => {
+  it("trims old data once maxChars is exceeded, keeping the tail", () => {
     const stream = new EventEmitter() as EventEmitter & NodeJS.ReadableStream;
     const read = attachRingBuffer(stream, 10);
     stream.emit("data", "0123456789");
