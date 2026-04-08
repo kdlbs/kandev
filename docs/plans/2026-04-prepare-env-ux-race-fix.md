@@ -25,7 +25,7 @@ Bump the header `IconLoader2` from `h-3 w-3` → `h-3.5 w-3.5` to match `StepIco
 
 Gate the initial `loadTree()` on `agentctlStatus.isReady` inside the reset effect of `useFileBrowserTree`:
 
-- Capture `agentctlStatus.isReady` via a render-time ref (`agentctlReadyAtMountRef`) so the reset effect can read the latest value without depending on it (depending on it would re-run the reset effect on every ready-flip and wipe the tree).
+- Capture `agentctlStatus.isReady` via a render-time ref (`agentctlIsReadyRef`) so the reset effect can read the latest value without depending on it (depending on it would re-run the reset effect on every ready-flip and wipe the tree).
 - If not ready at mount: set `loadState = "waiting"`, leave `retryAttemptRef = 0`, and skip `loadTree()` entirely.
 - The sibling effect watching `agentctlStatus.isReady` already triggers `loadTree({ resetRetry: true })` when readiness flips true, so it becomes the single initial-load trigger for the cold path.
 
