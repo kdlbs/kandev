@@ -1,9 +1,10 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cleanOldReleases, findCachedRelease } from "./run";
+import { attachRingBuffer, cleanOldReleases, findCachedRelease } from "./run";
 
 // Mock CACHE_DIR to use a temp directory.
 const mockCacheDir = { value: "" };
@@ -185,5 +186,31 @@ describe("cleanOldReleases", () => {
     cleanOldReleases("v2.0");
     const remaining = fs.readdirSync(tmpDir).sort();
     expect(remaining).toEqual(["v1.10", "v2.0"]);
+  });
+});
+
+describe("attachRingBuffer", () => {
+  it("accumulates data chunks as utf8", () => {
+    const stream = new EventEmitter() as EventEmitter & NodeJS.ReadableStream;
+    const read = attachRingBuffer(stream, 1024);
+    stream.emit("data", Buffer.from("hello "));
+    stream.emit("data", "world");
+    expect(read()).toBe("hello world");
+  });
+
+  it("trims old data once maxChars is exceeded, keeping the tail", () => {
+    const stream = new EventEmitter() as EventEmitter & NodeJS.ReadableStream;
+    const read = attachRingBuffer(stream, 10);
+    stream.emit("data", "0123456789");
+    stream.emit("data", "ABCDE");
+    const buf = read();
+    expect(buf.length).toBeLessThanOrEqual(10);
+    expect(buf.endsWith("ABCDE")).toBe(true);
+    expect(buf).not.toContain("0123");
+  });
+
+  it("returns empty string when stream is null", () => {
+    const read = attachRingBuffer(null);
+    expect(read()).toBe("");
   });
 });

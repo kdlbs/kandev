@@ -28,12 +28,14 @@ export async function waitForHealth(
   baseUrl: string,
   proc: { exitCode: number | null },
   timeoutMs: number,
+  onFailure?: () => void,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const healthUrl = `${baseUrl}/health`;
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) {
-      throw new Error("Backend exited before healthcheck passed");
+      onFailure?.();
+      throw new Error(`Backend exited (code ${proc.exitCode}) before healthcheck passed`);
     }
     try {
       const res = await fetch(healthUrl);
@@ -45,7 +47,12 @@ export async function waitForHealth(
     }
     await delay(300);
   }
-  throw new Error(`Backend healthcheck timed out after ${timeoutMs}ms`);
+  onFailure?.();
+  throw new Error(
+    `Backend healthcheck timed out after ${timeoutMs}ms at ${healthUrl}. ` +
+      `If your machine is slow on first run (antivirus scan, cold disk), ` +
+      `set KANDEV_HEALTH_TIMEOUT_MS=120000 and retry.`,
+  );
 }
 
 export async function waitForUrlReady(

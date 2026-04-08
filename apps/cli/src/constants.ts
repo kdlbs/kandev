@@ -13,7 +13,7 @@ export const RANDOM_PORT_MAX = 60000;
 export const RANDOM_PORT_RETRIES = 10;
 
 // Backend healthcheck timeout during startup.
-export const HEALTH_TIMEOUT_MS_RELEASE = 15000;
+export const HEALTH_TIMEOUT_MS_RELEASE = 45000;
 export const HEALTH_TIMEOUT_MS_DEV = 600000;
 
 // Local user cache/data directories for release bundles and DB.
