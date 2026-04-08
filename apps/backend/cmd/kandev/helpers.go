@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -177,6 +179,10 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 
 	latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Expected for sessions that have not produced a snapshot yet.
+			return result
+		}
 		log.Warn("failed to load DB snapshot for session",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
