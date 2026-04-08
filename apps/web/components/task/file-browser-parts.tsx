@@ -120,9 +120,12 @@ function TreeNodeChildren({ props, depth }: { props: TreeNodeItemProps; depth: n
           onCancel={onCancelCreate}
         />
       )}
-      {node.children?.map((child) => (
-        <TreeNodeItem key={child.path} {...props} node={child} depth={depth + 1} />
-      ))}
+      {node.children &&
+        [...node.children]
+          .sort(compareTreeNodes)
+          .map((child) => (
+            <TreeNodeItem key={child.path} {...props} node={child} depth={depth + 1} />
+          ))}
     </div>
   );
 }
@@ -142,6 +145,9 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
 
   const rowContent = (
     <div
+      data-testid="file-tree-node"
+      data-path={node.path}
+      data-is-dir={node.is_dir ? "true" : "false"}
       className={cn(
         "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
         "hover:bg-muted",
