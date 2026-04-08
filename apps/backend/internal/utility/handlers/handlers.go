@@ -182,6 +182,16 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		return
 	}
 
+	// Validate inference agent is resolved before persisting a call record —
+	// missing agent_id is a client error, not an execution failure.
+	if prepared.AgentCLI == "" {
+		h.logger.Warn("execute prompt: missing agent_id")
+		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{
+			Error: lifecycle.ErrInferenceAgentIDRequired.Error(),
+		})
+		return
+	}
+
 	// Create call record for tracking
 	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model)
 	if err != nil {
@@ -193,16 +203,6 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	// Execute via agentctl using inference agent
 	resp, err := h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
 	if err != nil {
-		if errors.Is(err, lifecycle.ErrInferenceAgentIDRequired) {
-			h.logger.Warn("execute prompt: missing agent_id",
-				zap.String("call_id", callID))
-			_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-			c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{
-				CallID: callID,
-				Error:  err.Error(),
-			})
-			return
-		}
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
