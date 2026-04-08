@@ -148,6 +148,7 @@ export const Combobox = memo(function Combobox({
         )}
         side={popoverSide}
         align={popoverAlign}
+        portal={false}
       >
         <Command value={highlighted} onValueChange={setHighlighted}>
           {dropdownLabel ? (
