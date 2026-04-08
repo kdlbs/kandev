@@ -216,16 +216,20 @@ async function prepareReleaseBundle({
   };
 }
 
-/** Attach a ring buffer to a readable stream, keeping roughly the last `maxBytes` bytes. */
+/**
+ * Attach a ring buffer to a readable stream, keeping roughly the last `maxChars`
+ * characters. Note: the limit is measured in JS string length (UTF-16 code units),
+ * not bytes — fine for log output which is overwhelmingly ASCII.
+ */
 export function attachRingBuffer(
   stream: NodeJS.ReadableStream | null,
-  maxBytes = 64 * 1024,
+  maxChars = 64 * 1024,
 ): () => string {
   let buf = "";
   stream?.on("data", (chunk: Buffer | string) => {
     buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    if (buf.length > maxBytes) {
-      buf = buf.slice(buf.length - maxBytes);
+    if (buf.length > maxChars) {
+      buf = buf.slice(buf.length - maxChars);
     }
   });
   return () => buf;
