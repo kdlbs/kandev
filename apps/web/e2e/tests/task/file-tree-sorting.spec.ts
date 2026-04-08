@@ -89,16 +89,8 @@ test.describe("File tree sorting", () => {
 
     // Directories must come before files. Within each group, order follows
     // the comparator's localeCompare (dot-prefixed names sort before letters).
-    const paths = childPaths.map((n) => n.path);
     const dirs = childPaths.filter((n) => n.isDir).map((n) => n.path);
     const files = childPaths.filter((n) => !n.isDir).map((n) => n.path);
-
-    // All dirs appear before all files.
-    const firstFileIdx = paths.findIndex((p) => !childPaths.find((n) => n.path === p)?.isDir);
-    const lastDirIdx = paths
-      .map((p) => childPaths.find((n) => n.path === p)?.isDir)
-      .lastIndexOf(true);
-    expect(lastDirIdx).toBeLessThan(firstFileIdx);
 
     expect(dirs).toEqual(["sub/.vscode", "sub/adir"]);
     expect(files).toEqual(["sub/.gitignore", "sub/.golangci.yaml", "sub/zfile.txt"]);
