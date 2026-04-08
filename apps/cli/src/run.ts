@@ -216,10 +216,26 @@ async function prepareReleaseBundle({
   };
 }
 
+/** Attach a ring buffer to a readable stream, keeping roughly the last `maxBytes` bytes. */
+export function attachRingBuffer(
+  stream: NodeJS.ReadableStream | null,
+  maxBytes = 64 * 1024,
+): () => string {
+  let buf = "";
+  stream?.on("data", (chunk: Buffer | string) => {
+    buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (buf.length > maxBytes) {
+      buf = buf.slice(buf.length - maxBytes);
+    }
+  });
+  return () => buf;
+}
+
 function launchReleaseApps(prepared: PreparedRelease): {
   supervisor: ReturnType<typeof createProcessSupervisor>;
   backendProc: ReturnType<typeof spawn>;
   webServerPath: string;
+  dumpBackendLogs: () => void;
 } {
   const releaseSource = prepared.requestedVersion
     ? `(requested: ${prepared.requestedVersion})`
@@ -241,14 +257,28 @@ function launchReleaseApps(prepared: PreparedRelease): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
-  // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
+  // Start backend: ignore stdin, always show stderr immediately.
+  // In verbose/debug mode stream stdout live; otherwise capture it into a ring
+  // buffer so we can dump the last few KB if the healthcheck fails (users were
+  // previously seeing opaque "timed out" errors with no backend context).
   const backendProc = spawn(prepared.backendBin, [], {
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
-    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
+    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "inherit"],
   });
   supervisor.children.push(backendProc);
+
+  const readBuffered = prepared.showOutput ? () => "" : attachRingBuffer(backendProc.stdout);
+  let dumped = false;
+  const dumpBackendLogs = (): void => {
+    if (dumped) return;
+    dumped = true;
+    const buffered = readBuffered();
+    if (buffered.trim().length === 0) return;
+    console.error("[kandev] --- backend stdout (last captured output) ---");
+    console.error(buffered.trimEnd());
+    console.error("[kandev] --- end backend stdout ---");
+  };
 
   attachBackendExitHandler(backendProc, supervisor);
 
@@ -257,7 +287,7 @@ function launchReleaseApps(prepared: PreparedRelease): {
     throw new Error("Web server entry (server.js) not found in bundle");
   }
 
-  return { supervisor, backendProc, webServerPath };
+  return { supervisor, backendProc, webServerPath, dumpBackendLogs };
 }
 
 export async function runRelease({
@@ -268,10 +298,10 @@ export async function runRelease({
   debug = false,
 }: RunOptions): Promise<void> {
   const prepared = await prepareReleaseBundle({ version, backendPort, webPort, verbose, debug });
-  const { supervisor, backendProc, webServerPath } = launchReleaseApps(prepared);
+  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = launchReleaseApps(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs);
+  await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs, dumpBackendLogs);
   console.log(`[kandev] backend ready at ${prepared.backendUrl}`);
 
   const webUrl = `http://localhost:${prepared.webPort}`;
