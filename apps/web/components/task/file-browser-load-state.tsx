@@ -35,7 +35,10 @@ export function renderSessionOrLoadState({
   }
   if (loadState === "waiting") {
     return (
-      <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
+      <div
+        data-testid="file-tree-waiting"
+        className="p-4 text-sm text-muted-foreground flex items-center gap-2"
+      >
         <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
         Preparing workspace...
       </div>
@@ -43,7 +46,7 @@ export function renderSessionOrLoadState({
   }
   if (loadState === "manual") {
     return (
-      <div className="p-4 text-sm text-muted-foreground space-y-2">
+      <div data-testid="file-tree-manual" className="p-4 text-sm text-muted-foreground space-y-2">
         <div>{loadError ?? "Workspace is still starting."}</div>
         <button
           type="button"

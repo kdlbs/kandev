@@ -210,8 +210,13 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   return (
     <div className="px-3 py-2 space-y-1.5 border-b border-border/50">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        {status === "preparing" && <IconLoader2 className="h-3 w-3 animate-spin" />}
-        {status === "failed" && <IconX className="h-3 w-3 text-destructive" />}
+        {status === "preparing" && (
+          <IconLoader2
+            data-testid="prepare-progress-header-spinner"
+            className="h-3.5 w-3.5 animate-spin"
+          />
+        )}
+        {status === "failed" && <IconX className="h-3.5 w-3.5 text-destructive" />}
         <span>
           {status === "preparing" && "Preparing environment..."}
           {status === "failed" && (prepareState.errorMessage ?? "Environment preparation failed")}

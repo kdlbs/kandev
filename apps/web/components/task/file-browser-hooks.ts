@@ -318,10 +318,15 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   });
 
   // Full reset: clear tree + loading state. Only fires when the environment changes.
+  // We deliberately do NOT depend on `agentctlStatus.isReady` here — that would
+  // re-run the reset effect and wipe the tree whenever agentctl restarts. The
+  // sibling effect below handles the ready transition without resetting state.
+  const agentctlReadyAtMountRef = useRef(agentctlStatus.isReady);
+  agentctlReadyAtMountRef.current = agentctlStatus.isReady;
   useEffect(() => {
     setTree(null);
     setIsLoadingTree(true);
-    setLoadState("loading");
+    setLoadState(agentctlReadyAtMountRef.current ? "loading" : "waiting");
     setLoadError(null);
     retryAttemptRef.current = 0;
     clearRetryTimer();
@@ -329,7 +334,15 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     const savedPaths = getFilesPanelExpandedPaths(effectiveResetKey);
     setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
     if (savedPaths.length > 0) hasInitializedExpandedRef.current = effectiveResetKey;
-    void loadTree({ resetRetry: true });
+    // Only kick off the load if agentctl is already ready. Otherwise the
+    // sibling effect (below) will trigger it as soon as readiness flips true.
+    // This prevents the retry budget from being burned while a long prepare
+    // script (e.g. slow git fetch) blocks agentctl from coming up.
+    if (agentctlReadyAtMountRef.current) {
+      void loadTree({ resetRetry: true });
+    } else {
+      setIsLoadingTree(false);
+    }
     return () => {
       clearRetryTimer();
     };

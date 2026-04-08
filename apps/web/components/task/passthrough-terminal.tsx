@@ -79,9 +79,12 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const sessionId = propSessionId ?? storeSessionId;
 
   const { session, isActive } = useSession(sessionId);
-  useSessionAgentctl(sessionId);
+  const agentctlStatus = useSessionAgentctl(sessionId);
   const taskId = session?.task_id ?? null;
-  const canConnect = Boolean(sessionId && isActive);
+  // Gate WS connection on agentctl readiness. During a long prepare script
+  // the backend terminal endpoint isn't accepting connections yet, and
+  // spamming reconnects burns cycles and confuses the loading state.
+  const canConnect = Boolean(sessionId && isActive && agentctlStatus.isReady);
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);

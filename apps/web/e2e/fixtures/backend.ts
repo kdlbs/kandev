@@ -181,8 +181,44 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const agentctlPortBase = 30001 + workerInfo.workerIndex * 50;
       const agentctlPortMax = agentctlPortBase + 49;
 
+      // Install a `git` shim that can sleep on `fetch`/`pull` before execing
+      // the real git binary. Tests that need to simulate slow network git
+      // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
+      // shim reads it on every invocation and sleeps the matching duration.
+      // When the file is absent the shim is a transparent passthrough, so
+      // other tests in the same worker are unaffected.
+      const shimDir = path.join(tmpDir, "bin");
+      const shimPath = path.join(shimDir, "git");
+      const shimDelayFile = path.join(tmpDir, "git-delay-ms");
+      const originalPath = process.env.PATH ?? "";
+      fs.mkdirSync(shimDir, { recursive: true });
+      fs.writeFileSync(
+        shimPath,
+        `#!/bin/sh
+if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$1" = "fetch" ] || [ "$1" = "pull" ]; }; then
+  delay_ms=$(cat "$KANDEV_E2E_GIT_DELAY_FILE" 2>/dev/null)
+  case "$delay_ms" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ "$delay_ms" -gt 0 ]; then
+        sleep_secs=$((delay_ms / 1000))
+        [ "$sleep_secs" -lt 1 ] && sleep_secs=1
+        sleep "$sleep_secs"
+      fi
+      ;;
+  esac
+fi
+export PATH="$KANDEV_E2E_ORIGINAL_PATH"
+exec git "$@"
+`,
+        { mode: 0o755 },
+      );
+
       const backendEnv = {
         ...stripGitHubTokens(process.env as Record<string, string>),
+        PATH: `${shimDir}:${originalPath}`,
+        KANDEV_E2E_ORIGINAL_PATH: originalPath,
+        KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
         HOME: tmpDir,
         KANDEV_DATA_DIR: dataDir,
         KANDEV_SERVER_PORT: String(backendPort),
