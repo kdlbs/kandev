@@ -3,7 +3,6 @@
 **Date:** 2026-04-08
 **Status:** implemented
 **PR:** #564
-**Decision:** ADR-0002 (E2E git shim for slow operations)
 
 ## Problem
 
@@ -53,7 +52,7 @@ The existing "Preparing workspace..." / "Connecting terminal..." overlay already
 
 `apps/web/e2e/tests/session/long-prepare-panels.spec.ts`:
 
-1. Writes `25000` to `${backend.tmpDir}/git-delay-ms` so the git shim (see ADR-0002) makes `git fetch origin main` sleep 25s during `worktree.Manager.pullBaseBranch`.
+1. Writes `25000` to `${backend.tmpDir}/git-delay-ms` so the `git` shim installed by the backend fixture makes `git fetch origin main` sleep 25s during `worktree.Manager.pullBaseBranch`. The shim is a POSIX script at `${tmpDir}/bin/git` that sleeps on `fetch`/`pull` when the delay file exists, then `exec`s the real `git` — transparent passthrough when the file is absent.
 2. Creates a task with `executor_profile_id: seedData.worktreeExecutorProfileId` — required, otherwise the task falls through with `executor_type: ""`, the worktree preparer never runs, and no fetch is invoked.
 3. Asserts `file-tree-waiting` is visible immediately after `waitForLoad()`.
 4. Waits 19s (past the pre-fix retry budget), asserts `file-tree-manual` has count 0 and `file-tree-waiting` is still visible. **This is the assertion that flips red pre-fix** (the file tree burns through its retries and transitions to manual).
