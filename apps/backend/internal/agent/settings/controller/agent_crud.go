@@ -51,10 +51,9 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name                       string
-	Model                      string
-	AutoApprove                bool
-	DangerouslySkipPermissions bool
+	Name  string
+	Model string
+	Mode  string
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -118,12 +117,11 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 	profiles := make([]*models.AgentProfile, 0, len(profileReqs))
 	for _, profileReq := range profileReqs {
 		profile := &models.AgentProfile{
-			AgentID:                    agentID,
-			Name:                       profileReq.Name,
-			AgentDisplayName:           displayName,
-			Model:                      profileReq.Model,
-			AutoApprove:                profileReq.AutoApprove,
-			DangerouslySkipPermissions: profileReq.DangerouslySkipPermissions,
+			AgentID:          agentID,
+			Name:             profileReq.Name,
+			AgentDisplayName: displayName,
+			Model:            profileReq.Model,
+			Mode:             profileReq.Mode,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

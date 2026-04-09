@@ -24,17 +24,38 @@ type TUIConfigJSON struct {
 }
 
 type AgentProfile struct {
-	ID                         string     `json:"id"`
-	AgentID                    string     `json:"agent_id"`
-	Name                       string     `json:"name"`
-	AgentDisplayName           string     `json:"agent_display_name"`
-	Model                      string     `json:"model"`
-	AutoApprove                bool       `json:"auto_approve"`
-	DangerouslySkipPermissions bool       `json:"dangerously_skip_permissions"`
-	AllowIndexing              bool       `json:"allow_indexing"`
-	CLIPassthrough             bool       `json:"cli_passthrough"`
-	UserModified               bool       `json:"user_modified"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
-	DeletedAt                  *time.Time `json:"deleted_at,omitempty"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	Name             string `json:"name"`
+	AgentDisplayName string `json:"agent_display_name"`
+
+	// Model is the ACP model ID applied via session/set_model at session start.
+	// Validated against the host utility capability cache by the reconciler.
+	Model string `json:"model"`
+
+	// Mode is the optional ACP session mode applied via session/set_mode at
+	// session start. Empty when the agent does not advertise modes.
+	Mode string `json:"mode,omitempty"`
+
+	// MigratedFrom records the agent_id this profile was migrated from, if any.
+	// Used for audit of the one-shot non-ACP → ACP migration.
+	MigratedFrom string `json:"migrated_from,omitempty"`
+
+	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
+	CLIPassthrough bool `json:"cli_passthrough"`
+
+	// AllowIndexing is kept as an auggie-only CLI flag (no ACP equivalent).
+	// Ignored for all other agents.
+	AllowIndexing bool `json:"allow_indexing"`
+
+	// Deprecated legacy permission fields: retained in the DB schema so rows
+	// load cleanly, but no longer read by the launch path. ACP session modes
+	// and interactive permission_request prompts replace them.
+	AutoApprove                bool `json:"-"`
+	DangerouslySkipPermissions bool `json:"-"`
+
+	UserModified bool       `json:"user_modified"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }

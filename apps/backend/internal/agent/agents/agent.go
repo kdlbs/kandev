@@ -16,6 +16,10 @@ import (
 var ErrNotSupported = errors.New("not supported by this agent")
 
 // Agent is the core interface for all coding agents.
+//
+// Models are no longer part of this interface — they come from the host utility
+// capability cache (which probes each ACP agent at boot to learn its models and
+// modes via session/new). See internal/agent/hostutility.
 type Agent interface {
 	// --- Identity ---
 	ID() string
@@ -30,10 +34,6 @@ type Agent interface {
 
 	// --- Discovery ---
 	IsInstalled(ctx context.Context) (*DiscoveryResult, error)
-
-	// --- Models ---
-	DefaultModel() string
-	ListModels(ctx context.Context) (*ModelList, error)
 
 	// --- Execution ---
 	BuildCommand(opts CommandOptions) Command
@@ -55,14 +55,13 @@ type Agent interface {
 	InstallScript() string
 }
 
-// InferenceAgent is an optional capability for agents that support one-shot LLM inference.
-// Agents implementing this interface can execute single prompts without a persistent session.
+// InferenceAgent is an optional capability marker for agents that support
+// one-shot LLM inference via the host utility manager. The actual model list
+// is populated dynamically from the ACP probe — agents no longer declare a
+// static model list.
 type InferenceAgent interface {
 	// InferenceConfig returns the configuration for one-shot inference.
 	InferenceConfig() *InferenceConfig
-
-	// InferenceModels returns models available for inference (may be a subset of full models).
-	InferenceModels() []InferenceModel
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
@@ -85,63 +84,6 @@ const (
 	LogoLight LogoVariant = iota
 	LogoDark
 )
-
-// Model describes a single model available for an agent.
-type Model struct {
-	ID            string `json:"id"`
-	ACPID         string `json:"acp_id,omitempty"` // ACP protocol model ID (if different from ID)
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Provider      string `json:"provider"`
-	ContextWindow int    `json:"context_window"` // 0 = unspecified
-	IsDefault     bool   `json:"is_default"`
-	Source        string `json:"source,omitempty"` // "static" or "dynamic"
-}
-
-// ACPModelID returns the model ID for ACP SetModel. Falls back to ID if ACPID is not set.
-func (m Model) ACPModelID() string {
-	if m.ACPID != "" {
-		return m.ACPID
-	}
-	return m.ID
-}
-
-// ResolveACPModelID finds the ACP model ID for a given profile model ID.
-// Searches the model list for a matching ID and returns its ACPID.
-// Returns the original ID if no ACPID mapping exists.
-func ResolveACPModelID(models []Model, profileModel string) string {
-	for _, m := range models {
-		if m.ID == profileModel && m.ACPID != "" {
-			return m.ACPID
-		}
-	}
-	return profileModel
-}
-
-// ToInferenceModel converts a Model to an InferenceModel.
-func (m Model) ToInferenceModel() InferenceModel {
-	return InferenceModel{
-		ID:          m.ID,
-		Name:        m.Name,
-		Description: m.Description,
-		IsDefault:   m.IsDefault,
-	}
-}
-
-// ModelsToInferenceModels converts a slice of Models to InferenceModels.
-func ModelsToInferenceModels(models []Model) []InferenceModel {
-	result := make([]InferenceModel, 0, len(models))
-	for _, m := range models {
-		result = append(result, m.ToInferenceModel())
-	}
-	return result
-}
-
-// ModelList is the result of listing models for an agent.
-type ModelList struct {
-	Models          []Model
-	SupportsDynamic bool // true = UI shows refresh button
-}
 
 // DiscoveryResult is the result of checking if an agent is installed.
 type DiscoveryResult struct {

@@ -295,17 +295,21 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID                  string
-	ProfileName                string
-	AgentID                    string
-	AgentName                  string // e.g., "auggie", "claude", "codex"
-	Model                      string
+	ProfileID           string
+	ProfileName         string
+	AgentID             string
+	AgentName           string // e.g., "auggie", "claude", "codex"
+	Model               string // applied via ACP session/set_model at session start
+	Mode                string // applied via ACP session/set_mode at session start (empty = use agent default)
+	AllowIndexing       bool   // auggie-only CLI flag
+	CLIPassthrough      bool
+	NativeSessionResume bool // Agent supports ACP session/load for resume
+	SupportsMCP         bool
+
+	// Deprecated: legacy permission fields, no longer consulted by the launch
+	// path. Kept so existing call sites compile during the transition.
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
-	AllowIndexing              bool
-	CLIPassthrough             bool
-	NativeSessionResume        bool // Agent supports ACP session/load for resume
-	SupportsMCP                bool
 }
 
 // ProfileResolver resolves agent profile IDs to profile information

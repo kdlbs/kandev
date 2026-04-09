@@ -3,6 +3,7 @@ package hostutility
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -28,8 +29,20 @@ func (m *Manager) Get(agentType string) (AgentCapabilities, bool) {
 // new capabilities. If the warm instance is missing (never bootstrapped or
 // crashed), it is lazily recreated.
 func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilities, error) {
+	// Publish "probing" so callers polling the cache see in-flight state.
+	m.cache.set(AgentCapabilities{
+		AgentType:     agentType,
+		Status:        StatusProbing,
+		LastCheckedAt: time.Now(),
+	})
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
+		m.cache.set(AgentCapabilities{
+			AgentType:     agentType,
+			Status:        StatusFailed,
+			Error:         err.Error(),
+			LastCheckedAt: time.Now(),
+		})
 		return AgentCapabilities{}, err
 	}
 	caps := m.probe(ctx, inst, ia)
@@ -86,18 +99,14 @@ func (m *Manager) ExecutePrompt(
 }
 
 // resolveModel picks the model to use for an ExecutePrompt call.
-// Precedence: explicit argument > cached probe currentModelID > agent's default inference model.
-func (m *Manager) resolveModel(agentType, explicit string, ia agents.InferenceAgent) string {
+// Precedence: explicit argument > cached probe currentModelID.
+// Static per-agent default models no longer exist; probes are the source of truth.
+func (m *Manager) resolveModel(agentType, explicit string, _ agents.InferenceAgent) string {
 	if explicit != "" {
 		return explicit
 	}
 	if caps, ok := m.cache.get(agentType); ok && caps.CurrentModelID != "" {
 		return caps.CurrentModelID
-	}
-	for _, im := range ia.InferenceModels() {
-		if im.IsDefault {
-			return im.ID
-		}
 	}
 	return ""
 }

@@ -87,15 +87,7 @@ export async function createAgentProfileAction(
 export async function updateAgentProfileAction(
   id: string,
   payload: Partial<
-    Pick<
-      AgentProfile,
-      | "name"
-      | "model"
-      | "auto_approve"
-      | "dangerously_skip_permissions"
-      | "allow_indexing"
-      | "cli_passthrough"
-    >
+    Pick<AgentProfile, "name" | "model" | "mode" | "allow_indexing" | "cli_passthrough">
   >,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {

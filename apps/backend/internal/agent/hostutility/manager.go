@@ -161,6 +161,14 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	agentType := ag.ID()
 	log := m.log.WithFields(zap.String("agent_type", agentType))
 
+	// Publish "probing" synchronously so the UI can distinguish "not started"
+	// (cache miss) from "in flight".
+	m.cache.set(AgentCapabilities{
+		AgentType:     agentType,
+		Status:        StatusProbing,
+		LastCheckedAt: time.Now(),
+	})
+
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
 		m.cache.set(AgentCapabilities{

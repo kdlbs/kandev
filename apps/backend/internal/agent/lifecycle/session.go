@@ -265,6 +265,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
 	profileModel string,
+	profileMode string,
 ) error {
 	// Create session-level trace span to group all operations under one trace
 	_, sessionSpan := tracing.TraceSessionStart(
@@ -328,25 +329,32 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
 
-	// Set the user's configured profile model if it differs from the agent's default.
-	// Resolve ACP-specific model ID (e.g., "claude-opus-4-6" → "default" for Claude ACP).
-	if profileModel != "" && profileModel != agentConfig.DefaultModel() && execution.agentctl != nil {
-		acpModel := profileModel
-		if list, err := agentConfig.ListModels(ctx); err == nil && list != nil {
-			acpModel = agents.ResolveACPModelID(list.Models, profileModel)
-		}
-
-		if err := execution.agentctl.SetModel(ctx, acpModel); err != nil {
+	// Apply profile model via ACP session/set_model (best-effort).
+	// ACP is the only surface for model selection now; no --model CLI flag.
+	if profileModel != "" && execution.agentctl != nil {
+		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel),
-				zap.String("acp_model", acpModel),
 				zap.Error(err))
 		} else {
 			sm.logger.Info("set profile model on ACP session",
 				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel),
-				zap.String("acp_model", acpModel))
+				zap.String("model", profileModel))
+		}
+	}
+
+	// Apply profile mode via ACP session/set_mode (best-effort).
+	if profileMode != "" && execution.agentctl != nil {
+		if err := execution.agentctl.SetMode(ctx, result.SessionID, profileMode); err != nil {
+			sm.logger.Warn("failed to set profile mode via ACP",
+				zap.String("execution_id", execution.ID),
+				zap.String("mode", profileMode),
+				zap.Error(err))
+		} else {
+			sm.logger.Info("set profile mode on ACP session",
+				zap.String("execution_id", execution.ID),
+				zap.String("mode", profileMode))
 		}
 	}
 

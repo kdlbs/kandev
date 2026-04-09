@@ -20,14 +20,19 @@ type Handlers struct {
 }
 
 // RegisterRoutes mounts the capability routes on the given router.
+//
+// These endpoints sit under `/api/v1/agent-capabilities` rather than under
+// `/api/v1/agents/...` to avoid a routing conflict with the existing settings
+// handler which uses `/api/v1/agents/:id/...` — Gin does not allow two
+// different wildcard names (:id vs :type) at the same path level.
 func RegisterRoutes(router *gin.Engine, hostUtility *hostutility.Manager, log *logger.Logger) {
 	h := &Handlers{
 		hostUtility: hostUtility,
 		logger:      log.WithFields(zap.String("component", "agent-capabilities-handlers")),
 	}
-	api := router.Group("/api/v1/agents")
-	api.GET("/capabilities", h.list)
-	api.GET("/:type/capabilities", h.get)
+	api := router.Group("/api/v1/agent-capabilities")
+	api.GET("", h.list)
+	api.GET("/:type", h.get)
 	api.POST("/:type/probe", h.probe)
 	api.POST("/:type/prompt", h.prompt)
 }

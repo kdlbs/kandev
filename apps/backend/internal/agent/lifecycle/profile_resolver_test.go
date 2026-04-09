@@ -270,9 +270,12 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 	if info == nil {
 		t.Fatal("expected non-nil profile info")
 	}
-	if info.Model != "claude-sonnet-4-20250514" {
-		// Should have fallback to registry's default model
-		t.Errorf("expected Model 'claude-sonnet-4-20250514' (from registry), got '%s'", info.Model)
+	// Static per-agent default models have been removed; an empty profile
+	// model stays empty until the host utility probe fills it in via the
+	// reconciler. The session-start hook calls session/set_model only when
+	// a model is set, otherwise the agent uses its own default.
+	if info.Model != "" {
+		t.Errorf("expected Model '' (no static fallback), got '%s'", info.Model)
 	}
 }
 

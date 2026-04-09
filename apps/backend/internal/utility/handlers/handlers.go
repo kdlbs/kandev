@@ -310,23 +310,15 @@ func (h *Handlers) httpListCalls(c *gin.Context) {
 func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 	inferenceAgents := h.executor.ListInferenceAgentsWithContext(c.Request.Context())
 
-	// Convert to DTO
+	// Convert to DTO. Models are no longer listed per-agent here — the
+	// frontend should read them from the host utility capability cache via
+	// GET /api/v1/agents/:type/capabilities.
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
 	for _, ia := range inferenceAgents {
-		models := make([]dto.InferenceModelDTO, 0, len(ia.Models))
-		for _, m := range ia.Models {
-			models = append(models, dto.InferenceModelDTO{
-				ID:          m.ID,
-				Name:        m.Name,
-				Description: m.Description,
-				IsDefault:   m.IsDefault,
-			})
-		}
 		result = append(result, dto.InferenceAgentDTO{
 			ID:          ia.ID,
 			Name:        ia.Name,
 			DisplayName: ia.DisplayName,
-			Models:      models,
 		})
 	}
 	c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})

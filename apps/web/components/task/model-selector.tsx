@@ -16,9 +16,9 @@ type ModelSelectorProps = {
 type ModelOption = {
   id: string;
   name: string;
-  provider: string;
-  context_window: number;
-  is_default: boolean;
+  provider?: string;
+  context_window?: number;
+  is_default?: boolean;
   description?: string;
   usageMultiplier?: string;
 };

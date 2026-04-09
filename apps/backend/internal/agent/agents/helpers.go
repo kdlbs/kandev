@@ -1,13 +1,13 @@
 package agents
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"os/exec"
 	"strings"
-	"time"
 )
+
+// emptyPermSettings is a shared zero-value permission settings map used by ACP
+// agents that have no CLI-driven permission flags. Permission stance is
+// expressed via ACP session modes and per-tool-call permission prompts.
+var emptyPermSettings = map[string]PermissionSetting{}
 
 // CmdBuilder constructs CLI command slices using a fluent API.
 type CmdBuilder struct {
@@ -113,27 +113,4 @@ func (b *CmdBuilder) Flag(parts ...string) *CmdBuilder {
 // Build returns the final Command value.
 func (b *CmdBuilder) Build() Command {
 	return Command{args: b.args}
-}
-
-// execAndParse runs a command with a timeout and parses stdout with the given parser function.
-func execAndParse(ctx context.Context, timeout time.Duration, parse func(string) ([]Model, error), name string, args ...string) ([]Model, error) {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, name, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("command timed out after %v", timeout)
-		}
-		return nil, fmt.Errorf("command failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	return parse(stdout.String())
 }

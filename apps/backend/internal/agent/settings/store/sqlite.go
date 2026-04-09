@@ -56,7 +56,9 @@ func (r *sqliteRepository) initSchema() error {
 		agent_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		agent_display_name TEXT NOT NULL,
-		model TEXT NOT NULL CHECK(model != ''),
+		model TEXT NOT NULL DEFAULT '',
+		mode TEXT DEFAULT NULL,
+		migrated_from TEXT DEFAULT NULL,
 		auto_approve INTEGER NOT NULL DEFAULT 0,
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		allow_indexing INTEGER NOT NULL DEFAULT 1,
@@ -90,6 +92,10 @@ func (r *sqliteRepository) initSchema() error {
 
 	// Migration: add tui_config column (idempotent — ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
+
+	// Migration: add mode and migrated_from columns on agent_profiles (idempotent)
+	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
+	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
 
 	return nil
 }
@@ -241,20 +247,33 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
-	`), profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, dialect.BoolToInt(profile.AutoApprove),
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+	`), profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
+		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
+		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
+}
+
+// nullableString converts an empty string to sql.NullString zero-value so the
+// column is written as NULL rather than "". Keeps nullable columns clean.
+func nullableString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`), profile.Name, profile.AgentDisplayName, profile.Model, dialect.BoolToInt(profile.AutoApprove),
+	`), profile.Name, profile.AgentDisplayName, profile.Model,
+		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
+		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
@@ -283,7 +302,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`), id)
 	return scanAgentProfile(row)
@@ -291,7 +310,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), agentID)
 	if err != nil {
@@ -376,6 +395,8 @@ func scanAgentProfile(scanner interface {
 	Scan(dest ...any) error
 }) (*models.AgentProfile, error) {
 	profile := &models.AgentProfile{}
+	var mode sql.NullString
+	var migratedFrom sql.NullString
 	var autoApprove int
 	var skipPermissions int
 	var allowIndexing int
@@ -388,6 +409,8 @@ func scanAgentProfile(scanner interface {
 		&profile.Name,
 		&profile.AgentDisplayName,
 		&profile.Model,
+		&mode,
+		&migratedFrom,
 		&autoApprove,
 		&skipPermissions,
 		&allowIndexing,
@@ -399,6 +422,12 @@ func scanAgentProfile(scanner interface {
 		&profile.DeletedAt,
 	); err != nil {
 		return nil, err
+	}
+	if mode.Valid {
+		profile.Mode = mode.String
+	}
+	if migratedFrom.Valid {
+		profile.MigratedFrom = migratedFrom.String
 	}
 	profile.AutoApprove = autoApprove == 1
 	profile.DangerouslySkipPermissions = skipPermissions == 1

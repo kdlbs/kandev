@@ -134,8 +134,7 @@ function ProfileSettingsCard({
           profile={{
             name: draft.name,
             model: draft.model,
-            auto_approve: draft.auto_approve,
-            dangerously_skip_permissions: draft.dangerously_skip_permissions,
+            mode: draft.mode ?? "",
             allow_indexing: draft.allow_indexing,
             cli_passthrough: draft.cli_passthrough,
           }}
@@ -179,8 +178,7 @@ function useProfileEditorState(profile: AgentProfile) {
     () =>
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
-      draft.auto_approve !== savedProfile.auto_approve ||
-      draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
+      (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
       draft.cli_passthrough !== savedProfile.cli_passthrough,
     [draft, savedProfile],
@@ -225,21 +223,14 @@ function useProfileSave({
       });
       return;
     }
-    if (!draft.model.trim()) {
-      toast({
-        title: "Model is required",
-        description: "Please select a model before saving.",
-        variant: "error",
-      });
-      return;
-    }
+    // Model is optional — an empty profile model means "use the agent's
+    // default", which is applied via ACP session/set_model at session start.
     setSaveStatus("loading");
     try {
       const updated = await updateAgentProfileAction(draft.id, {
         name: draft.name,
         model: draft.model,
-        auto_approve: draft.auto_approve,
-        dangerously_skip_permissions: draft.dangerously_skip_permissions,
+        mode: draft.mode,
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
       });
@@ -367,8 +358,6 @@ function ProfileEditor({
         agentName={agent.name}
         model={draft.model}
         permissionSettings={{
-          auto_approve: draft.auto_approve,
-          dangerously_skip_permissions: draft.dangerously_skip_permissions,
           allow_indexing: draft.allow_indexing,
         }}
         cliPassthrough={draft.cli_passthrough}

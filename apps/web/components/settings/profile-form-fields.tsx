@@ -11,6 +11,7 @@ import type { ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/ty
 export type ProfileFormData = {
   name: string;
   model: string;
+  mode: string;
   cli_passthrough: boolean;
 } & Record<PermissionKey, boolean>;
 
@@ -125,6 +126,145 @@ function PermissionToggles({
   );
 }
 
+function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
+  switch (modelConfig.status) {
+    case "probing":
+      return "Checking agent capabilities…";
+    case "auth_required":
+      return "Authentication required. Run the agent CLI in your terminal to authenticate, then refresh.";
+    case "not_installed":
+      return "Agent CLI not installed.";
+    case "failed":
+      return `Probe failed${modelConfig.error ? `: ${modelConfig.error}` : ""}`;
+    default:
+      return null;
+  }
+}
+
+function CapabilityStatusMessage({ modelConfig }: { modelConfig: ModelConfig }) {
+  const msg = capabilityStatusMessage(modelConfig);
+  if (!msg) return null;
+  return (
+    <p
+      data-testid="profile-capability-status"
+      data-status={modelConfig.status}
+      className="text-xs text-muted-foreground"
+    >
+      {msg}
+    </p>
+  );
+}
+
+function ModelField({
+  profile,
+  modelConfig,
+  onChange,
+  agentName,
+  isCompact,
+}: {
+  profile: ProfileFormData;
+  modelConfig: ModelConfig;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  agentName: string;
+  isCompact: boolean;
+}) {
+  return (
+    <div className={isCompact ? "space-y-1.5" : "space-y-2"}>
+      {isCompact ? (
+        <Label className="text-xs text-muted-foreground">Model</Label>
+      ) : (
+        <Label>Model</Label>
+      )}
+      <ModelCombobox
+        value={profile.model || modelConfig.default_model}
+        onChange={(value) => onChange({ model: value })}
+        models={modelConfig.available_models}
+        defaultModel={modelConfig.default_model}
+        placeholder="Select or enter model..."
+        agentName={agentName}
+        supportsDynamicModels={modelConfig.supports_dynamic_models}
+      />
+      <CapabilityStatusMessage modelConfig={modelConfig} />
+    </div>
+  );
+}
+
+function ModeField({
+  profile,
+  modelConfig,
+  onChange,
+  isCompact,
+}: {
+  profile: ProfileFormData;
+  modelConfig: ModelConfig;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  isCompact: boolean;
+}) {
+  if (!modelConfig.available_modes || modelConfig.available_modes.length === 0) {
+    return null;
+  }
+  const selected = profile.mode || modelConfig.current_mode_id || "";
+  const activeMode = modelConfig.available_modes.find((m) => m.id === selected);
+  return (
+    <div
+      data-testid="profile-mode-field"
+      className={isCompact ? "space-y-1.5" : "space-y-2"}
+    >
+      {isCompact ? (
+        <Label className="text-xs text-muted-foreground">Mode</Label>
+      ) : (
+        <Label>Mode</Label>
+      )}
+      <select
+        data-testid="profile-mode-select"
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm cursor-pointer"
+        value={selected}
+        onChange={(event) => onChange({ mode: event.target.value })}
+      >
+        {modelConfig.available_modes.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+      {activeMode?.description && (
+        <p className="text-xs text-muted-foreground">{activeMode.description}</p>
+      )}
+    </div>
+  );
+}
+
+function NameField({
+  profile,
+  onChange,
+  canRemove,
+  onRemove,
+}: {
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  canRemove?: boolean;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex-1 space-y-2">
+        <Label>Profile name</Label>
+        <Input
+          data-testid="profile-name-input"
+          value={profile.name}
+          onChange={(event) => onChange({ name: event.target.value })}
+          placeholder="Default profile"
+        />
+      </div>
+      {canRemove && onRemove && (
+        <Button size="sm" variant="ghost" onClick={onRemove}>
+          Remove
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function ProfileFormFields({
   profile,
   onChange,
@@ -143,39 +283,28 @@ export function ProfileFormFields({
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
       {!hideNameField && (
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 space-y-2">
-            <Label>Profile name</Label>
-            <Input
-              value={profile.name}
-              onChange={(event) => onChange({ name: event.target.value })}
-              placeholder="Default profile"
-            />
-          </div>
-          {canRemove && onRemove && (
-            <Button size="sm" variant="ghost" onClick={onRemove}>
-              Remove
-            </Button>
-          )}
-        </div>
+        <NameField
+          profile={profile}
+          onChange={onChange}
+          canRemove={canRemove}
+          onRemove={onRemove}
+        />
       )}
 
-      <div className={isCompact ? "space-y-1.5" : "space-y-2"}>
-        {isCompact ? (
-          <Label className="text-xs text-muted-foreground">Model</Label>
-        ) : (
-          <Label>Model</Label>
-        )}
-        <ModelCombobox
-          value={profile.model || modelConfig.default_model}
-          onChange={(value) => onChange({ model: value })}
-          models={modelConfig.available_models}
-          defaultModel={modelConfig.default_model}
-          placeholder="Select or enter model..."
-          agentName={agentName}
-          supportsDynamicModels={modelConfig.supports_dynamic_models}
-        />
-      </div>
+      <ModelField
+        profile={profile}
+        modelConfig={modelConfig}
+        onChange={onChange}
+        agentName={agentName}
+        isCompact={isCompact}
+      />
+
+      <ModeField
+        profile={profile}
+        modelConfig={modelConfig}
+        onChange={onChange}
+        isCompact={isCompact}
+      />
 
       <PermissionToggles
         profile={profile}

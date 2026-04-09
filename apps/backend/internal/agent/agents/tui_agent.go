@@ -106,12 +106,6 @@ func (a *TUIAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return Detect(ctx, a.cfg.DetectOpts...)
 }
 
-func (a *TUIAgent) DefaultModel() string { return "" }
-
-func (a *TUIAgent) ListModels(_ context.Context) (*ModelList, error) {
-	return &ModelList{Models: nil, SupportsDynamic: false}, nil
-}
-
 func (a *TUIAgent) BuildCommand(_ CommandOptions) Command {
 	return a.cmd
 }

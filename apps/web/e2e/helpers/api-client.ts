@@ -242,16 +242,23 @@ export class ApiClient {
     name: string,
     opts: {
       model: string;
-      auto_approve?: boolean;
+      mode?: string;
       cli_passthrough?: boolean;
     },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
-      auto_approve: opts.auto_approve ?? true,
+      mode: opts.mode,
       cli_passthrough: opts.cli_passthrough ?? false,
     });
+  }
+
+  async updateAgentProfile(
+    profileId: string,
+    patch: { name?: string; model?: string; mode?: string; cli_passthrough?: boolean },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
   }
 
   async createTaskWithAgent(

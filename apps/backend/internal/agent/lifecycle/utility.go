@@ -89,7 +89,6 @@ func (m *Manager) ListInferenceAgentsWithContext(ctx context.Context) []Inferenc
 			ID:          ag.ID(),
 			Name:        ag.Name(),
 			DisplayName: ag.DisplayName(),
-			Models:      ia.InferenceModels(),
 		})
 	}
 
@@ -97,9 +96,10 @@ func (m *Manager) ListInferenceAgentsWithContext(ctx context.Context) []Inferenc
 }
 
 // InferenceAgentInfo contains info about an inference-capable agent.
+// Models are no longer listed here — consumers should read them from the
+// host utility capability cache directly.
 type InferenceAgentInfo struct {
-	ID          string                  `json:"id"`
-	Name        string                  `json:"name"`
-	DisplayName string                  `json:"display_name"`
-	Models      []agents.InferenceModel `json:"models"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
 }

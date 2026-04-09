@@ -6,19 +6,16 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-func TestMockAgent_BuildCommand_WithModel(t *testing.T) {
+func TestMockAgent_BuildCommand_NoModelFlag(t *testing.T) {
+	// ACP agents apply model via session/set_model after session/new, not
+	// via --model CLI flag. BuildCommand must not add --model.
 	a := NewMockAgent()
 	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast"})
 	args := cmd.Args()
-
-	foundModel := false
-	for i, arg := range args {
-		if arg == "--model" && i+1 < len(args) && args[i+1] == "mock-fast" {
-			foundModel = true
+	for _, arg := range args {
+		if arg == "--model" {
+			t.Errorf("--model CLI flag should not be emitted, got %v", args)
 		}
-	}
-	if !foundModel {
-		t.Errorf("expected --model mock-fast in args %v", args)
 	}
 }
 

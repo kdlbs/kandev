@@ -43,11 +43,12 @@ export function useDynamicModels(
           // Fall back to static models on error
           setModels(staticModels);
         } else {
-          setModels(response.models);
+          // Defensive: the backend may marshal nil slices as null.
+          setModels(response.models ?? []);
         }
 
-        setCached(response.cached);
-        setCachedAt(response.cached_at ?? null);
+        setCached(response.status === "ok");
+        setCachedAt(null);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch models";
         setError(errorMessage);

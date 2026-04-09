@@ -32,12 +32,12 @@ type AmpACP struct {
 func NewAmpACP() *AmpACP {
 	return &AmpACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: ampPermSettings,
+			PermSettings: emptyPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", ampPkg),
+				PassthroughCmd: NewCommand("npx", "-y", ampACPPkg),
 				ModelFlag:      NewParam("-m", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -85,12 +85,6 @@ func (a *AmpACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *AmpACP) DefaultModel() string { return "smart" }
-
-func (a *AmpACP) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{Models: ampStaticModels(), SupportsDynamic: false}, nil
-}
-
 func (a *AmpACP) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", ampACPPkg).Build()
 }
@@ -118,7 +112,7 @@ func (a *AmpACP) InstallScript() string {
 }
 
 func (a *AmpACP) PermissionSettings() map[string]PermissionSetting {
-	return ampPermSettings
+	return emptyPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
@@ -126,11 +120,5 @@ func (a *AmpACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   NewCommand("npx", "-y", ampACPPkg),
-		ModelFlag: NewParam("-m", "{model}"),
 	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *AmpACP) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(ampStaticModels())
 }

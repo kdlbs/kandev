@@ -32,7 +32,7 @@ type CopilotACP struct {
 func NewCopilotACP() *CopilotACP {
 	return &CopilotACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: copilotPermSettings,
+			PermSettings: emptyPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:         true,
 				Label:             "CLI Passthrough",
@@ -86,17 +86,8 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 	return result, nil
 }
 
-func (a *CopilotACP) DefaultModel() string { return "gpt-4.1" }
-
-func (a *CopilotACP) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{Models: copilotStaticModels(), SupportsDynamic: false}, nil
-}
-
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", copilotACPPkg, "--acp").
-		Model(NewParam("--model", "{model}"), opts.Model).
-		Settings(copilotPermSettings, opts.PermissionValues).
-		Build()
+	return Cmd("npx", "-y", copilotACPPkg, "--acp").Build()
 }
 
 func (a *CopilotACP) Runtime() *RuntimeConfig {
@@ -107,7 +98,6 @@ func (a *CopilotACP) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
-		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -123,7 +113,7 @@ func (a *CopilotACP) InstallScript() string {
 }
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
-	return copilotPermSettings
+	return emptyPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
@@ -131,11 +121,5 @@ func (a *CopilotACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   NewCommand("npx", "-y", copilotACPPkg, "--acp"),
-		ModelFlag: NewParam("--model", "{model}"),
 	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *CopilotACP) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(copilotStaticModels())
 }

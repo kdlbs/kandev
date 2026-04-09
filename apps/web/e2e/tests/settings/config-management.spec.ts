@@ -355,17 +355,21 @@ test.describe("Config-mode MCP — agent management", () => {
     expect(profile?.name).toBe("Renamed Profile");
   });
 
-  test("agent can update agent profile model and auto_approve", async ({
+  test("agent can update agent profile model via MCP", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
+    // Legacy `auto_approve` / `dangerously_skip_permissions` fields were
+    // removed when profile permission stance moved to ACP session modes.
+    // This test now verifies only the model update round-trip through the
+    // config-mode MCP tool.
     const session = await startConfigSession(
       apiClient,
       seedData,
       [
         'e2e:message("Updating profile settings...")',
-        `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514","auto_approve":false})`,
+        `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514"})`,
         'e2e:message("Profile settings updated")',
       ].join("\n"),
     );
@@ -378,7 +382,6 @@ test.describe("Config-mode MCP — agent management", () => {
       .flatMap((a) => a.profiles ?? [])
       .find((p) => p.id === seedData.agentProfileId);
     expect(profile?.model).toBe("claude-sonnet-4-5-20250514");
-    expect(profile?.auto_approve).toBe(false);
   });
 });
 

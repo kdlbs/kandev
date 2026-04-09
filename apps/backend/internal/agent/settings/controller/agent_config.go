@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -160,19 +161,6 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 	return
 }
 
-// resolveModelDisplayName returns the display name for a model ID from the model list,
-// falling back to the model ID itself if not found.
-func resolveModelDisplayName(modelList *agents.ModelList, modelID string) string {
-	if modelList != nil {
-		for _, m := range modelList.Models {
-			if m.ID == modelID {
-				return m.Name
-			}
-		}
-	}
-	return modelID
-}
-
 // CommandPreviewRequest contains the draft settings for command preview
 type CommandPreviewRequest struct {
 	Model              string
@@ -207,91 +195,68 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	}, nil
 }
 
-// FetchDynamicModels fetches models for an agent, optionally refreshing the cache
+// FetchDynamicModels returns models and modes for an agent from the host
+// utility capability cache populated by the ACP probe at boot. The refresh
+// flag triggers a live Refresh() call against the warm host instance.
 func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, refresh bool) (*dto.DynamicModelsResponse, error) {
-	ag, ok := c.agentRegistry.Get(agentName)
-	if !ok {
+	if _, ok := c.agentRegistry.Get(agentName); !ok {
 		return nil, fmt.Errorf("agent %q not found", agentName)
 	}
+	if c.hostUtility == nil {
+		return &dto.DynamicModelsResponse{
+			AgentName: agentName,
+			Status:    "not_configured",
+		}, nil
+	}
 
-	// Check cache unless refresh is requested
-	if !refresh {
-		if cached, ok := c.checkModelCache(agentName); ok {
-			return cached, nil
+	var caps hostutility.AgentCapabilities
+	if refresh {
+		var err error
+		caps, err = c.hostUtility.Refresh(ctx, agentName)
+		if err != nil {
+			s := err.Error()
+			return &dto.DynamicModelsResponse{
+				AgentName: agentName,
+				Status:    string(hostutility.StatusFailed),
+				Error:     &s,
+			}, nil
+		}
+	} else {
+		var ok bool
+		caps, ok = c.hostUtility.Get(agentName)
+		if !ok {
+			return &dto.DynamicModelsResponse{
+				AgentName: agentName,
+				Status:    "not_configured",
+			}, nil
 		}
 	}
 
-	// Fetch models from the agent
-	modelList, err := ag.ListModels(ctx)
-	if err != nil {
-		c.logger.Warn("model fetch failed",
-			zap.String("agent", agentName),
-			zap.Error(err))
-		c.modelCache.Set(agentName, nil, err)
-		s := err.Error()
-		return &dto.DynamicModelsResponse{
-			AgentName: agentName,
-			Models:    nil,
-			Cached:    false,
-			Error:     &s,
-		}, nil
+	resp := &dto.DynamicModelsResponse{
+		AgentName:      agentName,
+		Status:         string(caps.Status),
+		CurrentModelID: caps.CurrentModelID,
+		CurrentModeID:  caps.CurrentModeID,
+		Models:         []dto.ModelEntryDTO{},
+		Modes:          []dto.ModeEntryDTO{},
 	}
-
-	models := modelList.Models
-
-	// Cache the result if dynamic models are supported
-	if modelList.SupportsDynamic {
-		c.modelCache.Set(agentName, models, nil)
-		cachedAt := time.Now()
-		return &dto.DynamicModelsResponse{
-			AgentName: agentName,
-			Models:    modelsToDTO(models),
-			Cached:    true,
-			CachedAt:  &cachedAt,
-		}, nil
+	if caps.Error != "" {
+		e := caps.Error
+		resp.Error = &e
 	}
-
-	return &dto.DynamicModelsResponse{
-		AgentName: agentName,
-		Models:    modelsToDTO(models),
-		Cached:    false,
-	}, nil
-}
-
-// checkModelCache returns cached model response if available and valid.
-func (c *Controller) checkModelCache(agentName string) (*dto.DynamicModelsResponse, bool) {
-	entry, exists := c.modelCache.Get(agentName)
-	if !exists || !entry.IsValid() {
-		return nil, false
-	}
-	cachedAt := entry.CachedAt
-	modelDTOs := modelsToDTO(entry.Models)
-	var errStr *string
-	if entry.Error != nil {
-		s := entry.Error.Error()
-		errStr = &s
-	}
-	return &dto.DynamicModelsResponse{
-		AgentName: agentName,
-		Models:    modelDTOs,
-		Cached:    true,
-		CachedAt:  &cachedAt,
-		Error:     errStr,
-	}, true
-}
-
-// modelsToDTO converts agent models to DTOs.
-func modelsToDTO(models []agents.Model) []dto.ModelEntryDTO {
-	dtos := make([]dto.ModelEntryDTO, 0, len(models))
-	for _, m := range models {
-		dtos = append(dtos, dto.ModelEntryDTO{
-			ID:            m.ID,
-			Name:          m.Name,
-			Provider:      m.Provider,
-			ContextWindow: m.ContextWindow,
-			IsDefault:     m.IsDefault,
-			Source:        m.Source,
+	for _, m := range caps.Models {
+		resp.Models = append(resp.Models, dto.ModelEntryDTO{
+			ID:        m.ID,
+			Name:      m.Name,
+			IsDefault: m.ID == caps.CurrentModelID,
 		})
 	}
-	return dtos
+	for _, m := range caps.Modes {
+		resp.Modes = append(resp.Modes, dto.ModeEntryDTO{
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+		})
+	}
+	return resp, nil
 }

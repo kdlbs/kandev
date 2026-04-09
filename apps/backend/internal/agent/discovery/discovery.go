@@ -24,16 +24,17 @@ type Capabilities struct {
 }
 
 // KnownAgent represents an agent definition with discovery metadata.
+// Model data now comes from the host utility capability cache — see
+// internal/agent/hostutility. The Models/DefaultModel fields below are
+// intentionally empty; discovery only advertises *which* agent types exist
+// and whether their CLI is installed.
 type KnownAgent struct {
-	Name              string         `json:"name"`
-	DisplayName       string         `json:"display_name"`
-	SupportsMCP       bool           `json:"supports_mcp"`
-	MCPConfigPaths    []string       `json:"mcp_config_paths"`
-	InstallationPaths []string       `json:"installation_paths"`
-	Capabilities      Capabilities   `json:"capabilities"`
-	DefaultModel      string         `json:"default_model"`
-	Models            []agents.Model `json:"models"`
-	SupportsDynamic   bool           `json:"supports_dynamic"`
+	Name              string       `json:"name"`
+	DisplayName       string       `json:"display_name"`
+	SupportsMCP       bool         `json:"supports_mcp"`
+	MCPConfigPaths    []string     `json:"mcp_config_paths"`
+	InstallationPaths []string     `json:"installation_paths"`
+	Capabilities      Capabilities `json:"capabilities"`
 }
 
 // Availability represents the result of detecting an agent's installation.
@@ -80,20 +81,6 @@ func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logge
 			result = &agents.DiscoveryResult{}
 		}
 
-		// Gather model info from the agent.
-		var models []agents.Model
-		var supportsDynamic bool
-		modelList, err := ag.ListModels(ctx)
-		if err != nil {
-			log.Warn("discovery: failed to list agent models",
-				zap.String("agent", ag.ID()),
-				zap.Error(err),
-			)
-		} else if modelList != nil {
-			models = modelList.Models
-			supportsDynamic = modelList.SupportsDynamic
-		}
-
 		displayName := ag.DisplayName()
 		if displayName == "" {
 			displayName = ag.Name()
@@ -110,9 +97,6 @@ func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logge
 				SupportsShell:         result.Capabilities.SupportsShell,
 				SupportsWorkspaceOnly: result.Capabilities.SupportsWorkspaceOnly,
 			},
-			DefaultModel:    ag.DefaultModel(),
-			Models:          models,
-			SupportsDynamic: supportsDynamic,
 		}
 
 		definitions = append(definitions, knownAgent)

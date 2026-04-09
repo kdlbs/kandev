@@ -19,6 +19,7 @@ const geminiPkg = "@google/gemini-cli"
 var (
 	_ Agent            = (*Gemini)(nil)
 	_ PassthroughAgent = (*Gemini)(nil)
+	_ InferenceAgent   = (*Gemini)(nil)
 )
 
 type Gemini struct {
@@ -28,7 +29,7 @@ type Gemini struct {
 func NewGemini() *Gemini {
 	return &Gemini{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: geminiPermSettings,
+			PermSettings: emptyPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:      true,
 				Label:          "CLI Passthrough",
@@ -83,17 +84,8 @@ func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *Gemini) DefaultModel() string { return "gemini-3-flash-preview" }
-
-func (a *Gemini) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{Models: geminiStaticModels(), SupportsDynamic: false}, nil
-}
-
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", geminiPkg, "--acp").
-		Model(NewParam("--model", "{model}"), opts.Model).
-		Settings(geminiPermSettings, opts.PermissionValues).
-		Build()
+	return Cmd("npx", "-y", geminiPkg, "--acp").Build()
 }
 
 func (a *Gemini) Runtime() *RuntimeConfig {
@@ -104,7 +96,6 @@ func (a *Gemini) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
-		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{
 			CanRecover:         &canRecover,
 			SessionDirTemplate: "{home}/.gemini",
@@ -137,19 +128,15 @@ func (a *Gemini) InstallScript() string {
 }
 
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
-	return geminiPermSettings
+	return emptyPermSettings
 }
 
-var geminiPermSettings = map[string]PermissionSetting{
-	"auto_approve": {
-		Supported: true, Default: true, Label: "Auto-approve (YOLO mode)", Description: "Automatically approve all tool calls",
-		ApplyMethod: "cli_flag", CLIFlag: "--yolo --allowed-tools run_shell_command",
-	},
-}
-
-func geminiStaticModels() []Model {
-	return []Model{
-		{ID: "gemini-3-flash-preview", Name: "3 Flash", Description: "Fast and efficient model", Provider: "google", ContextWindow: 1000000, IsDefault: true, Source: "static"},
-		{ID: "gemini-3-pro-preview", Name: "3 Pro", Description: "Most capable model with 2M context", Provider: "google", ContextWindow: 2000000, Source: "static"},
+// InferenceConfig returns configuration for one-shot inference using ACP.
+// Gemini CLI speaks ACP natively via the --acp flag, so there's no separate
+// _acp variant.
+func (a *Gemini) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("npx", "-y", geminiPkg, "--acp"),
 	}
 }

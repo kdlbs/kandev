@@ -24,7 +24,6 @@ type testAgent struct {
 	runtime            *agents.RuntimeConfig
 	permissionSettings map[string]agents.PermissionSetting
 	logoData           []byte
-	modelList          *agents.ModelList
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -40,16 +39,8 @@ func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, e
 	return &agents.DiscoveryResult{Available: false}, nil
 }
 
-func (a *testAgent) DefaultModel() string { return "" }
-
-func (a *testAgent) ListModels(ctx context.Context) (*agents.ModelList, error) {
-	if a.modelList != nil {
-		return a.modelList, nil
-	}
-	return &agents.ModelList{}, nil
-}
-
-// BuildCommand builds a command using runtime config, model flag, and permission flags.
+// BuildCommand builds a command using runtime config and permission flags.
+// Model/mode are applied via ACP session/set_model at session start, not via CLI.
 func (a *testAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	rt := a.Runtime()
 	if rt == nil {
@@ -57,13 +48,6 @@ func (a *testAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	}
 	cmd := make([]string, len(rt.Cmd.Args()))
 	copy(cmd, rt.Cmd.Args())
-
-	if opts.Model != "" && !rt.ModelFlag.IsEmpty() {
-		for _, arg := range rt.ModelFlag.Args() {
-			cmd = append(cmd, strings.ReplaceAll(arg, "{model}", opts.Model))
-		}
-	}
-
 	cmd = applyTestPermissionFlags(cmd, a.permissionSettings, opts.PermissionValues)
 	return agents.NewCommand(cmd...)
 }
@@ -153,7 +137,8 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		t.Error("PreviewAgentCommand() Supported = false, want true")
 	}
 
-	expectedParts := []string{"test-cli", "--verbose", "--model", "gpt-4", "--yes"}
+	// --model is no longer emitted: model is applied via ACP session/set_model.
+	expectedParts := []string{"test-cli", "--verbose", "--yes"}
 	for _, part := range expectedParts {
 		found := false
 		for _, cmdPart := range result.Command {
@@ -164,6 +149,11 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("PreviewAgentCommand() command missing %q, got %v", part, result.Command)
+		}
+	}
+	for _, cmdPart := range result.Command {
+		if cmdPart == "--model" {
+			t.Errorf("PreviewAgentCommand() should not emit --model, got %v", result.Command)
 		}
 	}
 }

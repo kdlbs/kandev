@@ -3,9 +3,6 @@ package agents
 import (
 	"context"
 	_ "embed"
-	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/pkg/agent"
@@ -81,23 +78,15 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *Auggie) DefaultModel() string { return "sonnet4.6" }
-
-func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
-	models, err := execAndParse(ctx, 30*time.Second, auggieParseModels, "auggie", "model", "list")
-	if err != nil {
-		return &ModelList{Models: auggieStaticModels(), SupportsDynamic: true}, nil
-	}
-	return &ModelList{Models: models, SupportsDynamic: true}, nil
-}
-
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
-	// Session resume is handled via ACP session/load, not CLI flags (NativeSessionResume: true)
-	return Cmd("npx", "-y", auggiePkg, "--acp").
-		Model(NewParam("--model", "{model}"), opts.Model).
-		Permissions("--permission", auggiePermTools, opts).
-		Settings(auggiePermSettings, opts.PermissionValues).
-		Build()
+	// Model and mode are applied via ACP session/set_model and session/set_mode
+	// after session creation — no --model CLI flag.
+	// allow_indexing is auggie-only: apply the CLI flag if the profile enables it.
+	b := Cmd("npx", "-y", auggiePkg, "--acp")
+	if opts.PermissionValues != nil && opts.PermissionValues["allow_indexing"] {
+		b = b.Flag("--allow-indexing")
+	}
+	return b.Build()
 }
 
 func (a *Auggie) Runtime() *RuntimeConfig {
@@ -114,7 +103,6 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
-		ModelFlag:      NewParam("--model", "{model}"),
 		WorkspaceFlag:  "--workspace-root",
 		AssumeMcpSse:   true,
 		SessionConfig: SessionConfig{
@@ -157,84 +145,17 @@ func (a *Auggie) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   NewCommand("auggie", "--acp", "--allow-indexing"),
-		ModelFlag: NewParam("--model", "{model}"),
 	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *Auggie) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(auggieStaticModels())
 }
 
 // --- Private ---
 
-var auggiePermTools = []string{"launch-process", "save-file", "str-replace-editor", "remove-files"}
-
+// auggiePermSettings exposes only the auggie-specific allow_indexing flag.
+// All other permission concerns are handled via ACP session modes and the
+// per-tool-call permission_request UI.
 var auggiePermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls"},
 	"allow_indexing": {
 		Supported: true, Default: true, Label: "Allow indexing", Description: "Enable workspace indexing without confirmation",
 		ApplyMethod: "cli_flag", CLIFlag: "--allow-indexing",
 	},
-}
-
-func auggieStaticModels() []Model {
-	return []Model{
-		{ID: "sonnet4.6", ACPID: "claude-sonnet-4-6", Name: "Sonnet 4.6", Description: "Latest Sonnet model with improved capabilities", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "sonnet4.5", ACPID: "claude-sonnet-4-5", Name: "Sonnet 4.5", Description: "Great for everyday tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "opus4.6", ACPID: "claude-opus-4-6", Name: "Opus 4.6", Description: "Best for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "opus4.5", ACPID: "claude-opus-4-5", Name: "Opus 4.5", Description: "Best for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "haiku4.5", ACPID: "claude-haiku-4-5", Name: "Haiku 4.5", Description: "Fast and efficient responses", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "sonnet4", ACPID: "claude-sonnet-4", Name: "Sonnet 4", Description: "Legacy model", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "gpt5.4", ACPID: "gpt-5-4", Name: "GPT-5.4", Description: "Strong reasoning and planning (free for a limited time)", Provider: "openai", ContextWindow: 128000, Source: "static"},
-		{ID: "gpt5.2", ACPID: "gpt-5-2", Name: "GPT-5.2", Description: "Smarter but slower and more expensive than GPT-5.1", Provider: "openai", ContextWindow: 128000, Source: "static"},
-		{ID: "gpt5.1", ACPID: "gpt-5-1", Name: "GPT-5.1", Description: "Strong reasoning and planning", Provider: "openai", ContextWindow: 128000, Source: "static"},
-		{ID: "gpt5", ACPID: "gpt-5", Name: "GPT-5", Description: "OpenAI GPT-5 legacy", Provider: "openai", ContextWindow: 128000, Source: "static"},
-	}
-}
-
-// auggieParseModels parses "auggie model list" output.
-// Format:
-//
-//	Available models:
-//	 - Haiku 4.5 [haiku4.5]
-//	     Fast and efficient responses
-//	 - Claude Opus 4.5 [opus4.5]
-//	     Best for complex tasks
-var auggieModelLineRe = regexp.MustCompile(`^\s*-\s+(.+?)\s+\[(\S+)\]\s*$`)
-
-func auggieParseModels(output string) ([]Model, error) {
-	lines := strings.Split(output, "\n")
-	models := make([]Model, 0)
-	defaultModel := "sonnet4.6"
-
-	for i := 0; i < len(lines); i++ {
-		m := auggieModelLineRe.FindStringSubmatch(lines[i])
-		if m == nil {
-			continue
-		}
-		name := m[1]
-		id := m[2]
-
-		var description string
-		if i+1 < len(lines) {
-			desc := strings.TrimSpace(lines[i+1])
-			if desc != "" && !strings.HasPrefix(strings.TrimSpace(lines[i+1]), "-") {
-				description = desc
-				i++ // skip the description line
-			}
-		}
-
-		models = append(models, Model{
-			ID:          id,
-			Name:        name,
-			Description: description,
-			IsDefault:   id == defaultModel,
-			Source:      "dynamic",
-		})
-	}
-	if len(models) == 0 && strings.TrimSpace(output) != "" {
-		return nil, fmt.Errorf("no models parsed from auggie output")
-	}
-	return models, nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
@@ -48,6 +49,7 @@ type Controller struct {
 	sessionChecker SessionChecker
 	mcpService     *mcpconfig.Service
 	modelCache     *modelfetcher.Cache
+	hostUtility    *hostutility.Manager
 	logger         *logger.Logger
 }
 
@@ -77,4 +79,12 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		modelCache:     modelfetcher.NewCache(),
 		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
 	}
+}
+
+// SetHostUtility wires the host utility manager into the controller so that
+// endpoints like /agent-models can read the cached capability data. Called
+// once at startup after the host utility manager is constructed; leaving this
+// unset simply causes the model endpoints to report "not_configured".
+func (c *Controller) SetHostUtility(h *hostutility.Manager) {
+	c.hostUtility = h
 }

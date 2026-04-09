@@ -10,16 +10,14 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/streamjson"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Protocol and file type constants.
 const (
-	protocolACP        = "acp"
-	protocolStreamJSON = "streamjson"
-	filetypeUnknown    = "unknown"
+	protocolACP     = "acp"
+	filetypeUnknown = "unknown"
 )
 
 // DiscoveredFile represents a discovered fixture file.
@@ -354,12 +352,7 @@ func parseProtocolFromFilename(filename string) string {
 
 // isKnownProtocol checks if the protocol is one of the known protocols.
 func isKnownProtocol(protocol string) bool {
-	switch protocol {
-	case protocolACP, protocolStreamJSON, "codex", "opencode":
-		return true
-	default:
-		return false
-	}
+	return protocol == protocolACP
 }
 
 // countLines counts the number of lines in a file.
@@ -384,8 +377,6 @@ func getNormalizerForProtocol(protocol string) normalizer {
 	switch protocol {
 	case protocolACP:
 		return acp.NewNormalizer()
-	case protocolStreamJSON:
-		return streamjson.NewNormalizer()
 	default:
 		return nil
 	}
@@ -421,20 +412,12 @@ func normalizeFixtureFile(filePath string) ([]NormalizedFixture, error) {
 		}
 
 		// Extract tool info and normalize based on protocol
-		switch protocol {
-		case protocolACP:
+		if protocol == protocolACP {
 			args, _ := input.Input["args"].(map[string]any)
 			kind, _ := args["kind"].(string)
 			fixture.ToolName = kind
 			fixture.ToolType = acp.DetectToolOperationType(kind, args)
 			fixture.Payload = norm.NormalizeToolCall(kind, args)
-
-		case protocolStreamJSON:
-			toolName, _ := input.Input["tool_name"].(string)
-			args, _ := input.Input["args"].(map[string]any)
-			fixture.ToolName = toolName
-			fixture.ToolType = streamjson.DetectStreamJSONToolType(toolName)
-			fixture.Payload = norm.NormalizeToolCall(toolName, args)
 		}
 
 		fixtures = append(fixtures, fixture)

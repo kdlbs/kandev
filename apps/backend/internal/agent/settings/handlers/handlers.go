@@ -121,10 +121,9 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name                       string `json:"name"`
-	Model                      string `json:"model"`
-	AutoApprove                bool   `json:"auto_approve"`
-	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
+	Name  string `json:"name"`
+	Model string `json:"model"`
+	Mode  string `json:"mode,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -144,10 +143,9 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:                       profile.Name,
-			Model:                      profile.Model,
-			AutoApprove:                profile.AutoApprove,
-			DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
+			Name:  profile.Name,
+			Model: profile.Model,
+			Mode:  profile.Mode,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -299,12 +297,11 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name                       string `json:"name"`
-	Model                      string `json:"model"`
-	AutoApprove                bool   `json:"auto_approve"`
-	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
-	AllowIndexing              bool   `json:"allow_indexing"`
-	CLIPassthrough             bool   `json:"cli_passthrough"`
+	Name           string `json:"name"`
+	Model          string `json:"model"`
+	Mode           string `json:"mode,omitempty"`
+	AllowIndexing  bool   `json:"allow_indexing"`
+	CLIPassthrough bool   `json:"cli_passthrough"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -318,13 +315,12 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		return
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequest{
-		AgentID:                    c.Param("id"),
-		Name:                       body.Name,
-		Model:                      body.Model,
-		AutoApprove:                body.AutoApprove,
-		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
-		AllowIndexing:              body.AllowIndexing,
-		CLIPassthrough:             body.CLIPassthrough,
+		AgentID:        c.Param("id"),
+		Name:           body.Name,
+		Model:          body.Model,
+		Mode:           body.Mode,
+		AllowIndexing:  body.AllowIndexing,
+		CLIPassthrough: body.CLIPassthrough,
 	})
 	if err != nil {
 		h.logger.Error("failed to create profile", zap.Error(err))
@@ -341,12 +337,11 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name                       *string `json:"name,omitempty"`
-	Model                      *string `json:"model,omitempty"`
-	AutoApprove                *bool   `json:"auto_approve,omitempty"`
-	DangerouslySkipPermissions *bool   `json:"dangerously_skip_permissions,omitempty"`
-	AllowIndexing              *bool   `json:"allow_indexing,omitempty"`
-	CLIPassthrough             *bool   `json:"cli_passthrough,omitempty"`
+	Name           *string `json:"name,omitempty"`
+	Model          *string `json:"model,omitempty"`
+	Mode           *string `json:"mode,omitempty"`
+	AllowIndexing  *bool   `json:"allow_indexing,omitempty"`
+	CLIPassthrough *bool   `json:"cli_passthrough,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -360,13 +355,12 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		return
 	}
 	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequest{
-		ID:                         c.Param("id"),
-		Name:                       body.Name,
-		Model:                      body.Model,
-		AutoApprove:                body.AutoApprove,
-		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
-		AllowIndexing:              body.AllowIndexing,
-		CLIPassthrough:             body.CLIPassthrough,
+		ID:             c.Param("id"),
+		Name:           body.Name,
+		Model:          body.Model,
+		Mode:           body.Mode,
+		AllowIndexing:  body.AllowIndexing,
+		CLIPassthrough: body.CLIPassthrough,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {

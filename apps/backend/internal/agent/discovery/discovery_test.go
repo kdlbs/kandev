@@ -24,7 +24,6 @@ func (a *discoveryTestAgent) Description() string                    { return ""
 func (a *discoveryTestAgent) Enabled() bool                          { return true }
 func (a *discoveryTestAgent) DisplayOrder() int                      { return 0 }
 func (a *discoveryTestAgent) Logo(variant agents.LogoVariant) []byte { return nil }
-func (a *discoveryTestAgent) DefaultModel() string                   { return "" }
 func (a *discoveryTestAgent) PermissionSettings() map[string]agents.PermissionSetting {
 	return nil
 }
@@ -33,9 +32,6 @@ func (a *discoveryTestAgent) RemoteAuth() *agents.RemoteAuth { return nil }
 func (a *discoveryTestAgent) InstallScript() string          { return "" }
 func (a *discoveryTestAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	return agents.NewCommand()
-}
-func (a *discoveryTestAgent) ListModels(ctx context.Context) (*agents.ModelList, error) {
-	return &agents.ModelList{}, nil
 }
 
 func (a *discoveryTestAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {

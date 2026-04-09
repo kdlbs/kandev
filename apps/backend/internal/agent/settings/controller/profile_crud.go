@@ -12,20 +12,18 @@ import (
 )
 
 type CreateProfileRequest struct {
-	AgentID                    string
-	Name                       string
-	Model                      string
-	AutoApprove                bool
-	DangerouslySkipPermissions bool
-	AllowIndexing              bool
-	CLIPassthrough             bool
+	AgentID        string
+	Name           string
+	Model          string
+	Mode           string
+	AllowIndexing  bool
+	CLIPassthrough bool
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
-	// Validate that model is provided
-	if strings.TrimSpace(req.Model) == "" {
-		return nil, ErrModelRequired
-	}
+	// Model is optional — the profile reconciler fills it from the host
+	// utility probe cache on boot, and session start applies it via
+	// session/set_model. An empty model means "use the agent's default".
 	agent, err := c.repo.GetAgent(ctx, req.AgentID)
 	if err != nil {
 		return nil, err
@@ -39,15 +37,14 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	profile := &models.AgentProfile{
-		AgentID:                    req.AgentID,
-		Name:                       req.Name,
-		AgentDisplayName:           displayName,
-		Model:                      req.Model,
-		AutoApprove:                req.AutoApprove,
-		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
-		AllowIndexing:              req.AllowIndexing,
-		CLIPassthrough:             req.CLIPassthrough,
-		UserModified:               true,
+		AgentID:          req.AgentID,
+		Name:             req.Name,
+		AgentDisplayName: displayName,
+		Model:            req.Model,
+		Mode:             req.Mode,
+		AllowIndexing:    req.AllowIndexing,
+		CLIPassthrough:   req.CLIPassthrough,
+		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -57,13 +54,12 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 }
 
 type UpdateProfileRequest struct {
-	ID                         string
-	Name                       *string
-	Model                      *string
-	AutoApprove                *bool
-	DangerouslySkipPermissions *bool
-	AllowIndexing              *bool
-	CLIPassthrough             *bool
+	ID             string
+	Name           *string
+	Model          *string
+	Mode           *string
+	AllowIndexing  *bool
+	CLIPassthrough *bool
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -75,23 +71,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.Name = *req.Name
 	}
 	if req.Model != nil {
-		// Validate that model is not empty
-		if strings.TrimSpace(*req.Model) == "" {
-			return nil, ErrModelRequired
-		}
 		profile.Model = *req.Model
-		// Auto-update profile name when model changes and name wasn't explicitly provided
 		if req.Name == nil {
 			if newName := c.resolveProfileNameForModel(ctx, profile.AgentID, *req.Model); newName != "" {
 				profile.Name = newName
 			}
 		}
 	}
-	if req.AutoApprove != nil {
-		profile.AutoApprove = *req.AutoApprove
-	}
-	if req.DangerouslySkipPermissions != nil {
-		profile.DangerouslySkipPermissions = *req.DangerouslySkipPermissions
+	if req.Mode != nil {
+		profile.Mode = *req.Mode
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
@@ -197,18 +185,17 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:                         profile.ID,
-		AgentID:                    profile.AgentID,
-		Name:                       profile.Name,
-		AgentDisplayName:           profile.AgentDisplayName,
-		Model:                      profile.Model,
-		AutoApprove:                profile.AutoApprove,
-		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
-		AllowIndexing:              profile.AllowIndexing,
-		CLIPassthrough:             profile.CLIPassthrough,
-		UserModified:               profile.UserModified,
-		CreatedAt:                  profile.CreatedAt,
-		UpdatedAt:                  profile.UpdatedAt,
+		ID:               profile.ID,
+		AgentID:          profile.AgentID,
+		Name:             profile.Name,
+		AgentDisplayName: profile.AgentDisplayName,
+		Model:            profile.Model,
+		Mode:             profile.Mode,
+		AllowIndexing:    profile.AllowIndexing,
+		CLIPassthrough:   profile.CLIPassthrough,
+		UserModified:     profile.UserModified,
+		CreatedAt:        profile.CreatedAt,
+		UpdatedAt:        profile.UpdatedAt,
 	}
 }
 

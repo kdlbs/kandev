@@ -84,20 +84,12 @@ func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
 }
 
-func (a *MockAgent) DefaultModel() string { return "mock-default" }
-
-func (a *MockAgent) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{Models: mockStaticModels(), SupportsDynamic: false}, nil
-}
-
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	binary := "mock-agent"
 	if a.binaryPath != "" {
 		binary = a.binaryPath
 	}
-	return Cmd(binary).
-		Model(NewParam("--model", "{model}"), opts.Model).
-		Build()
+	return Cmd(binary).Build()
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
@@ -108,7 +100,6 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
-		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{
 			CanRecover: &canRecover,
 		},
@@ -120,19 +111,5 @@ func (a *MockAgent) RemoteAuth() *RemoteAuth { return nil }
 func (a *MockAgent) InstallScript() string { return "" }
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
-	return mockPermSettings
-}
-
-var mockPermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls",
-		ApplyMethod: "stdio"},
-	"dangerously_skip_permissions": {Supported: true, Default: false, Label: "Skip Permissions (YOLO)", Description: "Bypass all permission checks"},
-}
-
-func mockStaticModels() []Model {
-	return []Model{
-		{ID: "mock-default", Name: "Mock Default", Provider: "mock", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "mock-slow", Name: "Mock Slow", Description: "Longer delays", Provider: "mock", ContextWindow: 200000, Source: "static"},
-		{ID: "mock-fast", Name: "Mock Fast", Description: "Minimal delays", Provider: "mock", ContextWindow: 200000, Source: "static"},
-	}
+	return emptyPermSettings
 }

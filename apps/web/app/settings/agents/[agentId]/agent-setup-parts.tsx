@@ -117,8 +117,7 @@ export function ProfileCardItem({
           profile={{
             name: profile.name,
             model: profile.model,
-            auto_approve: profile.auto_approve,
-            dangerously_skip_permissions: profile.dangerously_skip_permissions,
+            mode: profile.mode ?? "",
             allow_indexing: profile.allow_indexing ?? false,
             cli_passthrough: profile.cli_passthrough,
           }}

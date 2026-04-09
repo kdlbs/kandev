@@ -14,6 +14,7 @@ import "time"
 type Status string
 
 const (
+	StatusProbing       Status = "probing"
 	StatusOK            Status = "ok"
 	StatusAuthRequired  Status = "auth_required"
 	StatusNotInstalled  Status = "not_installed"

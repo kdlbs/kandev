@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
-	"go.uber.org/zap"
 )
 
 func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryResponse, error) {
@@ -86,7 +85,8 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		displayName = ag.Name()
 	}
 
-	modelEntries, supportsDynamic := c.fetchModelsWithCache(ctx, ag)
+	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
+	_ = ctx
 
 	capabilities := dto.AgentCapabilitiesDTO{
 		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
@@ -121,56 +121,69 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	return dto.AvailableAgentDTO{
-		Name:              ag.ID(),
-		DisplayName:       displayName,
-		Description:       ag.Description(),
-		InstallScript:     ag.InstallScript(),
-		SupportsMCP:       availability.SupportsMCP,
-		MCPConfigPath:     availability.MCPConfigPath,
-		InstallationPaths: availability.InstallationPaths,
-		Available:         availability.Available,
-		MatchedPath:       availability.MatchedPath,
-		Capabilities:      capabilities,
-		ModelConfig: dto.ModelConfigDTO{
-			DefaultModel:          ag.DefaultModel(),
-			AvailableModels:       modelEntries,
-			SupportsDynamicModels: supportsDynamic,
-		},
+		Name:               ag.ID(),
+		DisplayName:        displayName,
+		Description:        ag.Description(),
+		InstallScript:      ag.InstallScript(),
+		SupportsMCP:        availability.SupportsMCP,
+		MCPConfigPath:      availability.MCPConfigPath,
+		InstallationPaths:  availability.InstallationPaths,
+		Available:          availability.Available,
+		MatchedPath:        availability.MatchedPath,
+		Capabilities:       capabilities,
+		ModelConfig:        modelConfig,
 		PermissionSettings: permissionSettings,
 		PassthroughConfig:  passthroughConfig,
 		UpdatedAt:          now,
 	}
 }
 
-// fetchModelsWithCache returns model entries for an agent, using the model cache
-// to avoid expensive subprocess calls (e.g. `opencode models`) on every request.
-func (c *Controller) fetchModelsWithCache(ctx context.Context, ag agents.Agent) ([]dto.ModelEntryDTO, bool) {
-	agentName := ag.ID()
+// fetchModelsWithCache is a legacy stub retained so any remaining callers
+// compile; it returns empty data. The real model list comes from the host
+// utility capability cache.
+func (c *Controller) fetchModelsWithCache(_ context.Context, _ agents.Agent) ([]dto.ModelEntryDTO, bool) {
+	return nil, false
+}
 
-	// Check cache first
-	if entry, exists := c.modelCache.Get(agentName); exists && (entry.IsValid() || entry.IsStale()) {
-		if entry.Error == nil && entry.Models != nil {
-			return modelsToDTO(entry.Models), true
-		}
+// buildModelConfigFromHostUtility reads cached ACP probe data for the agent
+// type and produces a ModelConfigDTO with models, modes, and status.
+func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
+	// Always initialize slices so JSON marshals as [] not null — the
+	// frontend uses .some()/.find() on these without null checks.
+	cfg := dto.ModelConfigDTO{
+		SupportsDynamicModels: true,
+		AvailableModels:       []dto.ModelEntryDTO{},
+		AvailableModes:        []dto.ModeEntryDTO{},
 	}
-
-	// Cache miss — call ListModels and cache the result
-	modelList, err := ag.ListModels(ctx)
-	if err != nil {
-		c.logger.Warn("failed to list models for available agent",
-			zap.String("agent", agentName), zap.Error(err))
-		c.modelCache.Set(agentName, nil, err)
-		return nil, false
+	if c.hostUtility == nil {
+		cfg.Status = "not_configured"
+		return cfg
 	}
-	if modelList == nil {
-		return nil, false
+	caps, ok := c.hostUtility.Get(agentID)
+	if !ok {
+		cfg.Status = "not_configured"
+		return cfg
 	}
-
-	if modelList.SupportsDynamic {
-		c.modelCache.Set(agentName, modelList.Models, nil)
+	cfg.Status = string(caps.Status)
+	cfg.Error = caps.Error
+	cfg.DefaultModel = caps.CurrentModelID
+	cfg.CurrentModelID = caps.CurrentModelID
+	cfg.CurrentModeID = caps.CurrentModeID
+	for _, m := range caps.Models {
+		cfg.AvailableModels = append(cfg.AvailableModels, dto.ModelEntryDTO{
+			ID:        m.ID,
+			Name:      m.Name,
+			IsDefault: m.ID == caps.CurrentModelID,
+		})
 	}
-
-	return modelsToDTO(modelList.Models), modelList.SupportsDynamic
+	for _, m := range caps.Modes {
+		cfg.AvailableModes = append(cfg.AvailableModes, dto.ModeEntryDTO{
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+		})
+	}
+	return cfg
 }
 
 func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
@@ -197,7 +210,6 @@ type profileSyncParams struct {
 	autoApprove     bool
 	allowIndexing   bool
 	skipPermissions bool
-	modelList       *agents.ModelList
 }
 
 // updateExistingProfiles syncs non-user-modified profiles with current agent defaults.
@@ -215,7 +227,7 @@ func (c *Controller) updateExistingProfiles(ctx context.Context, profiles []*mod
 			profile.Model = p.defaultModel
 			updated = true
 		}
-		resolvedName := resolveModelDisplayName(p.modelList, profile.Model)
+		resolvedName := profile.Model
 		if p.isPassthrough {
 			resolvedName = p.displayName
 		}
@@ -292,17 +304,12 @@ func (c *Controller) resolveDisplayName(agentConfig agents.Agent, agentName stri
 
 // buildProfileSyncParams assembles the parameters needed to create or update agent profiles.
 func (c *Controller) buildProfileSyncParams(
-	ctx context.Context,
+	_ context.Context,
 	agentConfig agents.Agent,
-	agentName, displayName, defaultModel string,
+	_, displayName, defaultModel string,
 	isPassthroughOnly bool,
 ) profileSyncParams {
 	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
-	modelList, listErr := agentConfig.ListModels(ctx)
-	if listErr != nil {
-		c.logger.Warn("failed to list models during profile sync, using model ID as name",
-			zap.String("agent", agentName), zap.Error(listErr))
-	}
 	return profileSyncParams{
 		displayName:     displayName,
 		defaultModel:    defaultModel,
@@ -310,15 +317,16 @@ func (c *Controller) buildProfileSyncParams(
 		autoApprove:     autoApprove,
 		allowIndexing:   allowIndexing,
 		skipPermissions: skipPermissions,
-		modelList:       modelList,
 	}
 }
 
 // createDefaultProfile creates the initial agent profile when none exist for an agent.
+// The model may be empty — the profile reconciler fills it from the host
+// utility capability cache on boot.
 func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p profileSyncParams) error {
-	profileName := resolveModelDisplayName(p.modelList, p.defaultModel)
-	if p.isPassthrough {
-		profileName = p.displayName
+	profileName := p.displayName
+	if !p.isPassthrough && p.defaultModel != "" {
+		profileName = p.defaultModel
 	}
 	defaultProfile := &models.AgentProfile{
 		AgentID:                    agentID,
@@ -333,15 +341,15 @@ func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p
 	return c.repo.CreateAgentProfile(ctx, defaultProfile)
 }
 
-func resolveDefaultModel(agentConfig agents.Agent, name string) (string, bool, error) {
-	defaultModel := agentConfig.DefaultModel()
-	if defaultModel != "" {
-		return defaultModel, false, nil
-	}
-	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && ptAgent.PassthroughConfig().Supported {
+func resolveDefaultModel(agentConfig agents.Agent, _ string) (string, bool, error) {
+	// Default models come from the host utility capability cache after probing.
+	// The legacy bootstrap path leaves the model empty and lets the reconciler
+	// heal it against the cache. TUI-only agents still seed as passthrough so
+	// the terminal UI is enabled by default.
+	if agents.IsPassthroughOnly(agentConfig) {
 		return "passthrough", true, nil
 	}
-	return "", false, fmt.Errorf("unknown agent default model: %s", name)
+	return "", false, nil
 }
 
 func (c *Controller) upsertAgent(ctx context.Context, result discovery.Availability) (*models.Agent, error) {

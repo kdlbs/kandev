@@ -378,9 +378,19 @@ func startGatewayAndServe(
 	// (e.g. "enhance prompt" before a task/session exists).
 	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log)
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
+	// Wire the host utility manager into the settings controller so
+	// /api/v1/agent-models/:agentName reads live capability data.
+	agentSettingsController.SetHostUtility(hostUtilityMgr)
+	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 	go func() {
 		if err := hostUtilityMgr.Start(ctx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
+		}
+		// Reconcile profiles against fresh probe results — seeds defaults for
+		// newly probed agents, heals stale profile models/modes, cleans up
+		// orphans referencing removed agents.
+		if err := profileReconciler.Run(ctx); err != nil {
+			log.Warn("profile reconciler error", zap.Error(err))
 		}
 	}()
 	addCleanup(func() error {

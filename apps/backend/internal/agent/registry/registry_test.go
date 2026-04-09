@@ -29,10 +29,6 @@ func (a *testAgent) Logo(agents.LogoVariant) []byte { return nil }
 func (a *testAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error) {
 	return nil, agents.ErrNotSupported
 }
-func (a *testAgent) DefaultModel() string { return "" }
-func (a *testAgent) ListModels(context.Context) (*agents.ModelList, error) {
-	return nil, agents.ErrNotSupported
-}
 func (a *testAgent) BuildCommand(agents.CommandOptions) agents.Command { return agents.Command{} }
 func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
 	return nil

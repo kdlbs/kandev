@@ -1,14 +1,17 @@
 import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 /**
- * Single source of truth for permission keys.
- * Adding a key here that doesn't exist on AgentProfile will cause a compile error.
+ * Permission keys retained on the frontend. After the ACP-first migration the
+ * only surviving CLI-flag-driven permission is auggie's `allow_indexing` — all
+ * other agents express permission stance through ACP session modes (rendered
+ * as a separate Mode picker) and the interactive permission_request message UI.
+ *
+ * This file is kept as a thin compatibility shim so call sites that still use
+ * the old permission-map helpers continue to compile. Non-auggie agents will
+ * simply have an empty permission_settings map from the backend, causing the
+ * UI to render no toggles at all.
  */
-export const PERMISSION_KEYS = [
-  "auto_approve",
-  "dangerously_skip_permissions",
-  "allow_indexing",
-] as const;
+export const PERMISSION_KEYS = ["allow_indexing"] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 

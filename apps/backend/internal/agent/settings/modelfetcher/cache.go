@@ -3,9 +3,18 @@ package modelfetcher
 import (
 	"sync"
 	"time"
-
-	"github.com/kandev/kandev/internal/agent/agents"
 )
+
+// Model is a simple descriptor retained here so CacheEntry can remain typed.
+// Static agent model lists have been removed — models now come from the host
+// utility capability cache. This package is deprecated and kept only as a
+// shim for legacy callers until they migrate.
+type Model struct {
+	ID          string
+	Name        string
+	Description string
+	IsDefault   bool
+}
 
 const (
 	defaultTTL  = 10 * time.Second
@@ -14,7 +23,7 @@ const (
 
 // CacheEntry holds cached model data for an agent
 type CacheEntry struct {
-	Models    []agents.Model
+	Models    []Model
 	CachedAt  time.Time
 	ExpiresAt time.Time
 	Error     error
@@ -60,7 +69,7 @@ func (c *Cache) Get(agentName string) (*CacheEntry, bool) {
 }
 
 // Set caches the models for an agent
-func (c *Cache) Set(agentName string, models []agents.Model, err error) {
+func (c *Cache) Set(agentName string, models []Model, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

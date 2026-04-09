@@ -43,6 +43,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		AgentID:                    agent.ID,
 		AgentName:                  agent.Name,
 		Model:                      model,
+		Mode:                       profile.Mode,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
@@ -52,8 +53,10 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	}, nil
 }
 
-// resolveAgentCapabilities looks up the agent in the registry and returns the effective model
-// and whether the agent supports native session resume.
+// resolveAgentCapabilities looks up the agent in the registry and returns the
+// effective model and whether the agent supports native session resume.
+// The model comes straight from the profile; static per-agent defaults have
+// been removed. Empty model means "agent picks its own default".
 func (r *StoreProfileResolver) resolveAgentCapabilities(agentName, profileModel string) (string, bool) {
 	if r.registry == nil {
 		return profileModel, false
@@ -62,13 +65,9 @@ func (r *StoreProfileResolver) resolveAgentCapabilities(agentName, profileModel 
 	if !ok {
 		return profileModel, false
 	}
-	model := profileModel
-	if model == "" {
-		model = ag.DefaultModel()
-	}
 	var nativeSessionResume bool
 	if rt := ag.Runtime(); rt != nil {
 		nativeSessionResume = rt.SessionConfig.NativeSessionResume
 	}
-	return model, nativeSessionResume
+	return profileModel, nativeSessionResume
 }

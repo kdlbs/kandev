@@ -41,11 +41,6 @@ func (a *testAgent) IsInstalled(_ context.Context) (*agents.DiscoveryResult, err
 	return &agents.DiscoveryResult{Available: false}, nil
 }
 
-func (a *testAgent) DefaultModel() string { return a.defaultModel }
-func (a *testAgent) ListModels(_ context.Context) (*agents.ModelList, error) {
-	return &agents.ModelList{}, nil
-}
-
 func (a *testAgent) BuildCommand(_ agents.CommandOptions) agents.Command { return agents.Command{} }
 
 func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
