@@ -49,7 +49,7 @@ type TreeNodeItemProps = {
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  isSelected?: boolean;
+  isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
   isDragging?: boolean;
   dragOverPath?: string | null;
@@ -144,7 +144,7 @@ function TreeNodeChildren({ props, depth }: { props: TreeNodeItemProps; depth: n
 function getTreeNodeRowClass(
   isActive: boolean,
   isActiveFolder: boolean,
-  isSelected: boolean | undefined,
+  isSelected: boolean,
   isDragging: boolean | undefined,
   isDropTarget: boolean,
 ) {
@@ -160,80 +160,6 @@ function getTreeNodeRowClass(
   );
 }
 
-function TreeNodeRow({
-  node,
-  depth,
-  isActive,
-  isActiveFolder,
-  isExpanded,
-  isLoading,
-  isSelected,
-  isDragging,
-  isDropTarget,
-  gitStatus,
-  rename,
-  onClick,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-}: {
-  node: FileTreeNode;
-  depth: number;
-  isActive: boolean;
-  isActiveFolder: boolean;
-  isExpanded: boolean;
-  isLoading: boolean;
-  isSelected?: boolean;
-  isDragging?: boolean;
-  isDropTarget: boolean;
-  gitStatus: GitFileStatus;
-  rename: ReturnType<typeof useFileRename>;
-  onClick: (e: React.MouseEvent) => void;
-  onDragStart?: (path: string, e: React.DragEvent) => void;
-  onDragEnd?: () => void;
-  onDragOver?: (path: string, e: React.DragEvent) => void;
-  onDragLeave?: (e: React.DragEvent) => void;
-  onDrop?: (targetPath: string, e: React.DragEvent) => void;
-}) {
-  return (
-    <div
-      data-testid="file-tree-node"
-      data-path={node.path}
-      data-is-dir={node.is_dir ? "true" : "false"}
-      data-selected={isSelected ? "true" : "false"}
-      className={getTreeNodeRowClass(
-        isActive,
-        isActiveFolder,
-        isSelected,
-        isDragging,
-        isDropTarget,
-      )}
-      style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
-      onClick={onClick}
-      draggable={!!onDragStart}
-      onDragStart={(e) => onDragStart?.(node.path, e)}
-      onDragEnd={() => onDragEnd?.()}
-      onDragOver={(e) => {
-        if (node.is_dir) onDragOver?.(node.path, e);
-      }}
-      onDragLeave={(e) => onDragLeave?.(e)}
-      onDrop={(e) => {
-        if (node.is_dir) onDrop?.(node.path, e);
-      }}
-    >
-      {node.is_dir && (
-        <span className="flex-shrink-0">
-          <TreeNodeExpandChevron isLoading={isLoading} isExpanded={isExpanded} />
-        </span>
-      )}
-      <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
-      <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
-    </div>
-  );
-}
-
 export function TreeNodeItem(props: TreeNodeItemProps) {
   const { node, depth, expandedPaths, activeFolderPath, activeFilePath, visibleLoadingPaths } =
     props;
@@ -245,6 +171,8 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
   const isActiveFolder = node.is_dir && activeFolderPath === node.path;
   const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
   const rename = useFileRename(node, tree, setTree, onRenameFile);
+  const isSelected = props.isSelectedFn?.(node.path) ?? false;
+  const isDropTarget = node.is_dir && props.dragOverPath === node.path;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -253,6 +181,46 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
       handleTreeNodeClick(node, onToggleExpand, onOpenFile);
     }
   };
+
+  // Inline the row JSX so ContextMenuTrigger asChild can attach directly to the DOM div
+  const rowContent = (
+    <div
+      data-testid="file-tree-node"
+      data-path={node.path}
+      data-is-dir={node.is_dir ? "true" : "false"}
+      data-selected={isSelected ? "true" : "false"}
+      className={getTreeNodeRowClass(
+        isActive,
+        isActiveFolder,
+        isSelected,
+        props.isDragging,
+        isDropTarget,
+      )}
+      style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
+      onClick={handleClick}
+      draggable={!!props.onDragStart}
+      onDragStart={(e) => props.onDragStart?.(node.path, e)}
+      onDragEnd={() => props.onDragEnd?.()}
+      onDragOver={(e) => {
+        if (node.is_dir) props.onDragOver?.(node.path, e);
+      }}
+      onDragLeave={(e) => props.onDragLeave?.(e)}
+      onDrop={(e) => {
+        if (node.is_dir) props.onDrop?.(node.path, e);
+      }}
+    >
+      {node.is_dir && (
+        <span className="flex-shrink-0">
+          <TreeNodeExpandChevron
+            isLoading={visibleLoadingPaths.has(node.path)}
+            isExpanded={isExpanded}
+          />
+        </span>
+      )}
+      <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
+      <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
+    </div>
+  );
 
   return (
     <div>
@@ -266,25 +234,7 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
         selectedCount={props.selectedCount}
         selectedPaths={props.selectedPaths}
       >
-        <TreeNodeRow
-          node={node}
-          depth={depth}
-          isActive={isActive}
-          isActiveFolder={isActiveFolder}
-          isExpanded={isExpanded}
-          isLoading={visibleLoadingPaths.has(node.path)}
-          isSelected={props.isSelected}
-          isDragging={props.isDragging}
-          isDropTarget={node.is_dir && props.dragOverPath === node.path}
-          gitStatus={gitStatus}
-          rename={rename}
-          onClick={handleClick}
-          onDragStart={props.onDragStart}
-          onDragEnd={props.onDragEnd}
-          onDragOver={props.onDragOver}
-          onDragLeave={props.onDragLeave}
-          onDrop={props.onDrop}
-        />
+        {rowContent}
       </FileContextMenu>
       {node.is_dir && isExpanded && <TreeNodeChildren props={props} depth={depth} />}
     </div>
@@ -370,7 +320,7 @@ type FileBrowserContentAreaProps = {
   onCancelCreate: () => void;
   onRetry: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  isSelected?: (path: string) => boolean;
+  isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
   isDragging?: boolean;
   dragOverPath?: string | null;
@@ -417,7 +367,7 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
               onCreateFileSubmit={onCreateFileSubmit}
               onCancelCreate={onCancelCreate}
               setTree={props.setTree}
-              isSelected={props.isSelected?.(child.path)}
+              isSelectedFn={props.isSelectedFn}
               onSelect={props.onSelect}
               isDragging={props.isDragging}
               dragOverPath={props.dragOverPath}

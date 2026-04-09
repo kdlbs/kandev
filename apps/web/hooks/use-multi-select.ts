@@ -55,8 +55,9 @@ export function useMultiSelect({
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
       const isShift = event.shiftKey;
 
-      // Plain click: clear selection and let the caller handle the action
+      // Plain click: clear selection, set anchor for future shift-clicks
       if (!isCtrlOrMeta && !isShift) {
+        lastClickedRef.current = path;
         if (rawSelection.size > 0) {
           setRawSelection(new Set());
           onSelectionChange?.(new Set());
@@ -67,7 +68,14 @@ export function useMultiSelect({
       setRawSelection((prev) => {
         let next: Set<string>;
 
-        if (isShift && lastClickedRef.current) {
+        if (isShift) {
+          // If no anchor yet, treat as selecting just this item
+          if (!lastClickedRef.current) {
+            next = new Set([path]);
+            lastClickedRef.current = path;
+            onSelectionChange?.(next);
+            return next;
+          }
           const anchorIndex = items.indexOf(lastClickedRef.current);
           const currentIndex = items.indexOf(path);
           if (anchorIndex === -1 || currentIndex === -1) {

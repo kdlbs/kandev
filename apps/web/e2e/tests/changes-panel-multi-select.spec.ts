@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 
-const MODIFIER = process.platform === "darwin" ? "Meta" : "Control";
+const MOD = process.platform === "darwin" ? ("Meta" as const) : ("Control" as const);
 
 class GitHelper {
   constructor(
@@ -81,7 +81,7 @@ async function createStandardProfile(apiClient: ApiClient, name: string) {
   });
 }
 
-test.describe("Changes Panel Multi-Select", () => {
+test.describe("Git Panel Multi-Select", () => {
   test("ctrl-click selects multiple unstaged files and shows bulk actions", async ({
     testPage,
     apiClient,
@@ -91,7 +91,6 @@ test.describe("Changes Panel Multi-Select", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    // Create task and navigate first, then create files so WS picks up changes
     const profile = await createStandardProfile(apiClient, "git-multi-select");
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Multi-Select Test", profile.id, {
       description: "/e2e:simple-message",
@@ -107,24 +106,19 @@ test.describe("Changes Panel Multi-Select", () => {
     git.createFile("file-a.ts", "a");
     git.createFile("file-b.ts", "b");
 
-    // Wait for files to appear in unstaged section
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     const fileA = session.changesFileRow("file-a.ts");
     const fileB = session.changesFileRow("file-b.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
     await expect(fileB).toBeVisible({ timeout: 15_000 });
 
-    // Ctrl-click first file to select
-    const mod = MODIFIER === "Meta" ? "Meta" : ("Control" as const);
-    await fileA.click({ modifiers: [mod] });
+    await fileA.click({ modifiers: [MOD] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
 
-    // Ctrl-click second file — both should be selected
-    await fileB.click({ modifiers: [mod] });
+    await fileB.click({ modifiers: [MOD] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
     await expect(fileB).toHaveAttribute("data-selected", "true");
 
-    // Bulk action bar should appear
     const bulkBar = session.changesBulkActionBar("unstaged");
     await expect(bulkBar).toBeVisible({ timeout: 5_000 });
     await expect(session.changesBulkStageButton()).toBeVisible();
@@ -151,32 +145,26 @@ test.describe("Changes Panel Multi-Select", () => {
     const session = await openTaskSession(testPage, "Git Bulk Stage Test");
     await session.clickTab("Changes");
 
-    // Create files after session is open
     git.createFile("stage-a.ts", "a");
     git.createFile("stage-b.ts", "b");
 
-    // Wait for files
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     const fileA = session.changesFileRow("stage-a.ts");
     const fileB = session.changesFileRow("stage-b.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
     await expect(fileB).toBeVisible({ timeout: 15_000 });
 
-    // Select both via ctrl-click
-    const mod = MODIFIER === "Meta" ? "Meta" : ("Control" as const);
-    await fileA.click({ modifiers: [mod] });
-    await fileB.click({ modifiers: [mod] });
+    await fileA.click({ modifiers: [MOD] });
+    await fileB.click({ modifiers: [MOD] });
 
-    // Click bulk stage
     await session.changesBulkStageButton().click();
 
-    // Files should move to staged section
     const stagedList = session.changes.getByTestId("staged-file-list");
     await expect(stagedList.getByText("stage-a.ts")).toBeVisible({ timeout: 15_000 });
     await expect(stagedList.getByText("stage-b.ts")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("escape clears selection in changes panel", async ({
+  test("escape clears selection in git panel", async ({
     testPage,
     apiClient,
     seedData,
@@ -196,7 +184,6 @@ test.describe("Changes Panel Multi-Select", () => {
     const session = await openTaskSession(testPage, "Git Escape Test");
     await session.clickTab("Changes");
 
-    // Create files after session is open
     git.createFile("esc-a.ts", "a");
     git.createFile("esc-b.ts", "b");
 
@@ -204,20 +191,16 @@ test.describe("Changes Panel Multi-Select", () => {
     const fileA = session.changesFileRow("esc-a.ts");
     await expect(fileA).toBeVisible({ timeout: 15_000 });
 
-    // Select file via ctrl-click
-    await fileA.click({ modifiers: [MODIFIER === "Meta" ? "Meta" : "Control"] });
+    await fileA.click({ modifiers: [MOD] });
     await expect(fileA).toHaveAttribute("data-selected", "true");
 
-    // Bulk bar visible
     const bulkBar = session.changesBulkActionBar("unstaged");
     await expect(bulkBar).toBeVisible({ timeout: 5_000 });
 
-    // Focus the file list wrapper (has tabIndex=-1) and press Escape
     const fileList = testPage.getByTestId("unstaged-file-list");
     await fileList.focus();
     await testPage.keyboard.press("Escape");
 
-    // Selection should be cleared
     await expect(session.changesSelectedRows()).toHaveCount(0, { timeout: 5_000 });
     await expect(bulkBar).not.toBeVisible({ timeout: 5_000 });
   });

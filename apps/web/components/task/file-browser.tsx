@@ -296,6 +296,39 @@ function useAutoExpandAncestors(
   }, [activeFilePath, setExpandedPaths]);
 }
 
+function useSelectionInteractions(
+  treeState: ReturnType<typeof useFileBrowserTree>,
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  activeFilePath: string | null | undefined,
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
+) {
+  const visiblePaths = useMemo(
+    () => (treeState.tree ? getVisiblePaths(treeState.tree, treeState.expandedPaths) : []),
+    [treeState.tree, treeState.expandedPaths],
+  );
+  const multiSelect = useMultiSelect({ items: visiblePaths });
+  const dnd = useDragAndDrop(
+    treeState,
+    multiSelect.selectedPaths,
+    multiSelect.setSelectedPaths,
+    onRenameFile,
+  );
+
+  useKeyboardShortcuts(containerRef, multiSelect);
+  useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);
+
+  const handleClickOutside = useCallback(
+    (e: React.MouseEvent) => {
+      if (multiSelect.selectedPaths.size === 0) return;
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-testid='file-tree-node']")) multiSelect.clearSelection();
+    },
+    [multiSelect],
+  );
+
+  return { multiSelect, dnd, handleClickOutside };
+}
+
 function useKeyboardShortcuts(
   containerRef: React.RefObject<HTMLDivElement | null>,
   multiSelect: ReturnType<typeof useMultiSelect>,
@@ -349,24 +382,20 @@ export function FileBrowser({
   const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
-
-  const visiblePaths = useMemo(
-    () => (treeState.tree ? getVisiblePaths(treeState.tree, treeState.expandedPaths) : []),
-    [treeState.tree, treeState.expandedPaths],
-  );
-  const multiSelect = useMultiSelect({ items: visiblePaths });
-  const dnd = useDragAndDrop(
+  const { multiSelect, dnd, handleClickOutside } = useSelectionInteractions(
     treeState,
-    multiSelect.selectedPaths,
-    multiSelect.setSelectedPaths,
+    containerRef,
+    activeFilePath,
     onRenameFile,
   );
 
-  useKeyboardShortcuts(containerRef, multiSelect);
-  useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);
-
   return (
-    <div className="flex flex-col h-full" ref={containerRef} tabIndex={-1}>
+    <div
+      className="flex flex-col h-full"
+      ref={containerRef}
+      tabIndex={-1}
+      onMouseDown={handleClickOutside}
+    >
       <FileBrowserHeader
         treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
         search={search}
@@ -404,7 +433,7 @@ export function FileBrowser({
           onCancelCreate={handlers.handleCancelCreate}
           onRetry={() => void treeState.loadTree({ resetRetry: true })}
           setTree={treeState.setTree}
-          isSelected={multiSelect.isSelected}
+          isSelectedFn={multiSelect.isSelected}
           onSelect={multiSelect.handleClick}
           isDragging={dnd.isDragging}
           dragOverPath={dnd.dragOverPath}
