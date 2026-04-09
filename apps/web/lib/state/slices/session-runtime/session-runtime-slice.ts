@@ -208,6 +208,24 @@ export const createSessionRuntimeSlice: StateCreator<
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;
+      // Migrate any data stored under the fallback `sessionId` key to the
+      // proper `environmentId` key so selectors don't see stale data.
+      if (sessionId !== environmentId) {
+        const migrate = <T>(store: Record<string, T>) => {
+          if (sessionId in store && !(environmentId in store)) {
+            store[environmentId] = store[sessionId];
+            delete store[sessionId];
+          }
+        };
+        migrate(draft.sessionCommits.byEnvironmentId);
+        migrate(draft.sessionCommits.loading);
+        migrate(draft.gitStatus.byEnvironmentId);
+        migrate(draft.shell.outputs);
+        migrate(draft.shell.statuses);
+        migrate(draft.userShells.byEnvironmentId);
+        migrate(draft.userShells.loading);
+        migrate(draft.userShells.loaded);
+      }
     }),
   setContextWindow: (sessionId, contextWindow) =>
     set((draft) => {
