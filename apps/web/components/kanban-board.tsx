@@ -158,6 +158,9 @@ function useKanbanBoardHooks(
     handleWorkflowChange,
     deletingTaskId,
     archivingTaskId,
+    handleClearLane,
+    handleArchiveLane,
+    handleMoveLane,
   } = useKanbanActions({ workspaceState, workflowsState });
   const { enablePreviewOnClick, userSettings, commitSettings, activeSteps, isMounted } =
     useKanbanData({
@@ -183,6 +186,9 @@ function useKanbanBoardHooks(
     commitSettings,
     activeSteps,
     isMounted,
+    handleClearLane,
+    handleArchiveLane,
+    handleMoveLane,
   };
 }
 
@@ -308,6 +314,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
+        onClearLane={s.handleClearLane}
+        onArchiveLane={s.handleArchiveLane}
+        onMoveLane={s.handleMoveLane}
       />
       {s.isMobile && (
         <>

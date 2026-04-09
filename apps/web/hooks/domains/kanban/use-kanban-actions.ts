@@ -97,6 +97,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     setEditingTask,
     deletingTaskId,
     archivingTaskId,
+    handleClearLane,
+    handleArchiveLane,
+    handleMoveLane,
   } = useTaskCRUD();
 
   // Handle task dialog success (create/update)
@@ -168,5 +171,10 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     // Navigation actions
     handleWorkspaceChange,
     handleWorkflowChange,
+
+    // Lane actions
+    handleClearLane,
+    handleArchiveLane,
+    handleMoveLane,
   };
 }

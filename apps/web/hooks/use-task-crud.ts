@@ -17,7 +17,7 @@ export function useTaskCRUD() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { deleteTaskById, archiveTaskById, moveTaskById } = useTaskActions();
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
 
@@ -86,6 +86,84 @@ export function useTaskCRUD() {
     }
   }, []);
 
+  const handleClearLane = useCallback(
+    async (tasks: Task[]) => {
+      if (!kanban.workflowId || tasks.length === 0) return;
+
+      await Promise.all(tasks.map((task) => deleteTaskById(task.id)));
+
+      const deletedIds = new Set(tasks.map((t) => t.id));
+      store.getState().hydrate({
+        kanban: {
+          ...store.getState().kanban,
+          tasks: store
+            .getState()
+            .kanban.tasks.filter((item: KanbanState["tasks"][number]) => !deletedIds.has(item.id)),
+        },
+      });
+    },
+    [deleteTaskById, kanban.workflowId, store],
+  );
+
+  const handleMoveLane = useCallback(
+    async (tasks: Task[], targetStepId: string) => {
+      if (!kanban.workflowId || tasks.length === 0) return;
+
+      const currentTasks = store.getState().kanban.tasks;
+      const movedIds = new Set(tasks.map((t) => t.id));
+      const maxTargetPos = currentTasks
+        .filter(
+          (t: KanbanState["tasks"][number]) =>
+            t.workflowStepId === targetStepId && !movedIds.has(t.id),
+        )
+        .reduce(
+          (max: number, t: KanbanState["tasks"][number]) => Math.max(max, t.position ?? 0),
+          -1,
+        );
+
+      await Promise.all(
+        tasks.map((task, i) =>
+          moveTaskById(task.id, {
+            workflow_id: kanban.workflowId!,
+            workflow_step_id: targetStepId,
+            position: maxTargetPos + 1 + i,
+          }),
+        ),
+      );
+
+      store.getState().hydrate({
+        kanban: {
+          ...store.getState().kanban,
+          tasks: store.getState().kanban.tasks.map((t: KanbanState["tasks"][number]) => {
+            if (!movedIds.has(t.id)) return t;
+            const idx = tasks.findIndex((m) => m.id === t.id);
+            return { ...t, workflowStepId: targetStepId, position: maxTargetPos + 1 + idx };
+          }),
+        },
+      });
+    },
+    [moveTaskById, kanban.workflowId, store],
+  );
+
+  const handleArchiveLane = useCallback(
+    async (tasks: Task[]) => {
+      if (!kanban.workflowId || tasks.length === 0) return;
+
+      await Promise.all(tasks.map((task) => archiveTaskById(task.id)));
+
+      const archivedIds = new Set(tasks.map((t) => t.id));
+      store.getState().hydrate({
+        kanban: {
+          ...store.getState().kanban,
+          tasks: store
+            .getState()
+            .kanban.tasks.filter((item: KanbanState["tasks"][number]) => !archivedIds.has(item.id)),
+        },
+      });
+    },
+    [archiveTaskById, kanban.workflowId, store],
+  );
+
   return {
     isDialogOpen,
     setIsDialogOpen,
@@ -98,5 +176,8 @@ export function useTaskCRUD() {
     handleDialogOpenChange,
     deletingTaskId,
     archivingTaskId,
+    handleClearLane,
+    handleArchiveLane,
+    handleMoveLane,
   };
 }

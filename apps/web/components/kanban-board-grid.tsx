@@ -38,6 +38,9 @@ export type KanbanBoardGridProps = {
   archivingTaskId?: string | null;
   onCreateTask?: () => void;
   isLoading?: boolean;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 type ColumnGridProps = Pick<
@@ -53,6 +56,9 @@ type ColumnGridProps = Pick<
   | "showMaximizeButton"
   | "deletingTaskId"
   | "archivingTaskId"
+  | "onClearLane"
+  | "onArchiveLane"
+  | "onMoveLane"
 >;
 
 function getTasksForStep(tasks: Task[], stepId: string) {
@@ -89,6 +95,9 @@ function MobileLayout({
   activeColumnIndex,
   setActiveColumnIndex,
   currentStepId,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: ColumnGridProps & {
   showLoading: boolean;
   activeTask: Task | null;
@@ -125,6 +134,9 @@ function MobileLayout({
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
               archivingTaskId={archivingTaskId}
+              onClearLane={onClearLane}
+              onArchiveLane={onArchiveLane}
+              onMoveLane={onMoveLane}
             />
             <MobileDropTargets
               steps={steps}
@@ -158,6 +170,9 @@ function TabletLayout({
   archivingTaskId,
   showLoading,
   activeTask,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
   return (
     <>
@@ -181,6 +196,9 @@ function TabletLayout({
                   showMaximizeButton={showMaximizeButton}
                   deletingTaskId={deletingTaskId}
                   archivingTaskId={archivingTaskId}
+                  onClearLane={onClearLane}
+                  onArchiveLane={onArchiveLane}
+                  onMoveLane={onMoveLane}
                 />
               </div>
             ))}
@@ -208,6 +226,9 @@ function DesktopLayout({
   archivingTaskId,
   showLoading,
   activeTask,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
   return (
     <>
@@ -234,6 +255,9 @@ function DesktopLayout({
                 showMaximizeButton={showMaximizeButton}
                 deletingTaskId={deletingTaskId}
                 archivingTaskId={archivingTaskId}
+                onClearLane={onClearLane}
+                onArchiveLane={onArchiveLane}
+                onMoveLane={onMoveLane}
               />
             ))}
           </div>
@@ -275,6 +299,9 @@ export function KanbanBoardGrid({
   archivingTaskId,
   onCreateTask,
   isLoading,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: KanbanBoardGridProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const activeColumnIndex = useAppStore((state) => state.mobileKanban.activeColumnIndex);
@@ -334,6 +361,9 @@ export function KanbanBoardGrid({
     showMaximizeButton,
     deletingTaskId,
     archivingTaskId,
+    onClearLane,
+    onArchiveLane,
+    onMoveLane,
   };
 
   let layoutContent: React.ReactNode;

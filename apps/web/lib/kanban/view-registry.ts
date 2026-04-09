@@ -19,6 +19,9 @@ export type ViewContentProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 export type ViewRegistryEntry = {

@@ -46,6 +46,9 @@ export type SwimlaneContainerProps = {
   showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 function getEmptyMessage(
@@ -113,6 +116,9 @@ type WorkflowItemProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 function SortableWorkflowItem({ wf, hideHeader, isSortable, ...rest }: WorkflowItemProps) {
@@ -215,6 +221,9 @@ export function SwimlaneContainer({
   showMaximizeButton,
   searchQuery,
   selectedRepositoryIds = [],
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
@@ -299,6 +308,9 @@ export function SwimlaneContainer({
                 deletingTaskId={deletingTaskId}
                 archivingTaskId={archivingTaskId}
                 showMaximizeButton={showMaximizeButton}
+                onClearLane={onClearLane}
+                onArchiveLane={onArchiveLane}
+                onMoveLane={onMoveLane}
               />
             );
           })}

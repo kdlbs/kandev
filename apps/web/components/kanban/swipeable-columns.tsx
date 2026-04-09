@@ -19,6 +19,9 @@ type SwipeableColumnsProps = {
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 export function SwipeableColumns({
@@ -35,6 +38,9 @@ export function SwipeableColumns({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -119,6 +125,9 @@ export function SwipeableColumns({
               deletingTaskId={deletingTaskId}
               archivingTaskId={archivingTaskId}
               hideHeader
+              onClearLane={onClearLane}
+              onArchiveLane={onArchiveLane}
+              onMoveLane={onMoveLane}
             />
           </div>
         ))}

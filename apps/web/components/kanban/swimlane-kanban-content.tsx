@@ -36,6 +36,9 @@ export type SwimlaneKanbanContentProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 };
 
 type SwimlaneKanbanDndOptions = {
@@ -183,6 +186,9 @@ function MobileKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -198,6 +204,9 @@ function MobileKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 }) {
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -231,6 +240,9 @@ function MobileKanbanLayout({
         showMaximizeButton={showMaximizeButton}
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
+        onClearLane={onClearLane}
+        onArchiveLane={onArchiveLane}
+        onMoveLane={onMoveLane}
       />
       <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
     </div>
@@ -249,6 +261,9 @@ function TabletKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -261,6 +276,9 @@ function TabletKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -284,6 +302,9 @@ function TabletKanbanLayout({
             showMaximizeButton={showMaximizeButton}
             deletingTaskId={deletingTaskId}
             archivingTaskId={archivingTaskId}
+            onClearLane={onClearLane}
+            onArchiveLane={onArchiveLane}
+            onMoveLane={onMoveLane}
           />
         </div>
       ))}
@@ -303,6 +324,9 @@ function DesktopKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -315,6 +339,9 @@ function DesktopKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  onClearLane?: (tasks: Task[]) => Promise<void>;
+  onArchiveLane?: (tasks: Task[]) => Promise<void>;
+  onMoveLane?: (tasks: Task[], targetStepId: string) => Promise<void>;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -338,6 +365,9 @@ function DesktopKanbanLayout({
           deletingTaskId={deletingTaskId}
           archivingTaskId={archivingTaskId}
           showMaximizeButton={showMaximizeButton}
+          onClearLane={onClearLane}
+          onArchiveLane={onArchiveLane}
+          onMoveLane={onMoveLane}
         />
       ))}
     </div>
@@ -357,6 +387,9 @@ export function SwimlaneKanbanContent({
   deletingTaskId,
   archivingTaskId,
   showMaximizeButton,
+  onClearLane,
+  onArchiveLane,
+  onMoveLane,
 }: SwimlaneKanbanContentProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
@@ -377,6 +410,9 @@ export function SwimlaneKanbanContent({
     showMaximizeButton,
     deletingTaskId,
     archivingTaskId,
+    onClearLane,
+    onArchiveLane,
+    onMoveLane,
   };
 
   let layoutContent: React.ReactNode;
