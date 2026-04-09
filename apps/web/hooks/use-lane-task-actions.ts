@@ -8,8 +8,16 @@ import type { useTaskActions } from "@/hooks/use-task-actions";
 
 type TaskActions = ReturnType<typeof useTaskActions>;
 
+// Max concurrent API requests per bulk operation. Avoids thundering-herd
+// against the backend when a lane has many tasks.
 const BULK_ACTION_BATCH_SIZE = 10;
 
+/**
+ * Runs `worker` over `items` in serial batches of BULK_ACTION_BATCH_SIZE,
+ * collecting settled results in the same order as the input array.
+ * Index passed to `worker` is the global index across all batches so callers
+ * can use it for stable position assignment.
+ */
 async function allSettledInBatches<T>(
   items: T[],
   worker: (item: T, index: number) => Promise<unknown>,
@@ -22,6 +30,11 @@ async function allSettledInBatches<T>(
   return results;
 }
 
+/**
+ * Runs `action` on each task in batches, then calls `applySuccess` with the
+ * set of IDs whose requests fulfilled. Partial failures are silently ignored —
+ * only successful task IDs are passed to the store update.
+ */
 async function performBulkAction(
   tasks: KanbanState["tasks"][number][],
   action: (id: string) => Promise<unknown>,
@@ -70,9 +83,12 @@ export function useLaneTaskActions({
     async (tasks: KanbanState["tasks"][number][], targetStepId: string) => {
       if (!workflowId || tasks.length === 0) return;
 
+      // Skip tasks already in the target step — moving them would be a no-op
+      // and would wastefully re-sequence their positions.
       const actionableTasks = tasks.filter((t) => t.workflowStepId !== targetStepId);
       if (actionableTasks.length === 0) return;
 
+      // Snapshot current tasks before any mutations so position math is stable.
       const currentTasks = store.getState().kanban.tasks;
       const movedIds = new Set(actionableTasks.map((t) => t.id));
       const maxTargetPos = currentTasks
