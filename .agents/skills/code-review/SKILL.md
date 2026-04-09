@@ -100,7 +100,7 @@ Use this format:
    - Fix: concrete suggestion or code snippet
 
 #### Suggestion (recommended, doesn't block)
-*Performance problems, poor error handling, architectural concerns, missing tests*
+*Performance problems, poor error handling, architectural concerns*
 
 ### Summary
 
