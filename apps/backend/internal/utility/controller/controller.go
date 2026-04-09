@@ -93,7 +93,7 @@ func (c *Controller) GetTemplateVariables(ctx context.Context) *dto.TemplateVari
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
 // If defaults is provided and the utility agent has empty agent_id/model, the defaults are used.
-func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePromptRequest, defaults *service.DefaultUtilitySettings) (*service.PromptRequest, error) {
+func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePromptRequest, defaults *service.DefaultUtilitySettings, sessionless bool) (*service.PromptRequest, error) {
 	tmplCtx := &template.Context{
 		GitDiff:             req.GitDiff,
 		CommitLog:           req.CommitLog,
@@ -107,7 +107,7 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 		UserPrompt:          req.UserPrompt,
 		ConversationHistory: req.ConversationHistory,
 	}
-	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults)
+	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
 }
 
 // CreateCall creates a call record for tracking.

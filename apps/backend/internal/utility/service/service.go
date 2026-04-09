@@ -167,14 +167,18 @@ type DefaultUtilitySettings struct {
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
 // If the utility agent has empty AgentID/Model, the defaults are used.
-func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings) (*PromptRequest, error) {
+// When sessionless is true, missing template variables are substituted with
+// empty strings instead of being left as {{Var}}.
+func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool) (*PromptRequest, error) {
 	agent, err := s.repo.GetAgentByID(ctx, utilityID)
 	if err != nil {
 		return nil, ErrAgentNotFound
 	}
 
 	// Resolve template
-	resolvedPrompt, err := s.templateEngine.Resolve(agent.Prompt, tmplCtx)
+	resolvedPrompt, err := s.templateEngine.ResolveWithOptions(agent.Prompt, tmplCtx, template.ResolveOptions{
+		MissingAsEmpty: sessionless,
+	})
 	if err != nil {
 		return nil, err
 	}

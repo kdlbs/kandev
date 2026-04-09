@@ -78,7 +78,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}()
 
 	// Execute ACP protocol
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Mode)
 	if err != nil {
 		return &PromptResponse{
 			Success:    false,
@@ -95,14 +95,15 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}, nil
 }
 
-// executeACPSession performs the ACP handshake, creates a session, sends the prompt,
-// and collects the response text.
+// executeACPSession performs the ACP handshake, creates a session, optionally
+// sets the session mode, sends the prompt, and collects the response text.
 func (e *ACPInferenceExecutor) executeACPSession(
 	ctx context.Context,
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
 	prompt string,
+	mode string,
 ) (string, error) {
 	// Collect response text from updates
 	var responseText strings.Builder
@@ -150,6 +151,16 @@ func (e *ACPInferenceExecutor) executeACPSession(
 
 	sessionID := sessionResp.SessionId
 
+	// Optionally set the session mode before prompting.
+	if mode != "" {
+		if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
+			SessionId: sessionID,
+			ModeId:    acp.SessionModeId(mode),
+		}); err != nil {
+			return "", fmt.Errorf("ACP session/set_mode failed: %w", err)
+		}
+	}
+
 	// Send prompt and wait for completion
 	_, err = conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
@@ -164,6 +175,161 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mu.Unlock()
 
 	return result, nil
+}
+
+// Probe runs an ephemeral ACP handshake (initialize + session/new) to discover
+// agent capabilities, auth methods, models, and modes. It does not send a prompt.
+func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*ProbeResponse, error) {
+	if req.InferenceConfig == nil {
+		return &ProbeResponse{Success: false, Error: "inference config is required"}, nil
+	}
+	cfg := req.InferenceConfig
+	if len(cfg.Command) == 0 {
+		return &ProbeResponse{Success: false, Error: "inference command is empty"}, nil
+	}
+	workDir := cfg.WorkDir
+	if workDir == "" {
+		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
+	}
+
+	startTime := time.Now()
+
+	// Probes intentionally omit the model flag so session/new returns the agent's
+	// default model and the complete availableModels list.
+	args := buildACPCommand(cfg, "")
+
+	e.logger.Info("starting ACP probe",
+		zap.String("agent_id", req.AgentID),
+		zap.Strings("command", args))
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = workDir
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return &ProbeResponse{Success: false, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return &ProbeResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
+	}
+	if err := cmd.Start(); err != nil {
+		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
+	if err != nil {
+		return &ProbeResponse{
+			Success:    false,
+			Error:      err.Error(),
+			DurationMs: int(time.Since(startTime).Milliseconds()),
+		}, nil
+	}
+
+	resp.Success = true
+	resp.DurationMs = int(time.Since(startTime).Milliseconds())
+	return resp, nil
+}
+
+// probeACPSession performs initialize + session/new and returns the parsed
+// capabilities, without sending any prompt or running session/prompt.
+func (e *ACPInferenceExecutor) probeACPSession(
+	ctx context.Context,
+	stdin io.Writer,
+	stdout io.Reader,
+	workDir string,
+) (*ProbeResponse, error) {
+	client := acpclient.NewClient(
+		acpclient.WithLogger(e.logger),
+		acpclient.WithWorkspaceRoot(workDir),
+	)
+
+	conn := acp.NewClientSideConnection(client, stdin, stdout)
+	conn.SetLogger(slog.Default().With("component", "acp-probe"))
+
+	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientInfo: &acp.Implementation{
+			Name:    "kandev-probe",
+			Version: "1.0.0",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ACP initialize failed: %w", err)
+	}
+
+	sessionResp, err := conn.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        workDir,
+		McpServers: []acp.McpServer{},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ACP session/new failed: %w", err)
+	}
+
+	out := buildInitProbeFields(initResp)
+	applySessionProbeFields(out, sessionResp)
+	return out, nil
+}
+
+// buildInitProbeFields populates agent info, protocol version, capabilities and
+// auth methods from an ACP initialize response.
+func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
+	out := &ProbeResponse{
+		ProtocolVersion: int(initResp.ProtocolVersion),
+		LoadSession:     initResp.AgentCapabilities.LoadSession,
+		PromptCapabilities: ProbePromptCapabilities{
+			Image:           initResp.AgentCapabilities.PromptCapabilities.Image,
+			Audio:           initResp.AgentCapabilities.PromptCapabilities.Audio,
+			EmbeddedContext: initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+		},
+	}
+	if initResp.AgentInfo != nil {
+		out.AgentName = initResp.AgentInfo.Name
+		out.AgentVersion = initResp.AgentInfo.Version
+	}
+	for _, m := range initResp.AuthMethods {
+		out.AuthMethods = append(out.AuthMethods, ProbeAuthMethod{
+			ID:          string(m.Id), //nolint:unconvert // AuthMethodId is a named string type; conversion required
+			Name:        m.Name,
+			Description: derefString(m.Description),
+		})
+	}
+	return out
+}
+
+// applySessionProbeFields populates models and modes from an ACP session/new response.
+func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
+	if sessionResp.Models != nil {
+		out.CurrentModelID = string(sessionResp.Models.CurrentModelId)
+		for _, m := range sessionResp.Models.AvailableModels {
+			out.Models = append(out.Models, ProbeModel{
+				ID:          string(m.ModelId),
+				Name:        m.Name,
+				Description: derefString(m.Description),
+			})
+		}
+	}
+	if sessionResp.Modes != nil {
+		out.CurrentModeID = string(sessionResp.Modes.CurrentModeId)
+		for _, m := range sessionResp.Modes.AvailableModes {
+			out.Modes = append(out.Modes, ProbeMode{
+				ID:          string(m.Id),
+				Name:        m.Name,
+				Description: derefString(m.Description),
+			})
+		}
+	}
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // buildACPCommand builds the command arguments for ACP inference.

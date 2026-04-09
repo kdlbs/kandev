@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/httpmw"
@@ -29,10 +30,12 @@ import (
 	githubpkg "github.com/kandev/kandev/internal/github"
 
 	// Agent infrastructure
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -326,7 +329,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, runCleanups)
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, addCleanup, runCleanups)
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -343,6 +346,7 @@ func startGatewayAndServe(
 	agentRegistry *registry.Registry,
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
+	addCleanup func(func() error),
 	runCleanups func(),
 ) bool {
 	// ============================================
@@ -365,6 +369,27 @@ func startGatewayAndServe(
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
+
+	// ============================================
+	// HOST UTILITY MANAGER
+	// ============================================
+	// Long-lived per-agent-type agentctl instances for boot-time capability
+	// probes, on-demand refresh via settings, and sessionless utility prompts
+	// (e.g. "enhance prompt" before a task/session exists).
+	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log)
+	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
+	go func() {
+		if err := hostUtilityMgr.Start(ctx); err != nil {
+			log.Warn("host utility manager bootstrap error", zap.Error(err))
+		}
+	}()
+	addCleanup(func() error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		hostUtilityMgr.Stop(stopCtx)
+		return nil
+	})
+
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Error("Failed to start orchestrator", zap.Error(err))
 		return false
@@ -379,7 +404,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -416,6 +441,7 @@ func buildHTTPServer(
 	notificationCtrl *notificationcontroller.Controller,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
+	hostUtilityMgr *hostutility.Manager,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -432,6 +458,7 @@ func buildHTTPServer(
 		analyticsRepo:           repos.Analytics,
 		orchestratorSvc:         orchestratorSvc,
 		lifecycleMgr:            lifecycleMgr,
+		hostUtilityMgr:          hostUtilityMgr,
 		eventBus:                eventBus,
 		services:                services,
 		agentSettingsController: agentSettingsController,

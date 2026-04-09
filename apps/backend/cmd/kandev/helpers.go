@@ -13,8 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	agentcapabilities "github.com/kandev/kandev/internal/agent/capabilities/handlers"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -427,6 +429,7 @@ type routeParams struct {
 	analyticsRepo           analyticsrepository.Repository
 	orchestratorSvc         *orchestrator.Service
 	lifecycleMgr            *lifecycle.Manager
+	hostUtilityMgr          *hostutility.Manager
 	eventBus                bus.EventBus
 	services                *Services
 	agentSettingsController *agentsettingscontroller.Controller
@@ -552,8 +555,11 @@ func registerSecondaryRoutes(
 	prompthandlers.RegisterRoutes(p.router, p.promptCtrl, p.log)
 	p.log.Debug("Registered Prompts handlers (HTTP)")
 
-	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.services.User, p.log)
+	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
+
+	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
+	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
 	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")

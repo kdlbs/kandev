@@ -10,41 +10,56 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
-// InferencePrompt executes a one-shot inference prompt via agentctl.
-// Uses the long-running HTTP client since LLM inference can take several minutes.
-func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
-	body, err := json.Marshal(req)
+// doLongRunningJSON posts a JSON body to the given path on the long-running
+// HTTP client and decodes a JSON response body into out. It is used by the
+// utility endpoints (inference prompt, probe) where the underlying LLM call
+// or agent cold-start can take minutes.
+func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, out any) error {
+	body, err := json.Marshal(in)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return fmt.Errorf("failed to marshal request: %w", err)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/inference/prompt", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Use longRunningHTTPClient for inference prompts since LLM API calls
-	// can take 1-5 minutes depending on model and prompt complexity.
 	resp, err := c.longRunningHTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return fmt.Errorf("failed to read response: %w", err)
 	}
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("utility prompt failed with status %d: %s", resp.StatusCode, truncateBody(respBody))
+		return fmt.Errorf("%s failed with status %d: %s", label, resp.StatusCode, truncateBody(respBody))
 	}
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return fmt.Errorf("failed to parse %s response (status %d, body: %s): %w", label, resp.StatusCode, truncateBody(respBody), err)
+	}
+	return nil
+}
 
+// InferencePrompt executes a one-shot inference prompt via agentctl.
+// Uses the long-running HTTP client since LLM inference can take several minutes.
+func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
 	var result utility.PromptResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", req, &result); err != nil {
+		return nil, err
 	}
+	return &result, nil
+}
 
+// Probe runs an ACP handshake (initialize + session/new) against the agent
+// to discover its capabilities, auth methods, models, and modes.
+func (c *Client) Probe(ctx context.Context, req *utility.ProbeRequest) (*utility.ProbeResponse, error) {
+	var result utility.ProbeResponse
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/probe", "probe", req, &result); err != nil {
+		return nil, err
+	}
 	return &result, nil
 }

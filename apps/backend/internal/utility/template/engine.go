@@ -46,20 +46,35 @@ var templatePattern = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
 
 // Resolve resolves template variables in the given prompt using the provided context.
 // Uses {{Key}} format (no dot) for consistency with scriptengine.
+// Unknown placeholders are left unchanged.
 func (e *Engine) Resolve(promptTemplate string, ctx *Context) (string, error) {
+	return e.ResolveWithOptions(promptTemplate, ctx, ResolveOptions{})
+}
+
+// ResolveOptions configures template resolution.
+type ResolveOptions struct {
+	// MissingAsEmpty substitutes unknown placeholders with an empty string
+	// instead of leaving them as {{Var}}. Used for sessionless utility execution
+	// where some context variables (e.g. GitDiff, TaskTitle) are meaningless.
+	MissingAsEmpty bool
+}
+
+// ResolveWithOptions resolves template variables with the given options.
+func (e *Engine) ResolveWithOptions(promptTemplate string, ctx *Context, opts ResolveOptions) (string, error) {
 	if ctx == nil {
 		ctx = &Context{}
 	}
 	data := e.buildTemplateData(ctx)
 
-	// Use regex replacement for deterministic single-pass substitution
 	result := templatePattern.ReplaceAllStringFunc(promptTemplate, func(match string) string {
-		// Extract key from {{Key}}
 		key := strings.TrimSuffix(strings.TrimPrefix(match, "{{"), "}}")
 		if val, ok := data[key]; ok {
 			return val
 		}
-		return match // Leave unknown placeholders unchanged
+		if opts.MissingAsEmpty {
+			return ""
+		}
+		return match
 	})
 
 	return result, nil

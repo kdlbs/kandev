@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -25,6 +26,12 @@ type InferenceExecutor interface {
 	ListInferenceAgentsWithContext(ctx context.Context) []lifecycle.InferenceAgentInfo
 }
 
+// HostUtilityExecutor runs sessionless utility prompts via the long-lived
+// per-agent-type host agentctl instances.
+type HostUtilityExecutor interface {
+	ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (*hostutility.PromptResult, error)
+}
+
 // UserSettingsProvider provides user settings for default utility agent/model.
 type UserSettingsProvider interface {
 	// GetDefaultUtilitySettings returns the user's default utility agent/model settings.
@@ -35,23 +42,25 @@ type UserSettingsProvider interface {
 type Handlers struct {
 	controller   *controller.Controller
 	executor     InferenceExecutor
+	hostExecutor HostUtilityExecutor
 	userSettings UserSettingsProvider
 	logger       *logger.Logger
 }
 
 // NewHandlers creates new utility agent handlers.
-func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
+func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
 	return &Handlers{
 		controller:   ctrl,
 		executor:     executor,
+		hostExecutor: hostExecutor,
 		userSettings: userSettings,
 		logger:       log.WithFields(zap.String("component", "utility-handlers")),
 	}
 }
 
 // RegisterRoutes registers the utility agent routes.
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor InferenceExecutor, userSettings UserSettingsProvider, log *logger.Logger) {
-	handlers := NewHandlers(ctrl, executor, userSettings, log)
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) {
+	handlers := NewHandlers(ctrl, executor, hostExecutor, userSettings, log)
 	api := router.Group("/api/v1/utility")
 	api.GET("/agents", handlers.httpListAgents)
 	api.GET("/agents/:id", handlers.httpGetAgent)
@@ -170,8 +179,10 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		}
 	}
 
+	sessionless := req.SessionID == ""
+
 	// Prepare the prompt request (resolve template, get agent/model info)
-	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults)
+	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults, sessionless)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrAgentNotFound) {
@@ -200,7 +211,12 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		return
 	}
 
-	// Execute via agentctl using inference agent
+	if sessionless {
+		h.executeSessionless(c, ctx, prepared, callID)
+		return
+	}
+
+	// Execute via agentctl using an existing task session's agentctl
 	resp, err := h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
 	if err != nil {
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
@@ -235,6 +251,41 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		PromptTokens:   resp.PromptTokens,
 		ResponseTokens: resp.ResponseTokens,
 		DurationMs:     resp.DurationMs,
+	})
+}
+
+// executeSessionless runs the prepared prompt through the host utility manager
+// (no task session). Used for flows like "enhance prompt" in the new-task modal.
+func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepared *service.PromptRequest, callID string) {
+	if h.hostExecutor == nil {
+		_ = h.controller.FailCall(ctx, callID, "host utility not configured", 0)
+		c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{
+			CallID: callID,
+			Error:  "host utility not configured; session_id is required",
+		})
+		return
+	}
+	result, err := h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
+	if err != nil {
+		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
+		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
+			CallID: callID,
+			Error:  "failed to execute prompt: " + err.Error(),
+		})
+		return
+	}
+	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
+		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	}
+	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+		Success:        true,
+		CallID:         callID,
+		Response:       result.Response,
+		Model:          result.Model,
+		PromptTokens:   result.PromptTokens,
+		ResponseTokens: result.ResponseTokens,
+		DurationMs:     result.DurationMs,
 	})
 }
 
