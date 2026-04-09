@@ -1,85 +1,80 @@
 import { useState, useEffect, useCallback } from "react";
 import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
-import type { ModelEntry, DynamicModelsResponse } from "@/lib/types/http";
+import type {
+  CommandEntry,
+  ModeEntry,
+  ModelEntry,
+  DynamicModelsResponse,
+  ModelConfig,
+} from "@/lib/types/http";
 
-type UseDynamicModelsState = {
+type UseAgentCapabilitiesState = {
   models: ModelEntry[];
+  modes: ModeEntry[];
+  commands: CommandEntry[];
+  currentModelId: string | undefined;
+  currentModeId: string | undefined;
   isLoading: boolean;
   error: string | null;
-  cached: boolean;
-  cachedAt: string | null;
   refresh: () => Promise<void>;
 };
 
-export function useDynamicModels(
+/**
+ * useAgentCapabilities fetches the full ACP probe cache for an agent
+ * (models, modes, current defaults) and keeps it in sync. Refresh triggers
+ * a live re-probe against the host utility and updates both models and
+ * modes atomically — so the profile page's refresh button covers the whole
+ * agent surface, not just models.
+ */
+export function useAgentCapabilities(
   agentName: string | undefined,
-  staticModels: ModelEntry[],
-  supportsDynamicModels: boolean,
-): UseDynamicModelsState {
-  const [models, setModels] = useState<ModelEntry[]>(staticModels);
-  // Start in loading state if dynamic models are supported to avoid UI flash
+  initial: ModelConfig,
+): UseAgentCapabilitiesState {
+  const supportsDynamicModels = initial.supports_dynamic_models;
+  const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
+  const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
+  const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);
+  const [currentModelId, setCurrentModelId] = useState<string | undefined>(initial.current_model_id);
+  const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
   const [error, setError] = useState<string | null>(null);
-  const [cached, setCached] = useState(false);
-  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
-  const fetchModels = useCallback(
-    async (forceRefresh = false) => {
+  const fetchCaps = useCallback(
+    async (forceRefresh: boolean) => {
       if (!agentName || !supportsDynamicModels) {
-        setModels(staticModels);
         return;
       }
-
       setIsLoading(true);
       setError(null);
-
       try {
         const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
           refresh: forceRefresh,
         });
-
         if (response.error) {
           setError(response.error);
-          // Fall back to static models on error
-          setModels(staticModels);
-        } else {
-          // Defensive: the backend may marshal nil slices as null.
-          setModels(response.models ?? []);
+          return;
         }
-
-        setCached(response.status === "ok");
-        setCachedAt(null);
+        setModels(response.models ?? []);
+        setModes(response.modes ?? []);
+        setCommands(response.commands ?? []);
+        setCurrentModelId(response.current_model_id);
+        setCurrentModeId(response.current_mode_id);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to fetch models";
-        setError(errorMessage);
-        // Fall back to static models on error
-        setModels(staticModels);
+        setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
       } finally {
         setIsLoading(false);
       }
     },
-    [agentName, supportsDynamicModels, staticModels],
+    [agentName, supportsDynamicModels],
   );
 
-  // Fetch on mount if dynamic models are supported
   useEffect(() => {
     if (supportsDynamicModels && agentName) {
-      fetchModels(false);
-    } else {
-      setModels(staticModels);
+      void fetchCaps(false);
     }
-  }, [agentName, supportsDynamicModels, fetchModels, staticModels]);
+  }, [agentName, supportsDynamicModels, fetchCaps]);
 
-  const refresh = useCallback(async () => {
-    await fetchModels(true);
-  }, [fetchModels]);
+  const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
 
-  return {
-    models,
-    isLoading,
-    error,
-    cached,
-    cachedAt,
-    refresh,
-  };
+  return { models, modes, commands, currentModelId, currentModeId, isLoading, error, refresh };
 }

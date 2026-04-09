@@ -1,13 +1,46 @@
 "use client";
 
+import { useState } from "react";
+import {
+  IconRefresh,
+  IconAlertCircle,
+  IconSelector,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@kandev/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ModelCombobox } from "@/components/settings/model-combobox";
+import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
-import type { ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
+import type {
+  CommandEntry,
+  ModelConfig,
+  ModeEntry,
+  ModelEntry,
+  PermissionSetting,
+  PassthroughConfig,
+} from "@/lib/types/http";
 
 export type ProfileFormData = {
   name: string;
@@ -156,90 +189,266 @@ function CapabilityStatusMessage({ modelConfig }: { modelConfig: ModelConfig }) 
   );
 }
 
-function ModelField({
-  profile,
-  modelConfig,
-  onChange,
-  agentName,
-  isCompact,
+function RefreshCapabilitiesButton({
+  onRefresh,
+  isLoading,
+  error,
 }: {
-  profile: ProfileFormData;
-  modelConfig: ModelConfig;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-  agentName: string;
-  isCompact: boolean;
+  onRefresh: () => Promise<void>;
+  isLoading: boolean;
+  error: string | null;
 }) {
   return (
-    <div className={isCompact ? "space-y-1.5" : "space-y-2"}>
-      {isCompact ? (
-        <Label className="text-xs text-muted-foreground">Model</Label>
-      ) : (
-        <Label>Model</Label>
+    <div className="flex items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="cursor-pointer"
+            data-testid="profile-refresh-capabilities"
+          >
+            <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Refresh agent capabilities (models + modes)</p>
+        </TooltipContent>
+      </Tooltip>
+      {error && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center">
+              <IconAlertCircle className="h-4 w-4 text-amber-500" />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="max-w-xs">Failed to refresh: {error}</p>
+          </TooltipContent>
+        </Tooltip>
       )}
-      <ModelCombobox
-        value={profile.model || modelConfig.default_model}
-        onChange={(value) => onChange({ model: value })}
-        models={modelConfig.available_models}
-        defaultModel={modelConfig.default_model}
-        placeholder="Select or enter model..."
-        agentName={agentName}
-        supportsDynamicModels={modelConfig.supports_dynamic_models}
-      />
-      <CapabilityStatusMessage modelConfig={modelConfig} />
     </div>
   );
 }
 
-// DEFAULT_MODE_VALUE is the sentinel used in the mode combobox to represent
-// "no explicit override" — the profile stores `mode = ""` and the agent uses
-// its own default at session start.
-const DEFAULT_MODE_VALUE = "__default__";
-
-function ModeField({
+function ModelPicker({
   profile,
-  modelConfig,
+  models,
+  currentModelId,
   onChange,
-  isCompact,
 }: {
   profile: ProfileFormData;
-  modelConfig: ModelConfig;
+  models: ModelEntry[];
+  currentModelId: string | undefined;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  return (
+    <ModelCombobox
+      value={profile.model}
+      onChange={(value) => onChange({ model: value })}
+      models={models}
+      currentModelId={currentModelId}
+      placeholder="Select a model..."
+    />
+  );
+}
+
+function ModePicker({
+  profile,
+  modes,
+  currentModeId,
+  onChange,
+}: {
+  profile: ProfileFormData;
+  modes: ModeEntry[];
+  currentModeId: string | undefined;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = profile.mode || currentModeId || modes[0]?.id || "";
+  const activeMode = modes.find((m) => m.id === selected);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          data-testid="profile-mode-select"
+          className="w-full justify-between font-normal cursor-pointer"
+        >
+          <span className="flex items-center gap-2 truncate">
+            {activeMode?.name ?? selected}
+            {activeMode?.id === currentModeId && (
+              <span className="text-muted-foreground">(default)</span>
+            )}
+          </span>
+          <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="min-w-[--radix-popover-trigger-width] w-[min(32rem,calc(100vw-2rem))] p-0"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder="Search modes..." />
+          <CommandList>
+            <CommandEmpty>No mode found.</CommandEmpty>
+            <CommandGroup>
+              {modes.map((m) => (
+                <CommandItem
+                  key={m.id}
+                  value={`${m.id} ${m.name}`}
+                  onSelect={() => {
+                    onChange({ mode: m.id });
+                    setOpen(false);
+                  }}
+                  data-checked={selected === m.id}
+                  className="cursor-pointer"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="truncate">{m.name}</span>
+                      {m.id === currentModeId && (
+                        <span className="text-muted-foreground text-xs">(default)</span>
+                      )}
+                    </div>
+                    {m.description && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {m.description}
+                      </p>
+                    )}
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CommandsButton({ commands }: { commands: CommandEntry[] }) {
+  if (commands.length === 0) return null;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          data-testid="profile-commands-button"
+        >
+          <IconTerminal2 className="mr-2 h-4 w-4" />
+          Available commands ({commands.length})
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Available slash commands</DialogTitle>
+          <DialogDescription>
+            Type these during a session chat to invoke them — e.g. <code>/init</code>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto space-y-2">
+          {commands.map((c) => (
+            <div key={c.name} className="rounded-md border p-3">
+              <code className="text-sm font-semibold">/{c.name}</code>
+              {c.description && (
+                <p className="text-xs text-muted-foreground mt-1">{c.description}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CapabilitiesRow({
+  profile,
+  models,
+  modes,
+  commands,
+  currentModelId,
+  currentModeId,
+  onChange,
+  isCompact,
+  isLoading,
+  onRefresh,
+  error,
+  modelConfig,
+}: {
+  profile: ProfileFormData;
+  models: ModelEntry[];
+  modes: ModeEntry[];
+  commands: CommandEntry[];
+  currentModelId: string | undefined;
+  currentModeId: string | undefined;
   onChange: (patch: Partial<ProfileFormData>) => void;
   isCompact: boolean;
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
+  error: string | null;
+  modelConfig: ModelConfig;
 }) {
-  if (!modelConfig.available_modes || modelConfig.available_modes.length === 0) {
-    return null;
+  const hasModes = modes.length > 0;
+  const activeMode = hasModes
+    ? modes.find((m) => m.id === (profile.mode || currentModeId || modes[0]?.id))
+    : undefined;
+  const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
+  const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
+
+  if (isLoading && models.length === 0) {
+    return (
+      <div className={gapCls}>
+        <Label className={labelCls}>Start model</Label>
+        <Skeleton className="h-9 w-full" />
+      </div>
+    );
   }
-  const selected = profile.mode || DEFAULT_MODE_VALUE;
-  const activeMode = modelConfig.available_modes.find((m) => m.id === profile.mode);
-  const defaultLabel = modelConfig.current_mode_id
-    ? `Agent default (${modelConfig.current_mode_id})`
-    : "Agent default";
+
   return (
-    <div data-testid="profile-mode-field" className={isCompact ? "space-y-1.5" : "space-y-2"}>
-      {isCompact ? (
-        <Label className="text-xs text-muted-foreground">Mode</Label>
-      ) : (
-        <Label>Mode</Label>
-      )}
-      <Select
-        value={selected}
-        onValueChange={(value) => onChange({ mode: value === DEFAULT_MODE_VALUE ? "" : value })}
-      >
-        <SelectTrigger data-testid="profile-mode-select" className="w-full cursor-pointer">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={DEFAULT_MODE_VALUE}>{defaultLabel}</SelectItem>
-          {modelConfig.available_modes.map((m) => (
-            <SelectItem key={m.id} value={m.id}>
-              {m.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div className={gapCls}>
+      <div className="flex items-end gap-2">
+        <div className={`flex-1 min-w-0 ${gapCls}`}>
+          <Label className={labelCls}>Start model</Label>
+          <ModelPicker
+            profile={profile}
+            models={models}
+            currentModelId={currentModelId}
+            onChange={onChange}
+          />
+        </div>
+        {hasModes && (
+          <div
+            data-testid="profile-mode-field"
+            className={`flex-1 min-w-0 ${gapCls}`}
+          >
+            <Label className={labelCls}>Start mode</Label>
+            <ModePicker
+              profile={profile}
+              modes={modes}
+              currentModeId={currentModeId}
+              onChange={onChange}
+            />
+          </div>
+        )}
+        <RefreshCapabilitiesButton
+          onRefresh={onRefresh}
+          isLoading={isLoading}
+          error={error}
+        />
+      </div>
       {activeMode?.description && (
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
+      {commands.length > 0 && <CommandsButton commands={commands} />}
+      <CapabilityStatusMessage modelConfig={modelConfig} />
     </div>
   );
 }
@@ -289,6 +498,7 @@ export function ProfileFormFields({
   lockPassthrough = false,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
+  const caps = useAgentCapabilities(agentName, modelConfig);
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
@@ -301,19 +511,19 @@ export function ProfileFormFields({
         />
       )}
 
-      <ModelField
+      <CapabilitiesRow
         profile={profile}
-        modelConfig={modelConfig}
-        onChange={onChange}
-        agentName={agentName}
-        isCompact={isCompact}
-      />
-
-      <ModeField
-        profile={profile}
-        modelConfig={modelConfig}
+        models={caps.models}
+        modes={caps.modes}
+        commands={caps.commands}
+        currentModelId={caps.currentModelId}
+        currentModeId={caps.currentModeId}
         onChange={onChange}
         isCompact={isCompact}
+        isLoading={caps.isLoading}
+        onRefresh={caps.refresh}
+        error={caps.error}
+        modelConfig={modelConfig}
       />
 
       <PermissionToggles

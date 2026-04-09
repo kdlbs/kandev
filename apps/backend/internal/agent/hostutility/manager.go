@@ -407,13 +407,22 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 		LastCheckedAt:  now,
 	}
 	for _, m := range resp.AuthMethods {
-		caps.AuthMethods = append(caps.AuthMethods, AuthMethod(m))
+		caps.AuthMethods = append(caps.AuthMethods, AuthMethod{
+			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
+		})
 	}
 	for _, m := range resp.Models {
-		caps.Models = append(caps.Models, Model(m))
+		caps.Models = append(caps.Models, Model{
+			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
+		})
 	}
 	for _, m := range resp.Modes {
-		caps.Modes = append(caps.Modes, Mode(m))
+		caps.Modes = append(caps.Modes, Mode{
+			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
+		})
+	}
+	for _, c := range resp.Commands {
+		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
 }

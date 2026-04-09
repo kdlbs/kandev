@@ -71,6 +71,11 @@ apps/backend/bin/
 apps/backend/kandev
 apps/backend/agentctl
 apps/backend/mock-agent
+apps/backend/acpdbg
+
+# acpdbg JSONL output (raw ACP wire frames from debug runs)
+apps/backend/acp-debug/
+acp-debug/
 
 # Next.js
 .next/

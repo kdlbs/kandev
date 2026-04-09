@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg build-mock-agent clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -35,6 +35,10 @@ build-mock-agent:
 	@echo "Building mock-agent..."
 	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent ./cmd/mock-agent
+
+## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
+acpdbg: build-acpdbg
+	@$(BUILD_DIR)/acpdbg $(ARGS)
 
 ## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .claude/skills/acp-debug)
 build-acpdbg:

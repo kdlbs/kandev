@@ -162,6 +162,10 @@ build-backend:
 	@printf "$(CYAN)Building backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) build
 
+.PHONY: acpdbg
+acpdbg:
+	@$(MAKE) -s -C $(BACKEND_DIR) acpdbg ARGS="$(ARGS)"
+
 .PHONY: build-backend-quiet
 build-backend-quiet:
 	@printf "  $(DIM)Backend$(RESET)\n"

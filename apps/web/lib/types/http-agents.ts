@@ -78,14 +78,27 @@ export type AgentCapabilities = {
 export type ModelEntry = {
   id: string;
   name: string;
+  description?: string;
   provider?: string;
   context_window?: number;
   is_default?: boolean;
   source?: "static" | "dynamic";
+  /**
+   * Agent-specific extras from ACP's `_meta` field. GitHub Copilot exposes
+   * `copilotUsage` (e.g. "1x", "0.33x", "0x" — premium-request multiplier)
+   * and `copilotEnablement`.
+   */
+  meta?: Record<string, unknown>;
 };
 
 export type ModeEntry = {
   id: string;
+  name: string;
+  description?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type CommandEntry = {
   name: string;
   description?: string;
 };
@@ -107,6 +120,7 @@ export type ModelConfig = {
   current_model_id?: string;
   available_modes?: ModeEntry[];
   current_mode_id?: string;
+  available_commands?: CommandEntry[];
   supports_dynamic_models: boolean;
   status?: CapabilityStatus;
   error?: string;
@@ -119,6 +133,7 @@ export type DynamicModelsResponse = {
   current_model_id?: string;
   modes?: ModeEntry[];
   current_mode_id?: string;
+  commands?: CommandEntry[];
   error: string | null;
 };
 

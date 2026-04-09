@@ -43,6 +43,8 @@ type AgentCapabilities struct {
 	Modes         []Mode `json:"modes,omitempty"`
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
+	Commands []Command `json:"commands,omitempty"`
+
 	LastCheckedAt time.Time `json:"last_checked_at"`
 	DurationMs    int       `json:"duration_ms,omitempty"`
 }
@@ -54,25 +56,39 @@ type PromptCapabilities struct {
 	EmbeddedContext bool `json:"embedded_context,omitempty"`
 }
 
-// AuthMethod is a single advertised authentication method.
+// AuthMethod is a single advertised authentication method. Meta carries
+// agent-specific extras from ACP's `_meta` field (e.g. amp/copilot's
+// `terminal-auth` launchable-login descriptor).
 type AuthMethod struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
-// Model is a single advertised model.
+// Model is a single advertised model. Meta carries agent-specific extras
+// from ACP's `_meta` field — e.g. GitHub Copilot exposes `copilotUsage`
+// ("1x", "0.33x", "0x") and `copilotEnablement` here.
 type Model struct {
-	ID          string `json:"id"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+// Command is a single advertised slash command from the ACP
+// `available_commands_update` notification.
+type Command struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
 // Mode is a single advertised session mode.
 type Mode struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

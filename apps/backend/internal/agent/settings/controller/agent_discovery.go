@@ -176,9 +176,11 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 	cfg.CurrentModeID = caps.CurrentModeID
 	for _, m := range caps.Models {
 		cfg.AvailableModels = append(cfg.AvailableModels, dto.ModelEntryDTO{
-			ID:        m.ID,
-			Name:      m.Name,
-			IsDefault: m.ID == caps.CurrentModelID,
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+			IsDefault:   m.ID == caps.CurrentModelID,
+			Meta:        m.Meta,
 		})
 	}
 	for _, m := range caps.Modes {
@@ -186,6 +188,13 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 			ID:          m.ID,
 			Name:        m.Name,
 			Description: m.Description,
+			Meta:        m.Meta,
+		})
+	}
+	for _, c := range caps.Commands {
+		cfg.AvailableCommands = append(cfg.AvailableCommands, dto.CommandEntryDTO{
+			Name:        c.Name,
+			Description: c.Description,
 		})
 	}
 	return cfg

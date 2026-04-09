@@ -71,6 +71,11 @@ type ProbeResponse struct {
 	// CurrentModeID is the default/current mode selected by the agent.
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
+	// Commands are the slash commands the agent advertises via the
+	// `available_commands_update` session notification (drained briefly
+	// after session/new).
+	Commands []ProbeCommand `json:"commands,omitempty"`
+
 	// LoadSession indicates if the agent supports session/load.
 	LoadSession bool `json:"load_session,omitempty"`
 	// PromptCapabilities reports which content block types the agent accepts.
@@ -79,21 +84,33 @@ type ProbeResponse struct {
 
 // ProbeAuthMethod is a single advertised authentication method.
 type ProbeAuthMethod struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
-// ProbeModel is a single advertised model.
+// ProbeModel is a single advertised model. Meta carries agent-specific
+// extras from ACP's `_meta` field — e.g. GitHub Copilot exposes
+// `copilotUsage` ("1x", "0.33x", "0x") and `copilotEnablement` here.
 type ProbeModel struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
 // ProbeMode is a single advertised session mode.
 type ProbeMode struct {
-	ID          string `json:"id"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+// ProbeCommand is a single slash command advertised by the agent via the
+// ACP `available_commands_update` session notification.
+type ProbeCommand struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }

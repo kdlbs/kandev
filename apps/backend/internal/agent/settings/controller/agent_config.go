@@ -246,9 +246,11 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 	}
 	for _, m := range caps.Models {
 		resp.Models = append(resp.Models, dto.ModelEntryDTO{
-			ID:        m.ID,
-			Name:      m.Name,
-			IsDefault: m.ID == caps.CurrentModelID,
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+			IsDefault:   m.ID == caps.CurrentModelID,
+			Meta:        m.Meta,
 		})
 	}
 	for _, m := range caps.Modes {
@@ -256,6 +258,13 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			ID:          m.ID,
 			Name:        m.Name,
 			Description: m.Description,
+			Meta:        m.Meta,
+		})
+	}
+	for _, c := range caps.Commands {
+		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{
+			Name:        c.Name,
+			Description: c.Description,
 		})
 	}
 	return resp, nil

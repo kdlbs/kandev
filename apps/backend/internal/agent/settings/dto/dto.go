@@ -69,19 +69,25 @@ type AgentCapabilitiesDTO struct {
 type ModelEntryDTO struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
+	Description   string `json:"description,omitempty"`
 	Provider      string `json:"provider"`
 	ContextWindow int    `json:"context_window"`
 	IsDefault     bool   `json:"is_default"`
 	Source        string `json:"source,omitempty"`
+	// Meta carries agent-specific extras from ACP's `_meta` field. For
+	// GitHub Copilot this includes `copilotUsage` (e.g. "1x", "0.33x",
+	// "0x" — the premium-request multiplier) and `copilotEnablement`.
+	Meta map[string]any `json:"meta,omitempty"`
 }
 
 type ModelConfigDTO struct {
-	DefaultModel          string          `json:"default_model"`
-	AvailableModels       []ModelEntryDTO `json:"available_models"`
-	CurrentModelID        string          `json:"current_model_id,omitempty"`
-	AvailableModes        []ModeEntryDTO  `json:"available_modes,omitempty"`
-	CurrentModeID         string          `json:"current_mode_id,omitempty"`
-	SupportsDynamicModels bool            `json:"supports_dynamic_models"`
+	DefaultModel          string            `json:"default_model"`
+	AvailableModels       []ModelEntryDTO   `json:"available_models"`
+	CurrentModelID        string            `json:"current_model_id,omitempty"`
+	AvailableModes        []ModeEntryDTO    `json:"available_modes,omitempty"`
+	CurrentModeID         string            `json:"current_mode_id,omitempty"`
+	AvailableCommands     []CommandEntryDTO `json:"available_commands,omitempty"`
+	SupportsDynamicModels bool              `json:"supports_dynamic_models"`
 	// Status reflects the host utility probe state for this agent type:
 	// "probing" | "ok" | "auth_required" | "not_installed" | "failed".
 	Status string `json:"status,omitempty"`
@@ -161,18 +167,26 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName      string          `json:"agent_name"`
-	Status         string          `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models         []ModelEntryDTO `json:"models"`
-	CurrentModelID string          `json:"current_model_id,omitempty"`
-	Modes          []ModeEntryDTO  `json:"modes,omitempty"`
-	CurrentModeID  string          `json:"current_mode_id,omitempty"`
-	Error          *string         `json:"error"`
+	AgentName      string            `json:"agent_name"`
+	Status         string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models         []ModelEntryDTO   `json:"models"`
+	CurrentModelID string            `json:"current_model_id,omitempty"`
+	Modes          []ModeEntryDTO    `json:"modes,omitempty"`
+	CurrentModeID  string            `json:"current_mode_id,omitempty"`
+	Commands       []CommandEntryDTO `json:"commands,omitempty"`
+	Error          *string           `json:"error"`
 }
 
 // ModeEntryDTO is a single ACP session mode advertised by an agent.
 type ModeEntryDTO struct {
-	ID          string `json:"id"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+// CommandEntryDTO is a slash command advertised by the agent.
+type CommandEntryDTO struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }

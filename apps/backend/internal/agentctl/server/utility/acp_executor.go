@@ -264,16 +264,38 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 }
 
 // probeACPSession performs initialize + session/new and returns the parsed
-// capabilities, without sending any prompt or running session/prompt.
+// capabilities, without sending any prompt or running session/prompt. After
+// session/new, it briefly drains out-of-band notifications to capture the
+// `available_commands_update` notification which some agents emit post-session.
 func (e *ACPInferenceExecutor) probeACPSession(
 	ctx context.Context,
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
 ) (*ProbeResponse, error) {
+	var mu sync.Mutex
+	var commands []ProbeCommand
+	gotCommands := make(chan struct{}, 1)
+	updateHandler := func(n acp.SessionNotification) {
+		if n.Update.AvailableCommandsUpdate == nil {
+			return
+		}
+		mu.Lock()
+		commands = commands[:0]
+		for _, c := range n.Update.AvailableCommandsUpdate.AvailableCommands {
+			commands = append(commands, ProbeCommand{Name: c.Name, Description: c.Description})
+		}
+		mu.Unlock()
+		select {
+		case gotCommands <- struct{}{}:
+		default:
+		}
+	}
+
 	client := acpclient.NewClient(
 		acpclient.WithLogger(e.logger),
 		acpclient.WithWorkspaceRoot(workDir),
+		acpclient.WithUpdateHandler(updateHandler),
 	)
 
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
@@ -298,8 +320,20 @@ func (e *ACPInferenceExecutor) probeACPSession(
 		return nil, fmt.Errorf("ACP session/new failed: %w", err)
 	}
 
+	// Wait up to 1s for the available_commands_update notification. Agents
+	// that don't advertise commands (or push them later) simply yield an
+	// empty Commands slice.
+	select {
+	case <-gotCommands:
+	case <-time.After(1 * time.Second):
+	case <-ctx.Done():
+	}
+
 	out := buildInitProbeFields(initResp)
 	applySessionProbeFields(out, sessionResp)
+	mu.Lock()
+	out.Commands = append([]ProbeCommand(nil), commands...)
+	mu.Unlock()
 	return out, nil
 }
 
@@ -324,6 +358,7 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 			ID:          string(m.Id), //nolint:unconvert // AuthMethodId is a named string type; conversion required
 			Name:        m.Name,
 			Description: derefString(m.Description),
+			Meta:        m.Meta,
 		})
 	}
 	return out
@@ -338,6 +373,7 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 				ID:          string(m.ModelId),
 				Name:        m.Name,
 				Description: derefString(m.Description),
+				Meta:        m.Meta,
 			})
 		}
 	}
@@ -348,6 +384,7 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 				ID:          string(m.Id),
 				Name:        m.Name,
 				Description: derefString(m.Description),
+				Meta:        m.Meta,
 			})
 		}
 	}
