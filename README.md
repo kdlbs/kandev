@@ -144,7 +144,7 @@ make dev
 
 # Or run separately
 make dev-backend    # Backend on :8080
-make dev-web        # Frontend on :3000
+make dev-web        # Frontend on :37429
 ```
 
 ### Testing & Linting

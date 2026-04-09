@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const defaultDevOrigins = [
   "localhost",
-  "localhost:3000",
+  "localhost:37429",
   "192.168.1.116", // Maintainer dev server
   "100.105.155.17", // Maintainer dev server (Tailscale)
 ];

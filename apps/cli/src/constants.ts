@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Default service ports (will auto-fallback if busy).
 export const DEFAULT_BACKEND_PORT = 8080;
-export const DEFAULT_WEB_PORT = 3000;
+export const DEFAULT_WEB_PORT = 37429;
 export const DEFAULT_AGENTCTL_PORT = 9999;
 export const DEFAULT_MCP_PORT = 9090;
 

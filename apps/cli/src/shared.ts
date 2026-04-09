@@ -96,7 +96,7 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     ...process.env,
     // Server-side: full localhost URL for SSR fetches (Next.js SSR → Go backend)
     KANDEV_API_BASE_URL: ports.backendUrl,
-    // Client-side: port injection for dev mode (browser on :3000, API on :8080).
+    // Client-side: port injection for dev mode (browser on web port, API on backend port).
     // In production, the backend reverse-proxies Next.js so the client uses same-origin.
     NEXT_PUBLIC_KANDEV_API_PORT: String(ports.backendPort),
     PORT: String(ports.webPort),

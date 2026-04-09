@@ -50,7 +50,7 @@ npm install -g kandev
 # Run the latest release (recommended for users)
 npx kandev
 
-# Opens the app at http://localhost:3000 (or next available port)
+# Opens the app at http://localhost:37429 (or next available port)
 ```
 
 ## Commands
@@ -113,7 +113,7 @@ npx kandev start
 |--------|-------------|---------|
 | `--version <tag>` | Use a specific release version | `--version v0.1.0` |
 | `--backend-port <port>` | Override backend port | `--backend-port 8080` |
-| `--web-port <port>` | Override web port | `--web-port 3000` |
+| `--web-port <port>` | Override web port | `--web-port 37429` |
 | `--help`, `-h` | Show help | `--help` |
 
 ### Examples
@@ -126,7 +126,7 @@ npx kandev --version v0.1.0
 npx kandev --backend-port 18080 --web-port 13000
 
 # Dev mode with custom ports
-npx kandev dev --backend-port 8080 --web-port 3000
+npx kandev dev --backend-port 8080 --web-port 13000
 ```
 
 ## Port Selection
@@ -136,7 +136,7 @@ By default, the CLI automatically finds available ports:
 | Service | Default Port | Fallback |
 |---------|--------------|----------|
 | Backend | 8080 | Auto-selects from 10000-60000 |
-| Web | 3000 | Auto-selects from 10000-60000 |
+| Web | 37429 | Auto-selects from 10000-60000 |
 | AgentCtl | 8081 | Auto-selects from 10000-60000 |
 | MCP Server | 8082 | Auto-selects from 10000-60000 |
 
@@ -186,7 +186,7 @@ See `make help` for all available commands.
 The CLI automatically finds available ports. If you need a specific port:
 
 ```bash
-npx kandev --backend-port 8080 --web-port 3000
+npx kandev --backend-port 8080 --web-port 37429
 ```
 
 ### Backend Takes Too Long to Start

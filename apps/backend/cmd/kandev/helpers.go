@@ -468,10 +468,9 @@ func registerRoutes(p routeParams) {
 		} else {
 			proxy := httputil.NewSingleHostReverseProxy(target)
 			proxy.FlushInterval = -1
-			// Custom error handler to prevent the default behavior of panicking
-			// with http.ErrAbortHandler when the upstream connection fails or the
-			// client disconnects. Without this, Gin's recovery middleware catches
-			// the panic and logs a full (harmless but noisy) stack trace.
+			// ErrorHandler catches upstream failures (e.g., connection refused)
+			// that occur before any response headers are written, returning a
+			// clean 502 instead of letting the default handler log an error.
 			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
 				p.log.Debug("Web proxy error", zap.Error(err))
 				w.WriteHeader(http.StatusBadGateway)
@@ -482,6 +481,19 @@ func registerRoutes(p routeParams) {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
+				// httputil.ReverseProxy panics with http.ErrAbortHandler as an
+				// intentional stdlib signal when a streaming response is aborted
+				// (e.g., the client disconnects mid-body, or the upstream dies
+				// after response headers were already written). net/http.Server
+				// understands this sentinel panic and closes the connection
+				// quietly, but Gin's recovery middleware catches it first and
+				// logs a noisy stack trace. Swallow that specific panic here
+				// while letting any other panic bubble up to Gin's recovery.
+				defer func() {
+					if r := recover(); r != nil && r != http.ErrAbortHandler {
+						panic(r)
+					}
+				}()
 				proxy.ServeHTTP(c.Writer, c.Request)
 			})
 			p.log.Info("Web reverse proxy enabled", zap.String("target", p.webInternalURL))

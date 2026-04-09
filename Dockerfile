@@ -118,4 +118,4 @@ EXPOSE 8080
 
 # tini as PID 1 for signal handling; entrypoint handles privilege drop
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
-CMD ["kandev", "start", "--backend-port", "8080", "--web-port", "3000", "--verbose"]
+CMD ["kandev", "start", "--backend-port", "8080", "--web-port", "37429", "--verbose"]

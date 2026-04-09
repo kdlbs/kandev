@@ -55,7 +55,7 @@ help:
 	@echo "Development Commands:"
 	@echo "  dev              Run backend + web via CLI (auto ports)"
 	@echo "  dev-backend      Run backend in development mode (port 8080)"
-	@echo "  dev-web          Run web app in development mode (port 3000)"
+	@echo "  dev-web          Run web app in development mode (port 37429)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
 	@echo ""
 	@echo "Production Commands:"
@@ -121,8 +121,8 @@ dev-backend:
 
 .PHONY: dev-web
 dev-web:
-	@echo "Starting web app on http://localhost:3000"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev
+	@echo "Starting web app on http://localhost:37429"
+	@cd $(APPS_DIR) && PORT=37429 $(PNPM) --filter @kandev/web dev
 
 #
 # Build
