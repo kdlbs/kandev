@@ -171,6 +171,13 @@ func runProbe(ctx context.Context, args []string) error {
 
 	res, err := acpdbg.Probe(runCtx, runner)
 	if err != nil {
+		if acpdbg.IsAuthErrorMessage(err.Error()) {
+			fmt.Printf("agent:            %s\n", cfg.AgentID)
+			fmt.Printf("jsonl:            %s\n", runner.Path())
+			fmt.Printf("status:           auth_required\n")
+			fmt.Printf("error:            %v\n", err)
+			return nil
+		}
 		fmt.Fprintf(os.Stderr, "probe failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "jsonl: %s\n", runner.Path())
 		return err

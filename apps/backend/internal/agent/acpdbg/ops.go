@@ -8,6 +8,21 @@ import (
 	"strings"
 )
 
+// IsAuthErrorMessage is a coarse substring heuristic mirroring
+// hostutility.isAuthError. ACP auth failures bubble up as plain-text
+// JSON-RPC errors without a distinct code, so we match obvious markers so
+// callers can route the user to the login flow; anything unmatched stays
+// as a generic failure.
+func IsAuthErrorMessage(s string) bool {
+	lower := strings.ToLower(s)
+	for _, needle := range []string{"auth", "login", "unauthorized", "credential", "api key", "token"} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProbeResult is the parsed summary of a successful probe. It mirrors the
 // high-level fields we extract from `initialize` and `session/new` so the
 // CLI's `matrix` summary and the skill don't have to re-parse JSONL.

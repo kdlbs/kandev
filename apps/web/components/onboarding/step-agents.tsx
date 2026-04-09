@@ -2,12 +2,14 @@
 
 import { useCallback, useState } from "react";
 import {
+  IconAlertTriangle,
   IconCheck,
   IconClipboard,
   IconChevronDown,
   IconLoader2,
   IconDownload,
   IconExternalLink,
+  IconLock,
 } from "@tabler/icons-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
 import { AgentLogo } from "@/components/agent-logo";
@@ -54,6 +56,36 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function StatusPill({ status }: { status: string }) {
+  switch (status) {
+    case "auth_required":
+      return (
+        <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+          <IconLock className="h-3.5 w-3.5" />
+          No auth
+        </span>
+      );
+    case "not_installed":
+      return (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">Not installed</span>
+      );
+    case "failed":
+      return (
+        <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+          <IconAlertTriangle className="h-3.5 w-3.5" />
+          Error
+        </span>
+      );
+    default:
+      return (
+        <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+          <IconCheck className="h-3.5 w-3.5" />
+          Installed
+        </span>
+      );
+  }
+}
+
 function InstalledAgentRow({
   agent,
   settings,
@@ -70,6 +102,8 @@ function InstalledAgentRow({
   const currentModel = settings?.formData.model || agent.model_config.default_model;
   const modelName =
     agent.model_config.available_models.find((m) => m.id === currentModel)?.name ?? currentModel;
+  const status = agent.model_config.status ?? "ok";
+  const showModelPill = status === "ok" && !!modelName;
 
   return (
     <Collapsible open={isOpen} onOpenChange={onToggle}>
@@ -82,13 +116,12 @@ function InstalledAgentRow({
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium">{agent.display_name}</p>
           </div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium truncate max-w-[120px]">
-            {modelName}
-          </span>
-          <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-            <IconCheck className="h-3.5 w-3.5" />
-            Installed
-          </span>
+          {showModelPill && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium truncate max-w-[120px]">
+              {modelName}
+            </span>
+          )}
+          <StatusPill status={status} />
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>

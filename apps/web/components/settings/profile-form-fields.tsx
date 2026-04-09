@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { IconRefresh, IconAlertCircle, IconSelector, IconTerminal2 } from "@tabler/icons-react";
+import {
+  IconRefresh,
+  IconAlertCircle,
+  IconLock,
+  IconPackageOff,
+  IconSelector,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -362,6 +369,58 @@ function CommandsButton({ commands }: { commands: CommandEntry[] }) {
   );
 }
 
+function NoAuthPanel({
+  agentName,
+  status,
+  isLoading,
+  onRefresh,
+  error,
+}: {
+  agentName: string;
+  status: "auth_required" | "not_installed";
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
+  error: string | null;
+}) {
+  const isAuth = status === "auth_required";
+  const Icon = isAuth ? IconLock : IconPackageOff;
+  const title = isAuth ? "No auth — login required" : "Not installed";
+  const hint = isAuth ? (
+    <>
+      Run <code className="font-mono bg-muted px-1 py-0.5 rounded">{agentName} login</code> in your
+      terminal, then click Refresh.
+    </>
+  ) : (
+    <>Install the agent CLI, then click Refresh.</>
+  );
+  return (
+    <div
+      data-testid="profile-no-auth-panel"
+      data-status={status}
+      className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
+    >
+      <Icon className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="flex-1 min-w-0 space-y-1">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onRefresh}
+        disabled={isLoading}
+        className="cursor-pointer shrink-0"
+        data-testid="profile-no-auth-refresh"
+      >
+        <IconRefresh className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+        Refresh
+      </Button>
+    </div>
+  );
+}
+
 function CapabilitiesRow({
   profile,
   models,
@@ -375,6 +434,7 @@ function CapabilitiesRow({
   onRefresh,
   error,
   modelConfig,
+  agentName,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -388,6 +448,7 @@ function CapabilitiesRow({
   onRefresh: () => Promise<void>;
   error: string | null;
   modelConfig: ModelConfig;
+  agentName: string;
 }) {
   const hasModes = modes.length > 0;
   const activeMode = hasModes
@@ -402,6 +463,19 @@ function CapabilitiesRow({
         <Label className={labelCls}>Start model</Label>
         <Skeleton className="h-9 w-full" />
       </div>
+    );
+  }
+
+  const status = modelConfig.status;
+  if (status === "auth_required" || status === "not_installed") {
+    return (
+      <NoAuthPanel
+        agentName={agentName}
+        status={status}
+        isLoading={isLoading}
+        onRefresh={onRefresh}
+        error={error}
+      />
     );
   }
 
@@ -504,6 +578,7 @@ export function ProfileFormFields({
         commands={caps.commands}
         currentModelId={caps.currentModelId}
         currentModeId={caps.currentModeId}
+        agentName={agentName}
         onChange={onChange}
         isCompact={isCompact}
         isLoading={caps.isLoading}
