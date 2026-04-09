@@ -107,7 +107,7 @@ export function ModelCombobox({
                           <span className="text-muted-foreground text-xs">(default)</span>
                         )}
                       </div>
-                      {model.description && (
+                      {model.description && model.description !== model.name && (
                         <p className="text-xs text-muted-foreground truncate">
                           {model.description}
                         </p>

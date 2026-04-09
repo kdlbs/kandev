@@ -1,23 +1,13 @@
 "use client";
 
-import { useState } from "react";
 import {
   IconRefresh,
   IconAlertCircle,
   IconLock,
   IconPackageOff,
-  IconSelector,
   IconTerminal2,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@kandev/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -28,10 +18,10 @@ import {
 } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
@@ -268,70 +258,13 @@ function ModePicker({
   currentModeId: string | undefined;
   onChange: (patch: Partial<ProfileFormData>) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selected = profile.mode || currentModeId || modes[0]?.id || "";
-  const activeMode = modes.find((m) => m.id === selected);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          data-testid="profile-mode-select"
-          className="w-full justify-between font-normal cursor-pointer"
-        >
-          <span className="flex items-center gap-2 truncate">
-            {activeMode?.name ?? selected}
-            {activeMode?.id === currentModeId && (
-              <span className="text-muted-foreground">(default)</span>
-            )}
-          </span>
-          <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="min-w-[--radix-popover-trigger-width] w-[min(32rem,calc(100vw-2rem))] p-0"
-        align="start"
-        onWheel={(e) => e.stopPropagation()}
-      >
-        <Command>
-          <CommandInput placeholder="Search modes..." />
-          <CommandList
-            className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain"
-            onWheel={(e) => e.stopPropagation()}
-          >
-            <CommandEmpty>No mode found.</CommandEmpty>
-            <CommandGroup>
-              {modes.map((m) => (
-                <CommandItem
-                  key={m.id}
-                  value={`${m.id} ${m.name}`}
-                  onSelect={() => {
-                    onChange({ mode: m.id });
-                    setOpen(false);
-                  }}
-                  data-checked={selected === m.id}
-                  className="cursor-pointer"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="truncate">{m.name}</span>
-                      {m.id === currentModeId && (
-                        <span className="text-muted-foreground text-xs">(default)</span>
-                      )}
-                    </div>
-                    {m.description && (
-                      <p className="text-xs text-muted-foreground truncate">{m.description}</p>
-                    )}
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+    <ModeCombobox
+      value={profile.mode}
+      onChange={(value) => onChange({ mode: value })}
+      modes={modes}
+      currentModeId={currentModeId}
+    />
   );
 }
 
