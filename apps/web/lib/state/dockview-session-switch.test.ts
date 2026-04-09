@@ -16,7 +16,8 @@ vi.mock("./layout-manager", () => ({
   layoutStructuresMatch: vi.fn(() => false),
 }));
 
-import { layoutStructuresMatch } from "./layout-manager";
+import { getSessionLayout } from "@/lib/local-storage";
+import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
 
 function makeMockApi() {
   return {
@@ -42,7 +43,10 @@ function makeParams(overrides?: Partial<SessionSwitchParams>): SessionSwitchPara
 
 describe("performSessionSwitch", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.mocked(getSessionLayout).mockReturnValue(null);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValue(false);
+    vi.mocked(layoutStructuresMatch).mockReturnValue(false);
   });
 
   it("calls api.layout on the fast path when structures match", () => {
@@ -52,6 +56,17 @@ describe("performSessionSwitch", () => {
     performSessionSwitch(params);
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
+  });
+
+  it("calls api.layout on the fast path when saved layout matches", () => {
+    vi.mocked(getSessionLayout).mockReturnValue({ grid: {} } as any);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValue(true);
+    const params = makeParams();
+
+    performSessionSwitch(params);
+
+    expect(params.api.layout).toHaveBeenCalledWith(800, 600);
+    expect(params.api.fromJSON).not.toHaveBeenCalled();
   });
 
   it("calls api.layout on the slow path (buildDefault fallback)", () => {
