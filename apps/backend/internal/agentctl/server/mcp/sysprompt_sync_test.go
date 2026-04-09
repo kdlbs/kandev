@@ -25,23 +25,24 @@ func extractKandevTools(prompt string) map[string]struct{} {
 	return out
 }
 
-// findBareToolReferences scans `prompt` for occurrences of any `bareName` from
-// `bareNames` that are NOT followed by `_kandev`. Returns the list of bare names
-// found in this state. Used to catch sysprompt drift in the opposite direction
-// of the v0.28 bug — i.e. a prompt that says `get_task_plan` (no suffix) when
-// the registered tool is `get_task_plan_kandev`.
+// findBareToolReferences scans `prompt` for any whole-word occurrence of a
+// `bareName`. Returns the sorted list of bare names found. Used to catch
+// sysprompt drift in the opposite direction of the v0.28 bug — i.e. a prompt
+// that says `get_task_plan` (no suffix) when the registered tool is
+// `get_task_plan_kandev`.
+//
+// `\b` in Go's RE2 fires at a transition between a word char (`[A-Za-z0-9_]`)
+// and a non-word char. Since `_` is a word char, `\b<bare>\b` cannot match
+// inside `<bare>_kandev` — the trailing `\b` requires a non-word char after the
+// last letter of `bare`, and `_` fails that test. So this regex naturally
+// distinguishes bare references from the suffixed form without an explicit
+// suffix guard.
 func findBareToolReferences(prompt string, bareNames map[string]struct{}) []string {
-	const suffix = "_kandev"
 	var found []string
 	for bare := range bareNames {
 		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(bare) + `\b`)
-		for _, idx := range re.FindAllStringIndex(prompt, -1) {
-			end := idx[1]
-			if end+len(suffix) <= len(prompt) && prompt[end:end+len(suffix)] == suffix {
-				continue // matched the suffixed form, ignore
-			}
+		if re.MatchString(prompt) {
 			found = append(found, bare)
-			break
 		}
 	}
 	sort.Strings(found)
@@ -162,5 +163,56 @@ func TestSyspromptToolNames_NoBareToolReferences(t *testing.T) {
 		assert.Empty(t, bare,
 			"sysprompt %s contains tool name(s) without the _kandev suffix: %v — every reference must use the suffixed form",
 			name, bare)
+	}
+}
+
+// TestFindBareToolReferences_DistinguishesSuffixedFromBare locks in the
+// regex-word-boundary contract that findBareToolReferences relies on. If a
+// future Go release changes `\b` semantics for `_`, the production tests above
+// would silently start passing or failing for the wrong reasons; this unit
+// test surfaces the change at its source.
+func TestFindBareToolReferences_DistinguishesSuffixedFromBare(t *testing.T) {
+	bareNames := map[string]struct{}{
+		"create_task_plan": {},
+		"list_executors":   {},
+	}
+
+	cases := []struct {
+		name   string
+		prompt string
+		want   []string
+	}{
+		{
+			name:   "bare name in prose is flagged",
+			prompt: "Use list_executors to find IDs.",
+			want:   []string{"list_executors"},
+		},
+		{
+			name:   "suffixed name is not flagged",
+			prompt: "Use list_executors_kandev to find IDs.",
+			want:   nil,
+		},
+		{
+			name:   "both forms in same prompt: only bare is flagged",
+			prompt: "list_executors_kandev (bare: list_executors) returns IDs.",
+			want:   []string{"list_executors"},
+		},
+		{
+			name:   "multiple bare names sorted in output",
+			prompt: "Call create_task_plan then list_executors.",
+			want:   []string{"create_task_plan", "list_executors"},
+		},
+		{
+			name:   "no references",
+			prompt: "Hello world.",
+			want:   nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findBareToolReferences(tc.prompt, bareNames)
+			assert.Equal(t, tc.want, got)
+		})
 	}
 }
