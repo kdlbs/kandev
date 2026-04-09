@@ -192,8 +192,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
-	if err := validateCommandName(cfg.Command[0]); err != nil {
-		return &ProbeResponse{Success: false, Error: err.Error()}, nil
+	resolvedCmd := resolveProbeCommand(cfg.Command[0])
+	if resolvedCmd == "" {
+		return &ProbeResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP probe command", cfg.Command[0])}, nil
 	}
 
 	startTime := time.Now()
@@ -206,8 +207,10 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		zap.String("agent_id", req.AgentID),
 		zap.Strings("command", args))
 
-	//nolint:gosec // args[0] is validated above; args come from the trusted agent registry via InferenceConfig
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
+	// the executable name is not derived from tainted input.
+	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
+	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
 
 	stdin, err := cmd.StdinPipe()
@@ -337,24 +340,21 @@ func derefString(p *string) string {
 	return *p
 }
 
-// allowedProbeCommands is the fixed set of executables a probe is permitted
-// to launch. The agent registry always uses one of these to wrap an ACP CLI,
-// so validating against this list satisfies CodeQL's taint analysis without
-// restricting real usage.
-var allowedProbeCommands = map[string]struct{}{
-	"npx":      {},
-	"auggie":   {},
-	"opencode": {},
+// allowedProbeCommands maps each permitted executable base name to a
+// constant string literal. Spawning must pass one of these literal strings
+// to exec.Command so CodeQL's taint tracker can see that the command name
+// is not derived from untrusted input — even though the value is
+// semantically the same as the base name taken from InferenceConfig.Command.
+var allowedProbeCommands = map[string]string{
+	"npx":      "npx",
+	"auggie":   "auggie",
+	"opencode": "opencode",
 }
 
-// validateCommandName returns an error if the command is not in the allow-list.
-// This runs on the agentctl-server side before spawning the ACP subprocess.
-func validateCommandName(name string) error {
-	base := filepath.Base(name)
-	if _, ok := allowedProbeCommands[base]; !ok {
-		return fmt.Errorf("command %q is not an allowed ACP probe command", base)
-	}
-	return nil
+// resolveProbeCommand validates and returns a hard-coded executable name for
+// the given command. Returns the empty string if the command is not allowed.
+func resolveProbeCommand(name string) string {
+	return allowedProbeCommands[filepath.Base(name)]
 }
 
 // buildACPCommand builds the command arguments for ACP inference.
