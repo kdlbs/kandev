@@ -135,8 +135,8 @@ export function useTaskCRUD() {
 
       const succeededMoves = new Map(
         tasks
-          .filter((_, i) => results[i].status === "fulfilled")
-          .map((task, idx) => [task.id, maxTargetPos + 1 + idx]),
+          .map((task, i) => (results[i].status === "fulfilled" ? [task.id, maxTargetPos + 1 + i] as const : null))
+          .filter((entry): entry is [string, number] => entry !== null),
       );
       store.getState().hydrate({
         kanban: {
