@@ -9,6 +9,18 @@ import type { useTaskActions } from "@/hooks/use-task-actions";
 
 type TaskActions = ReturnType<typeof useTaskActions>;
 
+async function performBulkAction(
+  tasks: KanbanState["tasks"][number][],
+  action: (id: string) => Promise<unknown>,
+  applySuccess: (succeededIds: Set<string>) => void,
+): Promise<void> {
+  const results = await Promise.allSettled(tasks.map((task) => action(task.id)));
+  const succeededIds = new Set(
+    tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
+  );
+  applySuccess(succeededIds);
+}
+
 export function useLaneTaskActions({
   workflowId,
   store,
@@ -23,21 +35,19 @@ export function useLaneTaskActions({
   moveTaskById: TaskActions["moveTaskById"];
 }) {
   const handleClearLane = useCallback(
-    async (tasks: Task[]) => {
+    async (tasks: KanbanState["tasks"][number][]) => {
       if (!workflowId || tasks.length === 0) return;
-
-      const results = await Promise.allSettled(tasks.map((task) => deleteTaskById(task.id)));
-
-      const deletedIds = new Set(
-        tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
-      );
-      store.getState().hydrate({
-        kanban: {
-          ...store.getState().kanban,
-          tasks: store
-            .getState()
-            .kanban.tasks.filter((item: KanbanState["tasks"][number]) => !deletedIds.has(item.id)),
-        },
+      await performBulkAction(tasks, deleteTaskById, (deletedIds) => {
+        store.getState().hydrate({
+          kanban: {
+            ...store.getState().kanban,
+            tasks: store
+              .getState()
+              .kanban.tasks.filter(
+                (item: KanbanState["tasks"][number]) => !deletedIds.has(item.id),
+              ),
+          },
+        });
       });
     },
     [deleteTaskById, workflowId, store],
@@ -91,23 +101,19 @@ export function useLaneTaskActions({
   );
 
   const handleArchiveLane = useCallback(
-    async (tasks: Task[]) => {
+    async (tasks: KanbanState["tasks"][number][]) => {
       if (!workflowId || tasks.length === 0) return;
-
-      const results = await Promise.allSettled(tasks.map((task) => archiveTaskById(task.id)));
-
-      const archivedIds = new Set(
-        tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
-      );
-      store.getState().hydrate({
-        kanban: {
-          ...store.getState().kanban,
-          tasks: store
-            .getState()
-            .kanban.tasks.filter(
-              (item: KanbanState["tasks"][number]) => !archivedIds.has(item.id),
-            ),
-        },
+      await performBulkAction(tasks, archiveTaskById, (archivedIds) => {
+        store.getState().hydrate({
+          kanban: {
+            ...store.getState().kanban,
+            tasks: store
+              .getState()
+              .kanban.tasks.filter(
+                (item: KanbanState["tasks"][number]) => !archivedIds.has(item.id),
+              ),
+          },
+        });
       });
     },
     [archiveTaskById, workflowId, store],

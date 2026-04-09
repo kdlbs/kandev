@@ -153,6 +153,131 @@ export function KanbanColumn({
   );
 }
 
+function MoveAllSubmenu({
+  tasks,
+  currentStepId,
+  steps,
+  onMoveLane,
+}: {
+  tasks: Task[];
+  currentStepId?: string;
+  steps: WorkflowStep[];
+  onMoveLane: (tasks: Task[], targetStepId: string) => Promise<void>;
+}) {
+  const otherSteps = steps.filter((s) => s.id !== currentStepId);
+  if (otherSteps.length === 0) return null;
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger
+        data-testid="lane-menu-move-all"
+        className="cursor-pointer"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        Move all to
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent>
+          {otherSteps.map((s) => (
+            <DropdownMenuItem
+              key={s.id}
+              data-testid={`lane-menu-move-to-${s.id}`}
+              className="cursor-pointer"
+              onSelect={() => onMoveLane(tasks, s.id)}
+            >
+              <div className={cn("w-2 h-2 rounded-full mr-2", s.color)} />
+              {s.title}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
+  );
+}
+
+function ArchiveConfirmDialog({
+  open,
+  onOpenChange,
+  isArchiving,
+  onConfirm,
+  tasks,
+  stepTitle,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isArchiving: boolean;
+  onConfirm: () => void;
+  tasks: Task[];
+  stepTitle: string;
+}) {
+  const taskWord = tasks.length !== 1 ? "tasks" : "task";
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Archive all</AlertDialogTitle>
+          <AlertDialogDescription>
+            Archive all {tasks.length} {taskWord} in &quot;{stepTitle}&quot;?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            data-testid="lane-confirm-archive"
+            disabled={isArchiving}
+            className="cursor-pointer"
+            onClick={onConfirm}
+          >
+            Archive all
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function ClearConfirmDialog({
+  open,
+  onOpenChange,
+  isClearing,
+  onConfirm,
+  tasks,
+  stepTitle,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isClearing: boolean;
+  onConfirm: () => void;
+  tasks: Task[];
+  stepTitle: string;
+}) {
+  const taskWord = tasks.length !== 1 ? "tasks" : "task";
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Clear lane</AlertDialogTitle>
+          <AlertDialogDescription>
+            Delete all {tasks.length} {taskWord} in &quot;{stepTitle}&quot;? This action cannot be
+            undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            data-testid="lane-confirm-clear"
+            disabled={isClearing}
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={onConfirm}
+          >
+            Delete all
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function ColumnMenu({
   tasks,
   stepTitle,
@@ -198,8 +323,6 @@ function ColumnMenu({
     }
   };
 
-  const taskWord = tasks.length !== 1 ? "tasks" : "task";
-
   return (
     <>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -219,34 +342,13 @@ function ColumnMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {onMoveLane && steps && steps.filter((s) => s.id !== currentStepId).length > 0 && (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger
-                data-testid="lane-menu-move-all"
-                className="cursor-pointer"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                Move all to
-              </DropdownMenuSubTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuSubContent>
-                  {steps
-                    .filter((s) => s.id !== currentStepId)
-                    .map((s) => (
-                      <DropdownMenuItem
-                        key={s.id}
-                        data-testid={`lane-menu-move-to-${s.id}`}
-                        className="cursor-pointer"
-                        onSelect={() => onMoveLane(tasks, s.id)}
-                      >
-                        <div className={cn("w-2 h-2 rounded-full mr-2", s.color)} />
-                        {s.title}
-                      </DropdownMenuItem>
-                    ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuPortal>
-            </DropdownMenuSub>
+          {onMoveLane && steps && (
+            <MoveAllSubmenu
+              tasks={tasks}
+              currentStepId={currentStepId}
+              steps={steps}
+              onMoveLane={onMoveLane}
+            />
           )}
           {onMoveLane && onArchiveLane && <DropdownMenuSeparator />}
           {onArchiveLane && (
@@ -272,52 +374,25 @@ function ColumnMenu({
       </DropdownMenu>
 
       {onArchiveLane && (
-        <AlertDialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Archive all</AlertDialogTitle>
-              <AlertDialogDescription>
-                Archive all {tasks.length} {taskWord} in &quot;{stepTitle}&quot;?
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                data-testid="lane-confirm-archive"
-                disabled={isArchiving}
-                className="cursor-pointer"
-                onClick={handleArchiveConfirm}
-              >
-                Archive all
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ArchiveConfirmDialog
+          open={archiveConfirmOpen}
+          onOpenChange={setArchiveConfirmOpen}
+          isArchiving={isArchiving}
+          onConfirm={handleArchiveConfirm}
+          tasks={tasks}
+          stepTitle={stepTitle}
+        />
       )}
 
       {onClearLane && (
-        <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear lane</AlertDialogTitle>
-              <AlertDialogDescription>
-                Delete all {tasks.length} {taskWord} in &quot;{stepTitle}&quot;? This action cannot
-                be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                data-testid="lane-confirm-clear"
-                disabled={isClearing}
-                className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={handleClearConfirm}
-              >
-                Delete all
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ClearConfirmDialog
+          open={clearConfirmOpen}
+          onOpenChange={setClearConfirmOpen}
+          isClearing={isClearing}
+          onConfirm={handleClearConfirm}
+          tasks={tasks}
+          stepTitle={stepTitle}
+        />
       )}
     </>
   );
