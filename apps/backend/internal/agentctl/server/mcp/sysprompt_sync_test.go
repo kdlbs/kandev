@@ -140,7 +140,9 @@ func TestSyspromptToolNames_NoBareToolReferences(t *testing.T) {
 	defer backend.Close()
 
 	taskServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, taskServer)
 	configServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
+	require.NotNil(t, configServer)
 
 	registered := make(map[string]struct{})
 	for _, name := range getRegisteredToolNames(taskServer) {
