@@ -83,6 +83,7 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
   // Session-scoped portals (terminal, browser, etc.) will be re-acquired
   // via usePortalSlot's sessionId dependency change.
   removeEphemeralPanels(api, newSessionId);
+  api.layout(params.safeWidth, params.safeHeight);
   return applyLayoutFixups(api);
 }
 
