@@ -255,7 +255,9 @@ test.describe("Config-mode MCP — agent management", () => {
 
     const page = await runAndWait(testPage, session.task_id, "Agents listed");
     await expect(page.chat.getByText("list_agents_kandev")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("list_agent_profiles_kandev")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_agent_profiles_kandev")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("agent can create and delete an agent profile", async ({
@@ -527,7 +529,7 @@ test.describe("Config-mode MCP — executor management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Executors listed");
-    await expect(page.chat.getByText("list_executors", { exact: true })).toBeVisible({
+    await expect(page.chat.getByText("list_executors_kandev", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
   });
