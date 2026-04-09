@@ -206,6 +206,7 @@ function ColumnMenu({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            data-testid={`lane-menu-trigger-${currentStepId}`}
             className={cn(
               "transition-opacity text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 cursor-pointer",
               menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
@@ -221,6 +222,7 @@ function ColumnMenu({
           {onMoveLane && steps && steps.filter((s) => s.id !== currentStepId).length > 0 && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger
+                data-testid="lane-menu-move-all"
                 className="cursor-pointer"
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -234,6 +236,7 @@ function ColumnMenu({
                     .map((s) => (
                       <DropdownMenuItem
                         key={s.id}
+                        data-testid={`lane-menu-move-to-${s.id}`}
                         className="cursor-pointer"
                         onSelect={() => onMoveLane(tasks, s.id)}
                       >
@@ -248,6 +251,7 @@ function ColumnMenu({
           {onMoveLane && onArchiveLane && <DropdownMenuSeparator />}
           {onArchiveLane && (
             <DropdownMenuItem
+              data-testid="lane-menu-archive-all"
               className="cursor-pointer"
               onSelect={() => setArchiveConfirmOpen(true)}
             >
@@ -257,6 +261,7 @@ function ColumnMenu({
           {onArchiveLane && onClearLane && <DropdownMenuSeparator />}
           {onClearLane && (
             <DropdownMenuItem
+              data-testid="lane-menu-clear"
               className="text-destructive focus:text-destructive cursor-pointer"
               onSelect={() => setClearConfirmOpen(true)}
             >
@@ -278,6 +283,7 @@ function ColumnMenu({
             <AlertDialogFooter>
               <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
               <AlertDialogAction
+                data-testid="lane-confirm-archive"
                 disabled={isArchiving}
                 className="cursor-pointer"
                 onClick={handleArchiveConfirm}
@@ -302,6 +308,7 @@ function ColumnMenu({
             <AlertDialogFooter>
               <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
               <AlertDialogAction
+                data-testid="lane-confirm-clear"
                 disabled={isClearing}
                 className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={handleClearConfirm}

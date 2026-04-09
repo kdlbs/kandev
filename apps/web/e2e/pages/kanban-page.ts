@@ -33,4 +33,37 @@ export class KanbanPage {
       has: this.page.locator('[data-testid="task-card-title"]', { hasText: title }),
     });
   }
+
+  laneMenuTrigger(stepId: string): Locator {
+    return this.page.getByTestId(`lane-menu-trigger-${stepId}`);
+  }
+
+  async openLaneMenu(stepId: string): Promise<void> {
+    await this.columnByStepId(stepId).hover();
+    await this.laneMenuTrigger(stepId).click();
+  }
+
+  laneMenuMoveAll(): Locator {
+    return this.page.getByTestId("lane-menu-move-all");
+  }
+
+  laneMenuMoveToStep(stepId: string): Locator {
+    return this.page.getByTestId(`lane-menu-move-to-${stepId}`);
+  }
+
+  laneMenuArchiveAll(): Locator {
+    return this.page.getByTestId("lane-menu-archive-all");
+  }
+
+  laneMenuClear(): Locator {
+    return this.page.getByTestId("lane-menu-clear");
+  }
+
+  laneConfirmArchive(): Locator {
+    return this.page.getByTestId("lane-confirm-archive");
+  }
+
+  laneConfirmClear(): Locator {
+    return this.page.getByTestId("lane-confirm-clear");
+  }
 }
