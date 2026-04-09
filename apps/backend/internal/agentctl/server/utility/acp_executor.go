@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -191,6 +192,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
+	if err := validateCommandName(cfg.Command[0]); err != nil {
+		return &ProbeResponse{Success: false, Error: err.Error()}, nil
+	}
 
 	startTime := time.Now()
 
@@ -202,6 +206,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		zap.String("agent_id", req.AgentID),
 		zap.Strings("command", args))
 
+	//nolint:gosec // args[0] is validated above; args come from the trusted agent registry via InferenceConfig
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = workDir
 
@@ -330,6 +335,26 @@ func derefString(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// allowedProbeCommands is the fixed set of executables a probe is permitted
+// to launch. The agent registry always uses one of these to wrap an ACP CLI,
+// so validating against this list satisfies CodeQL's taint analysis without
+// restricting real usage.
+var allowedProbeCommands = map[string]struct{}{
+	"npx":      {},
+	"auggie":   {},
+	"opencode": {},
+}
+
+// validateCommandName returns an error if the command is not in the allow-list.
+// This runs on the agentctl-server side before spawning the ACP subprocess.
+func validateCommandName(name string) error {
+	base := filepath.Base(name)
+	if _, ok := allowedProbeCommands[base]; !ok {
+		return fmt.Errorf("command %q is not an allowed ACP probe command", base)
+	}
+	return nil
 }
 
 // buildACPCommand builds the command arguments for ACP inference.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -220,9 +221,19 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 		zap.Int("modes", len(caps.Modes)))
 }
 
+// safeAgentTypeName validates that the string is safe for use as a single
+// filesystem path segment: only letters, digits, dash, and underscore. The
+// ACP agent IDs registered in the agent registry always satisfy this (they
+// are hardcoded Go identifiers), but we enforce it explicitly so CodeQL's
+// taint analysis can see that the value cannot escape the parent tmp dir.
+var safeAgentTypeName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // createInstance asks the control client to create a new workspace-only
 // agentctl instance in a tmp subdirectory dedicated to this agent type.
 func (m *Manager) createInstance(ctx context.Context, agentType string) (*instance, error) {
+	if !safeAgentTypeName.MatchString(agentType) {
+		return nil, fmt.Errorf("invalid agent type %q: must match %s", agentType, safeAgentTypeName.String())
+	}
 	workDir := filepath.Join(m.parentTmpDir, agentType)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", workDir, err)

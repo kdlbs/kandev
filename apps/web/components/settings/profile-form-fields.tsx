@@ -206,10 +206,7 @@ function ModeField({
   const selected = profile.mode || modelConfig.current_mode_id || "";
   const activeMode = modelConfig.available_modes.find((m) => m.id === selected);
   return (
-    <div
-      data-testid="profile-mode-field"
-      className={isCompact ? "space-y-1.5" : "space-y-2"}
-    >
+    <div data-testid="profile-mode-field" className={isCompact ? "space-y-1.5" : "space-y-2"}>
       {isCompact ? (
         <Label className="text-xs text-muted-foreground">Mode</Label>
       ) : (
