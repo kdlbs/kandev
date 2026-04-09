@@ -2,6 +2,13 @@
 
 All notable changes to Kandev.
 
+## 0.31 - 2026-04-09
+
+### Bug Fixes
+
+- keep file tree and terminal waiting through long prepare ([#564](https://github.com/kdlbs/kandev/pull/564))
+- stop discarding branch selection for local executor ([#558](https://github.com/kdlbs/kandev/pull/558))
+
 ## 0.30 - 2026-04-08
 
 ### Bug Fixes
