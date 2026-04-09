@@ -287,6 +287,10 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 
 **When you hit a limit:** extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+### Testing
+
+Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
+
 ### Knowledge
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are stored in `docs/plans/`. Save completed feature designs via `/record plan`.
@@ -312,6 +316,9 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 
 ### Plan Implementation
 - After implementing a plan, run `make fmt` first to format code, then run `make typecheck test lint` to verify the changes. Formatting must come first because formatters may split lines, which can trigger complexity linter warnings.
+
+### GitHub Operations
+Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
 ---
 

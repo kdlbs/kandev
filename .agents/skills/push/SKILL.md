@@ -19,6 +19,8 @@ description: Commit and push to the current branch. Use --fixup to also wait for
 
 - `--fixup` — after pushing, run `/pr-fixup` to wait for CI and CodeRabbit review, fix issues, and push again.
 
+> **Note:** This skill only uses `git push`. GitHub CLI dependency is indirect via `/pr-fixup`.
+
 ## Your task
 
 Commit any pending changes and push to the remote branch.

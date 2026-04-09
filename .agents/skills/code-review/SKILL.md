@@ -71,11 +71,12 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - `as any` or `as unknown as X` casts used to dodge type errors instead of fixing types
 - Defensive checks abnormal for the area of the codebase — compare with surrounding code patterns
 
-**Testing:**
-- Backend (Go): new or changed functions/methods should have corresponding tests
-- Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices should have tests
+**Testing (blocker if missing):**
+- Backend (Go): new or changed functions/methods must have corresponding `*_test.go` tests
+- Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices must have `*.test.ts` tests
 - We do NOT test React components — skip those
-- Flag untested logic but don't block on it; suggest what tests to add and recommend `/tdd`
+- Exceptions: config files, generated code, React component markup
+- Missing tests for new or changed logic is a **blocker** — suggest what tests to add and recommend `/tdd`
 
 ### 3. Fix or report
 
@@ -91,7 +92,7 @@ Use this format:
 ### Findings
 
 #### Blocker (must fix before merge)
-*Security holes, data loss risk, broken logic, crashes*
+*Security holes, data loss risk, broken logic, crashes, missing tests for new/changed logic*
 
 1. **[Title]** — `file.go:42`
    - Issue: what's wrong
@@ -99,7 +100,7 @@ Use this format:
    - Fix: concrete suggestion or code snippet
 
 #### Suggestion (recommended, doesn't block)
-*Performance problems, poor error handling, architectural concerns, missing tests*
+*Performance problems, poor error handling, architectural concerns*
 
 ### Summary
 

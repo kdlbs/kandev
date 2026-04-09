@@ -82,7 +82,7 @@ Before writing an E2E test, validate the feature works interactively using `play
 
 ### Start the dev environment
 
-Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports use 18080-18089 (backend) and 13000-13009 (frontend) — stay outside those ranges.
+Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports auto-offset from 18080 (backend) and 13000 (frontend) using `E2E_PORT_OFFSET` (derived from `PID % 30` by default) — stay outside those ranges. Parallel E2E test runs are safe by default.
 
 ```bash
 OFFSET=$((RANDOM % 100))
@@ -217,7 +217,7 @@ When a test fails:
 
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install`
-- **Port conflicts** — backends use 18080+, frontends use 13000+ (per worker)
+- **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
