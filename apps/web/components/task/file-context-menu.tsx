@@ -144,17 +144,17 @@ export function FileContextMenu({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
-          {onRenameFile && !isBulk && (
-            <ContextMenuItem onSelect={onStartRename}>
-              <IconPencil className="h-3.5 w-3.5" />
-              Rename
-            </ContextMenuItem>
-          )}
-          {onRenameFile && onDeleteFile && !isBulk && <ContextMenuSeparator />}
           {onDeleteFile && (
             <ContextMenuItem variant="destructive" onSelect={handleDelete}>
               <IconTrash className="h-3.5 w-3.5" />
               {deleteLabel}
+            </ContextMenuItem>
+          )}
+          {onRenameFile && onDeleteFile && !isBulk && <ContextMenuSeparator />}
+          {onRenameFile && !isBulk && (
+            <ContextMenuItem onSelect={onStartRename}>
+              <IconPencil className="h-3.5 w-3.5" />
+              Rename
             </ContextMenuItem>
           )}
         </ContextMenuContent>
