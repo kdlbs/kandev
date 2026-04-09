@@ -2,7 +2,6 @@
 
 import { useCallback } from "react";
 import type { StoreApi } from "zustand";
-import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type { useTaskActions } from "@/hooks/use-task-actions";
@@ -54,11 +53,14 @@ export function useLaneTaskActions({
   );
 
   const handleMoveLane = useCallback(
-    async (tasks: Task[], targetStepId: string) => {
+    async (tasks: KanbanState["tasks"][number][], targetStepId: string) => {
       if (!workflowId || tasks.length === 0) return;
 
+      const actionableTasks = tasks.filter((t) => t.workflowStepId !== targetStepId);
+      if (actionableTasks.length === 0) return;
+
       const currentTasks = store.getState().kanban.tasks;
-      const movedIds = new Set(tasks.map((t) => t.id));
+      const movedIds = new Set(actionableTasks.map((t) => t.id));
       const maxTargetPos = currentTasks
         .filter(
           (t: KanbanState["tasks"][number]) =>
@@ -70,7 +72,7 @@ export function useLaneTaskActions({
         );
 
       const results = await Promise.allSettled(
-        tasks.map((task, i) =>
+        actionableTasks.map((task, i) =>
           moveTaskById(task.id, {
             workflow_id: workflowId!,
             workflow_step_id: targetStepId,
@@ -80,7 +82,7 @@ export function useLaneTaskActions({
       );
 
       const succeededMoves = new Map(
-        tasks
+        actionableTasks
           .map((task, i) =>
             results[i].status === "fulfilled" ? ([task.id, maxTargetPos + 1 + i] as const) : null,
           )
