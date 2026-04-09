@@ -3,6 +3,7 @@ import type {
   AgentProfile,
   AvailableAgent,
   AgentDiscovery,
+  CapabilityStatus,
   CustomPrompt,
   EditorOption,
   Executor,
@@ -40,11 +41,18 @@ export type AgentProfileOption = {
   agent_id: string;
   agent_name: string;
   cli_passthrough: boolean;
+  /**
+   * Host utility probe status for the agent this profile belongs to.
+   * Used by pickers and the settings sidebar to flag profiles whose agent
+   * needs login or reinstallation.
+   */
+  capability_status?: CapabilityStatus;
+  capability_error?: string;
 };
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
-  agent: Pick<Agent, "id" | "name">,
+  agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
   profile: Pick<AgentProfile, "id" | "agent_display_name" | "name"> & { cli_passthrough?: boolean },
 ): AgentProfileOption {
   return {
@@ -53,6 +61,8 @@ export function toAgentProfileOption(
     agent_id: agent.id,
     agent_name: agent.name,
     cli_passthrough: profile.cli_passthrough ?? false,
+    capability_status: agent.capability_status,
+    capability_error: agent.capability_error,
   };
 }
 

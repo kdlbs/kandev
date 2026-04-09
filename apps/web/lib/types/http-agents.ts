@@ -34,6 +34,14 @@ export type Agent = {
   mcp_config_path?: string | null;
   tui_config?: TUIConfig | null;
   profiles: AgentProfile[];
+  /**
+   * Host utility probe status for this agent type — mirrors
+   * `ModelConfig.status`. Populated by the backend from the host utility
+   * cache so clients can flag profiles that need login or reinstallation
+   * without fetching the full model config separately.
+   */
+  capability_status?: CapabilityStatus;
+  capability_error?: string;
   created_at: string;
   updated_at: string;
 };

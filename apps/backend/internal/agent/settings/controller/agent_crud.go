@@ -25,6 +25,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 		return nil, err
 	}
 	result := toAgentDTO(agent, profiles)
+	c.applyCapabilityStatus(&result, agent.Name)
 	return &result, nil
 }
 
@@ -39,7 +40,9 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		if err != nil {
 			return nil, err
 		}
-		payload = append(payload, toAgentDTO(agent, profiles))
+		entry := toAgentDTO(agent, profiles)
+		c.applyCapabilityStatus(&entry, agent.Name)
+		payload = append(payload, entry)
 	}
 	return &dto.ListAgentsResponse{Agents: payload, Total: len(payload)}, nil
 }
@@ -97,7 +100,23 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 		return nil, err
 	}
 	result := toAgentDTO(agent, profiles)
+	c.applyCapabilityStatus(&result, agent.Name)
 	return &result, nil
+}
+
+// applyCapabilityStatus populates the DTO's capability fields from the host
+// utility cache. No-op when the host utility is unavailable or the agent
+// isn't in the cache (e.g. mock, tui-only, or pre-probe).
+func (c *Controller) applyCapabilityStatus(d *dto.AgentDTO, agentName string) {
+	if c.hostUtility == nil {
+		return
+	}
+	caps, ok := c.hostUtility.Get(agentName)
+	if !ok {
+		return
+	}
+	d.CapabilityStatus = string(caps.Status)
+	d.CapabilityError = caps.Error
 }
 
 func (c *Controller) findMatchedAvailability(name string, results []discovery.Availability) (*discovery.Availability, error) {

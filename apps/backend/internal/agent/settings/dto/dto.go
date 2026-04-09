@@ -37,8 +37,14 @@ type AgentDTO struct {
 	MCPConfigPath string            `json:"mcp_config_path,omitempty"`
 	TUIConfig     *TUIConfigDTO     `json:"tui_config,omitempty"`
 	Profiles      []AgentProfileDTO `json:"profiles"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	// CapabilityStatus mirrors the host utility probe status so clients can
+	// flag agents that need login or reinstallation without fetching the
+	// full model config separately. "" for agents that aren't probed
+	// (mock, tui-only).
+	CapabilityStatus string    `json:"capability_status,omitempty"`
+	CapabilityError  string    `json:"capability_error,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type ListAgentsResponse struct {

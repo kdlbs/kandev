@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
+import { IconAlertTriangle, IconGitBranch, IconLock, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import type {
@@ -114,6 +114,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
+      const warning = capabilityWarning(profile);
       return {
         value: profile.id,
         label: profile.label,
@@ -122,6 +123,12 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
             <span className="flex shrink-0 items-center gap-1.5">
               <AgentLogo agentName={profile.agent_name} className="shrink-0" />
               <span>{agentLabel}</span>
+              {warning && (
+                <warning.Icon
+                  className={`size-3.5 ${warning.color}`}
+                  title={warning.title}
+                />
+              )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
               {isPassthrough && (
@@ -141,6 +148,37 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       };
     });
   }, [agentProfiles]);
+}
+
+type CapabilityWarning = {
+  Icon: typeof IconLock;
+  color: string;
+  title: string;
+};
+
+function capabilityWarning(profile: AgentProfileOption): CapabilityWarning | null {
+  switch (profile.capability_status) {
+    case "auth_required":
+      return {
+        Icon: IconLock,
+        color: "text-amber-600 dark:text-amber-400",
+        title: profile.capability_error || "Authentication required",
+      };
+    case "not_installed":
+      return {
+        Icon: IconAlertTriangle,
+        color: "text-muted-foreground",
+        title: profile.capability_error || "Agent CLI not installed",
+      };
+    case "failed":
+      return {
+        Icon: IconAlertTriangle,
+        color: "text-red-600 dark:text-red-400",
+        title: profile.capability_error || "Agent probe failed",
+      };
+    default:
+      return null;
+  }
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {
