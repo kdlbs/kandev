@@ -25,7 +25,7 @@ test -x apps/backend/bin/acpdbg || make -C apps/backend build-acpdbg
 
 ## Sub-commands
 
-```
+```text
 acpdbg list                                            # enumerate registered ACP agents
 acpdbg probe <agent>                                   # initialize + session/new + close
 acpdbg probe --exec "<cmd> [args...]"                  # probe an arbitrary binary not in the registry
@@ -100,7 +100,7 @@ jq -c 'select(.direction == "received" and .frame.method and .frame.id)' acp-deb
 
 Give a concise markdown summary: agent, protocol version, models found (with currentModelId), modes found (with currentModeId), auth methods, any errors, and the JSONL path for deeper inspection. Example:
 
-```
+```text
 **auggie** (protocol v1, auggie 0.20.1)
 Models (11): claude-sonnet-4-6 (current), claude-opus-4-6, gpt-5-4, …
 Modes  (2):  default (current), ask
@@ -132,7 +132,7 @@ One entry per agent with `status`, `models_count`, `current_model_id`, `auth_met
 
 ## What this skill does NOT do
 
-- No interactive UI. For side-by-side comparison, use the `/Users/cfl/Projects/acp-debug` project.
+- No interactive UI. For ad-hoc side-by-side comparison, read the `matrix-summary.json` output or build a separate visualization tool on top of the JSONL.
 - No permission-request handling beyond canned replies. Agent-initiated requests (`fs/read_text_file`, `session/request_permission`, etc.) are answered with `-32601 method not found` so the session doesn't hang. If you need to exercise a real permission flow, use the full kandev backend.
 - No automatic credential bootstrap. The child inherits the parent shell's env; if an auth check fails the skill reports which methods were advertised and lets the user fix their local credentials.
 - No Docker / remote executor support. Standalone subprocess only — same as a manual `auggie --acp` invocation.

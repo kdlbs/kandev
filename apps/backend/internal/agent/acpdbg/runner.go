@@ -184,7 +184,17 @@ func (r *Runner) Request(ctx context.Context, frame Frame) (Frame, error) {
 	}
 
 	select {
-	case resp := <-ch:
+	case resp, ok := <-ch:
+		if !ok {
+			// Channel closed by readLoop on fatal error.
+			r.mu.Lock()
+			err := r.readLoopEr
+			r.mu.Unlock()
+			if err == nil {
+				err = io.EOF
+			}
+			return nil, fmt.Errorf("read loop exited: %w", err)
+		}
 		return resp, nil
 	case <-ctx.Done():
 		r.mu.Lock()
@@ -316,7 +326,15 @@ func (r *Runner) readLoop() {
 	for {
 		frame, err := r.framer.Read()
 		if err != nil {
+			// Fail any outstanding request waiters so Request() returns
+			// rather than blocking forever when the child dies.
+			r.mu.Lock()
 			r.readLoopEr = err
+			for id, ch := range r.pending {
+				close(ch)
+				delete(r.pending, id)
+			}
+			r.mu.Unlock()
 			return
 		}
 		_ = r.rec.Received(frame)
@@ -327,13 +345,10 @@ func (r *Runner) readLoop() {
 		}
 
 		// Anything else (notifications, agent-initiated requests,
-		// orphaned responses) goes out of band.
-		select {
-		case r.oob <- frame:
-		default:
-			// Channel full — drop to avoid blocking. We still recorded
-			// the frame to JSONL so no data loss for post-hoc inspection.
-		}
+		// orphaned responses) goes out of band. Block rather than drop,
+		// so session/update chunks and agent-initiated requests are
+		// never lost — this is a debug tool, correctness beats throughput.
+		r.oob <- frame
 	}
 }
 

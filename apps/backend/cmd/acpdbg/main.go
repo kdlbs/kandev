@@ -1,5 +1,5 @@
 // Command acpdbg speaks raw ACP JSON-RPC to an agent CLI and captures every
-// frame to a JSONL file. See .claude/skills/acp-debug/SKILL.md for usage.
+// frame to a JSONL file. See .agents/skills/acp-debug/SKILL.md for usage.
 package main
 
 import (

@@ -40,7 +40,7 @@ build-mock-agent:
 acpdbg: build-acpdbg
 	@$(BUILD_DIR)/acpdbg $(ARGS)
 
-## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .claude/skills/acp-debug)
+## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .agents/skills/acp-debug)
 build-acpdbg:
 	@echo "Building acpdbg..."
 	@$(MKDIR) $(BUILD_DIR)

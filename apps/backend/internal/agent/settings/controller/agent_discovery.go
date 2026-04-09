@@ -138,13 +138,6 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 }
 
-// fetchModelsWithCache is a legacy stub retained so any remaining callers
-// compile; it returns empty data. The real model list comes from the host
-// utility capability cache.
-func (c *Controller) fetchModelsWithCache(_ context.Context, _ agents.Agent) ([]dto.ModelEntryDTO, bool) {
-	return nil, false
-}
-
 // buildModelConfigFromHostUtility reads cached ACP probe data for the agent
 // type and produces a ModelConfigDTO with models, modes, and status. Agents
 // not in the probe cache (e.g. the mock agent used in E2E tests, which
@@ -242,7 +235,7 @@ func (c *Controller) updateExistingProfiles(ctx context.Context, profiles []*mod
 			updated = true
 		}
 		resolvedName := profile.Model
-		if p.isPassthrough {
+		if p.isPassthrough || resolvedName == "" {
 			resolvedName = p.displayName
 		}
 		if profile.Name != resolvedName {

@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  IconRefresh,
-  IconAlertCircle,
-  IconSelector,
-  IconTerminal2,
-} from "@tabler/icons-react";
+import { IconRefresh, IconAlertCircle, IconSelector, IconTerminal2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -316,9 +311,7 @@ function ModePicker({
                       )}
                     </div>
                     {m.description && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {m.description}
-                      </p>
+                      <p className="text-xs text-muted-foreground truncate">{m.description}</p>
                     )}
                   </div>
                 </CommandItem>
@@ -425,10 +418,7 @@ function CapabilitiesRow({
           />
         </div>
         {hasModes && (
-          <div
-            data-testid="profile-mode-field"
-            className={`flex-1 min-w-0 ${gapCls}`}
-          >
+          <div data-testid="profile-mode-field" className={`flex-1 min-w-0 ${gapCls}`}>
             <Label className={labelCls}>Start mode</Label>
             <ModePicker
               profile={profile}
@@ -438,11 +428,7 @@ function CapabilitiesRow({
             />
           </div>
         )}
-        <RefreshCapabilitiesButton
-          onRefresh={onRefresh}
-          isLoading={isLoading}
-          error={error}
-        />
+        <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
       </div>
       {activeMode?.description && (
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>

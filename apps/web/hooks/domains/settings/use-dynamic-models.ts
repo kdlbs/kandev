@@ -34,7 +34,9 @@ export function useAgentCapabilities(
   const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
   const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
   const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);
-  const [currentModelId, setCurrentModelId] = useState<string | undefined>(initial.current_model_id);
+  const [currentModelId, setCurrentModelId] = useState<string | undefined>(
+    initial.current_model_id,
+  );
   const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
   const [error, setError] = useState<string | null>(null);
