@@ -321,7 +321,15 @@ function useSelectionInteractions(
     (e: React.MouseEvent) => {
       if (multiSelect.selectedPaths.size === 0) return;
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-testid='file-tree-node']")) multiSelect.clearSelection();
+      // Don't clear if clicking on a tree node, context menu, or dialog
+      if (
+        target.closest("[data-testid='file-tree-node']") ||
+        target.closest("[role='menu']") ||
+        target.closest("[role='alertdialog']") ||
+        target.closest("[role='dialog']")
+      )
+        return;
+      multiSelect.clearSelection();
     },
     [multiSelect],
   );

@@ -419,9 +419,18 @@ test.describe("File Tree Multi-Select", () => {
     await b.click({ modifiers: [MOD] });
 
     await a.click({ button: "right" });
-    await expect(testPage.getByRole("menuitem", { name: "Delete 2 items" })).toBeVisible({
-      timeout: 5_000,
-    });
+    const deleteItem = testPage.getByRole("menuitem", { name: "Delete 2 items" });
+    await expect(deleteItem).toBeVisible({ timeout: 5_000 });
+
+    // Click the delete menu item and confirm dialog
+    await deleteItem.click();
+    const confirmBtn = testPage.getByRole("button", { name: "Delete" });
+    await expect(confirmBtn).toBeVisible({ timeout: 5_000 });
+    await confirmBtn.click();
+
+    // Both files should be removed from the tree
+    await expect(a).not.toBeVisible({ timeout: 10_000 });
+    await expect(b).not.toBeVisible({ timeout: 10_000 });
   });
 
   // --- Click Outside ---
