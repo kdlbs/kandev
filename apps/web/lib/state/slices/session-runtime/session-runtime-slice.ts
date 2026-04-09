@@ -197,8 +197,10 @@ function migrateEnvKeyedData(
 ) {
   if (sessionId === environmentId) return;
   const migrate = <T>(store: Record<string, T>) => {
-    if (sessionId in store && !(environmentId in store)) {
-      store[environmentId] = store[sessionId];
+    if (sessionId in store) {
+      if (!(environmentId in store)) {
+        store[environmentId] = store[sessionId];
+      }
       delete store[sessionId];
     }
   };

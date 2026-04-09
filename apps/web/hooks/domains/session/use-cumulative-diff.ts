@@ -96,7 +96,11 @@ export function useCumulativeDiff(sessionId: string | null) {
   // Sync cached state when envKey changes
   useEffect(() => {
     if (envKey) {
-      setDiff(cumulativeDiffCache[envKey] ?? null);
+      const cached = cumulativeDiffCache[envKey] ?? null;
+      setDiff(cached);
+      // If cached data exists, clear any in-flight loading state from the
+      // previous envKey to avoid a brief spinner flash.
+      if (cached !== null) setLoading(false);
     } else {
       setDiff(null);
       setLoading(false);
