@@ -24,7 +24,6 @@ type GitHubService interface {
 	CreatePRWatch(ctx context.Context, sessionID, taskID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
 	EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, repo, branch string) (*github.PRWatch, error)
 	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
-	UpdatePRWatchBranch(ctx context.Context, id, branch string) error
 	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
 	ResetPRWatch(ctx context.Context, id, branch string) error

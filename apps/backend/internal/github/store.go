@@ -179,14 +179,6 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 	return err
 }
 
-// UpdatePRWatchBranch updates a PR watch's branch after the agent switches branches.
-func (s *Store) UpdatePRWatchBranch(ctx context.Context, id, branch string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ?`,
-		branch, time.Now().UTC(), id)
-	return err
-}
-
 // ResetPRWatch atomically resets a watch to the searching state: updates the
 // tracked branch and clears pr_number in a single statement. Used when the
 // session's active branch changes (rename, checkout) so the poller re-searches
@@ -275,10 +267,38 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	return result, nil
 }
 
-// DeleteTaskPR deletes a task-PR association by ID.
-func (s *Store) DeleteTaskPR(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM github_task_prs WHERE id = ?`, id)
-	return err
+// ReplaceTaskPR atomically replaces the task→PR association for a task: any
+// existing rows for task_id are deleted and the new row is inserted inside a
+// single transaction, matching the effective 1:1 task→PR mapping used by
+// reads. Use this when a task's active PR changes (e.g. the first PR was
+// closed and a follow-up was opened).
+func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
+	if tp.ID == "" {
+		tp.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	tp.UpdatedAt = now
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_task_prs WHERE task_id = ?`, tp.TaskID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO github_task_prs (id, task_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+			state, review_state, checks_state, review_count, pending_review_count, comment_count, additions, deletions,
+			created_at, merged_at, closed_at, last_synced_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.TaskID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateTaskPR updates a task-PR association.

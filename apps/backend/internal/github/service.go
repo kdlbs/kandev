@@ -208,11 +208,6 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 	return s.store.DeletePRWatch(ctx, id)
 }
 
-// UpdatePRWatchBranch updates a PR watch's branch (e.g. after the agent switches branches).
-func (s *Service) UpdatePRWatchBranch(ctx context.Context, id, branch string) error {
-	return s.store.UpdatePRWatchBranch(ctx, id, branch)
-}
-
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
 func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
 	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
@@ -296,19 +291,6 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 	if existing != nil && existing.PRNumber == pr.Number {
 		return existing, nil
 	}
-	// Replace the stale association when the task now points to a different PR
-	// (e.g. the first PR was closed and a follow-up PR was opened on the same
-	// or a new branch). Without this, GetTaskPR would keep returning the old
-	// PR and the UI would remain stuck on it.
-	if existing != nil {
-		if delErr := s.store.DeleteTaskPR(ctx, existing.ID); delErr != nil {
-			return nil, fmt.Errorf("delete stale task PR: %w", delErr)
-		}
-		s.logger.Info("replacing stale task PR association",
-			zap.String("task_id", taskID),
-			zap.Int("old_pr_number", existing.PRNumber),
-			zap.Int("new_pr_number", pr.Number))
-	}
 	tp := &TaskPR{
 		TaskID:      taskID,
 		Owner:       pr.RepoOwner,
@@ -326,8 +308,18 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 		MergedAt:    pr.MergedAt,
 		ClosedAt:    pr.ClosedAt,
 	}
-	if err := s.store.CreateTaskPR(ctx, tp); err != nil {
-		return nil, fmt.Errorf("create task PR: %w", err)
+	// ReplaceTaskPR atomically deletes any existing association for the task
+	// and inserts the new row inside a single transaction. This preserves the
+	// effective 1:1 task→PR mapping and prevents a window where the task has
+	// no associated PR or concurrent calls produce duplicate rows.
+	if err := s.store.ReplaceTaskPR(ctx, tp); err != nil {
+		return nil, fmt.Errorf("replace task PR: %w", err)
+	}
+	if existing != nil {
+		s.logger.Info("replaced stale task PR association",
+			zap.String("task_id", taskID),
+			zap.Int("old_pr_number", existing.PRNumber),
+			zap.Int("new_pr_number", pr.Number))
 	}
 
 	// Publish event for UI

@@ -51,11 +51,6 @@ func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _ string, _ *
 	m.associateCalls++
 	return &github.TaskPR{}, nil
 }
-func (m *mockGitHubService) UpdatePRWatchBranch(_ context.Context, _, branch string) error {
-	m.updateBranchCalls++
-	m.updatedBranch = branch
-	return nil
-}
 func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _, branch string) error {
 	m.updateBranchCalls++
 	m.updatedBranch = branch
