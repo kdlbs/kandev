@@ -198,13 +198,12 @@ function ApproveButton({
   return (
     <Button
       size="sm"
-      variant="outline"
-      className="cursor-pointer gap-1.5 text-green-600 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-900/20"
+      className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
       onClick={handleApprove}
       disabled={submitting}
     >
       <IconCheck className="h-3.5 w-3.5" />
-      {submitting ? "Approving..." : "Approve"}
+      {submitting ? "Approving..." : "Approve PR"}
     </Button>
   );
 }
