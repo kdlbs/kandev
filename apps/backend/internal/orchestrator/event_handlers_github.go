@@ -27,6 +27,7 @@ type GitHubService interface {
 	UpdatePRWatchBranch(ctx context.Context, id, branch string) error
 	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
+	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)

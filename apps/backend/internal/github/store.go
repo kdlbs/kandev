@@ -187,6 +187,18 @@ func (s *Store) UpdatePRWatchBranch(ctx context.Context, id, branch string) erro
 	return err
 }
 
+// ResetPRWatch atomically resets a watch to the searching state: updates the
+// tracked branch and clears pr_number in a single statement. Used when the
+// session's active branch changes (rename, checkout) so the poller re-searches
+// for a PR on the new branch without leaving an inconsistent intermediate
+// state.
+func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
+		branch, time.Now().UTC(), id)
+	return err
+}
+
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
 // preventing races with concurrent PR association.
 func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {

@@ -522,18 +522,11 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, sessionID, ne
 	if watch.Branch == newBranch && watch.PRNumber == 0 {
 		return
 	}
-	if err := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, newBranch); err != nil {
-		s.logger.Error("failed to reset PR watch branch after branch switch",
+	if err := s.githubService.ResetPRWatch(ctx, watch.ID, newBranch); err != nil {
+		s.logger.Error("failed to reset PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
 			zap.Error(err))
 		return
-	}
-	if watch.PRNumber != 0 {
-		if err := s.githubService.UpdatePRWatchPRNumber(ctx, watch.ID, 0); err != nil {
-			s.logger.Error("failed to reset PR watch pr_number after branch switch",
-				zap.String("session_id", sessionID), zap.Error(err))
-			return
-		}
 	}
 	s.logger.Info("reset PR watch after branch switch",
 		zap.String("session_id", sessionID),

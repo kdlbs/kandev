@@ -113,16 +113,10 @@ func TestHandleBranchSwitched_ResetsPRWatch(t *testing.T) {
 		},
 	})
 
-	if ghSvc.updateBranchCalls != 1 {
-		t.Errorf("expected 1 UpdatePRWatchBranch call, got %d", ghSvc.updateBranchCalls)
+	if ghSvc.resetWatchCalls != 1 {
+		t.Errorf("expected 1 ResetPRWatch call, got %d", ghSvc.resetWatchCalls)
 	}
-	if ghSvc.updatedBranch != "feature/b" {
-		t.Errorf("updated branch = %q, want feature/b", ghSvc.updatedBranch)
-	}
-	if ghSvc.updatePRNumberCalls != 1 {
-		t.Errorf("expected 1 UpdatePRWatchPRNumber call, got %d", ghSvc.updatePRNumberCalls)
-	}
-	if ghSvc.updatedPRNumber != 0 {
-		t.Errorf("updated PR number = %d, want 0 (reset)", ghSvc.updatedPRNumber)
+	if ghSvc.resetWatchBranch != "feature/b" {
+		t.Errorf("reset watch branch = %q, want feature/b", ghSvc.resetWatchBranch)
 	}
 }

@@ -22,6 +22,8 @@ type mockGitHubService struct {
 	associateCalls      int
 	updateBranchCalls   int
 	updatePRNumberCalls int
+	resetWatchCalls     int
+	resetWatchBranch    string
 	ensureWatchBranch   string
 	createWatchBranch   string
 	updatedBranch       string
@@ -62,6 +64,11 @@ func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _,
 func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
 	m.updatePRNumberCalls++
 	m.updatedPRNumber = prNumber
+	return nil
+}
+func (m *mockGitHubService) ResetPRWatch(_ context.Context, _, branch string) error {
+	m.resetWatchCalls++
+	m.resetWatchBranch = branch
 	return nil
 }
 func (m *mockGitHubService) ListActivePRWatches(context.Context) ([]*github.PRWatch, error) {

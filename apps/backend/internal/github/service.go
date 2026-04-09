@@ -223,6 +223,12 @@ func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)
 }
 
+// ResetPRWatch atomically resets a watch's branch and clears its pr_number so
+// the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
+func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
+	return s.store.ResetPRWatch(ctx, id, branch)
+}
+
 // CheckPRWatch fetches lightweight PR status for a watch and determines if there are changes.
 func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, bool, error) {
 	if s.client == nil {
