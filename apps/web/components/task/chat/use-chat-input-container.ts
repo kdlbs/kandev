@@ -4,6 +4,7 @@ import { useCallback, useRef, useState, useEffect, useImperativeHandle } from "r
 import type React from "react";
 import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
+import { useDraftSync } from "./use-draft-sync";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
@@ -107,6 +108,19 @@ function computeDerivedState(params: {
   };
 }
 
+function useDraftSyncBridge(
+  sessionId: string | null,
+  tiptapRef: React.RefObject<TipTapInputHandle | null>,
+) {
+  const draftSetValue = useCallback(
+    (v: string) => {
+      if (tiptapRef.current) tiptapRef.current.setValue(v);
+    },
+    [tiptapRef],
+  );
+  return useDraftSync(sessionId, tiptapRef, draftSetValue);
+}
+
 export function useChatInputContainer(params: UseChatInputContainerParams) {
   const {
     ref,
@@ -138,6 +152,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     getContentElement,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { saveToServer, clearServerDraft } = useDraftSyncBridge(sessionId, tiptapRef);
   const { value, inputRef, addFiles, handleChange, handleSubmit, allItems } = useChatInputState({
     sessionId,
     isSending,
@@ -147,15 +162,15 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     onSubmit,
+    onDraftSave: saveToServer,
+    onDraftClear: clearServerDraft,
   });
 
   useEffect(() => {
     tiptapRef.current = inputRef.current;
   });
-
   useInputHandle(ref, inputRef);
 
-  // Auto-expand the input container as the user types more lines
   const handleChangeWithAutoExpand = useCallback(
     (val: string) => {
       handleChange(val);
@@ -168,12 +183,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
   }, [showRequestChangesTooltip, inputRef]);
 
-  const handleAgentCommand = useCallback(
-    (commandName: string) => {
-      onSubmit(`/${commandName}`);
-    },
-    [onSubmit],
-  );
+  const handleAgentCommand = useCallback((cmd: string) => onSubmit(`/${cmd}`), [onSubmit]);
   const handleSubmitWithReset = useCallback(
     () => handleSubmit(resetHeight),
     [handleSubmit, resetHeight],

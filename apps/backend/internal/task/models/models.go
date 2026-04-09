@@ -279,6 +279,9 @@ type TaskSession struct {
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
 
+	// Draft persistence for cross-device input sync
+	DraftContent string `json:"draft_content,omitempty"` // JSON blob with text + TipTap content
+
 	// Workflow-related fields
 	IsPrimary     bool    `json:"is_primary"`              // Whether this is the primary session for the task
 	IsPassthrough bool    `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode

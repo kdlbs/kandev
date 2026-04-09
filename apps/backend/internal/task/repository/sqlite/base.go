@@ -160,6 +160,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+	// Add draft_content column to task_sessions for cross-device draft persistence (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN draft_content TEXT DEFAULT ''`)
 	return nil
 }
 

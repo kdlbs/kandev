@@ -30,6 +30,8 @@ export type TipTapInputHandle = {
   getSelectionStart: () => number;
   getValue: () => string;
   setValue: (value: string) => void;
+  getContent: () => unknown;
+  setContent: (json: unknown) => void;
   clear: () => void;
   getTextareaElement: () => HTMLElement | null;
   insertText: (text: string, from: number, to: number) => void;
@@ -437,6 +439,14 @@ function useEditorImperativeHandle(
         }
         isSyncingRef.current = false;
         onChange(v);
+      },
+      getContent: () => (editor ? editor.getJSON() : null),
+      setContent: (json: unknown) => {
+        if (!editor || !json) return;
+        isSyncingRef.current = true;
+        editor.commands.setContent(json as import("@tiptap/core").Content);
+        isSyncingRef.current = false;
+        onChange(editor ? getMarkdownText(editor) : "");
       },
       clear: () => {
         if (!editor) return;

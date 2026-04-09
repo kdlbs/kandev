@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrTaskPlanNotFound = errors.New("task plan not found")
-	ErrTaskIDRequired   = errors.New("task_id is required")
-	ErrContentRequired  = errors.New("content is required")
+	ErrTaskPlanNotFound  = errors.New("task plan not found")
+	ErrTaskIDRequired    = errors.New("task_id is required")
+	ErrSessionIDRequired = errors.New("session_id is required")
+	ErrContentRequired   = errors.New("content is required")
 )
 
 // createdByAgent is the default creator for agent-created plans.

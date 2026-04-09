@@ -51,6 +51,22 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	return nil
 }
 
+// SaveSessionDraft saves the chat input draft for a session (cross-device persistence).
+func (s *Service) SaveSessionDraft(ctx context.Context, sessionID string, content string) error {
+	if sessionID == "" {
+		return ErrSessionIDRequired
+	}
+	return s.sessions.SaveSessionDraft(ctx, sessionID, content)
+}
+
+// GetSessionDraft retrieves the chat input draft for a session.
+func (s *Service) GetSessionDraft(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", ErrSessionIDRequired
+	}
+	return s.sessions.GetSessionDraft(ctx, sessionID)
+}
+
 // UpdateSessionReviewStatus updates the review status of a session.
 func (s *Service) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
 	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, status); err != nil {

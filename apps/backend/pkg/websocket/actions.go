@@ -82,6 +82,8 @@ const (
 	ActionSessionStop         = "session.stop"
 	ActionSessionDelete       = "session.delete"
 	ActionSessionSetPrimary   = "session.set_primary"
+	ActionSessionDraftSave    = "session.draft.save"
+	ActionSessionDraftGet     = "session.draft.get"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"

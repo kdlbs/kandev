@@ -76,6 +76,35 @@ export async function authenticateSession(sessionId: string, methodId: string) {
   });
 }
 
+// --- Session draft persistence (cross-device) ---
+
+import { getWebSocketClient } from "@/lib/ws/connection";
+
+export async function saveSessionDraft(
+  sessionId: string,
+  text: string,
+  content: unknown,
+): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) return;
+  await client.request("session.draft.save", {
+    session_id: sessionId,
+    text,
+    content: content ?? null,
+  });
+}
+
+export async function getSessionDraft(
+  sessionId: string,
+): Promise<{ text: string; content: unknown } | null> {
+  const client = getWebSocketClient();
+  if (!client) return null;
+  const res = await client.request<{ text: string; content: unknown } | null>("session.draft.get", {
+    session_id: sessionId,
+  });
+  return res ?? null;
+}
+
 export { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 export {
   buildPRPrepareRequest,

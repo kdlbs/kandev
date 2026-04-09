@@ -35,6 +35,10 @@ type UseChatInputStateProps = {
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
   ) => void;
+  /** Called on input change to sync draft to server (debounced by caller) */
+  onDraftSave?: (text: string, content: unknown) => void;
+  /** Called on submit to clear the server draft */
+  onDraftClear?: () => void;
 };
 
 function collectComments(
@@ -60,6 +64,32 @@ function clearDraft(sessionId: string | null) {
   setChatDraftText(sessionId, "");
   setChatDraftContent(sessionId, null);
   setChatDraftAttachments(sessionId, []);
+}
+
+function buildContextItems(
+  contextItems: ContextItem[],
+  attachments: FileAttachment[],
+  handleRemoveAttachment: (id: string) => void,
+): ContextItem[] {
+  const attachmentItems: (ImageContextItem | FileAttachmentContextItem)[] = attachments.map(
+    (att) =>
+      att.isImage
+        ? ({
+            kind: "image" as const,
+            id: `image:${att.id}`,
+            label: `Image (${formatBytes(att.size)})`,
+            attachment: att,
+            onRemove: () => handleRemoveAttachment(att.id),
+          } as ImageContextItem)
+        : ({
+            kind: "file-attachment" as const,
+            id: `file:${att.id}`,
+            label: att.fileName,
+            attachment: att,
+            onRemove: () => handleRemoveAttachment(att.id),
+          } as FileAttachmentContextItem),
+  );
+  return [...contextItems, ...attachmentItems];
 }
 
 function useAttachments(sessionId: string | null) {
@@ -136,6 +166,8 @@ export function useChatInputState({
   showRequestChangesTooltip,
   onRequestChangesTooltipDismiss,
   onSubmit,
+  onDraftSave,
+  onDraftClear,
 }: UseChatInputStateProps) {
   const [value, setValue] = useState(() => (sessionId ? getChatDraftText(sessionId) : ""));
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -170,8 +202,15 @@ export function useChatInputState({
       if (historyIndex >= 0) setHistoryIndex(-1);
       if (showRequestChangesTooltip && onRequestChangesTooltipDismiss)
         onRequestChangesTooltipDismiss();
+      if (onDraftSave) onDraftSave(newValue, inputRef.current?.getContent?.() ?? null);
     },
-    [showRequestChangesTooltip, onRequestChangesTooltipDismiss, historyIndex, sessionId],
+    [
+      showRequestChangesTooltip,
+      onRequestChangesTooltipDismiss,
+      historyIndex,
+      sessionId,
+      onDraftSave,
+    ],
   );
 
   const handleSubmit = useCallback(
@@ -180,9 +219,8 @@ export function useChatInputState({
       const trimmed = valueRef.current.trim();
       const allComments = collectComments(pendingCommentsRef.current);
       const currentAttachments = attachmentsRef.current;
-      const hasContent =
-        trimmed || allComments.length > 0 || currentAttachments.length > 0 || hasContextComments;
-      if (!hasContent) return;
+      if (!trimmed && !allComments.length && !currentAttachments.length && !hasContextComments)
+        return;
       const messageAttachments = toMessageAttachments(currentAttachments);
       const inlineMentions = inputRef.current?.getMentions() ?? [];
       onSubmit(
@@ -197,31 +235,23 @@ export function useChatInputState({
       setHistoryIndex(-1);
       resetHeight();
       clearDraft(sessionId);
+      onDraftClear?.();
     },
-    [onSubmit, isSending, sessionId, attachmentsRef, setAttachments, hasContextComments],
+    [
+      onSubmit,
+      isSending,
+      sessionId,
+      attachmentsRef,
+      setAttachments,
+      hasContextComments,
+      onDraftClear,
+    ],
   );
 
-  const allItems = useMemo((): ContextItem[] => {
-    const attachmentItems: (ImageContextItem | FileAttachmentContextItem)[] = attachments.map(
-      (att) =>
-        att.isImage
-          ? ({
-              kind: "image" as const,
-              id: `image:${att.id}`,
-              label: `Image (${formatBytes(att.size)})`,
-              attachment: att,
-              onRemove: () => handleRemoveAttachment(att.id),
-            } as ImageContextItem)
-          : ({
-              kind: "file-attachment" as const,
-              id: `file:${att.id}`,
-              label: att.fileName,
-              attachment: att,
-              onRemove: () => handleRemoveAttachment(att.id),
-            } as FileAttachmentContextItem),
-    );
-    return [...contextItems, ...attachmentItems];
-  }, [contextItems, attachments, handleRemoveAttachment]);
+  const allItems = useMemo(
+    () => buildContextItems(contextItems, attachments, handleRemoveAttachment),
+    [contextItems, attachments, handleRemoveAttachment],
+  );
 
   return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems };
 }

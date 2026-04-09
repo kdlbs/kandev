@@ -109,6 +109,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanGet, h.wsGetTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanUpdate, h.wsUpdateTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanDelete, h.wsDeleteTaskPlan)
+	// Session draft handlers
+	dispatcher.RegisterFunc(ws.ActionSessionDraftSave, h.wsSaveSessionDraft)
+	dispatcher.RegisterFunc(ws.ActionSessionDraftGet, h.wsGetSessionDraft)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

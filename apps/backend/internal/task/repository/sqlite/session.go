@@ -479,6 +479,34 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 	return nil
 }
 
+// SaveSessionDraft saves the chat input draft for a session (cross-device persistence).
+func (r *Repository) SaveSessionDraft(ctx context.Context, sessionID string, content string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET draft_content = ?, updated_at = ? WHERE id = ?
+	`), content, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// GetSessionDraft retrieves the chat input draft for a session.
+func (r *Repository) GetSessionDraft(ctx context.Context, sessionID string) (string, error) {
+	var content string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT draft_content FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&content)
+	if err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")

@@ -407,6 +407,12 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	return nil
 }
+func (m *mockRepository) SaveSessionDraft(ctx context.Context, sessionID string, content string) error {
+	return nil
+}
+func (m *mockRepository) GetSessionDraft(ctx context.Context, sessionID string) (string, error) {
+	return "", nil
+}
 
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
