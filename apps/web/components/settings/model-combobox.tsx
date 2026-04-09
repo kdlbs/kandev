@@ -77,7 +77,7 @@ export function ModelCombobox({
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
           <CommandInput placeholder="Search models..." />
-          <CommandList>
+          <CommandList className="max-h-[min(60vh,24rem)] overflow-y-auto">
             <CommandEmpty>No model found.</CommandEmpty>
             <CommandGroup>
               {models.map((model) => {

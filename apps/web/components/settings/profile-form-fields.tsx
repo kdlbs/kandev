@@ -296,7 +296,7 @@ function ModePicker({
       >
         <Command>
           <CommandInput placeholder="Search modes..." />
-          <CommandList>
+          <CommandList className="max-h-[min(60vh,24rem)] overflow-y-auto">
             <CommandEmpty>No mode found.</CommandEmpty>
             <CommandGroup>
               {modes.map((m) => (
