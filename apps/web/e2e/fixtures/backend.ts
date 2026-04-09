@@ -13,8 +13,7 @@ const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
 // Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
 // Modulo 30 keeps agentctl ports under 65535 (30001 + 30*1000 = 60001 max)
 const rawPortOffset = process.env.E2E_PORT_OFFSET;
-const E2E_PORT_OFFSET =
-  rawPortOffset === undefined ? process.pid % 30 : Number(rawPortOffset);
+const E2E_PORT_OFFSET = rawPortOffset === undefined ? process.pid % 30 : Number(rawPortOffset);
 if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET > 29) {
   throw new Error(`E2E_PORT_OFFSET must be an integer 0-29, got: ${rawPortOffset}`);
 }
