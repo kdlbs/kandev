@@ -140,7 +140,7 @@ export function FileContextMenu({
   const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
 
   return (
-    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+    <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
@@ -160,15 +160,17 @@ export function FileContextMenu({
         </ContextMenuContent>
       </ContextMenu>
       {needsConfirmation && (
-        <DeleteConfirmDialog
-          isBulk={isBulk}
-          selectedCount={selectedCount}
-          node={node}
-          fileCount={countFilesInTree(node)}
-          onConfirm={handleConfirmDelete}
-        />
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DeleteConfirmDialog
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            node={node}
+            fileCount={countFilesInTree(node)}
+            onConfirm={handleConfirmDelete}
+          />
+        </AlertDialog>
       )}
-    </AlertDialog>
+    </>
   );
 }
 
