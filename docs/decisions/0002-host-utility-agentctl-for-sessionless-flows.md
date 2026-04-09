@@ -23,14 +23,14 @@ Key pieces:
 - **Probe path.** New `ACPInferenceExecutor.Probe` in `internal/agentctl/server/utility/acp_executor.go` runs `initialize` + `session/new` against an ephemeral subprocess and returns the parsed `ProbeResponse` (agent info, auth methods, models, modes, prompt capabilities). Exposed over HTTP as `POST /api/v1/inference/probe` with a matching `Client.Probe` client method.
 - **Warm instances, ephemeral ACP.** The per-agent-type instance is workspace-only — no persistent agent subprocess. Each probe/prompt call still spawns its own short-lived ACP subprocess via the existing `/api/v1/inference/prompt` and new `/api/v1/inference/probe` routes. The "warm" part is the agentctl instance host, not the ACP session.
 - **Sessionless utility execute.** `POST /api/v1/utility/execute` now treats `session_id` as optional. When absent, `internal/utility/handlers/handlers.go:executeSessionless` routes through `HostUtilityExecutor.ExecutePrompt`, template substitution uses `MissingAsEmpty: true` for variables that are meaningless without a session (GitDiff, TaskTitle, etc.), and the `UtilityAgentCall` record is still written.
-- **Public HTTP surface** (`internal/agent/capabilities/handlers/`):
-  - `GET  /api/v1/agents/capabilities` — list all cached
-  - `GET  /api/v1/agents/:type/capabilities` — single agent
-  - `POST /api/v1/agents/:type/probe` — re-probe + refresh cache
-  - `POST /api/v1/agents/:type/prompt` — raw one-off inference (no utility agent record)
+- **Public HTTP surface** (`internal/agent/capabilities/handlers/`, prefix `/api/v1/agent-capabilities` — separate from `/api/v1/agents/:id/...` to avoid a Gin wildcard name collision):
+  - `GET  /api/v1/agent-capabilities` — list all cached
+  - `GET  /api/v1/agent-capabilities/:type` — single agent
+  - `POST /api/v1/agent-capabilities/:type/probe` — re-probe + refresh cache
+  - `POST /api/v1/agent-capabilities/:type/prompt` — raw one-off inference (no utility agent record)
 - **Tmp dir lifetime.** Each kandev process creates `kandev-host-utility-<pid>-*` with per-agent subdirs; `Stop()` removes only dirs owned by this process. Concurrent kandev processes never share or clobber each other's tmp state.
 - **Scope.** v1 probes only agents whose `Runtime().Protocol == ProtocolACP` (claude-acp, codex-acp, copilot-acp, amp-acp, opencode-acp, auggie). Non-ACP adapters (streamjson, codex, copilot, amp, opencode) are explicitly out of scope; they can be extended later.
-- **Model resolution** for sessionless calls: explicit arg → cached probe `currentModelId` → agent's `InferenceModels()` default.
+- **Model resolution** for sessionless calls: explicit arg → cached probe `currentModelId`. Static per-agent model lists have been removed; `InferenceAgent` no longer exposes an `InferenceModels()` method.
 - **Failure isolation.** Per-agent-type probe failures land in the cache as `{Status: failed|auth_required|not_installed, Error}` without aborting other probes or blocking boot.
 
 ## Consequences

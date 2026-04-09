@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -148,15 +150,22 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 }
 
 // ensureDBAgent looks up the agent row in the store or creates one if missing.
-// The store's agent row is the parent of profiles; it is keyed by the
-// registry ID.
+// The store's agent row uses an auto-generated UUID for `ID`; `Name` holds
+// the registry-facing identifier like "claude-acp".
+//
+// Callers must distinguish "not found" from transient DB errors to avoid
+// duplicate rows on lock/timeout.
 func (r *ProfileReconciler) ensureDBAgent(ctx context.Context, ag agents.Agent) (*models.Agent, error) {
 	dbAgent, err := r.store.GetAgentByName(ctx, ag.ID())
 	if err == nil && dbAgent != nil {
 		return dbAgent, nil
 	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// Transient DB error — don't attempt to create, caller will retry.
+		return nil, fmt.Errorf("get agent %q: %w", ag.ID(), err)
+	}
+	// Not found: create a new row. The store assigns ID on CreateAgent.
 	newAgent := &models.Agent{
-		ID:          ag.ID(),
 		Name:        ag.ID(),
 		SupportsMCP: true,
 	}
@@ -225,6 +234,10 @@ func (r *ProfileReconciler) healProfile(
 			zap.String("profile_id", p.ID),
 			zap.String("old_mode", p.Mode))
 		p.Mode = ""
+		changed = true
+	}
+	if p.Mode == "" && caps.CurrentModeID != "" {
+		p.Mode = caps.CurrentModeID
 		changed = true
 	}
 

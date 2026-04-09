@@ -254,7 +254,7 @@ function NameField({
         />
       </div>
       {canRemove && onRemove && (
-        <Button size="sm" variant="ghost" onClick={onRemove}>
+        <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onRemove}>
           Remove
         </Button>
       )}

@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -43,8 +44,9 @@ type Manager struct {
 	parentTmpDir string
 	cache        *cache
 
-	mu        sync.RWMutex
-	instances map[string]*instance // keyed by agent type
+	mu          sync.RWMutex
+	instances   map[string]*instance // keyed by agent type
+	createGroup singleflight.Group
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -315,14 +317,31 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	if m.parentTmpDir == "" {
 		return nil, nil, errors.New("host utility manager not started")
 	}
-	inst, err := m.createInstance(ctx, agentType)
+
+	// Serialize instance creation per agent type via singleflight so two
+	// concurrent callers don't both spawn a process and then race to cache
+	// the result.
+	v, err, _ := m.createGroup.Do(agentType, func() (interface{}, error) {
+		// Double-check inside the singleflight window.
+		m.mu.RLock()
+		existing := m.instances[agentType]
+		m.mu.RUnlock()
+		if existing != nil {
+			return existing, nil
+		}
+		created, cerr := m.createInstance(ctx, agentType)
+		if cerr != nil {
+			return nil, cerr
+		}
+		m.mu.Lock()
+		m.instances[agentType] = created
+		m.mu.Unlock()
+		return created, nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	m.mu.Lock()
-	m.instances[agentType] = inst
-	m.mu.Unlock()
-	return inst, ia, nil
+	return v.(*instance), ia, nil
 }
 
 // probe runs an ACP probe against the given instance and translates the result

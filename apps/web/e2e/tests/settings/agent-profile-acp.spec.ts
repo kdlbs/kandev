@@ -52,34 +52,37 @@ test.describe("Agent profile — ACP-first", () => {
     const profile = agent.profiles[0];
     const originalName = profile.name;
 
-    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
-    const nameInput = testPage.getByTestId("profile-name-input");
-    await expect(nameInput).toBeVisible({ timeout: 15_000 });
-    await expect(nameInput).toHaveValue(originalName, { timeout: 10_000 });
+      const nameInput = testPage.getByTestId("profile-name-input");
+      await expect(nameInput).toBeVisible({ timeout: 15_000 });
+      await expect(nameInput).toHaveValue(originalName, { timeout: 10_000 });
 
-    // Edit name.
-    const newName = `${originalName} Renamed`;
-    await nameInput.fill(newName);
+      // Edit name.
+      const newName = `${originalName} Renamed`;
+      await nameInput.fill(newName);
 
-    // Save via the dirty-state save button (card header). The save dispatches
-    // a Next.js server action, so we wait for the dirty badge to disappear
-    // as the signal that the round-trip completed.
-    const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
-    await expect(saveButton).toBeEnabled({ timeout: 10_000 });
-    await saveButton.click();
-    await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+      // Save via the dirty-state save button (card header). The save
+      // dispatches a Next.js server action, so we wait for the dirty badge
+      // to disappear as the signal that the round-trip completed.
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 
-    // Reload and assert the new name persisted — this exercises the round-trip
-    // through the new profile DTO shape (model + mode + allow_indexing +
-    // cli_passthrough) without the legacy permission columns.
-    await testPage.reload();
-    await expect(testPage.getByTestId("profile-name-input")).toHaveValue(newName, {
-      timeout: 15_000,
-    });
-
-    // Restore the original name via the API so the worker-scoped seedData
-    // fixture stays valid for subsequent tests.
-    await apiClient.updateAgentProfile(profile.id, { name: originalName });
+      // Reload and assert the new name persisted — this exercises the
+      // round-trip through the new profile DTO shape (model + mode +
+      // allow_indexing + cli_passthrough) without the legacy permission columns.
+      await testPage.reload();
+      await expect(testPage.getByTestId("profile-name-input")).toHaveValue(newName, {
+        timeout: 15_000,
+      });
+    } finally {
+      // Always restore the original name so the worker-scoped seedData
+      // fixture stays valid for subsequent tests — even if an assertion
+      // above failed.
+      await apiClient.updateAgentProfile(profile.id, { name: originalName });
+    }
   });
 });

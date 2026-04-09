@@ -43,6 +43,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if workDir == "" {
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
+	resolvedCmd := resolveProbeCommand(cfg.Command[0])
+	if resolvedCmd == "" {
+		return &PromptResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP command", cfg.Command[0])}, nil
+	}
 
 	startTime := time.Now()
 
@@ -54,8 +58,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", req.Model),
 		zap.Strings("command", args))
 
-	// Start the agent process
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
+	// the executable name is not derived from tainted input.
+	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
+	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
 
 	stdin, err := cmd.StdinPipe()

@@ -19,7 +19,7 @@ Built-in utility prompts are self-contained (context is injected as template var
 
 ### Architecture
 
-```
+```text
 Backend boot
     ↓
 waitForAgentctlControlHealthy
@@ -37,8 +37,8 @@ HostUtilityManager.Start(ctx)  [goroutine]
 
 Per-call path (both probe and sessionless prompt):
 
-```
-caller → HostUtilityManager.getInstance(type)
+```text
+caller → HostUtilityManager.getInstance(type)  [singleflight per agent type]
        → per-type warm Client (one-shot ACP subprocess)
        → agentctl utility.{Probe|Execute}
        → initialize → session/new → [set_mode?] → [prompt?] → kill
@@ -48,11 +48,11 @@ caller → HostUtilityManager.getInstance(type)
 
 **New**
 - `internal/agent/hostutility/` — `Manager`, `cache`, public API (`GetAll`, `Get`, `Refresh`, `ExecutePrompt`), types (`AgentCapabilities`, `Model`, `Mode`, `AuthMethod`, `PromptResult`, `Status` enum).
-- `internal/agent/capabilities/handlers/` — HTTP routes:
-  - `GET  /api/v1/agents/capabilities`
-  - `GET  /api/v1/agents/:type/capabilities`
-  - `POST /api/v1/agents/:type/probe`
-  - `POST /api/v1/agents/:type/prompt` (raw one-off)
+- `internal/agent/capabilities/handlers/` — HTTP routes (mounted under `/api/v1/agent-capabilities` rather than under `/api/v1/agents/:id/...` to avoid a Gin wildcard-name collision with the existing settings routes):
+  - `GET  /api/v1/agent-capabilities`
+  - `GET  /api/v1/agent-capabilities/:type`
+  - `POST /api/v1/agent-capabilities/:type/probe`
+  - `POST /api/v1/agent-capabilities/:type/prompt` (raw one-off)
 
 **Extended**
 - `internal/agentctl/server/utility/types.go` — `ProbeRequest`/`ProbeResponse`, `Mode` field on `PromptRequest`, `ProbeAuthMethod`/`ProbeModel`/`ProbeMode`/`ProbePromptCapabilities`.

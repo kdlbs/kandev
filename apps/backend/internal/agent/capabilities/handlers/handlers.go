@@ -42,11 +42,16 @@ type capabilitiesResponse struct {
 }
 
 func (h *Handlers) list(c *gin.Context) {
+	// Always return a slice (never nil) so the JSON body is `[]` not `null`.
 	if h.hostUtility == nil {
-		c.JSON(http.StatusOK, capabilitiesResponse{Agents: nil})
+		c.JSON(http.StatusOK, capabilitiesResponse{Agents: []hostutility.AgentCapabilities{}})
 		return
 	}
-	c.JSON(http.StatusOK, capabilitiesResponse{Agents: h.hostUtility.GetAll()})
+	agents := h.hostUtility.GetAll()
+	if agents == nil {
+		agents = []hostutility.AgentCapabilities{}
+	}
+	c.JSON(http.StatusOK, capabilitiesResponse{Agents: agents})
 }
 
 func (h *Handlers) get(c *gin.Context) {
