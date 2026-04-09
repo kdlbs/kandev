@@ -8,12 +8,26 @@ import type { useTaskActions } from "@/hooks/use-task-actions";
 
 type TaskActions = ReturnType<typeof useTaskActions>;
 
+const BULK_ACTION_BATCH_SIZE = 10;
+
+async function allSettledInBatches<T>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<unknown>,
+): Promise<PromiseSettledResult<unknown>[]> {
+  const results: PromiseSettledResult<unknown>[] = [];
+  for (let i = 0; i < items.length; i += BULK_ACTION_BATCH_SIZE) {
+    const batch = items.slice(i, i + BULK_ACTION_BATCH_SIZE);
+    results.push(...(await Promise.allSettled(batch.map((item, offset) => worker(item, i + offset)))));
+  }
+  return results;
+}
+
 async function performBulkAction(
   tasks: KanbanState["tasks"][number][],
   action: (id: string) => Promise<unknown>,
   applySuccess: (succeededIds: Set<string>) => void,
 ): Promise<void> {
-  const results = await Promise.allSettled(tasks.map((task) => action(task.id)));
+  const results = await allSettledInBatches(tasks, (task) => action(task.id));
   const succeededIds = new Set(
     tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
   );
@@ -71,14 +85,12 @@ export function useLaneTaskActions({
           -1,
         );
 
-      const results = await Promise.allSettled(
-        actionableTasks.map((task, i) =>
-          moveTaskById(task.id, {
-            workflow_id: workflowId!,
-            workflow_step_id: targetStepId,
-            position: maxTargetPos + 1 + i,
-          }),
-        ),
+      const results = await allSettledInBatches(actionableTasks, (task, i) =>
+        moveTaskById(task.id, {
+          workflow_id: workflowId!,
+          workflow_step_id: targetStepId,
+          position: maxTargetPos + 1 + i,
+        }),
       );
 
       const succeededMoves = new Map(
