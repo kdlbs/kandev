@@ -7,7 +7,12 @@ vi.mock("@/lib/local-storage", () => ({
 }));
 
 vi.mock("./dockview-layout-builders", () => ({
-  applyLayoutFixups: vi.fn(() => ({ sidebar: "g1", center: "g2" })),
+  applyLayoutFixups: vi.fn(() => ({
+    sidebarGroupId: "g1",
+    centerGroupId: "g2",
+    rightTopGroupId: "g3",
+    rightBottomGroupId: "g4",
+  })),
 }));
 
 vi.mock("./layout-manager", () => ({
