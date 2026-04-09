@@ -682,8 +682,12 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 	worktreeID := uuid.New().String()
 	usesGitCrypt := m.usesGitCrypt(repoPath)
 
-	// Build worktree add command
-	args := []string{"worktree", "add", "-b", branchName}
+	// Build worktree add command.
+	// Use -c branch.autoSetupMerge=false to prevent git from automatically
+	// setting upstream tracking when the base ref is a remote-tracking branch
+	// (e.g. origin/feature/foo). New task branches should start with no
+	// upstream until the user explicitly pushes.
+	args := []string{"-c", "branch.autoSetupMerge=false", "worktree", "add", "-b", branchName}
 	if usesGitCrypt {
 		args = append(args, "--no-checkout")
 	}
@@ -724,8 +728,12 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
 
-	// Create worktree without checkout
-	cmd := exec.CommandContext(ctx, "git", "worktree", "add",
+	// Create worktree without checkout.
+	// Use -c branch.autoSetupMerge=false to prevent git from automatically
+	// setting upstream tracking when the base ref is a remote-tracking branch.
+	cmd := exec.CommandContext(ctx, "git",
+		"-c", "branch.autoSetupMerge=false",
+		"worktree", "add",
 		"-b", branchName,
 		"--no-checkout",
 		worktreePath,

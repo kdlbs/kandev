@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -72,5 +73,41 @@ func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testin
 	upstream2 := strings.TrimSpace(runGit(t, wt2.Path, "rev-parse", "--abbrev-ref", "@{upstream}"))
 	if upstream2 != wantUpstream {
 		t.Fatalf("second worktree upstream = %q, want %q", upstream2, wantUpstream)
+	}
+}
+
+func TestCreateInTaskDir_RemoteBaseRefDoesNotSetUpstream(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.TasksBasePath = cfg.BasePath
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoWithRemote(t)
+
+	// Create a task-dir worktree from a remote-tracking ref without CheckoutBranch.
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		TaskTitle:      "New Feature",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		BaseBranch:     "origin/feature/pr-branch",
+		TaskDirName:    "task-1",
+		RepoName:       "repo-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+
+	// The new branch should NOT have upstream tracking set.
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{upstream}")
+	cmd.Dir = wt.Path
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected no upstream for new task branch, but got %q", strings.TrimSpace(string(out)))
 	}
 }

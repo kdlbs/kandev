@@ -191,6 +191,53 @@ func TestCreateWorktree_CheckoutBranchNoFetchWarningWithRemote(t *testing.T) {
 	}
 }
 
+// TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream verifies that when a worktree
+// is created with a remote-tracking ref as the base (e.g. origin/feature/foo),
+// the new branch does NOT inherit upstream tracking from that ref.
+// This was a bug: git auto-sets upstream when branching from a remote ref,
+// causing the new task branch to track the original remote branch.
+func TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoWithRemote(t)
+
+	// Create a worktree using a remote-tracking ref as the base branch.
+	// This simulates the user selecting a remote branch in the UI, or
+	// PullBeforeWorktree resolving to origin/feature/pr-branch.
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		TaskTitle:      "New Feature",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		BaseBranch:     "origin/feature/pr-branch",
+	})
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+
+	// The new branch should NOT have upstream tracking set.
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{upstream}")
+	cmd.Dir = wt.Path
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected no upstream for new task branch, but got %q", strings.TrimSpace(string(out)))
+	}
+
+	// The branch should still be based on the correct commit.
+	featureSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "origin/feature/pr-branch"))
+	worktreeSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	if worktreeSHA != featureSHA {
+		t.Fatalf("worktree HEAD SHA = %q, want %q (origin/feature/pr-branch)", worktreeSHA, featureSHA)
+	}
+}
+
 // initGitRepoWithRemote creates a bare "origin" repo, clones it, and creates
 // a feature branch with a commit. Returns the clone path (has origin remote).
 func initGitRepoWithRemote(t *testing.T) string {
