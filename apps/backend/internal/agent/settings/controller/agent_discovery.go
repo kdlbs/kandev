@@ -349,6 +349,11 @@ func resolveDefaultModel(agentConfig agents.Agent, _ string) (string, bool, erro
 	if agents.IsPassthroughOnly(agentConfig) {
 		return "passthrough", true, nil
 	}
+	// Mock agent is not probed (not an InferenceAgent) but needs a concrete
+	// model for E2E tests that exercise the ModelSelector UI.
+	if agentConfig.ID() == "mock-agent" {
+		return "mock-default", false, nil
+	}
 	return "", false, nil
 }
 
