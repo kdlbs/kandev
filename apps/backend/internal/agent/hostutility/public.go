@@ -2,6 +2,7 @@ package hostutility
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,9 +38,13 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 	})
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
+		status := StatusFailed
+		if errors.Is(err, errAgentNotInstalled) {
+			status = StatusNotInstalled
+		}
 		m.cache.set(AgentCapabilities{
 			AgentType:     agentType,
-			Status:        StatusFailed,
+			Status:        status,
 			Error:         err.Error(),
 			LastCheckedAt: time.Now(),
 		})

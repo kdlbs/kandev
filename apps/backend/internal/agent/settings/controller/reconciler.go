@@ -16,6 +16,12 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// CapabilityReader is the minimum surface of the host utility manager that
+// the reconciler needs. Declared as an interface so tests can inject a fake.
+type CapabilityReader interface {
+	Get(agentType string) (hostutility.AgentCapabilities, bool)
+}
+
 // ProfileReconciler reconciles persisted agent profiles against the host
 // utility capability cache. On boot it seeds default profiles for newly
 // probed agents, validates existing profile models/modes against the cache
@@ -27,7 +33,7 @@ import (
 // never blocks task startup — profiles used before reconciliation simply get
 // validated on the next boot.
 type ProfileReconciler struct {
-	hostUtility *hostutility.Manager
+	hostUtility CapabilityReader
 	registry    *registry.Registry
 	store       store.Repository
 	log         *logger.Logger
@@ -35,7 +41,7 @@ type ProfileReconciler struct {
 
 // NewProfileReconciler constructs a reconciler.
 func NewProfileReconciler(
-	h *hostutility.Manager,
+	h CapabilityReader,
 	reg *registry.Registry,
 	st store.Repository,
 	log *logger.Logger,

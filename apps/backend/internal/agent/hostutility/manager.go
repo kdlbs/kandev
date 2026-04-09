@@ -292,6 +292,11 @@ func waitForClientHealthy(ctx context.Context, c *agentctlclient.Client) error {
 	}
 }
 
+// errAgentNotInstalled is returned from getInstance when the agent CLI is not
+// installed on the host. The Refresh path uses it to classify Status
+// accurately instead of lumping every error into StatusFailed.
+var errAgentNotInstalled = errors.New("agent not installed")
+
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
 func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance, agents.InferenceAgent, error) {
@@ -328,6 +333,11 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		m.mu.RUnlock()
 		if existing != nil {
 			return existing, nil
+		}
+		// Pre-check installation so Refresh surfaces `not_installed`
+		// instead of collapsing it into `failed` via createInstance errors.
+		if disc, derr := ag.IsInstalled(ctx); derr != nil || disc == nil || !disc.Available {
+			return nil, errAgentNotInstalled
 		}
 		created, cerr := m.createInstance(ctx, agentType)
 		if cerr != nil {

@@ -77,7 +77,10 @@ func (h *Handlers) probe(c *gin.Context) {
 	if err != nil {
 		h.logger.Warn("probe refresh failed",
 			zap.String("agent_type", agentType), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Don't forward the raw error to clients — it may include tmp paths
+		// or subprocess diagnostics. The status and sanitized message live
+		// on the capability record itself (returned inline below).
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "probe failed"})
 		return
 	}
 	c.JSON(http.StatusOK, caps)
@@ -106,7 +109,7 @@ func (h *Handlers) prompt(c *gin.Context) {
 	}
 	var req promptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 	agentType := c.Param("type")
@@ -114,7 +117,10 @@ func (h *Handlers) prompt(c *gin.Context) {
 	if err != nil {
 		h.logger.Warn("raw prompt failed",
 			zap.String("agent_type", agentType), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Log the full error above but return a sanitized message to the
+		// client — raw subprocess/ACP errors can include tmp paths and
+		// stack traces that are not appropriate for external responses.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "prompt execution failed"})
 		return
 	}
 	c.JSON(http.StatusOK, promptResponse{

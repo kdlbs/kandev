@@ -3,6 +3,7 @@
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
@@ -189,6 +190,11 @@ function ModelField({
   );
 }
 
+// DEFAULT_MODE_VALUE is the sentinel used in the mode combobox to represent
+// "no explicit override" — the profile stores `mode = ""` and the agent uses
+// its own default at session start.
+const DEFAULT_MODE_VALUE = "__default__";
+
 function ModeField({
   profile,
   modelConfig,
@@ -203,8 +209,11 @@ function ModeField({
   if (!modelConfig.available_modes || modelConfig.available_modes.length === 0) {
     return null;
   }
-  const selected = profile.mode || modelConfig.current_mode_id || "";
-  const activeMode = modelConfig.available_modes.find((m) => m.id === selected);
+  const selected = profile.mode || DEFAULT_MODE_VALUE;
+  const activeMode = modelConfig.available_modes.find((m) => m.id === profile.mode);
+  const defaultLabel = modelConfig.current_mode_id
+    ? `Agent default (${modelConfig.current_mode_id})`
+    : "Agent default";
   return (
     <div data-testid="profile-mode-field" className={isCompact ? "space-y-1.5" : "space-y-2"}>
       {isCompact ? (
@@ -212,18 +221,22 @@ function ModeField({
       ) : (
         <Label>Mode</Label>
       )}
-      <select
-        data-testid="profile-mode-select"
-        className="w-full rounded-md border bg-background px-3 py-2 text-sm cursor-pointer"
+      <Select
         value={selected}
-        onChange={(event) => onChange({ mode: event.target.value })}
+        onValueChange={(value) => onChange({ mode: value === DEFAULT_MODE_VALUE ? "" : value })}
       >
-        {modelConfig.available_modes.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger data-testid="profile-mode-select" className="w-full cursor-pointer">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_MODE_VALUE}>{defaultLabel}</SelectItem>
+          {modelConfig.available_modes.map((m) => (
+            <SelectItem key={m.id} value={m.id}>
+              {m.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {activeMode?.description && (
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}

@@ -206,16 +206,22 @@ func (c *Controller) resolveProfileNameForModel(ctx context.Context, agentID, mo
 	if err != nil {
 		return ""
 	}
-	agentConfig, ok := c.agentRegistry.Get(agent.Name)
-	if !ok {
+	if _, ok := c.agentRegistry.Get(agent.Name); !ok {
 		return ""
 	}
 
-	modelEntries, _ := c.fetchModelsWithCache(ctx, agentConfig)
-	for _, m := range modelEntries {
-		if m.ID == modelID {
-			return m.Name
+	// Look up the model's display name from the host utility capability
+	// cache. If the cache isn't populated yet (probes not finished, agent
+	// not probed) we fall through to the raw model ID — better than
+	// blocking the save.
+	if c.hostUtility != nil {
+		if caps, ok := c.hostUtility.Get(agent.Name); ok {
+			for _, m := range caps.Models {
+				if m.ID == modelID {
+					return m.Name
+				}
+			}
 		}
 	}
-	return modelID // fallback to model ID if not found
+	return modelID
 }

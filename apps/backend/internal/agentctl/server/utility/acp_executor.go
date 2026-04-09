@@ -85,7 +85,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}()
 
 	// Execute ACP protocol
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Mode)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Model, req.Mode)
 	if err != nil {
 		return &PromptResponse{
 			Success:    false,
@@ -103,13 +103,15 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 }
 
 // executeACPSession performs the ACP handshake, creates a session, optionally
-// sets the session mode, sends the prompt, and collects the response text.
+// sets the session model and mode, sends the prompt, and collects the response
+// text.
 func (e *ACPInferenceExecutor) executeACPSession(
 	ctx context.Context,
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
 	prompt string,
+	model string,
 	mode string,
 ) (string, error) {
 	// Collect response text from updates
@@ -157,6 +159,18 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	sessionID := sessionResp.SessionId
+
+	// Optionally set the session model before prompting. ACP-first agents
+	// declare no CLI ModelFlag, so `--model` is not appended at spawn time;
+	// the model has to be applied over the ACP protocol here.
+	if model != "" {
+		if _, err := conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
+			SessionId: sessionID,
+			ModelId:   acp.UnstableModelId(model),
+		}); err != nil {
+			return "", fmt.Errorf("ACP session/set_model failed: %w", err)
+		}
+	}
 
 	// Optionally set the session mode before prompting.
 	if mode != "" {

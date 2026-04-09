@@ -146,12 +146,16 @@ func (c *Controller) fetchModelsWithCache(_ context.Context, _ agents.Agent) ([]
 }
 
 // buildModelConfigFromHostUtility reads cached ACP probe data for the agent
-// type and produces a ModelConfigDTO with models, modes, and status.
+// type and produces a ModelConfigDTO with models, modes, and status. Agents
+// not in the probe cache (e.g. the mock agent used in E2E tests, which
+// doesn't speak ACP through its binary) fall back to `SupportsDynamicModels:
+// false` with an empty model list — callers render the profile's stored
+// model as a plain string rather than offering a dropdown.
 func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
 	cfg := dto.ModelConfigDTO{
-		SupportsDynamicModels: true,
+		SupportsDynamicModels: false,
 		AvailableModels:       []dto.ModelEntryDTO{},
 		AvailableModes:        []dto.ModeEntryDTO{},
 	}
@@ -164,6 +168,7 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 		cfg.Status = "not_configured"
 		return cfg
 	}
+	cfg.SupportsDynamicModels = true
 	cfg.Status = string(caps.Status)
 	cfg.Error = caps.Error
 	cfg.DefaultModel = caps.CurrentModelID
