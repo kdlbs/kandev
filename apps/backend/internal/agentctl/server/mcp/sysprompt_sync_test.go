@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -43,6 +44,7 @@ func findBareToolReferences(prompt string, bareNames map[string]struct{}) []stri
 			break
 		}
 	}
+	sort.Strings(found)
 	return found
 }
 
