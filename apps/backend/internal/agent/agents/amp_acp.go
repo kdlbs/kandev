@@ -63,22 +63,13 @@ func (a *AmpACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *AmpACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	install := OSPaths{
-		Linux: []string{"~/.amp/bin"},
-		MacOS: []string{"~/.amp/bin"},
-	}
-	mcp := OSPaths{
-		Linux: []string{"~/.config/amp/settings.json"},
-		MacOS: []string{"~/.amp/bin"},
-	}
-
-	result, err := Detect(ctx, WithFileExists(install.Resolve()...))
+	// Check for the amp CLI on PATH. Auth state is surfaced later by the
+	// ACP probe, not by scanning ~/.amp.
+	result, err := Detect(ctx, WithCommand("amp-acp"), WithCommand("amp"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = install.Expanded()
-	result.MCPConfigPaths = mcp.Expanded()
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}

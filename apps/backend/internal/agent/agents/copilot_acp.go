@@ -65,21 +65,13 @@ func (a *CopilotACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	install := OSPaths{
-		MacOS: []string{"~/.copilot/pkg"},
-	}
-	mcp := OSPaths{
-		Linux: []string{"~/.copilot/mcp-config.json"},
-		MacOS: []string{"~/.copilot/mcp-config.json"},
-	}
-
-	result, err := Detect(ctx, WithFileExists(install.Resolve()...))
+	// Check for the copilot CLI on PATH. Auth state is surfaced later by
+	// the ACP probe, not by scanning ~/.copilot.
+	result, err := Detect(ctx, WithCommand("copilot"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = install.Expanded()
-	result.MCPConfigPaths = mcp.Expanded()
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}

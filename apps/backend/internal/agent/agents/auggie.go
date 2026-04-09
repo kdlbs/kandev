@@ -61,15 +61,13 @@ func (a *Auggie) Logo(v LogoVariant) []byte {
 }
 
 func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx,
-		WithFileExists("~/.augment/.auggie.json"),
-		WithCommand("auggie"),
-	)
+	// Check for the auggie CLI on PATH. Auth state is surfaced later by the
+	// ACP probe.
+	result, err := Detect(ctx, WithCommand("auggie"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = []string{expandHomePath("~/.augment/.auggie.json")}
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 		SupportsShell:         false,

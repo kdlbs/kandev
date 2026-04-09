@@ -65,15 +65,13 @@ func (a *ClaudeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Use the same detection as claude-code: check for ~/.claude.json which is
-	// created after onboarding. Just having npx is not enough — the user needs
-	// Claude Code actually set up.
-	result, err := Detect(ctx, WithFileExists("~/.claude.json"))
+	// Check for the Claude Code CLI on PATH. Auth state is surfaced later by
+	// the ACP probe, not by the presence of ~/.claude.json.
+	result, err := Detect(ctx, WithCommand("claude"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = []string{expandHomePath("~/.claude.json")}
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}

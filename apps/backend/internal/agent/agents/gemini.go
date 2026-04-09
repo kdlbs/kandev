@@ -62,22 +62,13 @@ func (a *Gemini) Logo(v LogoVariant) []byte {
 }
 
 func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	install := OSPaths{
-		Linux: []string{"~/.gemini/oauth_creds.json", "~/.gemini/installation_id"},
-		MacOS: []string{"~/.gemini/oauth_creds.json", "~/.gemini/installation_id"},
-	}
-	mcp := OSPaths{
-		Linux: []string{"~/.gemini/settings.json"},
-		MacOS: []string{"~/.gemini/settings.json"},
-	}
-
-	result, err := Detect(ctx, WithFileExists(install.Resolve()...))
+	// Check for the gemini CLI on PATH. Auth state is surfaced later by the
+	// ACP probe, not by scanning ~/.gemini.
+	result, err := Detect(ctx, WithCommand("gemini"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = install.Expanded()
-	result.MCPConfigPaths = mcp.Expanded()
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}

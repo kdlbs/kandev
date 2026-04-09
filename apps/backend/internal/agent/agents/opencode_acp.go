@@ -64,17 +64,13 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	install := OSPaths{
-		Linux: []string{"~/.opencode", "~/.config/opencode"},
-		MacOS: []string{"~/.opencode", "~/.config/opencode", "~/Library/Application Support/ai.opencode.desktop"},
-	}
-
-	result, err := Detect(ctx, WithFileExists(install.Resolve()...))
+	// Check for the opencode CLI on PATH. Auth state is surfaced later by
+	// the ACP probe, not by scanning ~/.opencode.
+	result, err := Detect(ctx, WithCommand("opencode"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = install.Expanded()
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}
