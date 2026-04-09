@@ -90,9 +90,11 @@ export function useTaskCRUD() {
     async (tasks: Task[]) => {
       if (!kanban.workflowId || tasks.length === 0) return;
 
-      await Promise.all(tasks.map((task) => deleteTaskById(task.id)));
+      const results = await Promise.allSettled(tasks.map((task) => deleteTaskById(task.id)));
 
-      const deletedIds = new Set(tasks.map((t) => t.id));
+      const deletedIds = new Set(
+        tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
+      );
       store.getState().hydrate({
         kanban: {
           ...store.getState().kanban,
@@ -121,7 +123,7 @@ export function useTaskCRUD() {
           -1,
         );
 
-      await Promise.all(
+      const results = await Promise.allSettled(
         tasks.map((task, i) =>
           moveTaskById(task.id, {
             workflow_id: kanban.workflowId!,
@@ -131,13 +133,18 @@ export function useTaskCRUD() {
         ),
       );
 
+      const succeededMoves = new Map(
+        tasks
+          .filter((_, i) => results[i].status === "fulfilled")
+          .map((task, idx) => [task.id, maxTargetPos + 1 + idx]),
+      );
       store.getState().hydrate({
         kanban: {
           ...store.getState().kanban,
           tasks: store.getState().kanban.tasks.map((t: KanbanState["tasks"][number]) => {
-            if (!movedIds.has(t.id)) return t;
-            const idx = tasks.findIndex((m) => m.id === t.id);
-            return { ...t, workflowStepId: targetStepId, position: maxTargetPos + 1 + idx };
+            const newPos = succeededMoves.get(t.id);
+            if (newPos === undefined) return t;
+            return { ...t, workflowStepId: targetStepId, position: newPos };
           }),
         },
       });
@@ -149,9 +156,11 @@ export function useTaskCRUD() {
     async (tasks: Task[]) => {
       if (!kanban.workflowId || tasks.length === 0) return;
 
-      await Promise.all(tasks.map((task) => archiveTaskById(task.id)));
+      const results = await Promise.allSettled(tasks.map((task) => archiveTaskById(task.id)));
 
-      const archivedIds = new Set(tasks.map((t) => t.id));
+      const archivedIds = new Set(
+        tasks.filter((_, i) => results[i].status === "fulfilled").map((t) => t.id),
+      );
       store.getState().hydrate({
         kanban: {
           ...store.getState().kanban,
