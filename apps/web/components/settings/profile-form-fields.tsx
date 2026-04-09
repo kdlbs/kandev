@@ -375,12 +375,14 @@ function NoAuthPanel({
   isLoading,
   onRefresh,
   error,
+  rawError,
 }: {
   agentName: string;
   status: "auth_required" | "not_installed";
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   error: string | null;
+  rawError: string | null;
 }) {
   const isAuth = status === "auth_required";
   const Icon = isAuth ? IconLock : IconPackageOff;
@@ -393,6 +395,7 @@ function NoAuthPanel({
   ) : (
     <>Install the agent CLI, then click Refresh.</>
   );
+  const detail = rawError || error;
   return (
     <div
       data-testid="profile-no-auth-panel"
@@ -401,9 +404,27 @@ function NoAuthPanel({
     >
       <Icon className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
       <div className="flex-1 min-w-0 space-y-1">
-        <p className="text-sm font-medium">{title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{title}</p>
+          {detail && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground cursor-help"
+                  data-testid="profile-no-auth-details"
+                >
+                  <IconAlertCircle className="h-3 w-3" />
+                  details
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-md">
+                <p className="whitespace-pre-wrap break-words text-xs">{detail}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground">{hint}</p>
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       </div>
       <Button
         type="button"
@@ -475,6 +496,7 @@ function CapabilitiesRow({
         isLoading={isLoading}
         onRefresh={onRefresh}
         error={error}
+        rawError={modelConfig.error ?? null}
       />
     );
   }
