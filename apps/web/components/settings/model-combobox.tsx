@@ -74,10 +74,17 @@ export function ModelCombobox({
           <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+      >
         <Command>
           <CommandInput placeholder="Search models..." />
-          <CommandList className="max-h-[min(60vh,24rem)] overflow-y-auto">
+          <CommandList
+            className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <CommandEmpty>No model found.</CommandEmpty>
             <CommandGroup>
               {models.map((model) => {

@@ -293,10 +293,14 @@ function ModePicker({
       <PopoverContent
         className="min-w-[--radix-popover-trigger-width] w-[min(32rem,calc(100vw-2rem))] p-0"
         align="start"
+        onWheel={(e) => e.stopPropagation()}
       >
         <Command>
           <CommandInput placeholder="Search modes..." />
-          <CommandList className="max-h-[min(60vh,24rem)] overflow-y-auto">
+          <CommandList
+            className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <CommandEmpty>No mode found.</CommandEmpty>
             <CommandGroup>
               {modes.map((m) => (
