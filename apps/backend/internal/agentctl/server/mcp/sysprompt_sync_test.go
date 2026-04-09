@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -19,6 +20,40 @@ func extractKandevTools(prompt string) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, m := range kandevToolRef.FindAllString(prompt, -1) {
 		out[m] = struct{}{}
+	}
+	return out
+}
+
+// findBareToolReferences scans `prompt` for occurrences of any `bareName` from
+// `bareNames` that are NOT followed by `_kandev`. Returns the list of bare names
+// found in this state. Used to catch sysprompt drift in the opposite direction
+// of the v0.28 bug — i.e. a prompt that says `get_task_plan` (no suffix) when
+// the registered tool is `get_task_plan_kandev`.
+func findBareToolReferences(prompt string, bareNames map[string]struct{}) []string {
+	const suffix = "_kandev"
+	var found []string
+	for bare := range bareNames {
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(bare) + `\b`)
+		for _, idx := range re.FindAllStringIndex(prompt, -1) {
+			end := idx[1]
+			if end+len(suffix) <= len(prompt) && prompt[end:end+len(suffix)] == suffix {
+				continue // matched the suffixed form, ignore
+			}
+			found = append(found, bare)
+			break
+		}
+	}
+	return found
+}
+
+// bareNamesOf strips the `_kandev` suffix from every registered tool name and
+// returns the bare set, used by findBareToolReferences as the haystack of
+// candidates to scan for.
+func bareNamesOf(registered map[string]struct{}) map[string]struct{} {
+	const suffix = "_kandev"
+	out := make(map[string]struct{}, len(registered))
+	for name := range registered {
+		out[strings.TrimSuffix(name, suffix)] = struct{}{}
 	}
 	return out
 }
@@ -88,5 +123,42 @@ func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {
 		assert.True(t, ok,
 			"tool %q is referenced in ConfigContext but not registered by the MCP server in ModeConfig",
 			name)
+	}
+}
+
+// TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
+// prompt that mentions a registered tool by its bare name (without the
+// `_kandev` suffix). Without this check, a typo like
+// `get_task_plan` in a sysprompt would silently slip past the other tests
+// because they only inspect `_kandev`-suffixed mentions.
+func TestSyspromptToolNames_NoBareToolReferences(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	taskServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	configServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
+
+	registered := make(map[string]struct{})
+	for _, name := range getRegisteredToolNames(taskServer) {
+		registered[name] = struct{}{}
+	}
+	for _, name := range getRegisteredToolNames(configServer) {
+		registered[name] = struct{}{}
+	}
+	bareNames := bareNamesOf(registered)
+
+	cases := map[string]string{
+		"PlanMode":          sysprompt.PlanMode,
+		"KandevContext":     sysprompt.KandevContext,
+		"DefaultPlanPrefix": sysprompt.DefaultPlanPrefix,
+		"ConfigContext":     sysprompt.ConfigContext,
+	}
+
+	for name, prompt := range cases {
+		bare := findBareToolReferences(prompt, bareNames)
+		assert.Empty(t, bare,
+			"sysprompt %s contains tool name(s) without the _kandev suffix: %v — every reference must use the suffixed form",
+			name, bare)
 	}
 }

@@ -117,7 +117,7 @@ AGENT TOOLS:
 - delete_agent_profile_kandev: Delete an agent profile. Required: profile_id.
 
 EXECUTOR PROFILE TOOLS:
-Executors (local, worktree, local_docker, sprites) are pre-defined. Use list_executors to find executor IDs, then manage profiles.
+Executors (local, worktree, local_docker, sprites) are pre-defined. Use list_executors_kandev to find executor IDs, then manage profiles.
 - list_executors_kandev: List all executors with their IDs and types.
 - list_executor_profiles_kandev: List profiles for an executor. Required: executor_id.
 - create_executor_profile_kandev: Create an executor profile. Required: executor_id, name. Optional: mcp_policy, config, prepare_script, cleanup_script.
