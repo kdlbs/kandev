@@ -814,3 +814,55 @@ func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 		t.Errorf("expected 0 remaining dedup records, got %d", len(remaining))
 	}
 }
+
+// Regression: when a task already has a TaskPR row pointing to an old PR
+// (e.g. the first PR was closed and a second one opened on the same or a new
+// branch), AssociatePRWithTask must replace the stale row so downstream
+// consumers (UI, GetTaskPR) observe the current PR rather than the old one.
+func TestAssociatePRWithTask_ReplacesStaleAssociation(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+
+	// Seed an existing association for PR #1.
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "owner",
+		Repo:       "repo",
+		PRNumber:   1,
+		PRURL:      "https://github.com/owner/repo/pull/1",
+		PRTitle:    "First",
+		HeadBranch: "feat-a",
+		BaseBranch: "main",
+		State:      "closed",
+	}); err != nil {
+		t.Fatalf("seed TaskPR: %v", err)
+	}
+
+	// Associate a new PR #2 (could be on same or different branch).
+	newPR := &PR{
+		Number:      2,
+		Title:       "Second",
+		HTMLURL:     "https://github.com/owner/repo/pull/2",
+		HeadBranch:  "feat-b",
+		BaseBranch:  "main",
+		State:       "open",
+		RepoOwner:   "owner",
+		RepoName:    "repo",
+		AuthorLogin: "alice",
+	}
+	tp, err := svc.AssociatePRWithTask(ctx, "t1", newPR)
+	if err != nil {
+		t.Fatalf("AssociatePRWithTask: %v", err)
+	}
+	if tp.PRNumber != 2 {
+		t.Errorf("returned TaskPR.PRNumber=%d, want 2", tp.PRNumber)
+	}
+
+	got, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTaskPR: %v", err)
+	}
+	if got == nil || got.PRNumber != 2 {
+		t.Errorf("GetTaskPR after replace = %+v, want PRNumber=2", got)
+	}
+}

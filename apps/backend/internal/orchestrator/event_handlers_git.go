@@ -464,6 +464,26 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 		}
 	}
 
+	// Persist the new branch name to the session's worktree record so downstream
+	// consumers (PR watch reconciliation, branch listings) observe the current
+	// branch rather than the value captured at worktree creation. Without this,
+	// renaming or switching branches (e.g. `git branch -m`, `git checkout`)
+	// leaves PR auto-association stuck on the original branch.
+	if data.BranchSwitch.CurrentBranch != "" {
+		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch); err != nil {
+			s.logger.Error("failed to update session worktree branch after branch switch",
+				zap.String("session_id", data.SessionID),
+				zap.String("current_branch", data.BranchSwitch.CurrentBranch),
+				zap.Error(err))
+		}
+
+		// Reset the PR watch for this session so the poller re-searches for a PR
+		// on the new branch. This handles both rename (same PR, new branch name)
+		// and stacked-PR workflows (switching to a different branch with its own
+		// open PR).
+		s.resetPRWatchForBranchSwitch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch)
+	}
+
 	// Forward branch_switched event to WebSocket subject for frontend real-time updates
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
@@ -480,4 +500,42 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
+}
+
+// resetPRWatchForBranchSwitch re-points the session's existing PR watch to the
+// new branch and marks it as searching (pr_number=0) so the poller will
+// discover the PR for the new branch on its next tick. If no watch exists this
+// is a no-op — a watch will be created on the next push.
+func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, sessionID, newBranch string) {
+	if s.githubService == nil {
+		return
+	}
+	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to look up PR watch for branch switch",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if watch == nil {
+		return
+	}
+	if watch.Branch == newBranch && watch.PRNumber == 0 {
+		return
+	}
+	if err := s.githubService.UpdatePRWatchBranch(ctx, watch.ID, newBranch); err != nil {
+		s.logger.Error("failed to reset PR watch branch after branch switch",
+			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
+			zap.Error(err))
+		return
+	}
+	if watch.PRNumber != 0 {
+		if err := s.githubService.UpdatePRWatchPRNumber(ctx, watch.ID, 0); err != nil {
+			s.logger.Error("failed to reset PR watch pr_number after branch switch",
+				zap.String("session_id", sessionID), zap.Error(err))
+			return
+		}
+	}
+	s.logger.Info("reset PR watch after branch switch",
+		zap.String("session_id", sessionID),
+		zap.String("new_branch", newBranch))
 }

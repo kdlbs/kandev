@@ -759,6 +759,19 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 	return err
 }
 
+// UpdateTaskSessionWorktreeBranch updates the cached worktree_branch for all
+// worktrees belonging to a session. Called when a branch switch or rename is
+// detected in the live workspace so downstream consumers (PR watch
+// reconciliation, branch listings) see the current branch rather than the
+// value captured at worktree creation.
+func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_worktrees SET worktree_branch = ?, updated_at = ? WHERE session_id = ?
+	`), branch, now, sessionID)
+	return err
+}
+
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT

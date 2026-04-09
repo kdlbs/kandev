@@ -41,7 +41,7 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	return poller, svc, mockClient, store
 }
 
-func TestCheckSinglePRWatch_MergedPR_SyncsThenDeletes(t *testing.T) {
+func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 	poller, _, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
 
@@ -106,13 +106,17 @@ func TestCheckSinglePRWatch_MergedPR_SyncsThenDeletes(t *testing.T) {
 		t.Error("expected task PR MergedAt to be set")
 	}
 
-	// Assert: PRWatch should be deleted.
+	// Assert: PRWatch should be reset to pr_number=0 (still present so the
+	// poller can discover a follow-up PR on the same branch).
 	remainingWatch, err := store.GetPRWatchBySession(ctx, "sess-1")
 	if err != nil {
 		t.Fatalf("get PR watch: %v", err)
 	}
-	if remainingWatch != nil {
-		t.Error("expected PR watch to be deleted after merged PR")
+	if remainingWatch == nil {
+		t.Fatal("expected PR watch to remain after merged PR (reset, not deleted)")
+	}
+	if remainingWatch.PRNumber != 0 {
+		t.Errorf("expected PR watch pr_number=0 after merge, got %d", remainingWatch.PRNumber)
 	}
 }
 

@@ -129,6 +129,7 @@ type sessionExecutorStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
+	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
 	ClearSessionExecutionID(ctx context.Context, id string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error

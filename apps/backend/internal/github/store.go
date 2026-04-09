@@ -263,6 +263,12 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	return result, nil
 }
 
+// DeleteTaskPR deletes a task-PR association by ID.
+func (s *Store) DeleteTaskPR(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM github_task_prs WHERE id = ?`, id)
+	return err
+}
+
 // UpdateTaskPR updates a task-PR association.
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()

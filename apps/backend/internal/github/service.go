@@ -290,6 +290,19 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 	if existing != nil && existing.PRNumber == pr.Number {
 		return existing, nil
 	}
+	// Replace the stale association when the task now points to a different PR
+	// (e.g. the first PR was closed and a follow-up PR was opened on the same
+	// or a new branch). Without this, GetTaskPR would keep returning the old
+	// PR and the UI would remain stuck on it.
+	if existing != nil {
+		if delErr := s.store.DeleteTaskPR(ctx, existing.ID); delErr != nil {
+			return nil, fmt.Errorf("delete stale task PR: %w", delErr)
+		}
+		s.logger.Info("replacing stale task PR association",
+			zap.String("task_id", taskID),
+			zap.Int("old_pr_number", existing.PRNumber),
+			zap.Int("new_pr_number", pr.Number))
+	}
 	tp := &TaskPR{
 		TaskID:      taskID,
 		Owner:       pr.RepoOwner,
