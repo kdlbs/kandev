@@ -93,18 +93,17 @@ export function useCumulativeDiff(sessionId: string | null) {
     };
   }, [envKey]);
 
-  // Sync cached state when envKey changes
+  // Sync cached state when envKey changes.
+  // Always reset loading — fetchCumulativeDiff re-sets to true if it starts
+  // a request.  Without this, a stale in-flight for the previous envKey can
+  // leave loading=true indefinitely on version-mismatch discard.
   useEffect(() => {
     if (envKey) {
-      const cached = cumulativeDiffCache[envKey] ?? null;
-      setDiff(cached);
-      // If cached data exists, clear any in-flight loading state from the
-      // previous envKey to avoid a brief spinner flash.
-      if (cached !== null) setLoading(false);
+      setDiff(cumulativeDiffCache[envKey] ?? null);
     } else {
       setDiff(null);
-      setLoading(false);
     }
+    setLoading(false);
   }, [envKey]);
 
   return {
