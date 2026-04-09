@@ -185,6 +185,33 @@ function buildUserShellActions(set: ImmerSet) {
   };
 }
 
+/**
+ * Migrate any env-keyed data stored under the fallback `sessionId` key to the
+ * proper `environmentId` key so selectors don't see stale data after the
+ * session→environment mapping is registered.
+ */
+function migrateEnvKeyedData(
+  draft: SessionRuntimeSliceState,
+  sessionId: string,
+  environmentId: string,
+) {
+  if (sessionId === environmentId) return;
+  const migrate = <T>(store: Record<string, T>) => {
+    if (sessionId in store && !(environmentId in store)) {
+      store[environmentId] = store[sessionId];
+      delete store[sessionId];
+    }
+  };
+  migrate(draft.sessionCommits.byEnvironmentId);
+  migrate(draft.sessionCommits.loading);
+  migrate(draft.gitStatus.byEnvironmentId);
+  migrate(draft.shell.outputs);
+  migrate(draft.shell.statuses);
+  migrate(draft.userShells.byEnvironmentId);
+  migrate(draft.userShells.loading);
+  migrate(draft.userShells.loaded);
+}
+
 export const createSessionRuntimeSlice: StateCreator<
   SessionRuntimeSlice,
   [["zustand/immer", never]],
@@ -208,24 +235,7 @@ export const createSessionRuntimeSlice: StateCreator<
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;
-      // Migrate any data stored under the fallback `sessionId` key to the
-      // proper `environmentId` key so selectors don't see stale data.
-      if (sessionId !== environmentId) {
-        const migrate = <T>(store: Record<string, T>) => {
-          if (sessionId in store && !(environmentId in store)) {
-            store[environmentId] = store[sessionId];
-            delete store[sessionId];
-          }
-        };
-        migrate(draft.sessionCommits.byEnvironmentId);
-        migrate(draft.sessionCommits.loading);
-        migrate(draft.gitStatus.byEnvironmentId);
-        migrate(draft.shell.outputs);
-        migrate(draft.shell.statuses);
-        migrate(draft.userShells.byEnvironmentId);
-        migrate(draft.userShells.loading);
-        migrate(draft.userShells.loaded);
-      }
+      migrateEnvKeyedData(draft, sessionId, environmentId);
     }),
   setContextWindow: (sessionId, contextWindow) =>
     set((draft) => {
