@@ -43,14 +43,11 @@ function makeParams(overrides?: Partial<SessionSwitchParams>): SessionSwitchPara
 
 describe("performSessionSwitch", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.mocked(getSessionLayout).mockReturnValue(null);
-    vi.mocked(savedLayoutMatchesLive).mockReturnValue(false);
-    vi.mocked(layoutStructuresMatch).mockReturnValue(false);
+    vi.clearAllMocks();
   });
 
   it("calls api.layout on the fast path when structures match", () => {
-    vi.mocked(layoutStructuresMatch).mockReturnValue(true);
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     const params = makeParams();
 
     performSessionSwitch(params);
@@ -59,8 +56,10 @@ describe("performSessionSwitch", () => {
   });
 
   it("calls api.layout on the fast path when saved layout matches", () => {
-    vi.mocked(getSessionLayout).mockReturnValue({ grid: {} } as unknown as ReturnType<typeof getSessionLayout>);
-    vi.mocked(savedLayoutMatchesLive).mockReturnValue(true);
+    vi.mocked(getSessionLayout).mockReturnValueOnce({ grid: {} } as unknown as ReturnType<
+      typeof getSessionLayout
+    >);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
 
     performSessionSwitch(params);
@@ -70,7 +69,6 @@ describe("performSessionSwitch", () => {
   });
 
   it("calls api.layout on the slow path (buildDefault fallback)", () => {
-    vi.mocked(layoutStructuresMatch).mockReturnValue(false);
     const params = makeParams();
 
     performSessionSwitch(params);
