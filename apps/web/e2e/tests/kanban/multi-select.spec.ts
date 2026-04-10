@@ -150,10 +150,8 @@ test.describe("Multi-select bulk actions", () => {
     const targetOption = kanban.bulkMoveStepOption(targetStep.id);
     await expect(targetOption).toBeVisible();
     await targetOption.click();
-
-    // Toolbar clears after move
-    await expect(kanban.multiSelectToolbar).not.toBeVisible({ timeout: 10000 });
-
+    // Toolbar persists after move so follow-up actions can be chained
+    await expect(kanban.multiSelectToolbar).toBeVisible({ timeout: 10000 });
     // Task should be visible in the target column
     await expect(kanban.taskCardInColumn("MS Move Task", targetStep.id)).toBeVisible();
   });
