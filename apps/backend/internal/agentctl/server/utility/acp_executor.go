@@ -403,30 +403,29 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"npx":      "npx",
-	"auggie":   "auggie",
-	"opencode": "opencode",
-}
-
-// allowedPassthrough lists commands where the original path is used as-is
-// (e.g. mock-agent with an absolute path set by the test fixture).
-var allowedPassthrough = map[string]bool{
-	"mock-agent": true,
+	"npx":        "npx",
+	"auggie":     "auggie",
+	"opencode":   "opencode",
+	"mock-agent": "mock-agent",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
+// When the caller supplies an absolute path, we validate the base name and
+// return the original path so agents configured with absolute paths (e.g.
+// mock-agent in E2E tests) still resolve correctly.
 func resolveProbeCommand(name string) string {
 	base := filepath.Base(name)
-	if lit, ok := allowedProbeCommands[base]; ok {
-		return lit
+	if _, ok := allowedProbeCommands[base]; !ok {
+		return ""
 	}
-	// Passthrough entries return the original name (absolute path) so
-	// test-only agents like mock-agent work without being on PATH.
-	if allowedPassthrough[base] {
-		return name //nolint:gosec // base name is checked against a hard-coded set
+	// If the input is just a bare name, return the hard-coded literal.
+	// If it's an absolute/relative path, return it as-is — the base name
+	// has already been validated against the allow-list.
+	if name == base {
+		return allowedProbeCommands[base]
 	}
-	return ""
+	return name //nolint:gosec // base name validated against hard-coded allow-list
 }
 
 // buildACPCommand builds the command arguments for ACP inference.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconAlertTriangle, IconGitBranch, IconLock, IconTerminal2 } from "@tabler/icons-react";
+import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import type {
@@ -15,6 +15,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
+import { getCapabilityWarning } from "@/lib/capability-warning";
 
 type OptionItem = {
   value: string;
@@ -114,7 +115,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
-      const warning = capabilityWarning(profile);
+      const warning = getCapabilityWarning(profile.capability_status, profile.capability_error);
       return {
         value: profile.id,
         label: profile.label,
@@ -147,36 +148,6 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
   }, [agentProfiles]);
 }
 
-type CapabilityWarning = {
-  Icon: typeof IconLock;
-  color: string;
-  title: string;
-};
-
-function capabilityWarning(profile: AgentProfileOption): CapabilityWarning | null {
-  switch (profile.capability_status) {
-    case "auth_required":
-      return {
-        Icon: IconLock,
-        color: "text-amber-600 dark:text-amber-400",
-        title: profile.capability_error || "Authentication required",
-      };
-    case "not_installed":
-      return {
-        Icon: IconAlertTriangle,
-        color: "text-muted-foreground",
-        title: profile.capability_error || "Agent CLI not installed",
-      };
-    case "failed":
-      return {
-        Icon: IconAlertTriangle,
-        color: "text-red-600 dark:text-red-400",
-        title: profile.capability_error || "Agent probe failed",
-      };
-    default:
-      return null;
-  }
-}
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {
   return useMemo(() => {

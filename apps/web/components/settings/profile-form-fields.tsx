@@ -161,7 +161,7 @@ function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
     case "not_installed":
       return "Agent CLI not installed.";
     case "failed":
-      return `Probe failed${modelConfig.error ? `: ${modelConfig.error}` : ""}`;
+      return "Probe failed. Check agent logs for details.";
     default:
       return null;
   }
@@ -332,7 +332,7 @@ function NoAuthPanel({
   ) : (
     <>Install the agent CLI, then click Refresh.</>
   );
-  const detail = rawError || error;
+  const detail = error || rawError;
   return (
     <div
       data-testid="profile-no-auth-panel"

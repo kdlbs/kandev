@@ -464,24 +464,11 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
   });
-  const enhance = useEnhanceForDialog(fs);
   return {
-    fs,
-    isSessionMode,
-    isEditMode,
-    isCreateMode,
-    isTaskStarted,
-    sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositoriesLoading,
-    branchesLoading,
-    computed,
-    handlers,
-    submitHandlers,
-    handleKeyDown,
-    enhance,
+    fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted,
+    sessionRepoName, workflows, agentProfiles, snapshots,
+    repositoriesLoading, branchesLoading, computed, handlers,
+    submitHandlers, handleKeyDown, enhance: useEnhanceForDialog(fs),
   };
 }
 

@@ -4,10 +4,8 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  IconAlertTriangle,
   IconSettings,
   IconFolder,
-  IconLock,
   IconRobot,
   IconBell,
   IconCode,
@@ -155,36 +153,7 @@ type AgentsSidebarSectionProps = {
   agents: Agent[];
 };
 
-type CapabilityWarning = {
-  Icon: typeof IconLock;
-  color: string;
-  title: string;
-};
-
-function agentCapabilityWarning(agent: Agent): CapabilityWarning | null {
-  switch (agent.capability_status) {
-    case "auth_required":
-      return {
-        Icon: IconLock,
-        color: "text-amber-600 dark:text-amber-400",
-        title: agent.capability_error || "Authentication required",
-      };
-    case "not_installed":
-      return {
-        Icon: IconAlertTriangle,
-        color: "text-muted-foreground",
-        title: agent.capability_error || "Agent CLI not installed",
-      };
-    case "failed":
-      return {
-        Icon: IconAlertTriangle,
-        color: "text-red-600 dark:text-red-400",
-        title: agent.capability_error || "Agent probe failed",
-      };
-    default:
-      return null;
-  }
-}
+import { getCapabilityWarning } from "@/lib/capability-warning";
 
 function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
   return (
@@ -202,7 +171,7 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
               const encodedAgent = encodeURIComponent(agent.name);
               const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
               const agentLabel = profile.agent_display_name || agent.name;
-              const warning = agentCapabilityWarning(agent);
+              const warning = getCapabilityWarning(agent.capability_status, agent.capability_error);
               return (
                 <SidebarMenuSubItem key={profile.id} className="min-w-0">
                   <SidebarMenuSubButton asChild isActive={pathname === profilePath}>

@@ -76,6 +76,17 @@ function StatusPill({ status }: { status: string }) {
           Error
         </span>
       );
+    case "probing":
+      return (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+          Probing
+        </span>
+      );
+    case "not_configured":
+      return (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">Pending</span>
+      );
     default:
       return (
         <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">

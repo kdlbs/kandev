@@ -206,8 +206,6 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-// EnhancePromptButton is imported from the shared component.
-// Re-exported here for backwards compatibility with existing imports within this file.
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 
 function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
