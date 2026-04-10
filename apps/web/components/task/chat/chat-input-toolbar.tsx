@@ -13,6 +13,7 @@ import {
   IconPaperclip,
   IconRocket,
 } from "@tabler/icons-react";
+import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -205,8 +206,6 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
     </Tooltip>
   );
 }
-
-import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 
 function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
   const hasMcp = mcpServers.length > 0;

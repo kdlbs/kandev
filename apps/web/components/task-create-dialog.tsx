@@ -465,10 +465,22 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
   });
   return {
-    fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted,
-    sessionRepoName, workflows, agentProfiles, snapshots,
-    repositoriesLoading, branchesLoading, computed, handlers,
-    submitHandlers, handleKeyDown, enhance: useEnhanceForDialog(fs),
+    fs,
+    isSessionMode,
+    isEditMode,
+    isCreateMode,
+    isTaskStarted,
+    sessionRepoName,
+    workflows,
+    agentProfiles,
+    snapshots,
+    repositoriesLoading,
+    branchesLoading,
+    computed,
+    handlers,
+    submitHandlers,
+    handleKeyDown,
+    enhance: useEnhanceForDialog(fs),
   };
 }
 

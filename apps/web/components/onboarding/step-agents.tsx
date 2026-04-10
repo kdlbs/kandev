@@ -84,9 +84,7 @@ function StatusPill({ status }: { status: string }) {
         </span>
       );
     case "not_configured":
-      return (
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">Pending</span>
-      );
+      return <span className="flex items-center gap-1 text-xs text-muted-foreground">Pending</span>;
     default:
       return (
         <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">

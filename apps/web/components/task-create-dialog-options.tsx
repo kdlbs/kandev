@@ -148,7 +148,6 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
   }, [agentProfiles]);
 }
 
-
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {
   return useMemo(() => {
     return executors.map((executor: Executor) => {
