@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
@@ -47,6 +47,12 @@ export function useMultiSelect(workflowId: string | null) {
   selectedIdsRef.current = selectedIds;
 
   const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setIsProcessing(false);
+  }, [workflowId]);
+
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
   const { removeTasksFromStore, applyMoveInStore } = useMultiSelectStore();
 
@@ -75,7 +81,7 @@ export function useMultiSelect(workflowId: string | null) {
       const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
       const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
       removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set());
+      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
     } finally {
       setIsProcessing(false);
     }
@@ -90,7 +96,7 @@ export function useMultiSelect(workflowId: string | null) {
       const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
       const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
       removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set());
+      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
     } finally {
       setIsProcessing(false);
     }
