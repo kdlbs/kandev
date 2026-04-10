@@ -403,32 +403,20 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"npx":        "npx",
-	"auggie":     "auggie",
-	"opencode":   "opencode",
-	"mock-agent": "mock-agent",
+	"npx":      "npx",
+	"auggie":   "auggie",
+	"opencode": "opencode",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
-// When the caller supplies an absolute path, we validate the base name and
-// return the original path so agents configured with absolute paths (e.g.
-// mock-agent in E2E tests) still resolve correctly.
 func resolveProbeCommand(name string) string {
-	base := filepath.Base(name)
-	if _, ok := allowedProbeCommands[base]; !ok {
-		return ""
-	}
-	// If the input is just a bare name, return the hard-coded literal.
-	// If it's an absolute/relative path, return it as-is — the base name
-	// has already been validated against the allow-list.
-	if name == base {
-		return allowedProbeCommands[base]
-	}
-	return name //nolint:gosec // base name validated against hard-coded allow-list
+	return allowedProbeCommands[filepath.Base(name)]
 }
 
-// buildACPCommand builds the command arguments for ACP inference.
+// buildACPCommand builds the command arguments for ACP inference. The model
+// parameter is a no-op for ACP-first agents (they have no ModelFlag); model
+// selection is applied via the ACP session/set_model protocol call instead.
 func buildACPCommand(cfg *InferenceConfigDTO, model string) []string {
 	args := make([]string, len(cfg.Command))
 	copy(args, cfg.Command)

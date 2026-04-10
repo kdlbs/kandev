@@ -37,6 +37,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { getExecutorIcon } from "@/lib/executor-icons";
+import { getCapabilityWarning } from "@/lib/capability-warning";
 import type { Workspace, Agent, AgentProfile, Executor } from "@/lib/types/http";
 
 type GeneralSidebarSectionProps = {
@@ -152,8 +153,6 @@ type AgentsSidebarSectionProps = {
   pathname: string;
   agents: Agent[];
 };
-
-import { getCapabilityWarning } from "@/lib/capability-warning";
 
 function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
   return (
