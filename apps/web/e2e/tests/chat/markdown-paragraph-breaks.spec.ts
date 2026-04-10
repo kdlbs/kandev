@@ -34,10 +34,12 @@ test.describe("Markdown paragraph breaks", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    // Wait for the agent to finish processing the prompt and become idle.
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // Wait for the agent message containing our paragraphs to appear
+    // Wait for the agent response containing our paragraphs to appear.
     await expect(session.chat.getByText("Paragraph three.").last()).toBeVisible({
-      timeout: 30_000,
+      timeout: 10_000,
     });
 
     // Verify that consecutive <p> elements inside .markdown-body have spacing.
