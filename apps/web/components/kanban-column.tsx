@@ -32,6 +32,9 @@ interface KanbanColumnProps {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   hideHeader?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 }
 
 export function KanbanColumn({
@@ -48,6 +51,9 @@ export function KanbanColumn({
   deletingTaskId,
   archivingTaskId,
   hideHeader = false,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
@@ -91,7 +97,7 @@ export function KanbanColumn({
       )}
 
       {/* Tasks */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1 pt-1">
         {tasks.map((task) => (
           <KanbanCard
             key={task.id}
@@ -107,6 +113,9 @@ export function KanbanColumn({
             showMaximizeButton={showMaximizeButton}
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
+            isSelected={selectedIds?.has(task.id)}
+            onToggleSelect={onToggleSelect}
+            isMultiSelectMode={isMultiSelectMode}
           />
         ))}
       </div>

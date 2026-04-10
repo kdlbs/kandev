@@ -46,6 +46,9 @@ export type SwimlaneContainerProps = {
   showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 function getEmptyMessage(
@@ -113,6 +116,9 @@ type WorkflowItemProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 function SortableWorkflowItem({ wf, hideHeader, isSortable, ...rest }: WorkflowItemProps) {
@@ -215,6 +221,9 @@ export function SwimlaneContainer({
   showMaximizeButton,
   searchQuery,
   selectedRepositoryIds = [],
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
@@ -299,6 +308,9 @@ export function SwimlaneContainer({
                 deletingTaskId={deletingTaskId}
                 archivingTaskId={archivingTaskId}
                 showMaximizeButton={showMaximizeButton}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
+                isMultiSelectMode={isMultiSelectMode}
               />
             );
           })}

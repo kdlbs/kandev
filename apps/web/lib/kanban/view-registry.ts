@@ -19,6 +19,9 @@ export type ViewContentProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 export type ViewRegistryEntry = {

@@ -10,6 +10,7 @@ import {
   IconAlertCircle,
   IconSubtask,
 } from "@tabler/icons-react";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -81,6 +82,9 @@ interface KanbanCardProps {
   showMaximizeButton?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 }
 
 function KanbanCardBody({
@@ -446,9 +450,13 @@ export function KanbanCard({
   showMaximizeButton = false,
   isDeleting,
   isArchiving,
+  isSelected,
+  onToggleSelect,
+  isMultiSelectMode,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
+    disabled: isMultiSelectMode,
   });
 
   const style = {
@@ -457,6 +465,21 @@ export function KanbanCard({
     willChange: isDragging ? "transform" : undefined,
   };
 
+  const handleClick = () => {
+    if (isMultiSelectMode) {
+      onToggleSelect?.(task.id);
+      return;
+    }
+    onClick?.(task);
+  };
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleSelect?.(task.id);
+  };
+
+  const showCheckbox = isMultiSelectMode || isSelected;
+
   return (
     <Card
       size="sm"
@@ -464,33 +487,55 @@ export function KanbanCard({
       style={style}
       data-testid={`task-card-${task.id}`}
       className={cn(
-        "max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
-        needsAction(task) && "border-l-2 border-l-amber-500",
+        "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
+        needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
+        isSelected && "ring-1 ring-primary/60 border-primary/60",
       )}
-      onClick={() => onClick?.(task)}
-      {...listeners}
-      {...attributes}
+      onClick={handleClick}
+      {...(!isMultiSelectMode ? listeners : {})}
+      {...(!isMultiSelectMode ? attributes : {})}
     >
       <CardContent className="px-2 py-1">
-        <KanbanCardBody
-          task={task}
-          repoName={repositoryName ?? null}
-          actions={
-            <KanbanCardActions
-              task={task}
-              showMaximizeButton={showMaximizeButton}
-              onOpenFullPage={onOpenFullPage}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onArchive={onArchive}
-              onMove={onMove}
-              steps={steps}
-              isDeleting={isDeleting}
-              isArchiving={isArchiving}
+        <div className="flex items-start gap-1.5">
+          <div
+            className={cn(
+              "mt-0.5 shrink-0 transition-opacity",
+              showCheckbox ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+            onClick={handleCheckboxClick}
+            onPointerDown={(e) => e.stopPropagation()}
+            data-testid={`task-select-checkbox-${task.id}`}
+          >
+            <Checkbox
+              checked={!!isSelected}
+              aria-label={`Select task ${task.title}`}
+              className="cursor-pointer border-muted-foreground/50"
             />
-          }
-        />
+          </div>
+          <div className="min-w-0 flex-1">
+            <KanbanCardBody
+              task={task}
+              repoName={repositoryName ?? null}
+              actions={
+                !isMultiSelectMode ? (
+                  <KanbanCardActions
+                    task={task}
+                    showMaximizeButton={showMaximizeButton}
+                    onOpenFullPage={onOpenFullPage}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onArchive={onArchive}
+                    onMove={onMove}
+                    steps={steps}
+                    isDeleting={isDeleting}
+                    isArchiving={isArchiving}
+                  />
+                ) : undefined
+              }
+            />
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
