@@ -408,10 +408,25 @@ var allowedProbeCommands = map[string]string{
 	"opencode": "opencode",
 }
 
+// allowedPassthrough lists commands where the original path is used as-is
+// (e.g. mock-agent with an absolute path set by the test fixture).
+var allowedPassthrough = map[string]bool{
+	"mock-agent": true,
+}
+
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
 func resolveProbeCommand(name string) string {
-	return allowedProbeCommands[filepath.Base(name)]
+	base := filepath.Base(name)
+	if lit, ok := allowedProbeCommands[base]; ok {
+		return lit
+	}
+	// Passthrough entries return the original name (absolute path) so
+	// test-only agents like mock-agent work without being on PATH.
+	if allowedPassthrough[base] {
+		return name //nolint:gosec // base name is checked against a hard-coded set
+	}
+	return ""
 }
 
 // buildACPCommand builds the command arguments for ACP inference.

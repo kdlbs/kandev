@@ -72,9 +72,6 @@ func (m *Manager) ExecutePrompt(
 	cfg := ia.InferenceConfig()
 
 	resolved := m.resolveModel(agentType, model, ia)
-	if resolved == "" {
-		return nil, fmt.Errorf("no model specified for agent %q and no default found", agentType)
-	}
 
 	req := &agentctlutil.PromptRequest{
 		Prompt:  prompt,

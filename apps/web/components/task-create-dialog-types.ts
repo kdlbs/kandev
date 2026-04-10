@@ -85,6 +85,7 @@ import type { FileAttachment } from "@/components/task/chat/file-attachment";
 
 export type TaskFormInputsHandle = {
   getValue: () => string;
+  setValue: (v: string) => void;
   getAttachments: () => FileAttachment[];
 };
 

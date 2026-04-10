@@ -6,19 +6,21 @@ import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileInfo } from "@/lib/state/slices";
 
+const ENHANCE_PROMPT = "enhance-prompt" as const;
+
 type GeneratorType =
   | "commit-message"
   | "commit-description"
   | "pr-title"
   | "pr-description"
-  | "enhance-prompt";
+  | typeof ENHANCE_PROMPT;
 
 const UTILITY_AGENT_IDS: Record<GeneratorType, string> = {
   "commit-message": "builtin-commit-message",
   "commit-description": "builtin-commit-description",
   "pr-title": "builtin-pr-title",
   "pr-description": "builtin-pr-description",
-  "enhance-prompt": "builtin-enhance-prompt",
+  [ENHANCE_PROMPT]: "builtin-enhance-prompt",
 };
 
 type UseUtilityAgentGeneratorOptions = {
@@ -56,9 +58,42 @@ export function useUtilityAgentGenerator({
     return { changedFiles, diffs };
   }, [gitStatus]);
 
+  const clearType = useCallback(
+    (type: GeneratorType) =>
+      setGenerating((prev) => {
+        const next = new Set(prev);
+        next.delete(type);
+        return next;
+      }),
+    [],
+  );
+
+  const buildRequest = useCallback(
+    (type: GeneratorType, options?: GenerateOptions): ExecutePromptRequest => {
+      const sessionless = type === ENHANCE_PROMPT && !sessionId;
+      const { changedFiles, diffs } = sessionless
+        ? { changedFiles: [] as string[], diffs: undefined }
+        : collectGitContext();
+      return {
+        utility_agent_id: UTILITY_AGENT_IDS[type],
+        session_id: sessionId ?? "",
+        task_title: taskTitle,
+        task_description: taskDescription,
+        git_diff: diffs || undefined,
+        changed_files: changedFiles.join("\n") || undefined,
+        commit_log: options?.commitLog,
+        diff_summary: options?.diffSummary,
+        user_prompt: options?.userPrompt,
+      };
+    },
+    [sessionId, taskTitle, taskDescription, collectGitContext],
+  );
+
   const generate = useCallback(
     async (type: GeneratorType, options?: GenerateOptions) => {
-      if (!sessionId) {
+      // enhance-prompt can run sessionless via the host utility manager.
+      // Other generators need git context from an active session.
+      if (!sessionId && type !== ENHANCE_PROMPT) {
         toast({
           title: "No active session",
           description: "Start a session first to use AI generation",
@@ -69,34 +104,11 @@ export function useUtilityAgentGenerator({
 
       setGenerating((prev) => new Set(prev).add(type));
       try {
-        const { changedFiles, diffs } = collectGitContext();
-
-        const request: ExecutePromptRequest = {
-          utility_agent_id: UTILITY_AGENT_IDS[type],
-          session_id: sessionId,
-          task_title: taskTitle,
-          task_description: taskDescription,
-          git_diff: diffs || undefined,
-          changed_files: changedFiles.join("\n") || undefined,
-          commit_log: options?.commitLog,
-          diff_summary: options?.diffSummary,
-          user_prompt: options?.userPrompt,
-        };
-
-        const resp = await executeUtilityPrompt(request);
-
-        // Clear generating state BEFORE calling onSuccess so the editor is re-enabled
-        setGenerating((prev) => {
-          const next = new Set(prev);
-          next.delete(type);
-          return next;
-        });
-
+        const resp = await executeUtilityPrompt(buildRequest(type, options));
+        clearType(type);
         if (resp.success && resp.response) {
           const response = resp.response;
-          requestAnimationFrame(() => {
-            options?.onSuccess?.(response);
-          });
+          requestAnimationFrame(() => options?.onSuccess?.(response));
         } else {
           toast({
             title: "Generation failed",
@@ -105,11 +117,7 @@ export function useUtilityAgentGenerator({
           });
         }
       } catch (error) {
-        setGenerating((prev) => {
-          const next = new Set(prev);
-          next.delete(type);
-          return next;
-        });
+        clearType(type);
         toast({
           title: "Generation failed",
           description: error instanceof Error ? error.message : "Unknown error",
@@ -117,7 +125,7 @@ export function useUtilityAgentGenerator({
         });
       }
     },
-    [sessionId, taskTitle, taskDescription, collectGitContext, toast],
+    [sessionId, buildRequest, clearType, toast],
   );
 
   return useGeneratorCallbacks(generate, generating);
@@ -153,7 +161,7 @@ function useGeneratorCallbacks(
 
   const enhancePrompt = useCallback(
     (userPrompt: string, onSuccess: (enhanced: string) => void) =>
-      generate("enhance-prompt", { onSuccess, userPrompt }),
+      generate(ENHANCE_PROMPT, { onSuccess, userPrompt }),
     [generate],
   );
 
@@ -163,7 +171,7 @@ function useGeneratorCallbacks(
     isGeneratingCommitDescription: generating.has("commit-description"),
     isGeneratingPRTitle: generating.has("pr-title"),
     isGeneratingPRDescription: generating.has("pr-description"),
-    isEnhancingPrompt: generating.has("enhance-prompt"),
+    isEnhancingPrompt: generating.has(ENHANCE_PROMPT),
     generateCommitMessage,
     generateCommitDescription,
     generatePRTitle,

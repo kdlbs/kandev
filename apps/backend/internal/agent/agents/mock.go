@@ -108,6 +108,19 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 
 func (a *MockAgent) RemoteAuth() *RemoteAuth { return nil }
 
+// InferenceConfig makes the mock agent inference-capable so it can serve
+// sessionless utility prompts in E2E tests (e.g., "enhance prompt").
+func (a *MockAgent) InferenceConfig() *InferenceConfig {
+	binary := "mock-agent"
+	if a.binaryPath != "" {
+		binary = a.binaryPath
+	}
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand(binary, "--acp"),
+	}
+}
+
 func (a *MockAgent) InstallScript() string { return "" }
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {

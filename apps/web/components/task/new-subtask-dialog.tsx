@@ -18,7 +18,9 @@ import {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
@@ -203,6 +205,21 @@ function NewSubtaskForm({
   );
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+    sessionId: null,
+    taskTitle: title,
+  });
+  const handleEnhancePrompt = useCallback(() => {
+    const current = promptRef.current?.value?.trim();
+    if (!current) return;
+    enhancePrompt(current, (enhanced) => {
+      if (promptRef.current) {
+        promptRef.current.value = enhanced;
+        setHasPrompt(true);
+      }
+    });
+  }, [enhancePrompt]);
 
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
@@ -385,7 +402,14 @@ function NewSubtaskForm({
               }
             }}
           />
-          <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+          <div className="flex items-center px-1 pb-1">
+            <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+            <EnhancePromptButton
+              onClick={handleEnhancePrompt}
+              isLoading={isEnhancingPrompt}
+              isConfigured={isUtilityConfigured}
+            />
+          </div>
           <input
             ref={fileInputRef}
             type="file"

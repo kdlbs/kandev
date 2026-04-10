@@ -15,6 +15,7 @@ import {
 import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -248,6 +249,9 @@ type TaskFormInputsProps = {
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
   disabled?: boolean;
   placeholder?: string;
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt?: boolean;
+  isUtilityConfigured?: boolean;
 };
 
 function useFileAttachments() {
@@ -416,9 +420,16 @@ function useDescriptionInput(
   useEffect(() => {
     const ref = descriptionValueRef as React.MutableRefObject<TaskFormInputsHandle | null>;
     if (ref) {
-      ref.current = { getValue: () => description, getAttachments: () => attachments };
+      ref.current = {
+        getValue: () => description,
+        setValue: (v: string) => {
+          setDescription(v);
+          onDescriptionChange(v.trim().length > 0);
+        },
+        getAttachments: () => attachments,
+      };
     }
-  }, [description, attachments, descriptionValueRef]);
+  }, [description, attachments, descriptionValueRef, onDescriptionChange]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -458,6 +469,9 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   descriptionValueRef,
   disabled,
   placeholder,
+  onEnhancePrompt,
+  isEnhancingPrompt,
+  isUtilityConfigured,
 }: TaskFormInputsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
@@ -517,7 +531,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           required={isSessionMode}
           disabled={disabled}
         />
-        <AttachButton onClick={handleAttachClick} disabled={disabled} />
+        <div className="flex items-center px-1 pb-1">
+          <AttachButton onClick={handleAttachClick} disabled={disabled} />
+          {onEnhancePrompt && (
+            <EnhancePromptButton
+              onClick={onEnhancePrompt}
+              isLoading={isEnhancingPrompt ?? false}
+              isConfigured={isUtilityConfigured}
+            />
+          )}
+        </div>
         <input
           ref={fileInputRef}
           type="file"

@@ -12,7 +12,6 @@ import {
   IconPlugConnectedX,
   IconPaperclip,
   IconRocket,
-  IconSparkles,
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
@@ -207,43 +206,9 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function EnhancePromptButton({
-  onClick,
-  isLoading,
-  isConfigured = true,
-}: {
-  onClick: () => void;
-  isLoading: boolean;
-  isConfigured?: boolean;
-}) {
-  const isDisabled = !isConfigured || isLoading;
-  const tooltipText = isConfigured
-    ? "Enhance prompt with AI"
-    : "Configure a utility agent in settings to enable AI enhancement";
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Wrap in span so tooltip works even when button is disabled */}
-        <span className="inline-flex">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
-            onClick={isConfigured ? onClick : undefined}
-            disabled={isDisabled}
-            aria-label="Enhance prompt with AI"
-            aria-busy={isLoading}
-          >
-            {isLoading ? <GridSpinner className="h-4 w-4" /> : <IconSparkles className="h-4 w-4" />}
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltipText}</TooltipContent>
-    </Tooltip>
-  );
-}
+// EnhancePromptButton is imported from the shared component.
+// Re-exported here for backwards compatibility with existing imports within this file.
+import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 
 function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
   const hasMcp = mcpServers.length > 0;

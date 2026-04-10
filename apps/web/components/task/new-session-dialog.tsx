@@ -18,6 +18,9 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { IconLoader2 } from "@tabler/icons-react";
+import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import {
   EnvironmentBadges,
   ContextSelect,
@@ -152,6 +155,18 @@ function NewSessionForm({
   );
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(taskId);
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
+  const handleEnhancePrompt = useCallback(() => {
+    const current = promptRef.current?.value?.trim();
+    if (!current) return;
+    enhancePrompt(current, (enhanced) => {
+      if (promptRef.current) {
+        promptRef.current.value = enhanced;
+        setHasPrompt(true);
+      }
+    });
+  }, [enhancePrompt]);
 
   const handleContextChange = useCallback(
     async (value: string) => {
@@ -285,7 +300,14 @@ function NewSessionForm({
               }
             }}
           />
-          <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+          <div className="flex items-center px-1 pb-1">
+            <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+            <EnhancePromptButton
+              onClick={handleEnhancePrompt}
+              isLoading={isEnhancingPrompt}
+              isConfigured={isUtilityConfigured}
+            />
+          </div>
           <input
             ref={fileInputRef}
             type="file"
