@@ -384,14 +384,8 @@ function useEnhanceForDialog(fs: DialogFormState) {
 
 function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { open, onOpenChange, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const {
-    editingTask,
-    onSuccess,
-    onCreateSession,
-    initialValues,
-    taskId = null,
-    parentTaskId,
-  } = props;
+  const { editingTask, onSuccess, onCreateSession, initialValues, parentTaskId } = props;
+  const taskId = props.taskId ?? null;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isCreateMode = mode === "create";
