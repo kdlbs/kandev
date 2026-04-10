@@ -466,10 +466,22 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   });
   const enhance = useEnhanceForDialog(fs);
   return {
-    fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted,
-    sessionRepoName, workflows, agentProfiles, snapshots,
-    repositoriesLoading, branchesLoading, computed, handlers,
-    submitHandlers, handleKeyDown, enhance,
+    fs,
+    isSessionMode,
+    isEditMode,
+    isCreateMode,
+    isTaskStarted,
+    sessionRepoName,
+    workflows,
+    agentProfiles,
+    snapshots,
+    repositoriesLoading,
+    branchesLoading,
+    computed,
+    handlers,
+    submitHandlers,
+    handleKeyDown,
+    enhance,
   };
 }
 

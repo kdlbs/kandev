@@ -220,20 +220,7 @@ func (r *ProfileReconciler) healProfile(
 	p *models.AgentProfile,
 	caps hostutility.AgentCapabilities,
 ) {
-	changed := false
-
-	// Heal the default profile name when it still matches the agent display
-	// name (stale seed from before we started naming profiles after the
-	// current model). User-modified profiles are skipped.
-	if !p.UserModified && p.Name == p.AgentDisplayName && caps.CurrentModelID != "" {
-		for _, m := range caps.Models {
-			if m.ID == caps.CurrentModelID && m.Name != "" && m.Name != p.Name {
-				p.Name = m.Name
-				changed = true
-				break
-			}
-		}
-	}
+	changed := healProfileName(p, caps)
 
 	if p.Model != "" && !modelExists(p.Model, caps.Models) {
 		r.log.Info("profile model no longer available, auto-healing",
@@ -267,6 +254,22 @@ func (r *ProfileReconciler) healProfile(
 		r.log.Warn("profile heal update failed",
 			zap.String("profile_id", p.ID), zap.Error(err))
 	}
+}
+
+// healProfileName updates the profile name when it still matches the agent
+// display name (stale seed from before we started naming profiles after the
+// current model). User-modified profiles are skipped.
+func healProfileName(p *models.AgentProfile, caps hostutility.AgentCapabilities) bool {
+	if p.UserModified || p.Name != p.AgentDisplayName || caps.CurrentModelID == "" {
+		return false
+	}
+	for _, m := range caps.Models {
+		if m.ID == caps.CurrentModelID && m.Name != "" && m.Name != p.Name {
+			p.Name = m.Name
+			return true
+		}
+	}
+	return false
 }
 
 // profileNameFromCaps picks a user-facing default profile name from the

@@ -124,10 +124,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               <AgentLogo agentName={profile.agent_name} className="shrink-0" />
               <span>{agentLabel}</span>
               {warning && (
-                <warning.Icon
-                  className={`size-3.5 ${warning.color}`}
-                  title={warning.title}
-                />
+                <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
               )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">

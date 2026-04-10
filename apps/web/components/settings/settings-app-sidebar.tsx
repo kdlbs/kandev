@@ -215,9 +215,7 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
                       <ScrollOnOverflow className="min-w-0">
                         {agentLabel} • {profile.name}
                       </ScrollOnOverflow>
-                      {warning && (
-                        <warning.Icon className={`size-3.5 shrink-0 ${warning.color}`} />
-                      )}
+                      {warning && <warning.Icon className={`size-3.5 shrink-0 ${warning.color}`} />}
                     </Link>
                   </SidebarMenuSubButton>
                 </SidebarMenuSubItem>
