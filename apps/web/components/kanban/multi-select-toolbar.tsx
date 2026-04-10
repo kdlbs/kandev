@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconLoader, IconTrash, IconArchive, IconArrowRight, IconX } from "@tabler/icons-react";
+import { IconLoader, IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   AlertDialog,
@@ -122,8 +122,8 @@ export function MultiSelectToolbar({
               disabled={isProcessing}
               data-testid="bulk-move-button"
             >
-              <IconArrowRight className="h-4 w-4" />
               Move to
+              <IconChevronRight className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" side="top">
