@@ -133,7 +133,11 @@ export function FileContextMenu({
         for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
         return t;
       });
-      Promise.all(paths.map((p) => onDeleteFile(p))).catch(() => setTree(snapshot));
+      Promise.all(paths.map((p) => onDeleteFile(p)))
+        .then((results) => {
+          if (results.some((ok) => !ok)) setTree(snapshot);
+        })
+        .catch(() => setTree(snapshot));
     } else {
       deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
     }
