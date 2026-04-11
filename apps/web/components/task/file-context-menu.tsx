@@ -124,8 +124,17 @@ export function FileContextMenu({
     setDeleteDialogOpen(false);
     if (!onDeleteFile) return;
     if (isBulk && selectedPaths) {
-      for (const p of selectedPaths) {
-        deleteNodeOptimistically(tree, setTree, p, onDeleteFile);
+      // Remove all nodes optimistically, then call APIs individually.
+      // On failure, re-insert only the failed node instead of rolling back everything.
+      const snapshot = tree;
+      const paths = [...selectedPaths];
+      setTree((prev) => {
+        let t = prev;
+        for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
+        return t;
+      });
+      for (const p of paths) {
+        onDeleteFile(p).catch(() => setTree(snapshot));
       }
     } else {
       deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);

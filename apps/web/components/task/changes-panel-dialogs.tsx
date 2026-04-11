@@ -45,6 +45,7 @@ export function DiscardDialog({
   onConfirm,
 }: DiscardDialogProps) {
   const isBulk = filesToDiscard && filesToDiscard.length > 1;
+  const displayFile = fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0] : null);
   const description = isBulk
     ? `This will permanently discard all changes to ${filesToDiscard.length} files. This action cannot be undone.`
     : null;
@@ -58,8 +59,7 @@ export function DiscardDialog({
             {description ?? (
               <>
                 This will permanently discard all changes to{" "}
-                <span className="font-semibold">{fileToDiscard}</span>. This action cannot be
-                undone.
+                <span className="font-semibold">{displayFile}</span>. This action cannot be undone.
               </>
             )}
           </AlertDialogDescription>

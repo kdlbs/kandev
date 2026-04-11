@@ -189,6 +189,8 @@ export function TreeNodeItem(props: TreeNodeItemProps) {
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
       data-selected={isSelected ? "true" : "false"}
+      aria-selected={isSelected}
+      role="treeitem"
       className={getTreeNodeRowClass(
         isActive,
         isActiveFolder,

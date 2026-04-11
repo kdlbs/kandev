@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import {
   IconArrowBackUp,
   IconPlus,
@@ -259,7 +258,7 @@ export function BulkActionBar({
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[]) => void;
 }) {
-  const paths = useMemo(() => [...selectedPaths], [selectedPaths]);
+  const paths = [...selectedPaths];
 
   return (
     <div data-testid={`bulk-actions-${variant}`} className="flex items-center gap-1.5">

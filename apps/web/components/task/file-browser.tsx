@@ -326,7 +326,7 @@ function useSelectionInteractions(
     onRenameFile,
   );
 
-  useKeyboardShortcuts(containerRef, multiSelect);
+  useKeyboardShortcuts(containerRef, multiSelect.clearSelection, multiSelect.selectAll);
   useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);
 
   const handleClickOutside = useCallback(
@@ -351,7 +351,8 @@ function useSelectionInteractions(
 
 function useKeyboardShortcuts(
   containerRef: React.RefObject<HTMLDivElement | null>,
-  multiSelect: ReturnType<typeof useMultiSelect>,
+  clearSelection: () => void,
+  selectAll: () => void,
 ) {
   useEffect(() => {
     const container = containerRef.current;
@@ -360,15 +361,15 @@ function useKeyboardShortcuts(
       if (!container.contains(document.activeElement) && document.activeElement !== container)
         return;
       if (e.key === "Escape") {
-        multiSelect.clearSelection();
+        clearSelection();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        multiSelect.selectAll();
+        selectAll();
       }
     };
     container.addEventListener("keydown", handleKeyDown);
     return () => container.removeEventListener("keydown", handleKeyDown);
-  }, [containerRef, multiSelect]);
+  }, [containerRef, clearSelection, selectAll]);
 }
 
 export function FileBrowser({
