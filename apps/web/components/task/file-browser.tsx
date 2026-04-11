@@ -24,7 +24,7 @@ import {
   loadNodeChildren,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
-import { getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
+import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
 
 type FileBrowserHeaderProps = {
   treeLoaded: boolean;
@@ -173,14 +173,13 @@ type MoveFilesParams = {
 function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useToast>["toast"]) {
   const { sources, targetPath, treeState, setSelectedPaths, onRenameFile } = params;
   const snapshot = treeState.tree;
+
+  // Compute deduplicated target paths before modifying the tree
+  const targets = treeState.tree ? computeMoveTargets(treeState.tree, sources, targetPath) : [];
   treeState.setTree((prev) => (prev ? moveNodesInTree(prev, sources, targetPath) : prev));
   setSelectedPaths(new Set());
 
-  const movePromises = sources.map((sourcePath) => {
-    const name = sourcePath.split("/").pop() || sourcePath;
-    const newPath = targetPath ? `${targetPath}/${name}` : name;
-    return onRenameFile(sourcePath, newPath);
-  });
+  const movePromises = targets.map(({ oldPath, newPath }) => onRenameFile(oldPath, newPath));
 
   Promise.all(movePromises)
     .then((results) => {
@@ -231,6 +230,19 @@ function useDragAndDrop(
     setDragOverPath(null);
     dragPathsRef.current = [];
   }, []);
+
+  // Safety net: clear drag state if dragend doesn't fire on the element
+  // (e.g. Escape key, drag outside browser window)
+  useEffect(() => {
+    if (!isDragging) return;
+    const cleanup = () => {
+      setIsDragging(false);
+      setDragOverPath(null);
+      dragPathsRef.current = [];
+    };
+    document.addEventListener("dragend", cleanup);
+    return () => document.removeEventListener("dragend", cleanup);
+  }, [isDragging]);
 
   const handleDragOver = useCallback((targetPath: string, e: React.DragEvent) => {
     const sources = dragPathsRef.current;

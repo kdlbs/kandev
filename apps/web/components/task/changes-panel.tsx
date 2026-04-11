@@ -621,8 +621,12 @@ const ChangesPanel = memo(function ChangesPanel({
         onUnstageAll={git.unstageAll}
         onStage={(path) => git.stageFile([path]).then(() => undefined)}
         onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
-        onBulkStage={(paths) => void git.stageFile(paths)}
-        onBulkUnstage={(paths) => void git.unstageFile(paths)}
+        onBulkStage={(paths) => {
+          git.stageFile(paths).catch(() => {});
+        }}
+        onBulkUnstage={(paths) => {
+          git.unstageFile(paths).catch(() => {});
+        }}
         onBulkDiscard={localDialogs.handleBulkDiscardClick}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}

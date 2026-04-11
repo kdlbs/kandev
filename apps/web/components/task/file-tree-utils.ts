@@ -114,19 +114,66 @@ export function findNodeByPath(root: FileTreeNode, targetPath: string): FileTree
   return null;
 }
 
+/** Disambiguate a filename if it already exists in the used set. */
+function deduplicateName(name: string, usedNames: Set<string>): string {
+  if (!usedNames.has(name)) return name;
+  const dotIndex = name.lastIndexOf(".");
+  const base = dotIndex > 0 ? name.slice(0, dotIndex) : name;
+  const ext = dotIndex > 0 ? name.slice(dotIndex) : "";
+  let counter = 1;
+  let candidate = `${base} (${counter})${ext}`;
+  while (usedNames.has(candidate)) {
+    counter++;
+    candidate = `${base} (${counter})${ext}`;
+  }
+  return candidate;
+}
+
+/** Compute deduplicated old→new path mappings for a move operation. */
+export function computeMoveTargets(
+  root: FileTreeNode,
+  sourcePaths: string[],
+  targetDirPath: string,
+): { oldPath: string; newPath: string }[] {
+  const targetNode = targetDirPath ? findNodeByPath(root, targetDirPath) : root;
+  const usedNames = new Set<string>();
+  if (targetNode?.children) {
+    for (const child of targetNode.children) usedNames.add(child.name);
+  }
+  const results: { oldPath: string; newPath: string }[] = [];
+  for (const path of sourcePaths) {
+    const node = findNodeByPath(root, path);
+    if (node) {
+      const safeName = deduplicateName(node.name, usedNames);
+      usedNames.add(safeName);
+      const newPath = targetDirPath ? `${targetDirPath}/${safeName}` : safeName;
+      results.push({ oldPath: path, newPath });
+    }
+  }
+  return results;
+}
+
 /** Move nodes from their current locations into a target directory. Returns the updated tree. */
 export function moveNodesInTree(
   root: FileTreeNode,
   sourcePaths: string[],
   targetDirPath: string,
 ): FileTreeNode {
-  // Collect the nodes to move before removing them
+  // Collect existing names in target to avoid collisions
+  const targetNode = targetDirPath ? findNodeByPath(root, targetDirPath) : root;
+  const usedNames = new Set<string>();
+  if (targetNode?.children) {
+    for (const child of targetNode.children) usedNames.add(child.name);
+  }
+
+  // Collect the nodes to move, deduplicating names
   const nodesToMove: FileTreeNode[] = [];
   for (const path of sourcePaths) {
     const node = findNodeByPath(root, path);
     if (node) {
-      const name = node.name;
-      const newPath = targetDirPath ? `${targetDirPath}/${name}` : name;
+      const safeName = deduplicateName(node.name, usedNames);
+      usedNames.add(safeName);
+      const newPath = targetDirPath ? `${targetDirPath}/${safeName}` : safeName;
       nodesToMove.push(renameSubtree(node, path, newPath));
     }
   }
