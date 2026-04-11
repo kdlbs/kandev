@@ -311,6 +311,7 @@ function ChangesPanelDialogsSection({
         open={dialogs.showDiscardDialog}
         onOpenChange={dialogs.setShowDiscardDialog}
         fileToDiscard={dialogs.fileToDiscard}
+        filesToDiscard={dialogs.filesToDiscard}
         onConfirm={dialogs.handleDiscardConfirm}
       />
       <AmendDialog
@@ -622,7 +623,7 @@ const ChangesPanel = memo(function ChangesPanel({
         onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
         onBulkStage={(paths) => void git.stageFile(paths)}
         onBulkUnstage={(paths) => void git.unstageFile(paths)}
-        onBulkDiscard={(paths) => void git.discard(paths)}
+        onBulkDiscard={localDialogs.handleBulkDiscardClick}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}
         stagedFileCount={staged.stagedFileCount}
