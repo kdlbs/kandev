@@ -383,6 +383,9 @@ type WorkingTreeProps = Pick<
   | "onUnstageAll"
   | "onStage"
   | "onUnstage"
+  | "onBulkStage"
+  | "onBulkUnstage"
+  | "onBulkDiscard"
 > & { isLastUnstaged: boolean; isLastStaged: boolean };
 
 function WorkingTreeSections(props: WorkingTreeProps) {
