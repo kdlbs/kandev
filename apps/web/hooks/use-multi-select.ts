@@ -17,7 +17,7 @@ type UseMultiSelectReturn = {
   setSelectedPaths: (paths: Set<string>) => void;
 };
 
-type SelectionParams = {
+export type SelectionParams = {
   prev: Set<string>;
   path: string;
   items: string[];
@@ -26,7 +26,8 @@ type SelectionParams = {
   lastClickedRef: React.RefObject<string | null>;
 };
 
-function computeNextSelection(params: SelectionParams): Set<string> {
+/** Exported for testing. */
+export function computeNextSelection(params: SelectionParams): Set<string> {
   const { prev, path, items, isShift, isCtrlOrMeta, lastClickedRef } = params;
   if (isShift) {
     if (!lastClickedRef.current) {

@@ -125,7 +125,7 @@ export function FileContextMenu({
     if (!onDeleteFile) return;
     if (isBulk && selectedPaths) {
       // Remove all nodes optimistically, then call APIs individually.
-      // On failure, re-insert only the failed node instead of rolling back everything.
+      // On any failure, restore the full pre-delete tree snapshot.
       const snapshot = tree;
       const paths = [...selectedPaths];
       setTree((prev) => {
