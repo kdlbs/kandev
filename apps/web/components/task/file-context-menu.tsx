@@ -124,8 +124,8 @@ export function FileContextMenu({
     setDeleteDialogOpen(false);
     if (!onDeleteFile) return;
     if (isBulk && selectedPaths) {
-      // Remove all nodes optimistically, then call APIs individually.
-      // On any failure, restore the full pre-delete tree snapshot.
+      // Remove all nodes optimistically, then call APIs.
+      // Rollback entire tree only if any individual delete fails.
       const snapshot = tree;
       const paths = [...selectedPaths];
       setTree((prev) => {
@@ -133,9 +133,7 @@ export function FileContextMenu({
         for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
         return t;
       });
-      for (const p of paths) {
-        onDeleteFile(p).catch(() => setTree(snapshot));
-      }
+      Promise.all(paths.map((p) => onDeleteFile(p))).catch(() => setTree(snapshot));
     } else {
       deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
     }
