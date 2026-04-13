@@ -73,6 +73,17 @@ export function useCumulativeDiff(sessionId: string | null) {
     }
   }, [sessionId, envKey]);
 
+  // Sync cached state when envKey changes.  Must run BEFORE the fetch effect
+  // so that fetchCumulativeDiff's setLoading(true) wins the React 18 batch.
+  useEffect(() => {
+    if (envKey) {
+      setDiff(cumulativeDiffCache[envKey] ?? null);
+    } else {
+      setDiff(null);
+    }
+    setLoading(false);
+  }, [envKey]);
+
   // Fetch on mount and when cache is invalidated
   useEffect(() => {
     if (!envKey) return;
@@ -91,19 +102,6 @@ export function useCumulativeDiff(sessionId: string | null) {
     return () => {
       listeners.delete(handler);
     };
-  }, [envKey]);
-
-  // Sync cached state when envKey changes.
-  // Always reset loading — fetchCumulativeDiff re-sets to true if it starts
-  // a request.  Without this, a stale in-flight for the previous envKey can
-  // leave loading=true indefinitely on version-mismatch discard.
-  useEffect(() => {
-    if (envKey) {
-      setDiff(cumulativeDiffCache[envKey] ?? null);
-    } else {
-      setDiff(null);
-    }
-    setLoading(false);
   }, [envKey]);
 
   return {
