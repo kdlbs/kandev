@@ -105,8 +105,20 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		}
 	}
 
-	// Checkout HEAD to populate the working tree.
-	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", ".")
+	// Exclude submodule paths from checkout to avoid broken gitlink resolution.
+	// In worktrees, git resolves submodule git dirs relative to the worktree's
+	// git dir instead of the common dir, which fails.
+	checkoutArgs := []string{"checkout", "HEAD", "--", "."}
+	submodulePaths, subErr := getSubmodulePaths(ctx, worktreePath)
+	if subErr != nil {
+		m.logger.Debug("could not detect submodules, proceeding without exclusions",
+			zap.String("worktree_path", worktreePath), zap.Error(subErr))
+	}
+	for _, sp := range submodulePaths {
+		checkoutArgs = append(checkoutArgs, ":(exclude)"+sp)
+	}
+
+	checkoutCmd := exec.CommandContext(ctx, "git", checkoutArgs...)
 	checkoutCmd.Dir = worktreePath
 	if output, err := checkoutCmd.CombinedOutput(); err != nil {
 		m.logger.Error("git checkout failed after git-crypt setup",
@@ -128,6 +140,11 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		m.logger.Info("checked out worktree without git-crypt decryption (repo is locked)",
 			zap.String("worktree_path", worktreePath))
 	}
+
+	if len(submodulePaths) > 0 {
+		m.initSubmodules(ctx, worktreePath)
+	}
+
 	return nil
 }
 
