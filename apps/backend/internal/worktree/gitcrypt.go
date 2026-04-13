@@ -214,15 +214,15 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 // failing on encrypted files.
 // Uses --worktree to write to the worktree-local config, not the shared repo config.
 // Note: We only override smudge (for checkout) and diff (for git diff/log/show).
-// We deliberately do NOT override clean — if an agent tries to git add an encrypted
-// file, it should fail rather than silently committing plaintext.
+// We deliberately do NOT override clean or required — if an agent tries to git add
+// an encrypted file, the inherited clean filter will fail and required=true will
+// cause git to abort rather than silently committing plaintext.
 func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
 	if err := enableWorktreeConfig(ctx, worktreePath); err != nil {
 		return err
 	}
 	configs := [][2]string{
 		{"filter.git-crypt.smudge", "cat"},
-		{"filter.git-crypt.required", "false"},
 		{"diff.git-crypt.textconv", "cat"},
 	}
 	for _, kv := range configs {
