@@ -165,6 +165,7 @@ export function TaskMultiSelectToolbar({
         variant="ghost"
         className="cursor-pointer ml-1"
         onClick={onClearSelection}
+        disabled={isProcessing}
         aria-label="Clear selection"
         data-testid="bulk-clear-selection"
       >
