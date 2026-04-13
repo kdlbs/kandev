@@ -141,9 +141,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 			zap.String("worktree_path", worktreePath))
 	}
 
-	if len(submodulePaths) > 0 {
-		m.initSubmodules(ctx, worktreePath)
-	}
+	m.initSubmodules(ctx, worktreePath)
 
 	return nil
 }

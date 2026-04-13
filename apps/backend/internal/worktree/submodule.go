@@ -39,7 +39,7 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
-	cmd := exec.CommandContext(ctx, "git", "submodule", "update", "--init")
+	cmd := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--recursive")
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
