@@ -514,7 +514,7 @@ export function KanbanCard({
     onToggleSelect?.(task.id);
   };
 
-  const showCheckbox = isMultiSelectMode || isSelected;
+  const showCheckbox = isMultiSelectMode || !!isSelected;
 
   return (
     <Card
