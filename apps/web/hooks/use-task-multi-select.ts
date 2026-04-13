@@ -46,11 +46,14 @@ export function useTaskMultiSelect(workflowId: string | null) {
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
 
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const isProcessing = isDeleting || isArchiving;
 
   useEffect(() => {
     setSelectedIds(new Set());
-    setIsProcessing(false);
+    setIsDeleting(false);
+    setIsArchiving(false);
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
@@ -75,7 +78,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
   const bulkDelete = useCallback(async () => {
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
-    setIsProcessing(true);
+    setIsDeleting(true);
     try {
       const idList = [...ids];
       const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
@@ -83,14 +86,14 @@ export function useTaskMultiSelect(workflowId: string | null) {
       removeTasksFromStore(succeededIds);
       setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
     } finally {
-      setIsProcessing(false);
+      setIsDeleting(false);
     }
   }, [deleteTaskById, removeTasksFromStore]);
 
   const bulkArchive = useCallback(async () => {
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
-    setIsProcessing(true);
+    setIsArchiving(true);
     try {
       const idList = [...ids];
       const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
@@ -98,7 +101,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
       removeTasksFromStore(succeededIds);
       setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
     } finally {
-      setIsProcessing(false);
+      setIsArchiving(false);
     }
   }, [archiveTaskById, removeTasksFromStore]);
 
@@ -107,22 +110,17 @@ export function useTaskMultiSelect(workflowId: string | null) {
       if (!workflowId) return;
       const idList = [...selectedIdsRef.current];
       if (idList.length === 0) return;
-      setIsProcessing(true);
-      try {
-        const results = await Promise.allSettled(
-          idList.map((id, i) =>
-            moveTaskById(id, {
-              workflow_id: workflowId,
-              workflow_step_id: targetStepId,
-              position: i,
-            }),
-          ),
-        );
-        const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-        applyMoveInStore(succeededIds, targetStepId);
-      } finally {
-        setIsProcessing(false);
-      }
+      const results = await Promise.allSettled(
+        idList.map((id, i) =>
+          moveTaskById(id, {
+            workflow_id: workflowId,
+            workflow_step_id: targetStepId,
+            position: i,
+          }),
+        ),
+      );
+      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+      applyMoveInStore(succeededIds, targetStepId);
     },
     [workflowId, moveTaskById, applyMoveInStore],
   );
