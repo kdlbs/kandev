@@ -212,21 +212,27 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 // the repo is locked — encrypted files will be checked out as binary blobs.
 // Also overrides diff.git-crypt.textconv to prevent git diff/log/show from
 // failing on encrypted files.
-// Uses --worktree to write to the worktree-local config, not the shared repo config.
-// Note: We only override smudge (for checkout) and diff (for git diff/log/show).
+//
+// Note: Unlike configureGitCryptFilters, this writes to the SHARED repo config
+// (not worktree-local). This is intentional: if the user later runs git-crypt
+// unlock, it will overwrite these settings and decryption will work. Using
+// --worktree would shadow git-crypt's config and break unlock-after-create.
+//
+// Writing to shared config is safe here because the repo is locked — any existing
+// git-crypt filter config is useless without keys anyway. When git-crypt unlock
+// runs, it will set proper filter values that enable decryption.
+//
+// We only override smudge (for checkout) and diff (for git diff/log/show).
 // We deliberately do NOT override clean or required — if an agent tries to git add
-// an encrypted file, the inherited clean filter will fail and required=true will
-// cause git to abort rather than silently committing plaintext.
+// an encrypted file, the clean filter will fail and required=true will cause git
+// to abort rather than silently committing plaintext.
 func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
-	if err := enableWorktreeConfig(ctx, worktreePath); err != nil {
-		return err
-	}
 	configs := [][2]string{
 		{"filter.git-crypt.smudge", "cat"},
 		{"diff.git-crypt.textconv", "cat"},
 	}
 	for _, kv := range configs {
-		cmd := exec.CommandContext(ctx, "git", "config", "--worktree", kv[0], kv[1])
+		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
 		cmd.Dir = worktreePath
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)

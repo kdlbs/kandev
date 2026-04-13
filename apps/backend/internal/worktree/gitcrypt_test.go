@@ -443,6 +443,14 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 
 	repoPath := initGitCryptRepo(t)
 
+	// Export the key before locking (git-crypt lock removes it from .git/).
+	keyFile := filepath.Join(t.TempDir(), "exported.key")
+	exportCmd := exec.Command("git-crypt", "export-key", keyFile)
+	exportCmd.Dir = repoPath
+	if out, err := exportCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git-crypt export-key failed: %v\n%s", err, out)
+	}
+
 	// Lock the repo — removes keys, re-encrypts working tree files.
 	lockCmd := exec.Command("git-crypt", "lock")
 	lockCmd.Dir = repoPath
@@ -487,15 +495,20 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 		t.Error("secret.txt should be encrypted in worktree of locked repo")
 	}
 
-	// Verify worktree-local config was used (not polluting shared config).
-	// The smudge filter should be "cat" in the worktree config.
-	configCmd := exec.Command("git", "config", "--worktree", "filter.git-crypt.smudge")
-	configCmd.Dir = wt.Path
-	out, err := configCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git config --worktree failed: %v\n%s", err, out)
+	// Verify that unlock-after-create works: the user can provide keys mid-session
+	// and git-crypt unlock should succeed, overwriting our smudge=cat setting.
+	unlockCmd := exec.Command("git-crypt", "unlock", keyFile)
+	unlockCmd.Dir = wt.Path
+	if out, unlockErr := unlockCmd.CombinedOutput(); unlockErr != nil {
+		t.Fatalf("git-crypt unlock in worktree should work: %v\n%s", unlockErr, out)
 	}
-	if strings.TrimSpace(string(out)) != "cat" {
-		t.Errorf("worktree smudge filter = %q, want %q", strings.TrimSpace(string(out)), "cat")
+
+	// After unlock, secret.txt should be decrypted.
+	secret, err = os.ReadFile(filepath.Join(wt.Path, "secret.txt"))
+	if err != nil {
+		t.Fatalf("read secret.txt after unlock: %v", err)
+	}
+	if strings.TrimSpace(string(secret)) != "top-secret-value" {
+		t.Errorf("secret.txt after unlock = %q, want %q", string(secret), "top-secret-value")
 	}
 }
