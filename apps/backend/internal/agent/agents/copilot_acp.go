@@ -66,14 +66,15 @@ func (a *CopilotACP) Logo(v LogoVariant) []byte {
 
 func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	install := OSPaths{
-		MacOS: []string{"~/.copilot/pkg"},
+		Linux: []string{"~/.copilot/config.json"},
+		MacOS: []string{"~/.copilot/config.json", "~/.copilot/pkg"},
 	}
 	mcp := OSPaths{
 		Linux: []string{"~/.copilot/mcp-config.json"},
 		MacOS: []string{"~/.copilot/mcp-config.json"},
 	}
 
-	result, err := Detect(ctx, WithFileExists(install.Resolve()...))
+	result, err := Detect(ctx, WithFileExists(install.Resolve()...), WithCommand("copilot"))
 	if err != nil {
 		return result, err
 	}
