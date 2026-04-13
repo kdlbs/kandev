@@ -195,11 +195,14 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 // disableGitCryptFilters overrides any inherited git-crypt filter config
 // with pass-through commands (cat). This allows checkout to succeed when
 // the repo is locked — encrypted files will be checked out as binary blobs.
+// Also overrides diff.git-crypt.textconv to prevent git diff/log/show from
+// failing on encrypted files.
 func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
 	configs := [][2]string{
 		{"filter.git-crypt.smudge", "cat"},
 		{"filter.git-crypt.clean", "cat"},
 		{"filter.git-crypt.required", "false"},
+		{"diff.git-crypt.textconv", "cat"},
 	}
 	for _, kv := range configs {
 		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
