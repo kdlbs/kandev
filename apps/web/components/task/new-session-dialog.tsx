@@ -71,7 +71,22 @@ function useNewSessionDialogState(taskId: string) {
     return executor?.name ?? null;
   });
 
-  return { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel };
+  const sessionProfileId = currentSession?.agent_profile_id ?? "";
+  const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
+  const effectiveDefaultProfileId: string = profileIsValid
+    ? sessionProfileId
+    : (agentProfiles[0]?.id ?? "");
+
+  return {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    sessionProfileId,
+    effectiveDefaultProfileId,
+  };
 }
 
 function activateNewSession(
@@ -111,6 +126,7 @@ function useSessionOptions(taskId: string) {
 function NewSessionForm({
   taskId,
   defaultProfileId,
+  initialProfileId,
   executorId,
   executorLabel,
   worktreeBranch,
@@ -121,6 +137,7 @@ function NewSessionForm({
 }: {
   taskId: string;
   defaultProfileId: string;
+  initialProfileId?: string;
   executorId: string;
   executorLabel: string | null;
   worktreeBranch: string | null;
@@ -134,7 +151,7 @@ function NewSessionForm({
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
-  const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
+  const [selectedProfileId, setSelectedProfileId] = useState(initialProfileId ?? defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
@@ -167,6 +184,7 @@ function NewSessionForm({
       }
     });
   }, [enhancePrompt]);
+  const isDefaultProfileMissing = !profileOptions.find((o) => o.value === defaultProfileId);
 
   const handleContextChange = useCallback(
     async (value: string) => {
@@ -258,7 +276,12 @@ function NewSessionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      {profileOptions.length > 1 && (
+      {profileOptions.length === 0 && (
+        <p className="text-xs text-center text-muted-foreground">
+          No agent profiles configured. Add one in Settings → Agents first.
+        </p>
+      )}
+      {(profileOptions.length > 1 || isDefaultProfileMissing) && profileOptions.length > 0 && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
@@ -343,7 +366,7 @@ function NewSessionForm({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt}
+          disabled={isCreating || isSummarizing || !hasPrompt || profileOptions.length === 0}
           className="cursor-pointer"
         >
           {isCreating ? "Creating..." : "Start Agent"}
@@ -354,8 +377,16 @@ function NewSessionForm({
 }
 
 export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSessionDialogProps) {
-  const { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel } =
-    useNewSessionDialogState(taskId);
+  const {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    sessionProfileId,
+    effectiveDefaultProfileId,
+  } = useNewSessionDialogState(taskId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -368,7 +399,8 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
         <NewSessionForm
           key={`${open}`}
           taskId={taskId}
-          defaultProfileId={currentSession?.agent_profile_id ?? ""}
+          defaultProfileId={sessionProfileId}
+          initialProfileId={effectiveDefaultProfileId}
           executorId={currentSession?.executor_id ?? ""}
           executorLabel={executorLabel}
           worktreeBranch={worktreeBranch}

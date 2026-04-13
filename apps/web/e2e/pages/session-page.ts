@@ -61,6 +61,15 @@ export class SessionPage {
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }
+  failedSessionResumeButton(): Locator {
+    return this.page.getByTestId("failed-session-resume-button");
+  }
+  failedSessionResumeWrapper(): Locator {
+    return this.page.getByTestId("failed-session-resume-wrapper");
+  }
+  cancelAgentButton(): Locator {
+    return this.page.getByTestId("cancel-agent-button");
+  }
 
   async waitForLoad(timeout = 15_000) {
     // When multiple session tabs are open, multiple session-chat panels exist in
@@ -547,6 +556,12 @@ export class SessionPage {
   /** Context menu on a dockview tab — right-click the tab to trigger it. */
   async rightClickTab(text: string): Promise<void> {
     const tab = this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    await tab.click({ button: "right" });
+  }
+
+  /** Right-click the first session tab (useful when there is only one session). */
+  async rightClickFirstSessionTab(): Promise<void> {
+    const tab = this.page.locator("[data-testid^='session-tab-']").first();
     await tab.click({ button: "right" });
   }
 
