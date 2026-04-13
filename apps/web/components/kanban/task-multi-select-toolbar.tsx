@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { WorkflowStep } from "@/components/kanban-column";
 
-interface MultiSelectToolbarProps {
+interface TaskMultiSelectToolbarProps {
   selectedIds: Set<string>;
   steps: WorkflowStep[];
   isProcessing: boolean;
@@ -86,7 +86,7 @@ function BulkDeleteDialog({
   );
 }
 
-export function MultiSelectToolbar({
+export function TaskMultiSelectToolbar({
   selectedIds,
   steps,
   isProcessing,
@@ -94,7 +94,7 @@ export function MultiSelectToolbar({
   onBulkDelete,
   onBulkArchive,
   onBulkMove,
-}: MultiSelectToolbarProps) {
+}: TaskMultiSelectToolbarProps) {
   if (selectedIds.size === 0) return null;
 
   const count = selectedIds.size;

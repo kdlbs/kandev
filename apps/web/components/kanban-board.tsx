@@ -13,7 +13,7 @@ import { KanbanHeader } from "./kanban/kanban-header";
 import { MobileFab } from "./kanban/mobile-fab";
 import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
-import { MultiSelectToolbar } from "./kanban/multi-select-toolbar";
+import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
@@ -329,7 +329,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onToggleSelect={s.multiSelect.toggleSelect}
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
       />
-      <MultiSelectToolbar
+      <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}
         steps={multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
