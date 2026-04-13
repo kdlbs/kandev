@@ -95,6 +95,14 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		m.logger.Warn("git-crypt is locked in main repository, checking out without decryption",
 			zap.String("common_dir", commonDir),
 			zap.String("worktree_path", worktreePath))
+
+		// Override any inherited git-crypt filters with pass-through commands.
+		// Worktrees inherit filter config from the main repo via GIT_COMMON_DIR.
+		// Without this, git checkout would try to run the smudge filter and fail
+		// because there are no keys.
+		if err := disableGitCryptFilters(ctx, worktreePath); err != nil {
+			return &GitCryptError{Op: "disable-filters", Path: worktreePath, Output: "", Err: err}
+		}
 	}
 
 	// Checkout HEAD to populate the working tree.
@@ -173,6 +181,25 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 		{"filter.git-crypt.clean", "git-crypt clean"},
 		{"filter.git-crypt.required", "true"},
 		{"diff.git-crypt.textconv", "git-crypt diff"},
+	}
+	for _, kv := range configs {
+		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
+		cmd.Dir = worktreePath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
+		}
+	}
+	return nil
+}
+
+// disableGitCryptFilters overrides any inherited git-crypt filter config
+// with pass-through commands (cat). This allows checkout to succeed when
+// the repo is locked — encrypted files will be checked out as binary blobs.
+func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
+	configs := [][2]string{
+		{"filter.git-crypt.smudge", "cat"},
+		{"filter.git-crypt.clean", "cat"},
+		{"filter.git-crypt.required", "false"},
 	}
 	for _, kv := range configs {
 		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
