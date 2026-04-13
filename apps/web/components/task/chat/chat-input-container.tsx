@@ -99,7 +99,7 @@ function FailedSessionBanner({
     sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
   );
   const profileExists = useAppStore((s) =>
-    s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
+    agentProfileId !== "" && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
   );
 
   const handleResume = useCallback(async () => {

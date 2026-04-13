@@ -184,7 +184,12 @@ function NewSessionForm({
       }
     });
   }, [enhancePrompt]);
-  const isDefaultProfileMissing = !profileOptions.find((o) => o.value === defaultProfileId);
+  const hasProfiles = profileOptions.length > 0;
+  const showAgentSelector =
+    hasProfiles &&
+    (profileOptions.length > 1 ||
+      (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
+  const isBusy = isCreating || isSummarizing;
 
   const handleContextChange = useCallback(
     async (value: string) => {
@@ -271,17 +276,15 @@ function NewSessionForm({
     ],
   );
 
-  const showSessions = sessionOptions;
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      {profileOptions.length === 0 && (
+      {!hasProfiles && (
         <p className="text-xs text-center text-muted-foreground">
           No agent profiles configured. Add one in Settings → Agents first.
         </p>
       )}
-      {(profileOptions.length > 1 || isDefaultProfileMissing) && profileOptions.length > 0 && (
+      {showAgentSelector && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
@@ -297,7 +300,7 @@ function NewSessionForm({
         value={contextValue}
         onValueChange={handleContextChange}
         hasInitialPrompt={!!initialPrompt}
-        sessionOptions={showSessions}
+        sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
       />
       <div
@@ -313,7 +316,7 @@ function NewSessionForm({
             placeholder="What should the agent work on?"
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
             autoFocus
-            disabled={isCreating || isSummarizing}
+            disabled={isBusy}
             onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
@@ -324,7 +327,7 @@ function NewSessionForm({
             }}
           />
           <div className="flex items-center px-1 pb-1">
-            <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+            <AttachButton onClick={handleAttachClick} disabled={isBusy} />
             <EnhancePromptButton
               onClick={handleEnhancePrompt}
               isLoading={isEnhancingPrompt}
@@ -366,7 +369,7 @@ function NewSessionForm({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt || profileOptions.length === 0}
+          disabled={isBusy || !hasPrompt || !hasProfiles}
           className="cursor-pointer"
         >
           {isCreating ? "Creating..." : "Start Agent"}

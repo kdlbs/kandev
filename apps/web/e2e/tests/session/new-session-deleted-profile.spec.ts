@@ -2,9 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
-/**
- * Navigate to a kanban card by title and open its session page.
- */
+/** Navigate to a kanban card by title and open its session page. */
 async function openTaskSession(page: Parameters<typeof KanbanPage>[0], title: string) {
   const kanban = new KanbanPage(page);
   await kanban.goto();

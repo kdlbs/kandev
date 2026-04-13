@@ -61,12 +61,15 @@ export class SessionPage {
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }
+  /** Resume button shown in the FailedSessionBanner. */
   failedSessionResumeButton(): Locator {
     return this.page.getByTestId("failed-session-resume-button");
   }
+  /** Span wrapper around the resume button — used to trigger tooltip on disabled state. */
   failedSessionResumeWrapper(): Locator {
     return this.page.getByTestId("failed-session-resume-wrapper");
   }
+  /** Cancel button shown in the chat toolbar while an agent turn is running. */
   cancelAgentButton(): Locator {
     return this.page.getByTestId("cancel-agent-button");
   }
