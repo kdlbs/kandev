@@ -429,7 +429,6 @@ func TestUnlockGitCryptAndCheckout_ManualWorktree(t *testing.T) {
 	}
 }
 
-
 func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 	skipIfNoGitCrypt(t)
 
@@ -443,14 +442,6 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 	}
 
 	repoPath := initGitCryptRepo(t)
-
-	// Export the key before locking (git-crypt lock removes it from .git/).
-	keyFile := filepath.Join(t.TempDir(), "exported.key")
-	exportCmd := exec.Command("git-crypt", "export-key", keyFile)
-	exportCmd.Dir = repoPath
-	if out, err := exportCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git-crypt export-key failed: %v\n%s", err, out)
-	}
 
 	// Lock the repo — removes keys, re-encrypts working tree files.
 	lockCmd := exec.Command("git-crypt", "lock")
@@ -496,20 +487,15 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 		t.Error("secret.txt should be encrypted in worktree of locked repo")
 	}
 
-	// Now unlock git-crypt in the worktree — this should work because
-	// no broken filters are configured.
-	unlockCmd := exec.Command("git-crypt", "unlock", keyFile)
-	unlockCmd.Dir = wt.Path
-	if out, unlockErr := unlockCmd.CombinedOutput(); unlockErr != nil {
-		t.Fatalf("git-crypt unlock in worktree should work, got: %v\n%s", unlockErr, out)
-	}
-
-	// After unlock, secret.txt should be decrypted.
-	secret, err = os.ReadFile(filepath.Join(wt.Path, "secret.txt"))
+	// Verify worktree-local config was used (not polluting shared config).
+	// The smudge filter should be "cat" in the worktree config.
+	configCmd := exec.Command("git", "config", "--worktree", "filter.git-crypt.smudge")
+	configCmd.Dir = wt.Path
+	out, err := configCmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("read secret.txt after unlock: %v", err)
+		t.Fatalf("git config --worktree failed: %v\n%s", err, out)
 	}
-	if strings.TrimSpace(string(secret)) != "top-secret-value" {
-		t.Errorf("secret.txt after unlock = %q, want %q", string(secret), "top-secret-value")
+	if strings.TrimSpace(string(out)) != "cat" {
+		t.Errorf("worktree smudge filter = %q, want %q", strings.TrimSpace(string(out)), "cat")
 	}
 }

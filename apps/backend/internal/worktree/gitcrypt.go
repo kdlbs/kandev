@@ -173,9 +173,24 @@ func isGitCryptUnlocked(gitCryptDir string) bool {
 	return len(entries) > 0
 }
 
+// enableWorktreeConfig enables the worktreeConfig extension so that
+// --worktree flag works with git config in linked worktrees.
+func enableWorktreeConfig(ctx context.Context, worktreePath string) error {
+	cmd := exec.CommandContext(ctx, "git", "config", "extensions.worktreeConfig", "true")
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git config extensions.worktreeConfig: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 // configureGitCryptFilters sets the smudge/clean/diff filters in the
 // worktree's local git config so that git checkout can decrypt files.
+// Uses --worktree to write to the worktree-local config, not the shared repo config.
 func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
+	if err := enableWorktreeConfig(ctx, worktreePath); err != nil {
+		return err
+	}
 	configs := [][2]string{
 		{"filter.git-crypt.smudge", "git-crypt smudge"},
 		{"filter.git-crypt.clean", "git-crypt clean"},
@@ -183,7 +198,7 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 		{"diff.git-crypt.textconv", "git-crypt diff"},
 	}
 	for _, kv := range configs {
-		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
+		cmd := exec.CommandContext(ctx, "git", "config", "--worktree", kv[0], kv[1])
 		cmd.Dir = worktreePath
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
@@ -197,15 +212,21 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 // the repo is locked — encrypted files will be checked out as binary blobs.
 // Also overrides diff.git-crypt.textconv to prevent git diff/log/show from
 // failing on encrypted files.
+// Uses --worktree to write to the worktree-local config, not the shared repo config.
+// Note: We only override smudge (for checkout) and diff (for git diff/log/show).
+// We deliberately do NOT override clean — if an agent tries to git add an encrypted
+// file, it should fail rather than silently committing plaintext.
 func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
+	if err := enableWorktreeConfig(ctx, worktreePath); err != nil {
+		return err
+	}
 	configs := [][2]string{
 		{"filter.git-crypt.smudge", "cat"},
-		{"filter.git-crypt.clean", "cat"},
 		{"filter.git-crypt.required", "false"},
 		{"diff.git-crypt.textconv", "cat"},
 	}
 	for _, kv := range configs {
-		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
+		cmd := exec.CommandContext(ctx, "git", "config", "--worktree", kv[0], kv[1])
 		cmd.Dir = worktreePath
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
