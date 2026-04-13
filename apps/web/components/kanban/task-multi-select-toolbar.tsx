@@ -108,9 +108,7 @@ export function TaskMultiSelectToolbar({
       )}
       data-testid="multi-select-toolbar"
     >
-      <span className="text-sm font-medium text-muted-foreground mr-1">
-        {count} selected
-      </span>
+      <span className="text-sm font-medium text-muted-foreground mr-1">{count} selected</span>
 
       {steps.length > 0 && (
         <DropdownMenu>

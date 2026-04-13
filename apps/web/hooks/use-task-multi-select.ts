@@ -14,9 +14,7 @@ function useTaskMultiSelectStore() {
       store.getState().hydrate({
         kanban: {
           ...currentKanban,
-          tasks: currentKanban.tasks.filter(
-            (t: KanbanState["tasks"][number]) => !ids.has(t.id),
-          ),
+          tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
         },
       });
     },

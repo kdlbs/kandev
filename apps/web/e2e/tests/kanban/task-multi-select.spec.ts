@@ -47,11 +47,7 @@ test.describe("Multi-select bulk actions", () => {
     await expect(kanban.multiSelectToolbar).toContainText("2 selected");
   });
 
-  test("clear selection button hides the toolbar", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("clear selection button hides the toolbar", async ({ testPage, apiClient, seedData }) => {
     const task = await apiClient.createTask(seedData.workspaceId, "MS Clear Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -97,11 +93,7 @@ test.describe("Multi-select bulk actions", () => {
     await expect(kanban.multiSelectToolbar).not.toBeVisible();
   });
 
-  test("bulk archive removes tasks from board", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("bulk archive removes tasks from board", async ({ testPage, apiClient, seedData }) => {
     const [t1, t2] = await Promise.all([
       apiClient.createTask(seedData.workspaceId, "MS Archive 1", {
         workflow_id: seedData.workflowId,
@@ -125,11 +117,7 @@ test.describe("Multi-select bulk actions", () => {
     await expect(kanban.multiSelectToolbar).not.toBeVisible();
   });
 
-  test("bulk move moves tasks to target step", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("bulk move moves tasks to target step", async ({ testPage, apiClient, seedData }) => {
     // Pick a step that is not the start step as the move target
     const targetStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
     if (!targetStep) {
