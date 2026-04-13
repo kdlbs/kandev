@@ -45,15 +45,15 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Listing workspaces...")',
-        "e2e:mcp:kandev:list_workspaces({})",
-        `e2e:mcp:kandev:list_workflows({"workspace_id":"${seedData.workspaceId}"})`,
+        "e2e:mcp:kandev:list_workspaces_kandev({})",
+        `e2e:mcp:kandev:list_workflows_kandev({"workspace_id":"${seedData.workspaceId}"})`,
         'e2e:message("Done listing")',
       ].join("\n"),
     );
 
     const page = await runAndWait(testPage, session.task_id, "Done listing");
-    await expect(page.chat.getByText("list_workspaces")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("list_workflows")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_workspaces_kandev")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_workflows_kandev")).toBeVisible({ timeout: 10_000 });
   });
 
   test("agent can create and list workflow steps", async ({ testPage, apiClient, seedData }) => {
@@ -64,8 +64,8 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Creating step...")',
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"QA Review","position":0})`,
-        `e2e:mcp:kandev:list_workflow_steps({"workflow_id":"${workflow.id}"})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"QA Review","position":0})`,
+        `e2e:mcp:kandev:list_workflow_steps_kandev({"workflow_id":"${workflow.id}"})`,
         'e2e:message("Steps listed")',
       ].join("\n"),
     );
@@ -104,7 +104,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Creating step with all fields...")',
-        `e2e:mcp:kandev:create_workflow_step(${createArgs})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev(${createArgs})`,
         'e2e:message("Step created")',
       ].join("\n"),
     );
@@ -129,7 +129,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Creating workflow...")',
-        `e2e:mcp:kandev:create_workflow({"workspace_id":"${seedData.workspaceId}","name":"E2E Workflow","description":"Created by E2E test"})`,
+        `e2e:mcp:kandev:create_workflow_kandev({"workspace_id":"${seedData.workspaceId}","name":"E2E Workflow","description":"Created by E2E test"})`,
         'e2e:message("Workflow created")',
       ].join("\n"),
     );
@@ -153,7 +153,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Updating workflow...")',
-        `e2e:mcp:kandev:update_workflow({"workflow_id":"${workflow.id}","name":"After Update","description":"Updated description"})`,
+        `e2e:mcp:kandev:update_workflow_kandev({"workflow_id":"${workflow.id}","name":"After Update","description":"Updated description"})`,
         'e2e:message("Workflow updated")',
       ].join("\n"),
     );
@@ -179,7 +179,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Deleting workflow...")',
-        `e2e:mcp:kandev:delete_workflow({"workflow_id":"${workflow.id}"})`,
+        `e2e:mcp:kandev:delete_workflow_kandev({"workflow_id":"${workflow.id}"})`,
         'e2e:message("Workflow deleted")',
       ].join("\n"),
     );
@@ -213,7 +213,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       seedData,
       [
         'e2e:message("Updating step...")',
-        `e2e:mcp:kandev:update_workflow_step(${updateArgs})`,
+        `e2e:mcp:kandev:update_workflow_step_kandev(${updateArgs})`,
         'e2e:message("Step updated")',
       ].join("\n"),
     );
@@ -247,15 +247,17 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Listing agents...")',
-        "e2e:mcp:kandev:list_agents({})",
-        `e2e:mcp:kandev:list_agent_profiles({"agent_id":"${agent.id}"})`,
+        "e2e:mcp:kandev:list_agents_kandev({})",
+        `e2e:mcp:kandev:list_agent_profiles_kandev({"agent_id":"${agent.id}"})`,
         'e2e:message("Agents listed")',
       ].join("\n"),
     );
 
     const page = await runAndWait(testPage, session.task_id, "Agents listed");
-    await expect(page.chat.getByText("list_agents")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("list_agent_profiles")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_agents_kandev")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_agent_profiles_kandev")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("agent can create and delete an agent profile", async ({
@@ -273,7 +275,7 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Creating profile...")',
-        `e2e:mcp:kandev:create_agent_profile({"agent_id":"${agent.id}","name":"E2E Created Profile","model":"claude-sonnet-4-5-20250514"})`,
+        `e2e:mcp:kandev:create_agent_profile_kandev({"agent_id":"${agent.id}","name":"E2E Created Profile","model":"claude-sonnet-4-5-20250514"})`,
         'e2e:message("Profile created")',
       ].join("\n"),
     );
@@ -296,7 +298,7 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Deleting profile...")',
-        `e2e:mcp:kandev:delete_agent_profile({"profile_id":"${newProfileId}"})`,
+        `e2e:mcp:kandev:delete_agent_profile_kandev({"profile_id":"${newProfileId}"})`,
         'e2e:message("Profile deleted")',
       ].join("\n"),
     );
@@ -319,7 +321,7 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Updating agent...")',
-        `e2e:mcp:kandev:update_agent({"agent_id":"${agent.id}","supports_mcp":true})`,
+        `e2e:mcp:kandev:update_agent_kandev({"agent_id":"${agent.id}","supports_mcp":true})`,
         'e2e:message("Agent updated")',
       ].join("\n"),
     );
@@ -338,7 +340,7 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Updating profile...")',
-        `e2e:mcp:kandev:update_agent_profile({"profile_id":"${seedData.agentProfileId}","name":"Renamed Profile"})`,
+        `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","name":"Renamed Profile"})`,
         'e2e:message("Profile updated")',
       ].join("\n"),
     );
@@ -363,7 +365,7 @@ test.describe("Config-mode MCP — agent management", () => {
       seedData,
       [
         'e2e:message("Updating profile settings...")',
-        `e2e:mcp:kandev:update_agent_profile({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514","auto_approve":false})`,
+        `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514","auto_approve":false})`,
         'e2e:message("Profile settings updated")',
       ].join("\n"),
     );
@@ -391,15 +393,15 @@ test.describe("Config-mode MCP — MCP server configuration", () => {
       seedData,
       [
         'e2e:message("Reading MCP config...")',
-        `e2e:mcp:kandev:get_mcp_config({"profile_id":"${seedData.agentProfileId}"})`,
-        `e2e:mcp:kandev:update_mcp_config({"profile_id":"${seedData.agentProfileId}","enabled":true,"servers":{"test-server":{"command":"node","args":["server.js"]}}})`,
+        `e2e:mcp:kandev:get_mcp_config_kandev({"profile_id":"${seedData.agentProfileId}"})`,
+        `e2e:mcp:kandev:update_mcp_config_kandev({"profile_id":"${seedData.agentProfileId}","enabled":true,"servers":{"test-server":{"command":"node","args":["server.js"]}}})`,
         'e2e:message("MCP config updated")',
       ].join("\n"),
     );
 
     const page = await runAndWait(testPage, session.task_id, "MCP config updated");
-    await expect(page.chat.getByText("get_mcp_config")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("update_mcp_config")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("get_mcp_config_kandev")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("update_mcp_config_kandev")).toBeVisible({ timeout: 10_000 });
 
     // Verify via API
     const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
@@ -425,13 +427,13 @@ test.describe("Config-mode MCP — task management", () => {
       seedData,
       [
         'e2e:message("Listing tasks...")',
-        `e2e:mcp:kandev:list_tasks({"workflow_id":"${seedData.workflowId}"})`,
+        `e2e:mcp:kandev:list_tasks_kandev({"workflow_id":"${seedData.workflowId}"})`,
         'e2e:message("Tasks listed")',
       ].join("\n"),
     );
 
     const page = await runAndWait(testPage, session.task_id, "Tasks listed");
-    await expect(page.chat.getByText("list_tasks").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("list_tasks_kandev").first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("agent can move a task to a different step", async ({ testPage, apiClient, seedData }) => {
@@ -450,7 +452,7 @@ test.describe("Config-mode MCP — task management", () => {
       seedData,
       [
         'e2e:message("Moving task...")',
-        `e2e:mcp:kandev:move_task({"task_id":"${task.id}","workflow_id":"${seedData.workflowId}","workflow_step_id":"${targetStep!.id}"})`,
+        `e2e:mcp:kandev:move_task_kandev({"task_id":"${task.id}","workflow_id":"${seedData.workflowId}","workflow_step_id":"${targetStep!.id}"})`,
         'e2e:message("Task moved")',
       ].join("\n"),
     );
@@ -474,7 +476,7 @@ test.describe("Config-mode MCP — task management", () => {
       seedData,
       [
         'e2e:message("Archiving task...")',
-        `e2e:mcp:kandev:archive_task({"task_id":"${task.id}"})`,
+        `e2e:mcp:kandev:archive_task_kandev({"task_id":"${task.id}"})`,
         'e2e:message("Task archived")',
       ].join("\n"),
     );
@@ -497,7 +499,7 @@ test.describe("Config-mode MCP — task management", () => {
       seedData,
       [
         'e2e:message("Deleting task...")',
-        `e2e:mcp:kandev:delete_task({"task_id":"${task.id}"})`,
+        `e2e:mcp:kandev:delete_task_kandev({"task_id":"${task.id}"})`,
         'e2e:message("Task deleted")',
       ].join("\n"),
     );
@@ -521,13 +523,13 @@ test.describe("Config-mode MCP — executor management", () => {
       seedData,
       [
         'e2e:message("Listing executors...")',
-        "e2e:mcp:kandev:list_executors({})",
+        "e2e:mcp:kandev:list_executors_kandev({})",
         'e2e:message("Executors listed")',
       ].join("\n"),
     );
 
     const page = await runAndWait(testPage, session.task_id, "Executors listed");
-    await expect(page.chat.getByText("list_executors", { exact: true })).toBeVisible({
+    await expect(page.chat.getByText("list_executors_kandev", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -547,7 +549,7 @@ test.describe("Config-mode MCP — executor management", () => {
       seedData,
       [
         'e2e:message("Creating executor profile...")',
-        `e2e:mcp:kandev:create_executor_profile({"executor_id":"${executor.id}","name":"E2E Profile"})`,
+        `e2e:mcp:kandev:create_executor_profile_kandev({"executor_id":"${executor.id}","name":"E2E Profile"})`,
         'e2e:message("Executor profile created")',
       ].join("\n"),
     );
@@ -566,7 +568,7 @@ test.describe("Config-mode MCP — executor management", () => {
       seedData,
       [
         'e2e:message("Deleting executor profile...")',
-        `e2e:mcp:kandev:delete_executor_profile({"profile_id":"${profile!.id}"})`,
+        `e2e:mcp:kandev:delete_executor_profile_kandev({"profile_id":"${profile!.id}"})`,
         'e2e:message("Executor profile deleted")',
       ].join("\n"),
     );
@@ -597,10 +599,10 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       seedData,
       [
         'e2e:message("Starting multi-tool config...")',
-        "e2e:mcp:kandev:list_workspaces({})",
-        `e2e:mcp:kandev:list_workflows({"workspace_id":"${seedData.workspaceId}"})`,
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Agent Created Step","position":0})`,
-        "e2e:mcp:kandev:list_agents({})",
+        "e2e:mcp:kandev:list_workspaces_kandev({})",
+        `e2e:mcp:kandev:list_workflows_kandev({"workspace_id":"${seedData.workspaceId}"})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Agent Created Step","position":0})`,
+        "e2e:mcp:kandev:list_agents_kandev({})",
         'e2e:message("Multi-tool config complete")',
       ].join("\n"),
     );
@@ -628,13 +630,13 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       [
         'e2e:message("Setting up full workflow...")',
         // Create 3 steps
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Build","position":0,"color":"#3b82f6"})`,
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Test","position":1,"color":"#eab308"})`,
-        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Deploy","position":2,"color":"#22c55e"})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Build","position":0,"color":"#3b82f6"})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Test","position":1,"color":"#eab308"})`,
+        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Deploy","position":2,"color":"#22c55e"})`,
         // Create a new agent profile
-        `e2e:mcp:kandev:create_agent_profile({"agent_id":"${agent.id}","name":"CI Profile","model":"claude-sonnet-4-5-20250514"})`,
+        `e2e:mcp:kandev:create_agent_profile_kandev({"agent_id":"${agent.id}","name":"CI Profile","model":"claude-sonnet-4-5-20250514"})`,
         // Update MCP config on the test profile
-        `e2e:mcp:kandev:update_mcp_config({"profile_id":"${seedData.agentProfileId}","enabled":true,"servers":{"ci-tools":{"command":"npx","args":["-y","@ci/tools"]}}})`,
+        `e2e:mcp:kandev:update_mcp_config_kandev({"profile_id":"${seedData.agentProfileId}","enabled":true,"servers":{"ci-tools":{"command":"npx","args":["-y","@ci/tools"]}}})`,
         'e2e:message("Full setup complete")',
       ].join("\n"),
     );

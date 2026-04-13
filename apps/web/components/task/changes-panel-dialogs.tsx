@@ -33,6 +33,7 @@ type DiscardDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fileToDiscard: string | null;
+  filesToDiscard: string[] | null;
   onConfirm: () => void;
 };
 
@@ -40,16 +41,27 @@ export function DiscardDialog({
   open,
   onOpenChange,
   fileToDiscard,
+  filesToDiscard,
   onConfirm,
 }: DiscardDialogProps) {
+  const isBulk = filesToDiscard && filesToDiscard.length > 1;
+  const displayFile = fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0] : null);
+  const description = isBulk
+    ? `This will permanently discard all changes to ${filesToDiscard.length} files. This action cannot be undone.`
+    : null;
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard changes?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently discard all changes to{" "}
-            <span className="font-semibold">{fileToDiscard}</span>. This action cannot be undone.
+            {description ?? (
+              <>
+                This will permanently discard all changes to{" "}
+                <span className="font-semibold">{displayFile}</span>. This action cannot be undone.
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

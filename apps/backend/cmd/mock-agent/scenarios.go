@@ -408,7 +408,7 @@ func scenarioClarification(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a question about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question", clarificationQuestionArgs())
+	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
@@ -426,7 +426,7 @@ func scenarioClarificationTimeout(e *emitter) {
 	ctx, cancel := contextWithTimeout(5)
 	defer cancel()
 
-	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question", clarificationQuestionArgs())
+	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		fixedDelay(50)
 		if ctx.Err() != nil {

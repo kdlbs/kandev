@@ -1,141 +1,148 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStoreApi } from "@/components/state-provider";
-import type { KanbanState } from "@/lib/state/slices";
+import { useState, useCallback, useRef, useMemo } from "react";
 
-function useMultiSelectStore() {
-  const store = useAppStoreApi();
+type UseMultiSelectOptions = {
+  items: string[];
+  onSelectionChange?: (selected: Set<string>) => void;
+};
 
-  const removeTasksFromStore = useCallback(
-    (ids: Set<string>) => {
-      const currentKanban = store.getState().kanban;
-      store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.filter(
-            (t: KanbanState["tasks"][number]) => !ids.has(t.id),
-          ),
-        },
-      });
-    },
-    [store],
-  );
+type UseMultiSelectReturn = {
+  selectedPaths: Set<string>;
+  isSelected: (path: string) => boolean;
+  /** Returns true if the click was consumed by selection (modifier key held). */
+  handleClick: (path: string, event: React.MouseEvent) => boolean;
+  selectAll: () => void;
+  clearSelection: () => void;
+  setSelectedPaths: (paths: Set<string>) => void;
+};
 
-  const applyMoveInStore = useCallback(
-    (succeededIds: Set<string>, targetStepId: string) => {
-      const currentKanban = store.getState().kanban;
-      store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
-            succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-          ),
-        },
-      });
-    },
-    [store],
-  );
+export type SelectionParams = {
+  prev: Set<string>;
+  path: string;
+  items: string[];
+  isShift: boolean;
+  isCtrlOrMeta: boolean;
+  lastClickedRef: React.RefObject<string | null>;
+};
 
-  return { removeTasksFromStore, applyMoveInStore };
+/** Exported for testing. */
+export function computeNextSelection(params: SelectionParams): Set<string> {
+  const { prev, path, items, isShift, isCtrlOrMeta, lastClickedRef } = params;
+  if (isShift) {
+    if (!lastClickedRef.current) {
+      lastClickedRef.current = path;
+      return new Set([path]);
+    }
+    const anchorIndex = items.indexOf(lastClickedRef.current);
+    const currentIndex = items.indexOf(path);
+    if (anchorIndex === -1 || currentIndex === -1) {
+      lastClickedRef.current = path;
+      return new Set([path]);
+    }
+    const start = Math.min(anchorIndex, currentIndex);
+    const end = Math.max(anchorIndex, currentIndex);
+    const next = isCtrlOrMeta ? new Set(prev) : new Set<string>();
+    for (let i = start; i <= end; i++) next.add(items[i]);
+    return next;
+  }
+
+  // Ctrl/Cmd+click: toggle individual item
+  const next = new Set(prev);
+  if (next.has(path)) {
+    next.delete(path);
+  } else {
+    next.add(path);
+  }
+  lastClickedRef.current = path;
+  return next;
 }
 
-export function useMultiSelect(workflowId: string | null) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const selectedIdsRef = useRef(selectedIds);
-  selectedIdsRef.current = selectedIds;
+export function useMultiSelect({
+  items,
+  onSelectionChange,
+}: UseMultiSelectOptions): UseMultiSelectReturn {
+  const [rawSelection, setRawSelection] = useState<Set<string>>(new Set());
+  const lastClickedRef = useRef<string | null>(null);
 
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  useEffect(() => {
-    setSelectedIds(new Set());
-    setIsProcessing(false);
-  }, [workflowId]);
-
-  const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
-  const { removeTasksFromStore, applyMoveInStore } = useMultiSelectStore();
-
-  const toggleSelect = useCallback((taskId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
+  const itemSet = useMemo(() => new Set(items), [items]);
+  const selectedPaths = useMemo(() => {
+    if (rawSelection.size === 0) return rawSelection;
+    let allValid = true;
+    for (const p of rawSelection) {
+      if (!itemSet.has(p)) {
+        allValid = false;
+        break;
       }
-      return next;
-    });
-  }, []);
+    }
+    if (allValid) return rawSelection;
+    const pruned = new Set<string>();
+    for (const p of rawSelection) {
+      if (itemSet.has(p)) pruned.add(p);
+    }
+    return pruned;
+  }, [rawSelection, itemSet]);
+
+  const setSelectedPaths = useCallback(
+    (paths: Set<string>) => {
+      setRawSelection(paths);
+      onSelectionChange?.(paths);
+    },
+    [onSelectionChange],
+  );
+
+  const handleClick = useCallback(
+    (path: string, event: React.MouseEvent): boolean => {
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+      const isShift = event.shiftKey;
+
+      // Plain click: set anchor, clear selection, let caller handle action
+      if (!isCtrlOrMeta && !isShift) {
+        lastClickedRef.current = path;
+        setRawSelection((prev) => {
+          if (prev.size === 0) return prev;
+          return new Set();
+        });
+        onSelectionChange?.(new Set());
+        return false;
+      }
+
+      // Modifier click: compute new selection, then notify
+      const next = computeNextSelection({
+        prev: rawSelection,
+        path,
+        items,
+        isShift,
+        isCtrlOrMeta,
+        lastClickedRef,
+      });
+      setRawSelection(next);
+      onSelectionChange?.(next);
+      return true;
+    },
+    [items, rawSelection, onSelectionChange],
+  );
+
+  const selectAll = useCallback(() => {
+    const all = new Set(items);
+    setRawSelection(all);
+    onSelectionChange?.(all);
+  }, [items, onSelectionChange]);
 
   const clearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
+    setRawSelection(new Set());
+    onSelectionChange?.(new Set());
+    lastClickedRef.current = null;
+  }, [onSelectionChange]);
 
-  const bulkDelete = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (ids.size === 0) return;
-    setIsProcessing(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
-      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [deleteTaskById, removeTasksFromStore]);
-
-  const bulkArchive = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (ids.size === 0) return;
-    setIsProcessing(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
-      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [archiveTaskById, removeTasksFromStore]);
-
-  const bulkMove = useCallback(
-    async (targetStepId: string) => {
-      if (!workflowId) return;
-      const idList = [...selectedIdsRef.current];
-      if (idList.length === 0) return;
-      setIsProcessing(true);
-      try {
-        const results = await Promise.allSettled(
-          idList.map((id, i) =>
-            moveTaskById(id, {
-              workflow_id: workflowId,
-              workflow_step_id: targetStepId,
-              position: i,
-            }),
-          ),
-        );
-        const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-        applyMoveInStore(succeededIds, targetStepId);
-      } finally {
-        setIsProcessing(false);
-      }
-    },
-    [workflowId, moveTaskById, applyMoveInStore],
-  );
+  const isSelected = useCallback((path: string) => selectedPaths.has(path), [selectedPaths]);
 
   return {
-    selectedIds,
-    isMultiSelectMode: selectedIds.size > 0,
-    isProcessing,
-    toggleSelect,
+    selectedPaths,
+    isSelected,
+    handleClick,
+    selectAll,
     clearSelection,
-    bulkDelete,
-    bulkArchive,
-    bulkMove,
+    setSelectedPaths,
   };
 }
-

@@ -107,7 +107,7 @@ test.describe("MCP subtask creation", () => {
     const script = [
       'e2e:thinking("Planning subtasks...")',
       "e2e:delay(100)",
-      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify MCP create_task with parent_id"})`,
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify MCP create_task with parent_id"})`,
       "e2e:delay(100)",
       'e2e:message("Done.")',
     ].join("\n");
@@ -159,7 +159,7 @@ test.describe("MCP subtask creation", () => {
     const script = [
       'e2e:thinking("Creating subtask...")',
       "e2e:delay(100)",
-      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify repository inheritance"})`,
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify repository inheritance"})`,
       "e2e:delay(100)",
       'e2e:message("Done.")',
     ].join("\n");
@@ -275,7 +275,7 @@ test.describe("Subtask inheritance", () => {
     const script = [
       'e2e:thinking("Creating subtask...")',
       "e2e:delay(100)",
-      `e2e:mcp:kandev:create_task({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify executor and agent profile inheritance"})`,
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify executor and agent profile inheritance"})`,
       "e2e:delay(100)",
       'e2e:message("Done.")',
     ].join("\n");

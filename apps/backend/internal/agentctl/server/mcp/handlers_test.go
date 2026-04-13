@@ -20,7 +20,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	toolsMap := s.mcpServer.ListTools()
-	tool, ok := toolsMap["create_task"]
+	tool, ok := toolsMap["create_task_kandev"]
 	require.True(t, ok, "create_task tool not registered")
 
 	schema, err := json.Marshal(tool.Tool.InputSchema)
@@ -54,7 +54,7 @@ func TestCreateTask_SelfResolvesToTaskID(t *testing.T) {
 	}
 	s := newTaskModeServer(t, backend, "task-current")
 
-	result := callTool(t, s, "create_task", map[string]interface{}{
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title":     "Write tests",
 		"parent_id": "self",
 	})
@@ -72,7 +72,7 @@ func TestCreateTask_SelfWithNoTaskContext_ReturnsError(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "")
 
-	result := callTool(t, s, "create_task", map[string]interface{}{
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title":     "Write tests",
 		"parent_id": "self",
 	})
@@ -86,7 +86,7 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 	}
 	s := newTaskModeServer(t, backend, "task-current")
 
-	result := callTool(t, s, "create_task", map[string]interface{}{
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title":     "Fix bug",
 		"parent_id": "task-abc",
 	})
@@ -103,7 +103,7 @@ func TestCreateTask_NoParentID_RequiresWorkspaceAndWorkflow(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	// No parent_id and no workspace/workflow -> error
-	result := callTool(t, s, "create_task", map[string]interface{}{
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title": "Standalone task",
 	})
 
@@ -116,7 +116,7 @@ func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
 	}
 	s := newTaskModeServer(t, backend, "task-current")
 
-	result := callTool(t, s, "create_task", map[string]interface{}{
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title":        "Standalone",
 		"workspace_id": "ws-1",
 		"workflow_id":  "wf-1",

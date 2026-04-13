@@ -33,6 +33,67 @@ import {
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
+function deleteNodeOptimistically(
+  tree: FileTreeNode | null,
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
+  path: string,
+  onDeleteFile: (path: string) => Promise<boolean>,
+) {
+  const snapshot = tree;
+  setTree((prev) => (prev ? removeNodeFromTree(prev, path) : prev));
+  onDeleteFile(path)
+    .then((ok) => {
+      if (!ok) setTree(snapshot);
+    })
+    .catch(() => setTree(snapshot));
+}
+
+function DeleteConfirmDialog({
+  isBulk,
+  selectedCount,
+  node,
+  fileCount,
+  onConfirm,
+}: {
+  isBulk: boolean;
+  selectedCount: number;
+  node: FileTreeNode;
+  fileCount: number;
+  onConfirm: () => void;
+}) {
+  const title = isBulk ? `Delete ${selectedCount} items?` : "Delete folder?";
+  return (
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {isBulk ? (
+            `This will permanently delete ${selectedCount} selected items. This action cannot be undone.`
+          ) : (
+            <>
+              This will permanently delete <span className="font-semibold">{node.name}</span>
+              {fileCount > 0 && (
+                <>
+                  {" "}
+                  and <span className="font-semibold">{fileCount}</span>{" "}
+                  {fileCount === 1 ? "file" : "files"} inside it
+                </>
+              )}
+              . This action cannot be undone.
+            </>
+          )}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+        <AlertDialogAction onClick={onConfirm} variant="destructive" className="cursor-pointer">
+          Delete
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  );
+}
+
 /** Context menu for file nodes with Rename and Delete options */
 export function FileContextMenu({
   children,
@@ -42,6 +103,8 @@ export function FileContextMenu({
   onDeleteFile,
   onRenameFile,
   onStartRename,
+  selectedCount = 0,
+  selectedPaths,
 }: {
   children: React.ReactNode;
   node: FileTreeNode;
@@ -50,91 +113,81 @@ export function FileContextMenu({
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onStartRename: () => void;
+  selectedCount?: number;
+  selectedPaths?: Set<string>;
 }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const isDirectory = node.is_dir;
-  const fileCount = countFilesInTree(node);
+  const isBulk = selectedCount > 1;
+  const needsConfirmation = node.is_dir || isBulk;
 
   const handleConfirmDelete = useCallback(() => {
     setDeleteDialogOpen(false);
     if (!onDeleteFile) return;
-    const snapshot = tree;
-    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-    onDeleteFile(node.path)
-      .then((ok) => {
-        if (!ok) setTree(snapshot);
-      })
-      .catch(() => {
-        setTree(snapshot);
+    if (isBulk && selectedPaths) {
+      // Remove all nodes optimistically, then call APIs.
+      // Rollback entire tree only if any individual delete fails.
+      const snapshot = tree;
+      const paths = [...selectedPaths];
+      setTree((prev) => {
+        let t = prev;
+        for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
+        return t;
       });
-  }, [tree, setTree, node.path, onDeleteFile]);
+      Promise.all(paths.map((p) => onDeleteFile(p)))
+        .then((results) => {
+          if (results.some((ok) => !ok)) setTree(snapshot);
+        })
+        .catch(() => setTree(snapshot));
+    } else {
+      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
+    }
+  }, [tree, setTree, node.path, onDeleteFile, isBulk, selectedPaths]);
 
   const handleDelete = useCallback(() => {
     if (!onDeleteFile) return;
-    if (isDirectory) {
+    if (needsConfirmation) {
       setDeleteDialogOpen(true);
-      return;
+    } else {
+      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
     }
-    const snapshot = tree;
-    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-    onDeleteFile(node.path)
-      .then((ok) => {
-        if (!ok) setTree(snapshot);
-      })
-      .catch(() => {
-        setTree(snapshot);
-      });
-  }, [tree, setTree, node.path, onDeleteFile, isDirectory]);
+  }, [tree, setTree, node.path, onDeleteFile, needsConfirmation]);
 
-  const hasActions = onDeleteFile || onRenameFile;
+  if (!onDeleteFile && !onRenameFile) return <>{children}</>;
 
-  if (!hasActions) {
-    return <>{children}</>;
-  }
+  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
 
   return (
-    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+    <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
-          {onRenameFile && (
+          {onDeleteFile && (
+            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
+              <IconTrash className="h-3.5 w-3.5" />
+              {deleteLabel}
+            </ContextMenuItem>
+          )}
+          {onRenameFile && onDeleteFile && !isBulk && <ContextMenuSeparator />}
+          {onRenameFile && !isBulk && (
             <ContextMenuItem onSelect={onStartRename}>
               <IconPencil className="h-3.5 w-3.5" />
               Rename
             </ContextMenuItem>
           )}
-          {onRenameFile && onDeleteFile && <ContextMenuSeparator />}
-          {onDeleteFile && (
-            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
-              <IconTrash className="h-3.5 w-3.5" />
-              Delete
-            </ContextMenuItem>
-          )}
         </ContextMenuContent>
       </ContextMenu>
-      {isDirectory && (
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete <span className="font-semibold">{node.name}</span> and{" "}
-              <span className="font-semibold">{fileCount}</span>{" "}
-              {fileCount === 1 ? "file" : "files"} inside it. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              variant="destructive"
-              className="cursor-pointer"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+      {needsConfirmation && (
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DeleteConfirmDialog
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            node={node}
+            fileCount={countFilesInTree(node)}
+            onConfirm={handleConfirmDelete}
+          />
+        </AlertDialog>
       )}
-    </AlertDialog>
+    </>
   );
 }
 

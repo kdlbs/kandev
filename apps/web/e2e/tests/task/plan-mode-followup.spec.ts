@@ -12,7 +12,7 @@ import { SessionPage } from "../../pages/session-page";
 const PLAN_SCRIPT = [
   'e2e:thinking("Creating plan...")',
   "e2e:delay(100)",
-  'e2e:mcp:kandev:create_task_plan({"task_id":"{task_id}","content":"## Plan\\n\\n1. Analyze requirements\\n2. Implement solution\\n3. Write tests","title":"Implementation Plan"})',
+  'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Plan\\n\\n1. Analyze requirements\\n2. Implement solution\\n3. Write tests","title":"Implementation Plan"})',
   "e2e:delay(100)",
   'e2e:message("Plan created.")',
 ].join("\n");

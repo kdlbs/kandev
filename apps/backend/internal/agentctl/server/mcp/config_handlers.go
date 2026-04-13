@@ -13,57 +13,57 @@ import (
 
 func (s *Server) registerConfigWorkflowTools() {
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces",
+		mcp.NewToolWithRawSchema("list_workspaces_kandev",
 			"List all workspaces. Use this first to get workspace IDs.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
-		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
+		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows",
+		mcp.NewTool("list_workflows_kandev",
 			mcp.WithDescription("List all workflows in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 		),
-		s.wrapHandler("list_workflows", s.listWorkflowsHandler()),
+		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_workflow",
+		mcp.NewTool("create_workflow_kandev",
 			mcp.WithDescription("Create a new workflow in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Workflow name")),
 			mcp.WithString("description", mcp.Description("Workflow description")),
 		),
-		s.wrapHandler("create_workflow", s.createWorkflowHandler()),
+		s.wrapHandler("create_workflow_kandev", s.createWorkflowHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_workflow",
+		mcp.NewTool("update_workflow_kandev",
 			mcp.WithDescription("Update an existing workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 			mcp.WithString("name", mcp.Description("New workflow name")),
 			mcp.WithString("description", mcp.Description("New workflow description")),
 		),
-		s.wrapHandler("update_workflow", s.updateWorkflowHandler()),
+		s.wrapHandler("update_workflow_kandev", s.updateWorkflowHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_workflow",
+		mcp.NewTool("delete_workflow_kandev",
 			mcp.WithDescription("Delete a workflow and all its steps. This is destructive and cannot be undone."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID to delete")),
 		),
-		s.wrapHandler("delete_workflow", s.deleteWorkflowHandler()),
+		s.wrapHandler("delete_workflow_kandev", s.deleteWorkflowHandler()),
 	)
 	s.registerConfigWorkflowStepTools()
 }
 
 func (s *Server) registerConfigWorkflowStepTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps",
+		mcp.NewTool("list_workflow_steps_kandev",
 			mcp.WithDescription("List all workflow steps (columns) in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
-		s.wrapHandler("list_workflow_steps", s.listWorkflowStepsHandler()),
+		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_workflow_step",
+		mcp.NewTool("create_workflow_step_kandev",
 			mcp.WithDescription("Create a new workflow step (column) in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Step name")),
@@ -75,10 +75,10 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete. Each is an array of {type, config} objects.")),
 		),
-		s.wrapHandler("create_workflow_step", s.createWorkflowStepHandler()),
+		s.wrapHandler("create_workflow_step_kandev", s.createWorkflowStepHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_workflow_step",
+		mcp.NewTool("update_workflow_step_kandev",
 			mcp.WithDescription("Update an existing workflow step."),
 			mcp.WithString("step_id", mcp.Required(), mcp.Description("The workflow step ID")),
 			mcp.WithString("name", mcp.Description("New step name")),
@@ -90,22 +90,22 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithNumber("auto_archive_after_hours", mcp.Description("Auto-archive tasks after N hours in this step (0 to disable)")),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete.")),
 		),
-		s.wrapHandler("update_workflow_step", s.updateWorkflowStepHandler()),
+		s.wrapHandler("update_workflow_step_kandev", s.updateWorkflowStepHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_workflow_step",
+		mcp.NewTool("delete_workflow_step_kandev",
 			mcp.WithDescription("Delete a workflow step. This is destructive and cannot be undone."),
 			mcp.WithString("step_id", mcp.Required(), mcp.Description("The workflow step ID to delete")),
 		),
-		s.wrapHandler("delete_workflow_step", s.deleteWorkflowStepHandler()),
+		s.wrapHandler("delete_workflow_step_kandev", s.deleteWorkflowStepHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("reorder_workflow_steps",
+		mcp.NewTool("reorder_workflow_steps_kandev",
 			mcp.WithDescription("Reorder workflow steps by providing the full ordered list of step IDs."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order")),
 		),
-		s.wrapHandler("reorder_workflow_steps", s.reorderWorkflowStepsHandler()),
+		s.wrapHandler("reorder_workflow_steps_kandev", s.reorderWorkflowStepsHandler()),
 	)
 }
 
@@ -113,37 +113,37 @@ func (s *Server) registerConfigWorkflowStepTools() {
 
 func (s *Server) registerConfigAgentTools() {
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_agents",
+		mcp.NewToolWithRawSchema("list_agents_kandev",
 			"List all configured agents with their profiles.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
-		s.wrapHandler("list_agents", s.listAgentsHandler()),
+		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_agent",
+		mcp.NewTool("update_agent_kandev",
 			mcp.WithDescription("Update an existing agent."),
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID")),
 			mcp.WithBoolean("supports_mcp", mcp.Description("Whether the agent supports MCP")),
 			mcp.WithString("mcp_config_path", mcp.Description("Path to MCP config file")),
 		),
-		s.wrapHandler("update_agent", s.updateAgentHandler()),
+		s.wrapHandler("update_agent_kandev", s.updateAgentHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_agent_profile",
+		mcp.NewTool("create_agent_profile_kandev",
 			mcp.WithDescription("Create a new agent profile for an agent."),
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID to create a profile for")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
 			mcp.WithString("model", mcp.Required(), mcp.Description("Model name (e.g. 'claude-sonnet-4-5-20250514')")),
 			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions (default: false)")),
 		),
-		s.wrapHandler("create_agent_profile", s.createAgentProfileHandler()),
+		s.wrapHandler("create_agent_profile_kandev", s.createAgentProfileHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_agent_profile",
+		mcp.NewTool("delete_agent_profile_kandev",
 			mcp.WithDescription("Delete an agent profile. Fails if the profile is used by an active session."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The profile ID to delete")),
 		),
-		s.wrapHandler("delete_agent_profile", s.deleteAgentProfileHandler()),
+		s.wrapHandler("delete_agent_profile_kandev", s.deleteAgentProfileHandler()),
 	)
 }
 
@@ -151,37 +151,37 @@ func (s *Server) registerConfigAgentTools() {
 
 func (s *Server) registerConfigMcpTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_agent_profiles",
+		mcp.NewTool("list_agent_profiles_kandev",
 			mcp.WithDescription("List all profiles for an agent."),
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID")),
 		),
-		s.wrapHandler("list_agent_profiles", s.listAgentProfilesHandler()),
+		s.wrapHandler("list_agent_profiles_kandev", s.listAgentProfilesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_agent_profile",
+		mcp.NewTool("update_agent_profile_kandev",
 			mcp.WithDescription("Update an agent profile's settings."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The profile ID")),
 			mcp.WithString("name", mcp.Description("New profile name")),
 			mcp.WithString("model", mcp.Description("New model name")),
 			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions")),
 		),
-		s.wrapHandler("update_agent_profile", s.updateAgentProfileHandler()),
+		s.wrapHandler("update_agent_profile_kandev", s.updateAgentProfileHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("get_mcp_config",
+		mcp.NewTool("get_mcp_config_kandev",
 			mcp.WithDescription("Get MCP server configuration for an agent profile."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The agent profile ID")),
 		),
-		s.wrapHandler("get_mcp_config", s.getMcpConfigHandler()),
+		s.wrapHandler("get_mcp_config_kandev", s.getMcpConfigHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_mcp_config",
+		mcp.NewTool("update_mcp_config_kandev",
 			mcp.WithDescription("Update MCP server configuration for an agent profile. Pass the full servers map."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The agent profile ID")),
 			mcp.WithBoolean("enabled", mcp.Description("Whether MCP is enabled for this profile")),
 			mcp.WithObject("servers", mcp.Description("Full MCP servers map to set. Each key is a server name, value is the server configuration object.")),
 		),
-		s.wrapHandler("update_mcp_config", s.updateMcpConfigHandler()),
+		s.wrapHandler("update_mcp_config_kandev", s.updateMcpConfigHandler()),
 	)
 }
 
@@ -189,21 +189,21 @@ func (s *Server) registerConfigMcpTools() {
 
 func (s *Server) registerConfigExecutorTools() {
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_executors",
+		mcp.NewToolWithRawSchema("list_executors_kandev",
 			"List all executors.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
-		s.wrapHandler("list_executors", s.listExecutorsHandler()),
+		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_executor_profiles",
+		mcp.NewTool("list_executor_profiles_kandev",
 			mcp.WithDescription("List all profiles for an executor."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
 		),
-		s.wrapHandler("list_executor_profiles", s.listExecutorProfilesHandler()),
+		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_executor_profile",
+		mcp.NewTool("create_executor_profile_kandev",
 			mcp.WithDescription("Create a new executor profile."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
@@ -212,10 +212,10 @@ func (s *Server) registerConfigExecutorTools() {
 			mcp.WithString("prepare_script", mcp.Description("Script to run before agent starts")),
 			mcp.WithString("cleanup_script", mcp.Description("Script to run after agent stops")),
 		),
-		s.wrapHandler("create_executor_profile", s.createExecutorProfileHandler()),
+		s.wrapHandler("create_executor_profile_kandev", s.createExecutorProfileHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_executor_profile",
+		mcp.NewTool("update_executor_profile_kandev",
 			mcp.WithDescription("Update an existing executor profile."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID")),
 			mcp.WithString("name", mcp.Description("New profile name")),
@@ -224,14 +224,14 @@ func (s *Server) registerConfigExecutorTools() {
 			mcp.WithString("prepare_script", mcp.Description("New prepare script")),
 			mcp.WithString("cleanup_script", mcp.Description("New cleanup script")),
 		),
-		s.wrapHandler("update_executor_profile", s.updateExecutorProfileHandler()),
+		s.wrapHandler("update_executor_profile_kandev", s.updateExecutorProfileHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_executor_profile",
+		mcp.NewTool("delete_executor_profile_kandev",
 			mcp.WithDescription("Delete an executor profile."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID to delete")),
 		),
-		s.wrapHandler("delete_executor_profile", s.deleteExecutorProfileHandler()),
+		s.wrapHandler("delete_executor_profile_kandev", s.deleteExecutorProfileHandler()),
 	)
 }
 
@@ -239,43 +239,43 @@ func (s *Server) registerConfigExecutorTools() {
 
 func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks",
+		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
-		s.wrapHandler("list_tasks", s.listTasksHandler()),
+		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("move_task",
+		mcp.NewTool("move_task_kandev",
 			mcp.WithDescription("Move a task to a different workflow step."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
 		),
-		s.wrapHandler("move_task", s.moveTaskHandler()),
+		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_task",
+		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
 		),
-		s.wrapHandler("delete_task", s.deleteTaskHandler()),
+		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("archive_task",
+		mcp.NewTool("archive_task_kandev",
 			mcp.WithDescription("Archive a task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
-		s.wrapHandler("archive_task", s.archiveTaskHandler()),
+		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_state",
+		mcp.NewTool("update_task_state_kandev",
 			mcp.WithDescription("Update the state of a task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("state", mcp.Required(), mcp.Description("New state: open, in_progress, complete, blocked, cancelled")),
 		),
-		s.wrapHandler("update_task_state", s.updateTaskStateHandler()),
+		s.wrapHandler("update_task_state_kandev", s.updateTaskStateHandler()),
 	)
 }
 

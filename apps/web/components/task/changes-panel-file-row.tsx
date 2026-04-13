@@ -9,6 +9,8 @@ import {
   IconPencil,
 } from "@tabler/icons-react";
 
+import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
 import type { FileInfo } from "@/lib/state/store";
@@ -35,6 +37,8 @@ type ChangedFile = {
 type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
+  isSelected?: boolean;
+  onSelect?: (path: string, e: React.MouseEvent) => boolean;
   onOpenDiff: (path: string) => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
@@ -45,6 +49,8 @@ type FileRowProps = {
 export function FileRow({
   file,
   isPending,
+  isSelected,
+  onSelect,
   onOpenDiff,
   onStage,
   onUnstage,
@@ -53,11 +59,24 @@ export function FileRow({
 }: FileRowProps) {
   const { folder, file: name } = splitPath(file.path);
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.button === 2) return;
+    const consumed = onSelect?.(file.path, e);
+    if (!consumed) {
+      onOpenDiff(file.path);
+    }
+  };
+
   return (
     <li
       data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenDiff(file.path)}
+      data-changes-file={file.path}
+      data-selected={isSelected ? "true" : "false"}
+      className={cn(
+        "group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 cursor-pointer",
+        isSelected ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
+      )}
+      onClick={handleClick}
     >
       <div className="flex items-center gap-2 min-w-0">
         <StageButton
@@ -175,6 +194,108 @@ function FileRowActions({
         </TooltipTrigger>
         <TooltipContent>Edit</TooltipContent>
       </Tooltip>
+    </div>
+  );
+}
+
+// --- Bulk action components (used by FileListSection) ---
+
+export function DefaultActionButtons({
+  actionLabel,
+  isActionLoading,
+  onAction,
+  secondaryActionLabel,
+  isSecondaryActionLoading,
+  onSecondaryAction,
+}: {
+  actionLabel: string;
+  isActionLoading?: boolean;
+  onAction: () => void;
+  secondaryActionLabel?: string;
+  isSecondaryActionLoading?: boolean;
+  onSecondaryAction?: () => void;
+}) {
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+        onClick={onAction}
+        disabled={isActionLoading}
+      >
+        {isActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
+        {actionLabel}
+      </Button>
+      {onSecondaryAction && secondaryActionLabel && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+          onClick={onSecondaryAction}
+          disabled={isSecondaryActionLoading}
+        >
+          {isSecondaryActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
+          {secondaryActionLabel}
+        </Button>
+      )}
+    </>
+  );
+}
+
+export function BulkActionBar({
+  variant,
+  selectionCount,
+  selectedPaths,
+  onBulkStage,
+  onBulkUnstage,
+  onBulkDiscard,
+}: {
+  variant: "unstaged" | "staged";
+  selectionCount: number;
+  selectedPaths: Set<string>;
+  onBulkStage?: (paths: string[]) => void;
+  onBulkUnstage?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[]) => void;
+}) {
+  const paths = [...selectedPaths];
+
+  return (
+    <div data-testid={`bulk-actions-${variant}`} className="flex items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground">{selectionCount} selected</span>
+      {variant === "unstaged" && onBulkStage && (
+        <Button
+          data-testid="bulk-stage"
+          size="sm"
+          variant="outline"
+          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+          onClick={() => onBulkStage(paths)}
+        >
+          Stage {selectionCount}
+        </Button>
+      )}
+      {variant === "staged" && onBulkUnstage && (
+        <Button
+          data-testid={`bulk-unstage-${variant}`}
+          size="sm"
+          variant="outline"
+          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+          onClick={() => onBulkUnstage(paths)}
+        >
+          Unstage {selectionCount}
+        </Button>
+      )}
+      {onBulkDiscard && (
+        <Button
+          data-testid={`bulk-discard-${variant}`}
+          size="sm"
+          variant="outline"
+          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
+          onClick={() => onBulkDiscard(paths)}
+        >
+          Discard {selectionCount}
+        </Button>
+      )}
     </div>
   );
 }

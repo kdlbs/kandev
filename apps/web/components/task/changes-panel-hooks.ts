@@ -95,15 +95,23 @@ function useChangesDiscardAmendHandlers(
 ) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+  const [filesToDiscard, setFilesToDiscard] = useState<string[] | null>(null);
 
   const handleDiscardClick = useCallback((filePath: string) => {
     setFileToDiscard(filePath);
+    setFilesToDiscard(null);
+    setShowDiscardDialog(true);
+  }, []);
+  const handleBulkDiscardClick = useCallback((paths: string[]) => {
+    setFilesToDiscard(paths);
+    setFileToDiscard(null);
     setShowDiscardDialog(true);
   }, []);
   const handleDiscardConfirm = useCallback(async () => {
-    if (!fileToDiscard) return;
+    const paths = filesToDiscard ?? (fileToDiscard ? [fileToDiscard] : null);
+    if (!paths) return;
     try {
-      const result = await gitOps.discard([fileToDiscard]);
+      const result = await gitOps.discard(paths);
       if (!result.success)
         toast({
           title: "Failed to discard changes",
@@ -119,8 +127,9 @@ function useChangesDiscardAmendHandlers(
     } finally {
       setShowDiscardDialog(false);
       setFileToDiscard(null);
+      setFilesToDiscard(null);
     }
-  }, [fileToDiscard, gitOps, toast]);
+  }, [fileToDiscard, filesToDiscard, gitOps, toast]);
 
   // Amend dialog state (for editing last commit message directly)
   const [amendDialogOpen, setAmendDialogOpen] = useState(false);
@@ -142,7 +151,9 @@ function useChangesDiscardAmendHandlers(
     showDiscardDialog,
     setShowDiscardDialog,
     fileToDiscard,
+    filesToDiscard,
     handleDiscardClick,
+    handleBulkDiscardClick,
     handleDiscardConfirm,
     // Amend dialog
     amendDialogOpen,

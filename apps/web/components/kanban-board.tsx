@@ -18,7 +18,7 @@ import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/do
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useMultiSelect } from "@/hooks/use-multi-select";
+import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
 import {
@@ -216,7 +216,7 @@ function useKanbanBoardSetup(
     onOpenTask,
   });
 
-  const multiSelect = useMultiSelect(kanban.workflowId);
+  const multiSelect = useTaskMultiSelect(kanban.workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
 
   // Mobile bottom sheet: intercept card clicks to show task info first

@@ -18,7 +18,7 @@ func TestIsScriptMode(t *testing.T) {
 		{"e2e:message(\"hello\")", true},
 		{"e2e:thinking(\"thought\")", true},
 		{"e2e:delay(100)", true},
-		{"e2e:mcp:kandev:create_task_plan({})", true},
+		{"e2e:mcp:kandev:create_task_plan_kandev({})", true},
 		{"/e2e:simple-message", false},
 		{"hello world", false},
 		{"", false},
@@ -155,7 +155,7 @@ func TestSubstituteContextPlaceholders(t *testing.T) {
 Kandev Task ID: task-abc-123
 Kandev Session ID: sess-xyz-789
 </kandev-system>
-e2e:mcp:kandev:create_task_plan({"task_id":"{task_id}"})`
+e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}"})`
 
 	t.Run("replaces task_id", func(t *testing.T) {
 		args := map[string]any{"task_id": "{task_id}"}

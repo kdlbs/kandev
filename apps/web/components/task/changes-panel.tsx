@@ -291,6 +291,9 @@ type ChangesPanelBodyProps = {
   onUnstageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
+  onBulkStage: (paths: string[]) => void;
+  onBulkUnstage: (paths: string[]) => void;
+  onBulkDiscard: (paths: string[]) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -308,6 +311,7 @@ function ChangesPanelDialogsSection({
         open={dialogs.showDiscardDialog}
         onOpenChange={dialogs.setShowDiscardDialog}
         fileToDiscard={dialogs.fileToDiscard}
+        filesToDiscard={dialogs.filesToDiscard}
         onConfirm={dialogs.handleDiscardConfirm}
       />
       <AmendDialog
@@ -357,6 +361,9 @@ type TimelineProps = Pick<
   | "onUnstageAll"
   | "onStage"
   | "onUnstage"
+  | "onBulkStage"
+  | "onBulkUnstage"
+  | "onBulkDiscard"
   | "onPush"
   | "onForcePush"
 >;
@@ -376,6 +383,9 @@ type WorkingTreeProps = Pick<
   | "onUnstageAll"
   | "onStage"
   | "onUnstage"
+  | "onBulkStage"
+  | "onBulkUnstage"
+  | "onBulkDiscard"
 > & { isLastUnstaged: boolean; isLastStaged: boolean };
 
 function WorkingTreeSections(props: WorkingTreeProps) {
@@ -396,6 +406,8 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           onStage={props.onStage}
           onUnstage={props.onUnstage}
           onDiscard={props.dialogs.handleDiscardClick}
+          onBulkStage={props.onBulkStage}
+          onBulkDiscard={props.onBulkDiscard}
         />
       )}
       {props.hasStaged && (
@@ -415,6 +427,8 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           onStage={props.onStage}
           onUnstage={props.onUnstage}
           onDiscard={props.dialogs.handleDiscardClick}
+          onBulkUnstage={props.onBulkUnstage}
+          onBulkDiscard={props.onBulkDiscard}
         />
       )}
     </>
@@ -610,6 +624,13 @@ const ChangesPanel = memo(function ChangesPanel({
         onUnstageAll={git.unstageAll}
         onStage={(path) => git.stageFile([path]).then(() => undefined)}
         onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
+        onBulkStage={(paths) => {
+          git.stageFile(paths).catch(() => {});
+        }}
+        onBulkUnstage={(paths) => {
+          git.unstageFile(paths).catch(() => {});
+        }}
+        onBulkDiscard={localDialogs.handleBulkDiscardClick}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}
         stagedFileCount={staged.stagedFileCount}

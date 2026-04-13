@@ -36,49 +36,49 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 
 	// Task mode should have kanban tools
-	assert.Contains(t, tools, "list_workspaces")
-	assert.Contains(t, tools, "list_workflows")
-	assert.Contains(t, tools, "list_workflow_steps")
-	assert.Contains(t, tools, "list_tasks")
-	assert.Contains(t, tools, "create_task")
-	assert.Contains(t, tools, "update_task")
+	assert.Contains(t, tools, "list_workspaces_kandev")
+	assert.Contains(t, tools, "list_workflows_kandev")
+	assert.Contains(t, tools, "list_workflow_steps_kandev")
+	assert.Contains(t, tools, "list_tasks_kandev")
+	assert.Contains(t, tools, "create_task_kandev")
+	assert.Contains(t, tools, "update_task_kandev")
 
 	// Task mode should have plan tools
-	assert.Contains(t, tools, "create_task_plan")
-	assert.Contains(t, tools, "get_task_plan")
-	assert.Contains(t, tools, "update_task_plan")
-	assert.Contains(t, tools, "delete_task_plan")
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	assert.Contains(t, tools, "get_task_plan_kandev")
+	assert.Contains(t, tools, "update_task_plan_kandev")
+	assert.Contains(t, tools, "delete_task_plan_kandev")
 
 	// Task mode should have interaction tools
-	assert.Contains(t, tools, "ask_user_question")
+	assert.Contains(t, tools, "ask_user_question_kandev")
 
 	// Task mode should have profile listing tools (needed for create_task)
-	assert.Contains(t, tools, "list_agents")
-	assert.Contains(t, tools, "list_executor_profiles")
+	assert.Contains(t, tools, "list_agents_kandev")
+	assert.Contains(t, tools, "list_executor_profiles_kandev")
 
 	// Task mode should NOT have config/mutation tools
-	assert.NotContains(t, tools, "create_workflow")
-	assert.NotContains(t, tools, "update_workflow")
-	assert.NotContains(t, tools, "delete_workflow")
-	assert.NotContains(t, tools, "create_workflow_step")
-	assert.NotContains(t, tools, "update_workflow_step")
-	assert.NotContains(t, tools, "update_agent")
-	assert.NotContains(t, tools, "create_agent_profile")
-	assert.NotContains(t, tools, "delete_agent_profile")
-	assert.NotContains(t, tools, "list_agent_profiles")
-	assert.NotContains(t, tools, "update_agent_profile")
-	assert.NotContains(t, tools, "get_mcp_config")
-	assert.NotContains(t, tools, "update_mcp_config")
-	assert.NotContains(t, tools, "move_task")
-	assert.NotContains(t, tools, "delete_task")
-	assert.NotContains(t, tools, "archive_task")
-	assert.NotContains(t, tools, "list_executors")
-	assert.NotContains(t, tools, "create_executor_profile")
-	assert.NotContains(t, tools, "update_executor_profile")
-	assert.NotContains(t, tools, "delete_executor_profile")
-	assert.NotContains(t, tools, "update_task_state")
-	assert.NotContains(t, tools, "delete_workflow_step")
-	assert.NotContains(t, tools, "reorder_workflow_steps")
+	assert.NotContains(t, tools, "create_workflow_kandev")
+	assert.NotContains(t, tools, "update_workflow_kandev")
+	assert.NotContains(t, tools, "delete_workflow_kandev")
+	assert.NotContains(t, tools, "create_workflow_step_kandev")
+	assert.NotContains(t, tools, "update_workflow_step_kandev")
+	assert.NotContains(t, tools, "update_agent_kandev")
+	assert.NotContains(t, tools, "create_agent_profile_kandev")
+	assert.NotContains(t, tools, "delete_agent_profile_kandev")
+	assert.NotContains(t, tools, "list_agent_profiles_kandev")
+	assert.NotContains(t, tools, "update_agent_profile_kandev")
+	assert.NotContains(t, tools, "get_mcp_config_kandev")
+	assert.NotContains(t, tools, "update_mcp_config_kandev")
+	assert.NotContains(t, tools, "move_task_kandev")
+	assert.NotContains(t, tools, "delete_task_kandev")
+	assert.NotContains(t, tools, "archive_task_kandev")
+	assert.NotContains(t, tools, "list_executors_kandev")
+	assert.NotContains(t, tools, "create_executor_profile_kandev")
+	assert.NotContains(t, tools, "update_executor_profile_kandev")
+	assert.NotContains(t, tools, "delete_executor_profile_kandev")
+	assert.NotContains(t, tools, "update_task_state_kandev")
+	assert.NotContains(t, tools, "delete_workflow_step_kandev")
+	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -92,55 +92,55 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 
 	// Config mode should have workflow config tools
-	assert.Contains(t, tools, "list_workspaces")
-	assert.Contains(t, tools, "list_workflows")
-	assert.Contains(t, tools, "create_workflow")
-	assert.Contains(t, tools, "update_workflow")
-	assert.Contains(t, tools, "delete_workflow")
-	assert.Contains(t, tools, "list_workflow_steps")
-	assert.Contains(t, tools, "create_workflow_step")
-	assert.Contains(t, tools, "update_workflow_step")
-	assert.Contains(t, tools, "delete_workflow_step")
-	assert.Contains(t, tools, "reorder_workflow_steps")
+	assert.Contains(t, tools, "list_workspaces_kandev")
+	assert.Contains(t, tools, "list_workflows_kandev")
+	assert.Contains(t, tools, "create_workflow_kandev")
+	assert.Contains(t, tools, "update_workflow_kandev")
+	assert.Contains(t, tools, "delete_workflow_kandev")
+	assert.Contains(t, tools, "list_workflow_steps_kandev")
+	assert.Contains(t, tools, "create_workflow_step_kandev")
+	assert.Contains(t, tools, "update_workflow_step_kandev")
+	assert.Contains(t, tools, "delete_workflow_step_kandev")
+	assert.Contains(t, tools, "reorder_workflow_steps_kandev")
 
 	// Config mode should have agent tools
-	assert.Contains(t, tools, "list_agents")
-	assert.Contains(t, tools, "update_agent")
-	assert.Contains(t, tools, "create_agent_profile")
-	assert.Contains(t, tools, "delete_agent_profile")
+	assert.Contains(t, tools, "list_agents_kandev")
+	assert.Contains(t, tools, "update_agent_kandev")
+	assert.Contains(t, tools, "create_agent_profile_kandev")
+	assert.Contains(t, tools, "delete_agent_profile_kandev")
 
 	// Config mode should have MCP config tools
-	assert.Contains(t, tools, "list_agent_profiles")
-	assert.Contains(t, tools, "update_agent_profile")
-	assert.Contains(t, tools, "get_mcp_config")
-	assert.Contains(t, tools, "update_mcp_config")
+	assert.Contains(t, tools, "list_agent_profiles_kandev")
+	assert.Contains(t, tools, "update_agent_profile_kandev")
+	assert.Contains(t, tools, "get_mcp_config_kandev")
+	assert.Contains(t, tools, "update_mcp_config_kandev")
 
 	// Config mode should have executor profile tools
-	assert.Contains(t, tools, "list_executors")
-	assert.Contains(t, tools, "list_executor_profiles")
-	assert.Contains(t, tools, "create_executor_profile")
-	assert.Contains(t, tools, "update_executor_profile")
-	assert.Contains(t, tools, "delete_executor_profile")
+	assert.Contains(t, tools, "list_executors_kandev")
+	assert.Contains(t, tools, "list_executor_profiles_kandev")
+	assert.Contains(t, tools, "create_executor_profile_kandev")
+	assert.Contains(t, tools, "update_executor_profile_kandev")
+	assert.Contains(t, tools, "delete_executor_profile_kandev")
 
 	// Config mode should have task tools
-	assert.Contains(t, tools, "list_tasks")
-	assert.Contains(t, tools, "move_task")
-	assert.Contains(t, tools, "delete_task")
-	assert.Contains(t, tools, "archive_task")
-	assert.Contains(t, tools, "update_task_state")
+	assert.Contains(t, tools, "list_tasks_kandev")
+	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "delete_task_kandev")
+	assert.Contains(t, tools, "archive_task_kandev")
+	assert.Contains(t, tools, "update_task_state_kandev")
 
 	// Config mode should have interaction tools
-	assert.Contains(t, tools, "ask_user_question")
+	assert.Contains(t, tools, "ask_user_question_kandev")
 
 	// Config mode should NOT have plan tools
-	assert.NotContains(t, tools, "create_task_plan")
-	assert.NotContains(t, tools, "get_task_plan")
-	assert.NotContains(t, tools, "update_task_plan")
-	assert.NotContains(t, tools, "delete_task_plan")
+	assert.NotContains(t, tools, "create_task_plan_kandev")
+	assert.NotContains(t, tools, "get_task_plan_kandev")
+	assert.NotContains(t, tools, "update_task_plan_kandev")
+	assert.NotContains(t, tools, "delete_task_plan_kandev")
 
 	// Config mode should NOT have task-mode kanban create/update tools
-	assert.NotContains(t, tools, "create_task")
-	assert.NotContains(t, tools, "update_task")
+	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "update_task_kandev")
 }
 
 func TestServerModeDefault_DefaultsToTask(t *testing.T) {
@@ -153,9 +153,9 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	assert.Equal(t, ModeTask, s.mode)
 
 	tools := getRegisteredToolNames(s)
-	assert.Contains(t, tools, "create_task")
-	assert.Contains(t, tools, "create_task_plan")
-	assert.NotContains(t, tools, "create_workflow_step")
+	assert.Contains(t, tools, "create_task_kandev")
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	assert.NotContains(t, tools, "create_workflow_step_kandev")
 }
 
 func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
@@ -167,9 +167,9 @@ func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
-	assert.NotContains(t, tools, "ask_user_question")
-	assert.Contains(t, tools, "list_agents")
-	assert.Contains(t, tools, "create_workflow_step")
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+	assert.Contains(t, tools, "list_agents_kandev")
+	assert.Contains(t, tools, "create_workflow_step_kandev")
 }
 
 func TestServerModeTask_DisableAskQuestion(t *testing.T) {
@@ -181,9 +181,9 @@ func TestServerModeTask_DisableAskQuestion(t *testing.T) {
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
-	assert.NotContains(t, tools, "ask_user_question")
-	assert.Contains(t, tools, "create_task")
-	assert.Contains(t, tools, "create_task_plan")
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+	assert.Contains(t, tools, "create_task_kandev")
+	assert.Contains(t, tools, "create_task_plan_kandev")
 }
 
 func TestServerModeTask_ToolCount(t *testing.T) {
@@ -217,9 +217,9 @@ func TestServerModeConfig_ToolDescriptions(t *testing.T) {
 
 	toolsMap := s.mcpServer.ListTools()
 
-	assert.Contains(t, toolsMap["create_workflow_step"].Tool.Description, "Create a new workflow step")
-	assert.Contains(t, toolsMap["list_agents"].Tool.Description, "List all configured agents")
-	assert.Contains(t, toolsMap["get_mcp_config"].Tool.Description, "Get MCP server configuration")
+	assert.Contains(t, toolsMap["create_workflow_step_kandev"].Tool.Description, "Create a new workflow step")
+	assert.Contains(t, toolsMap["list_agents_kandev"].Tool.Description, "List all configured agents")
+	assert.Contains(t, toolsMap["get_mcp_config_kandev"].Tool.Description, "Get MCP server configuration")
 }
 
 func TestServerModeConstants(t *testing.T) {

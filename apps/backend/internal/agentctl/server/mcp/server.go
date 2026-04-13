@@ -262,36 +262,36 @@ func (s *Server) registerKanbanTools() {
 	// omitempty which drops empty properties maps, causing OpenAI API validation
 	// errors ("object schema missing properties").
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces",
+		mcp.NewToolWithRawSchema("list_workspaces_kandev",
 			"List all workspaces. Use this first to get workspace IDs.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
-		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
+		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows",
+		mcp.NewTool("list_workflows_kandev",
 			mcp.WithDescription("List all workflows in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 		),
-		s.wrapHandler("list_workflows", s.listWorkflowsHandler()),
+		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps",
+		mcp.NewTool("list_workflow_steps_kandev",
 			mcp.WithDescription("List all workflow steps in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
-		s.wrapHandler("list_workflow_steps", s.listWorkflowStepsHandler()),
+		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks",
+		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
-		s.wrapHandler("list_tasks", s.listTasksHandler()),
+		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_task",
-			mcp.WithDescription("Create a new task or subtask and auto-start an agent on it. For subtasks (parent_id='self'), the executor profile and agent profile are automatically inherited from the parent session — no need to ask. For top-level tasks, use ask_user_question first if you do not already know which executor profile and agent profile the user wants to use. IMPORTANT: 'description' is the initial prompt the sub-agent receives — it is the ONLY context the sub-agent has to start working. Always provide a detailed description for subtasks."),
+		mcp.NewTool("create_task_kandev",
+			mcp.WithDescription("Create a new task or subtask and auto-start an agent on it. For subtasks (parent_id='self'), the executor profile and agent profile are automatically inherited from the parent session — no need to ask. For top-level tasks, use ask_user_question_kandev first if you do not already know which executor profile and agent profile the user wants to use. IMPORTANT: 'description' is the initial prompt the sub-agent receives — it is the ONLY context the sub-agent has to start working. Always provide a detailed description for subtasks."),
 			mcp.WithString("parent_id", mcp.Description("Parent task ID for subtasks. Use 'self' to create a subtask of your current task. Omit to create a top-level task.")),
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID (required for top-level tasks, inherited from parent for subtasks)")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID (required for top-level tasks, inherited from parent for subtasks)")),
@@ -301,37 +301,37 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 		),
-		s.wrapHandler("create_task", s.createTaskHandler()),
+		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_agents",
-			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task.",
+		mcp.NewToolWithRawSchema("list_agents_kandev",
+			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
-		s.wrapHandler("list_agents", s.listAgentsHandler()),
+		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_executor_profiles",
-			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
+		mcp.NewTool("list_executor_profiles_kandev",
+			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task_kandev. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
 		),
-		s.wrapHandler("list_executor_profiles", s.listExecutorProfilesHandler()),
+		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_task",
+		mcp.NewTool("update_task_kandev",
 			mcp.WithDescription("Update an existing task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("title", mcp.Description("New title")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 		),
-		s.wrapHandler("update_task", s.updateTaskHandler()),
+		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
 	)
 }
 
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("ask_user_question",
+		mcp.NewTool("ask_user_question_kandev",
 			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
 
 Use this tool when you need user input to proceed. The user will see the prompt and can select one of the options or provide a custom text response.
@@ -381,41 +381,41 @@ Another example:
 			),
 			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
 		),
-		s.wrapHandler("ask_user_question", s.askUserQuestionHandler()),
+		s.wrapHandler("ask_user_question_kandev", s.askUserQuestionHandler()),
 	)
 }
 
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_task_plan",
+		mcp.NewTool("create_task_plan_kandev",
 			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
-		s.wrapHandler("create_task_plan", s.createTaskPlanHandler()),
+		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("get_task_plan",
+		mcp.NewTool("get_task_plan_kandev",
 			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
 		),
-		s.wrapHandler("get_task_plan", s.getTaskPlanHandler()),
+		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_plan",
+		mcp.NewTool("update_task_plan_kandev",
 			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
-		s.wrapHandler("update_task_plan", s.updateTaskPlanHandler()),
+		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("delete_task_plan",
+		mcp.NewTool("delete_task_plan_kandev",
 			mcp.WithDescription("Delete a task plan."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
 		),
-		s.wrapHandler("delete_task_plan", s.deleteTaskPlanHandler()),
+		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
 }

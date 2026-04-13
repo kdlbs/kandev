@@ -2,6 +2,25 @@
 
 All notable changes to Kandev.
 
+## 0.32 - 2026-04-13
+
+### Features
+
+- add multi-select and drag-to-move for file tree and changes panel ([#490](https://github.com/kdlbs/kandev/pull/490))
+
+### Bug Fixes
+
+- register MCP tools with _kandev suffix to match sysprompt ([#572](https://github.com/kdlbs/kandev/pull/572))
+- recalculate dockview layout after fast-path session switch ([#571](https://github.com/kdlbs/kandev/pull/571))
+- prevent worktree branches from inheriting upstream tracking ([#570](https://github.com/kdlbs/kandev/pull/570))
+- move frontend off port 3000 and silence reverse-proxy panic logs ([#568](https://github.com/kdlbs/kandev/pull/568))
+- make PR Approve button look clickable ([#567](https://github.com/kdlbs/kandev/pull/567))
+- associate PRs with tasks after branch rename or PR replacement ([#565](https://github.com/kdlbs/kandev/pull/565))
+
+### Documentation
+
+- enforce test requirements and improve agent skill resilience ([#543](https://github.com/kdlbs/kandev/pull/543))
+
 ## 0.31 - 2026-04-09
 
 ### Bug Fixes

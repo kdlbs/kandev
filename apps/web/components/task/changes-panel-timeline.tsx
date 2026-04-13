@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   IconGitPullRequest,
   IconCloudUpload,
@@ -8,6 +8,7 @@ import {
   IconChevronRight,
   IconLoader2,
 } from "@tabler/icons-react";
+import { useMultiSelect } from "@/hooks/use-multi-select";
 
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -21,7 +22,7 @@ import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
-import { FileRow } from "./changes-panel-file-row";
+import { FileRow, BulkActionBar, DefaultActionButtons } from "./changes-panel-file-row";
 import { CommitRow, type CommitItem } from "./commit-row";
 
 // --- Timeline visual components ---
@@ -291,27 +292,36 @@ type FileListSectionProps = {
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
   onDiscard: (path: string) => void;
+  onBulkStage?: (paths: string[]) => void;
+  onBulkUnstage?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[]) => void;
 };
 
-export function FileListSection({
-  variant,
-  files,
-  pendingStageFiles,
-  isLast,
-  actionLabel,
-  isActionLoading,
-  onAction,
-  secondaryActionLabel,
-  isSecondaryActionLoading,
-  onSecondaryAction,
-  onOpenDiff,
-  onEditFile,
-  onStage,
-  onUnstage,
-  onDiscard,
-}: FileListSectionProps) {
+export function FileListSection(props: FileListSectionProps) {
+  const {
+    variant,
+    files,
+    pendingStageFiles,
+    isLast,
+    onOpenDiff,
+    onEditFile,
+    onStage,
+    onUnstage,
+    onDiscard,
+  } = props;
   const dotColor = variant === "unstaged" ? DOT_COLORS.unstaged : DOT_COLORS.staged;
   const label = variant === "unstaged" ? "Unstaged" : "Staged";
+
+  const filePaths = useMemo(() => files.map((f) => f.path), [files]);
+  const multiSelect = useMultiSelect({ items: filePaths });
+  const hasSelection = multiSelect.selectedPaths.size > 0;
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape" && hasSelection) multiSelect.clearSelection();
+    },
+    [hasSelection, multiSelect],
+  );
 
   return (
     <TimelineSection
@@ -322,44 +332,50 @@ export function FileListSection({
       data-testid={`${variant}-files-section`}
     >
       {files.length > 0 && (
-        <ul data-testid={`${variant}-file-list`} className="space-y-0.5">
-          {files.map((file) => (
-            <FileRow
-              key={file.path}
-              file={file}
-              isPending={pendingStageFiles.has(file.path)}
-              onOpenDiff={onOpenDiff}
-              onStage={onStage}
-              onUnstage={onUnstage}
-              onDiscard={onDiscard}
-              onEditFile={onEditFile}
-            />
-          ))}
-        </ul>
+        <div>
+          <ul
+            data-testid={`${variant}-file-list`}
+            className="space-y-0.5"
+            tabIndex={-1}
+            onKeyDown={handleKeyDown}
+          >
+            {files.map((file) => (
+              <FileRow
+                key={file.path}
+                file={file}
+                isPending={pendingStageFiles.has(file.path)}
+                isSelected={multiSelect.isSelected(file.path)}
+                onSelect={multiSelect.handleClick}
+                onOpenDiff={onOpenDiff}
+                onStage={onStage}
+                onUnstage={onUnstage}
+                onDiscard={onDiscard}
+                onEditFile={onEditFile}
+              />
+            ))}
+          </ul>
+        </div>
       )}
       {files.length > 0 && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-            onClick={onAction}
-            disabled={isActionLoading}
-          >
-            {isActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
-            {actionLabel}
-          </Button>
-          {onSecondaryAction && secondaryActionLabel && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-              onClick={onSecondaryAction}
-              disabled={isSecondaryActionLoading}
-            >
-              {isSecondaryActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
-              {secondaryActionLabel}
-            </Button>
+          {hasSelection ? (
+            <BulkActionBar
+              variant={variant}
+              selectionCount={multiSelect.selectedPaths.size}
+              selectedPaths={multiSelect.selectedPaths}
+              onBulkStage={props.onBulkStage}
+              onBulkUnstage={props.onBulkUnstage}
+              onBulkDiscard={props.onBulkDiscard}
+            />
+          ) : (
+            <DefaultActionButtons
+              actionLabel={props.actionLabel}
+              isActionLoading={props.isActionLoading}
+              onAction={props.onAction}
+              secondaryActionLabel={props.secondaryActionLabel}
+              isSecondaryActionLoading={props.isSecondaryActionLoading}
+              onSecondaryAction={props.onSecondaryAction}
+            />
           )}
         </div>
       )}
