@@ -1,13 +1,27 @@
 package process
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
+)
+
+const (
+	// maxUntrackedFileSize is the maximum size of an untracked file to read for
+	// diff generation. Files larger than this are skipped to prevent excessive
+	// memory usage (the workspace tracker polls every few seconds).
+	maxUntrackedFileSize = 10 << 20 // 10 MB
+
+	// binaryDetectBytes is the number of bytes read from the beginning of a file
+	// to detect whether it is binary (contains null bytes).
+	binaryDetectBytes = 8192
 )
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
@@ -165,25 +179,59 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 
 // enrichUntrackedFileDiffs builds a synthetic git diff for untracked files showing all
 // lines as additions, so the diff viewer can display their full content.
-func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update *types.GitStatusUpdate) {
+//
+// Safety guards to prevent OOM (the workspace tracker polls every few seconds):
+//   - Files larger than maxUntrackedFileSize are skipped.
+//   - Binary files (containing null bytes) are skipped.
+func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(_ context.Context, update *types.GitStatusUpdate) {
 	for filePath, fileInfo := range update.Files {
 		if fileInfo.Status != fileStatusUntracked {
 			continue
 		}
-		catCmd := exec.CommandContext(ctx, "cat", filePath)
-		catCmd.Dir = wt.workDir
-		catOut, err := catCmd.Output()
+
+		absPath := filepath.Join(wt.workDir, filePath)
+
+		// Check file size before reading.
+		info, err := os.Stat(absPath)
 		if err != nil {
 			continue
 		}
-		content := string(catOut)
-		lines := strings.Split(content, "\n")
+		if info.Size() > maxUntrackedFileSize {
+			wt.logger.Debug("skipping large untracked file for diff",
+				zap.String("path", filePath),
+				zap.Int64("size_bytes", info.Size()))
+			fileInfo.DiffSkipReason = "too_large"
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+
+		// Skip binary files (contain null bytes in the first few KB).
+		detectLen := len(content)
+		if detectLen > binaryDetectBytes {
+			detectLen = binaryDetectBytes
+		}
+		if bytes.ContainsRune(content[:detectLen], 0) {
+			wt.logger.Debug("skipping binary untracked file for diff",
+				zap.String("path", filePath))
+			fileInfo.DiffSkipReason = "binary"
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
 		fileInfo.Additions = len(lines)
 		fileInfo.Deletions = 0
 
 		// Format as a proper git diff with all required headers.
 		// The @git-diff-view/react library requires the full git diff format.
 		var diffBuilder strings.Builder
+		// Pre-grow to avoid repeated allocations.
+		diffBuilder.Grow(len(content) + len(lines) + 256)
 		diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
 		diffBuilder.WriteString("new file mode 100644\n")
 		diffBuilder.WriteString("index 0000000..0000000\n")

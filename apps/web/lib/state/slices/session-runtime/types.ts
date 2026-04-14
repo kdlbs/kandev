@@ -48,6 +48,7 @@ export type FileInfo = {
   deletions?: number;
   old_path?: string;
   diff?: string;
+  diff_skip_reason?: "binary" | "too_large";
 };
 
 export type GitStatusEntry = {

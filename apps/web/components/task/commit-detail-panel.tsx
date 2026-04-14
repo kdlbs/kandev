@@ -12,6 +12,17 @@ import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import type { FileInfo } from "@/lib/state/store";
 import { requestCommitDiff } from "./commit-diff-request";
 
+function diffSkipLabel(reason?: string): string {
+  switch (reason) {
+    case "binary":
+      return "binary file";
+    case "too_large":
+      return "file too large to preview";
+    default:
+      return "binary or empty diff";
+  }
+}
+
 type CommitDetailPanelProps = {
   panelId: string;
   params: Record<string, unknown>;
@@ -209,7 +220,7 @@ function CommitFileList({
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">
-              {path} -- binary or empty diff
+              {path} -- {diffSkipLabel(file.diff_skip_reason)}
             </div>
           )}
         </div>
