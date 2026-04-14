@@ -35,7 +35,7 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 	return paths, nil
 }
 
-// initSubmodules runs "git submodule update --init" in the given directory.
+// initSubmodules runs "git submodule update --init --recursive" in the given directory.
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
