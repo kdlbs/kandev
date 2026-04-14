@@ -515,6 +515,8 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 				_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
 				return "", unlockErr
 			}
+		} else {
+			m.initSubmodules(ctx, worktreePath)
 		}
 		return worktreeID, nil
 	}
@@ -572,6 +574,8 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
 			return "", err
 		}
+	} else {
+		m.initSubmodules(ctx, worktreePath)
 	}
 
 	m.logger.Info("recovered from stale worktree checkout", zap.String("branch", branchName))
@@ -717,6 +721,8 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
 			return "", err
 		}
+	} else {
+		m.initSubmodules(ctx, worktreePath)
 	}
 
 	return worktreeID, nil
@@ -1498,6 +1504,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			_ = m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
 			return nil, err
 		}
+	} else {
+		m.initSubmodules(ctx, worktreePath)
 	}
 
 	// Update record

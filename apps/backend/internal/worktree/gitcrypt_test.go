@@ -512,3 +512,131 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 		t.Errorf("secret.txt after unlock = %q, want %q", string(secret), "top-secret-value")
 	}
 }
+
+// initGitCryptRepoWithSubmodule creates a git-crypt repo that also has a submodule.
+func initGitCryptRepoWithSubmodule(t *testing.T) (repoPath, submodulePath string) {
+	t.Helper()
+	allowFileProtocol(t)
+
+	// Create a submodule repository.
+	submodulePath = t.TempDir()
+	runGit(t, submodulePath, "init", "-b", "main")
+	runGit(t, submodulePath, "config", "user.email", "test@example.com")
+	runGit(t, submodulePath, "config", "user.name", "Test User")
+	runGit(t, submodulePath, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(submodulePath, "lib.txt"), []byte("library code\n"), 0644); err != nil {
+		t.Fatalf("write lib.txt: %v", err)
+	}
+	runGit(t, submodulePath, "add", ".")
+	runGit(t, submodulePath, "commit", "-m", "initial submodule commit")
+
+	// Create the main repo with git-crypt.
+	repoPath = initGitCryptRepo(t)
+
+	// Add the submodule.
+	runGit(t, repoPath, "submodule", "add", submodulePath, "schemas/proto")
+	runGit(t, repoPath, "commit", "-m", "add submodule")
+
+	return repoPath, submodulePath
+}
+
+func TestCreateWorktree_GitCryptWithSubmodules(t *testing.T) {
+	skipIfNoGitCrypt(t)
+
+	repoPath, _ := initGitCryptRepoWithSubmodule(t)
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "gc-sub-task-1",
+		SessionID:      "gc-sub-session-1",
+		TaskTitle:      "Git Crypt With Submodule",
+		RepositoryID:   "repo-gc-sub",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+	})
+	if err != nil {
+		t.Fatalf("Create() failed: %v", err)
+	}
+
+	// Encrypted file must be decrypted.
+	secret, err := os.ReadFile(filepath.Join(wt.Path, "secret.txt"))
+	if err != nil {
+		t.Fatalf("read secret.txt: %v", err)
+	}
+	if strings.TrimSpace(string(secret)) != "top-secret-value" {
+		t.Errorf("secret.txt = %q, want %q", string(secret), "top-secret-value\n")
+	}
+
+	// Public file must be present.
+	pub, err := os.ReadFile(filepath.Join(wt.Path, "public.txt"))
+	if err != nil {
+		t.Fatalf("read public.txt: %v", err)
+	}
+	if strings.TrimSpace(string(pub)) != "public-value" {
+		t.Errorf("public.txt = %q, want %q", string(pub), "public-value\n")
+	}
+
+	// Submodule must be initialized with content.
+	subContent, err := os.ReadFile(filepath.Join(wt.Path, "schemas", "proto", "lib.txt"))
+	if err != nil {
+		t.Fatalf("read submodule lib.txt: %v", err)
+	}
+	if strings.TrimSpace(string(subContent)) != "library code" {
+		t.Errorf("submodule lib.txt = %q, want %q", string(subContent), "library code")
+	}
+
+	// Working tree must be clean.
+	status := strings.TrimSpace(runGit(t, wt.Path, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("worktree is not clean: %s", status)
+	}
+}
+
+func TestUnlockGitCryptAndCheckout_WithSubmodules(t *testing.T) {
+	skipIfNoGitCrypt(t)
+
+	repoPath, _ := initGitCryptRepoWithSubmodule(t)
+	log := newTestLogger()
+	m := &Manager{logger: log}
+
+	// Create a worktree with --no-checkout (simulates what manager does for git-crypt).
+	wtPath := filepath.Join(t.TempDir(), "manual-wt")
+	runGit(t, repoPath, "worktree", "add", "-b", "submodule-test", "--no-checkout", wtPath, "main")
+
+	if err := m.unlockGitCryptAndCheckout(context.Background(), wtPath); err != nil {
+		t.Fatalf("unlockGitCryptAndCheckout() failed: %v", err)
+	}
+
+	// Encrypted file must be decrypted.
+	secret, err := os.ReadFile(filepath.Join(wtPath, "secret.txt"))
+	if err != nil {
+		t.Fatalf("read secret.txt: %v", err)
+	}
+	if strings.TrimSpace(string(secret)) != "top-secret-value" {
+		t.Errorf("secret.txt = %q, want %q", string(secret), "top-secret-value\n")
+	}
+
+	// Submodule must be initialized.
+	subContent, err := os.ReadFile(filepath.Join(wtPath, "schemas", "proto", "lib.txt"))
+	if err != nil {
+		t.Fatalf("read submodule lib.txt after unlock: %v", err)
+	}
+	if strings.TrimSpace(string(subContent)) != "library code" {
+		t.Errorf("submodule lib.txt = %q, want %q", string(subContent), "library code")
+	}
+
+	// Working tree must be clean — the index reset for excluded submodule
+	// gitlinks must have restored their entries.
+	status := strings.TrimSpace(runGit(t, wtPath, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("worktree not clean after unlock+checkout: %s", status)
+	}
+}
