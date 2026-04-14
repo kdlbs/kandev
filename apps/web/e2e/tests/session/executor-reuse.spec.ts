@@ -1,6 +1,6 @@
-import { test, expect } from "../fixtures/test-base";
-import { KanbanPage } from "../pages/kanban-page";
-import { SessionPage } from "../pages/session-page";
+import { test, expect } from "../../fixtures/test-base";
+import { KanbanPage } from "../../pages/kanban-page";
+import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
