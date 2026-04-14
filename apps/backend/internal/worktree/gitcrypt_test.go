@@ -632,4 +632,11 @@ func TestUnlockGitCryptAndCheckout_WithSubmodules(t *testing.T) {
 	if strings.TrimSpace(string(subContent)) != "library code" {
 		t.Errorf("submodule lib.txt = %q, want %q", string(subContent), "library code")
 	}
+
+	// Working tree must be clean — the index reset for excluded submodule
+	// gitlinks must have restored their entries.
+	status := strings.TrimSpace(runGit(t, wtPath, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("worktree not clean after unlock+checkout: %s", status)
+	}
 }
