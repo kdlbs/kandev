@@ -115,7 +115,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 			zap.String("worktree_path", worktreePath), zap.Error(subErr))
 	}
 	for _, sp := range submodulePaths {
-		checkoutArgs = append(checkoutArgs, ":(exclude)"+sp)
+		checkoutArgs = append(checkoutArgs, ":(literal,exclude)"+sp)
 	}
 
 	checkoutCmd := exec.CommandContext(ctx, "git", checkoutArgs...)
