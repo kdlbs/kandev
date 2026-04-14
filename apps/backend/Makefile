@@ -40,7 +40,7 @@ build-mock-agent:
 build: build-agentctl build-mock-agent
 	@echo "Building $(BINARY_NAME)..."
 	@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
+	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
@@ -84,7 +84,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(GO) test ./...
+	CGO_ENABLED=1 $(GO) test ./...
 
 ## Run E2E tests (real agents, costs money — manual only)
 ## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
