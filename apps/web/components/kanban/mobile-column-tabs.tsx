@@ -43,7 +43,7 @@ export function MobileColumnTabs({
   return (
     <div
       ref={tabsRef}
-      className="flex overflow-x-auto scrollbar-hide border-b border-border px-4 gap-1"
+      className="flex overflow-x-auto overflow-y-hidden scrollbar-hide border-b border-border px-4 gap-1"
     >
       {steps.map((step, index) => (
         <button
