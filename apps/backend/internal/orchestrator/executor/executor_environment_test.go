@@ -91,8 +91,8 @@ func TestApplyExistingEnvironment_SandboxReuse(t *testing.T) {
 	if req.PreviousExecutionID != "exec-456" {
 		t.Errorf("expected PreviousExecutionID=exec-456, got %s", req.PreviousExecutionID)
 	}
-	if req.Metadata["sandbox_id"] != "kandev-sprite-abc" {
-		t.Errorf("expected metadata sandbox_id=kandev-sprite-abc, got %v", req.Metadata["sandbox_id"])
+	if req.Metadata["sprite_name"] != "kandev-sprite-abc" {
+		t.Errorf("expected metadata sprite_name=kandev-sprite-abc, got %v", req.Metadata["sprite_name"])
 	}
 }
 

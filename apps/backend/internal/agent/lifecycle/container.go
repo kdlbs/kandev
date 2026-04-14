@@ -166,6 +166,18 @@ func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID 
 		return nil, fmt.Errorf("container not found or inaccessible: %w", err)
 	}
 
+	// Verify the container belongs to this system and the correct task
+	labels, labelsErr := cm.dockerClient.GetContainerLabels(ctx, containerID)
+	if labelsErr != nil {
+		return nil, fmt.Errorf("failed to read container labels: %w", labelsErr)
+	}
+	if labels["kandev.managed"] != "true" {
+		return nil, fmt.Errorf("container %s is not managed by kandev", containerID)
+	}
+	if taskID := labels["kandev.task_id"]; taskID != "" && taskID != config.TaskID {
+		return nil, fmt.Errorf("container %s belongs to a different task", containerID)
+	}
+
 	// Start the container if it's not running
 	if info.State != "running" {
 		cm.logger.Info("restarting stopped container for reuse",

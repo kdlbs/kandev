@@ -823,7 +823,8 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 			req.Metadata["container_id"] = env.ContainerID
 		}
 		if env.SandboxID != "" {
-			req.Metadata["sandbox_id"] = env.SandboxID
+			// Sprites executor reads "sprite_name" from metadata for reconnection
+			req.Metadata["sprite_name"] = env.SandboxID
 		}
 	}
 }
