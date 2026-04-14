@@ -133,6 +133,19 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		}
 	}
 
+	// Restore submodule entries in the index that were excluded from checkout.
+	// Without this, git status shows them as staged deletions.
+	for _, sp := range submodulePaths {
+		resetCmd := exec.CommandContext(ctx, "git", "reset", "HEAD", "--", sp)
+		resetCmd.Dir = worktreePath
+		if output, err := resetCmd.CombinedOutput(); err != nil {
+			m.logger.Debug("failed to reset submodule index entry",
+				zap.String("path", sp),
+				zap.String("output", string(output)),
+				zap.Error(err))
+		}
+	}
+
 	if unlocked {
 		m.logger.Info("successfully set up git-crypt and checked out worktree",
 			zap.String("worktree_path", worktreePath))
