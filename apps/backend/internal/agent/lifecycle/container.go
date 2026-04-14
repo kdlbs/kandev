@@ -173,8 +173,9 @@ func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID 
 		return nil, err
 	}
 
-	containerIP := info.IP
-	if containerIP == "" {
+	// Re-fetch IP after potential restart (stopped containers lose their IP)
+	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
+	if err != nil {
 		containerIP = "127.0.0.1"
 	}
 

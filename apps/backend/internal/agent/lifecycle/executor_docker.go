@@ -211,8 +211,6 @@ func (r *DockerExecutor) reconnectToContainer(
 		return nil, err
 	}
 
-	containerIP, _ := dockerClient.GetContainerIP(ctx, containerID)
-
 	metadata := make(map[string]interface{})
 	if worktreeID != "" {
 		metadata["worktree_id"] = worktreeID
@@ -222,8 +220,7 @@ func (r *DockerExecutor) reconnectToContainer(
 
 	r.logger.Info("docker instance reconnected to existing container",
 		zap.String("instance_id", req.InstanceID),
-		zap.String("container_id", containerID),
-		zap.String("container_ip", containerIP))
+		zap.String("container_id", containerID))
 
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
@@ -232,7 +229,6 @@ func (r *DockerExecutor) reconnectToContainer(
 		RuntimeName:   string(r.Name()),
 		Client:        client,
 		ContainerID:   containerID,
-		ContainerIP:   containerIP,
 		WorkspacePath: "/workspace",
 		Metadata:      metadata,
 	}, nil
