@@ -12,6 +12,7 @@ import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import type { FileInfo } from "@/lib/state/store";
 import { requestCommitDiff } from "./commit-diff-request";
 
+/** Returns a human-readable label for a diff skip reason. */
 function diffSkipLabel(reason?: string): string {
   switch (reason) {
     case "binary":

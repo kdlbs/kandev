@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -189,7 +188,10 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(_ context.Context, update *
 			continue
 		}
 
-		absPath := filepath.Join(wt.workDir, filePath)
+		absPath, err := wt.sanitizePath(filePath)
+		if err != nil {
+			continue
+		}
 
 		// Check file size before reading.
 		info, err := os.Stat(absPath)
@@ -224,6 +226,11 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(_ context.Context, update *
 		}
 
 		lines := strings.Split(string(content), "\n")
+		// Trim trailing empty element from newline-terminated files
+		// (e.g. "a\nb\n" splits to ["a","b",""] — the empty tail is not a real line).
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
 		fileInfo.Additions = len(lines)
 		fileInfo.Deletions = 0
 

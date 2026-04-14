@@ -24,6 +24,8 @@ func makeUntrackedUpdate(paths ...string) types.GitStatusUpdate {
 	}
 }
 
+// TestEnrichUntrackedFileDiffs_SmallTextFile verifies that small text files
+// produce a valid synthetic diff with correct addition counts.
 func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
 	dir := t.TempDir()
 	content := "line1\nline2\nline3\n"
@@ -41,14 +43,16 @@ func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
 	if fi.Diff == "" {
 		t.Fatal("expected diff to be populated for small text file")
 	}
-	if fi.Additions == 0 {
-		t.Fatal("expected additions > 0")
+	if fi.Additions != 3 {
+		t.Errorf("expected 3 additions (trailing newline should not count), got %d", fi.Additions)
 	}
 	if !strings.Contains(fi.Diff, "+line1") {
 		t.Errorf("diff should contain +line1, got: %s", fi.Diff[:min(200, len(fi.Diff))])
 	}
 }
 
+// TestEnrichUntrackedFileDiffs_SkipsBinaryFile verifies that files containing
+// null bytes are detected as binary and skipped with the appropriate reason.
 func TestEnrichUntrackedFileDiffs_SkipsBinaryFile(t *testing.T) {
 	dir := t.TempDir()
 	// Binary content: contains null bytes.
@@ -75,9 +79,11 @@ func TestEnrichUntrackedFileDiffs_SkipsBinaryFile(t *testing.T) {
 	}
 }
 
+// TestEnrichUntrackedFileDiffs_SkipsLargeFile verifies that files exceeding
+// maxUntrackedFileSize are skipped with the "too_large" reason.
 func TestEnrichUntrackedFileDiffs_SkipsLargeFile(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file larger than maxUntrackedFileSize (1 MB).
+	// Create a file larger than maxUntrackedFileSize (10 MB).
 	large := make([]byte, maxUntrackedFileSize+1)
 	for i := range large {
 		large[i] = 'x'
@@ -101,6 +107,8 @@ func TestEnrichUntrackedFileDiffs_SkipsLargeFile(t *testing.T) {
 	}
 }
 
+// TestEnrichUntrackedFileDiffs_SkipsNonexistentFile verifies that missing files
+// are silently skipped without panicking or populating a diff.
 func TestEnrichUntrackedFileDiffs_SkipsNonexistentFile(t *testing.T) {
 	dir := t.TempDir()
 	log := newTestLogger(t)
