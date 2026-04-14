@@ -14,7 +14,7 @@ You must understand the code you submit. You're welcome to use AI tools to help 
 
 ## Bug Reports
 
-Search [existing issues](https://github.com/cflynn7/kandev/issues) first. If your bug isn't already reported, open one with:
+Search [existing issues](https://github.com/kdlbs/kandev/issues) first. If your bug isn't already reported, open one with:
 
 - Steps to reproduce
 - Expected vs actual behavior
