@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { appendToQueue } from "@/lib/api/domains/queue-api";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
   formatReviewCommentsAsMarkdown,
@@ -52,7 +52,6 @@ function formatSingleComment(comment: Comment): string {
 type UseRunCommentParams = {
   sessionId: string | null;
   taskId: string | null;
-  isAgentBusy: boolean;
 };
 
 /**
@@ -60,16 +59,29 @@ type UseRunCommentParams = {
  *
  * If the agent is idle, sends as a direct message.
  * If the agent is busy, appends to the queued message (or creates a new one).
+ *
+ * The busy check reads fresh state from the store at call time to avoid
+ * stale closures that could incorrectly queue comments when the agent is idle.
  */
-export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentParams) {
+export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const storeApi = useAppStoreApi();
   const planModeEnabled = useAppStore((s) =>
     sessionId ? (s.chatInput.planModeBySessionId[sessionId] ?? false) : false,
   );
 
   const runComment = useCallback(
-    async (comment: Comment) => {
-      if (!sessionId || !taskId) return;
+    async (comment: Comment): Promise<{ queued: boolean }> => {
+      if (!sessionId || !taskId) return { queued: false };
+
+      // Read session state fresh at call time to avoid stale closures.
+      // Previously, isAgentBusy was captured in the useCallback closure and
+      // could be stale if the session state changed between the last render
+      // and the user clicking "Run".
+      const state = storeApi.getState();
+      const sid = state.tasks.activeSessionId;
+      const activeSession = sid ? (state.taskSessions.items[sid] ?? null) : null;
+      const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
 
       const content = formatSingleComment(comment);
 
@@ -83,7 +95,7 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
           });
         } else {
           const client = getWebSocketClient();
-          if (!client) return;
+          if (!client) return { queued: false };
 
           await client.request(
             "message.add",
@@ -99,12 +111,13 @@ export function useRunComment({ sessionId, taskId, isAgentBusy }: UseRunCommentP
         }
 
         markCommentsSent([comment.id]);
+        return { queued: isAgentBusy };
       } catch (error) {
         console.error("Failed to send comment to agent:", error);
         throw error;
       }
     },
-    [sessionId, taskId, isAgentBusy, planModeEnabled, markCommentsSent],
+    [sessionId, taskId, storeApi, planModeEnabled, markCommentsSent],
   );
 
   return { runComment };

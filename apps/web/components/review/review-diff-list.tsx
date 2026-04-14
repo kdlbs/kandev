@@ -383,15 +383,9 @@ function FileDiffHeader({
 
 function useCommentRunHandler(sessionId: string) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSession = useAppStore((state) => {
-    const sid = state.tasks.activeSessionId;
-    return sid ? (state.taskSessions.items[sid] ?? null) : null;
-  });
-  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
   const { runComment } = useRunComment({
     sessionId,
     taskId: activeTaskId ?? null,
-    isAgentBusy,
   });
   return useCallback((comment: DiffComment) => runComment(comment), [runComment]);
 }

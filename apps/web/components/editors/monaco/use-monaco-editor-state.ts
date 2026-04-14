@@ -335,15 +335,9 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSession = useAppStore((state) => {
-    const sid = state.tasks.activeSessionId;
-    return sid ? (state.taskSessions.items[sid] ?? null) : null;
-  });
-  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
   const { runComment } = useRunComment({
     sessionId: sessionId ?? null,
     taskId: activeTaskId ?? null,
-    isAgentBusy,
   });
 
   const createCommentFromForm = useCallback(
@@ -395,10 +389,10 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       const comment = createCommentFromForm(annotation);
       if (comment) {
         try {
-          await runComment(comment);
+          const { queued } = await runComment(comment);
           toast({
             title: "Comment sent",
-            description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+            description: queued ? "Queued for the agent." : "Sent to the agent.",
           });
         } catch {
           toast({
@@ -409,16 +403,16 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
         }
       }
     },
-    [createCommentFromForm, runComment, isAgentBusy, toast],
+    [createCommentFromForm, runComment, toast],
   );
 
   const handleCommentRun = useCallback(
     async (comment: DiffComment) => {
       try {
-        await runComment(comment);
+        const { queued } = await runComment(comment);
         toast({
           title: "Comment sent",
-          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+          description: queued ? "Queued for the agent." : "Sent to the agent.",
         });
       } catch {
         toast({
@@ -428,7 +422,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
         });
       }
     },
-    [runComment, isAgentBusy, toast],
+    [runComment, toast],
   );
 
   const handleDeleteComment = useCallback(

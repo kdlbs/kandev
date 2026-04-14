@@ -429,15 +429,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSession = useAppStore((state) => {
-    const sid = state.tasks.activeSessionId;
-    return sid ? (state.taskSessions.items[sid] ?? null) : null;
-  });
-  const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
   const { runComment } = useRunComment({
     sessionId: sessionId ?? null,
     taskId: activeTaskId ?? null,
-    isAgentBusy,
   });
 
   const createCommentFromSelection = useCallback(
@@ -481,17 +475,17 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    (annotation: string) => {
+    async (annotation: string) => {
       const comment = createCommentFromSelection(annotation);
       if (comment) {
-        runComment(comment);
+        const { queued } = await runComment(comment);
         toast({
           title: "Comment sent",
-          description: isAgentBusy ? "Queued for the agent." : "Sent to the agent.",
+          description: queued ? "Queued for the agent." : "Sent to the agent.",
         });
       }
     },
-    [createCommentFromSelection, runComment, isAgentBusy, toast],
+    [createCommentFromSelection, runComment, toast],
   );
 
   const handlePopoverClose = useCallback(() => {

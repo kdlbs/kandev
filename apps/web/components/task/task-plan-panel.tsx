@@ -194,7 +194,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
         textSelection={textSelection}
         activeSessionId={activeSessionId}
         taskId={taskId}
-        isAgentBusy={isAgentBusy}
         commentState={commentState}
         editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
@@ -217,7 +216,6 @@ function PlanSelectionPopoverWrapper({
   textSelection,
   activeSessionId,
   taskId,
-  isAgentBusy,
   commentState,
   editorRef,
   onClose,
@@ -225,7 +223,6 @@ function PlanSelectionPopoverWrapper({
   textSelection: TextSelection | null;
   activeSessionId: string | null | undefined;
   taskId: string | null;
-  isAgentBusy: boolean;
   commentState: ReturnType<typeof usePlanComments>;
   editorRef: React.RefObject<Editor | null>;
   onClose: () => void;
@@ -233,7 +230,6 @@ function PlanSelectionPopoverWrapper({
   const { runComment } = useRunComment({
     sessionId: activeSessionId ?? null,
     taskId,
-    isAgentBusy,
   });
 
   const addCommentAndApplyMark = useCallback(
