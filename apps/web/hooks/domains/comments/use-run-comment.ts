@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { appendToQueue } from "@/lib/api/domains/queue-api";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
   formatReviewCommentsAsMarkdown,
@@ -54,6 +54,45 @@ type UseRunCommentParams = {
   taskId: string | null;
 };
 
+type QueuePayload = {
+  session_id: string;
+  task_id: string;
+  content: string;
+  plan_mode?: boolean;
+};
+
+type MessagePayload = {
+  task_id: string;
+  session_id: string;
+  content: string;
+  plan_mode?: boolean;
+  has_review_comments?: boolean;
+};
+
+function buildQueuePayload(
+  sessionId: string,
+  taskId: string,
+  content: string,
+  planModeEnabled: boolean,
+): QueuePayload {
+  const payload: QueuePayload = { session_id: sessionId, task_id: taskId, content };
+  if (planModeEnabled) payload.plan_mode = true;
+  return payload;
+}
+
+function buildMessagePayload(
+  sessionId: string,
+  taskId: string,
+  content: string,
+  planModeEnabled: boolean,
+  comment: Comment,
+): MessagePayload {
+  const payload: MessagePayload = { task_id: taskId, session_id: sessionId, content };
+  if (planModeEnabled) payload.plan_mode = true;
+  if (comment.source !== "plan") payload.has_review_comments = true;
+  return payload;
+}
+
 /**
  * Hook that provides a function to immediately send a comment to the agent.
  *
@@ -66,46 +105,30 @@ type UseRunCommentParams = {
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const storeApi = useAppStoreApi();
-  const planModeEnabled = useAppStore((s) =>
-    sessionId ? (s.chatInput.planModeBySessionId[sessionId] ?? false) : false,
-  );
 
   const runComment = useCallback(
     async (comment: Comment): Promise<{ queued: boolean }> => {
       if (!sessionId || !taskId) return { queued: false };
 
-      // Read session state fresh at call time to avoid stale closures.
-      // Previously, isAgentBusy was captured in the useCallback closure and
-      // could be stale if the session state changed between the last render
-      // and the user clicking "Run".
+      // Read all derived values fresh from the store at call time to avoid
+      // stale closures that could cause incorrect behavior (e.g. queuing
+      // comments when the agent is idle, or sending with wrong plan mode).
       const state = storeApi.getState();
       const sid = state.tasks.activeSessionId;
       const activeSession = sid ? (state.taskSessions.items[sid] ?? null) : null;
       const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-
+      const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
       const content = formatSingleComment(comment);
 
       try {
         if (isAgentBusy) {
-          await appendToQueue({
-            session_id: sessionId,
-            task_id: taskId,
-            content,
-            ...(planModeEnabled && { plan_mode: true }),
-          });
+          await appendToQueue(buildQueuePayload(sessionId, taskId, content, planModeEnabled));
         } else {
           const client = getWebSocketClient();
           if (!client) return { queued: false };
-
           await client.request(
             "message.add",
-            {
-              task_id: taskId,
-              session_id: sessionId,
-              content,
-              ...(planModeEnabled && { plan_mode: true }),
-              ...(comment.source !== "plan" && { has_review_comments: true }),
-            },
+            buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
             10000,
           );
         }
@@ -117,7 +140,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
         throw error;
       }
     },
-    [sessionId, taskId, storeApi, planModeEnabled, markCommentsSent],
+    [sessionId, taskId, storeApi, markCommentsSent],
   );
 
   return { runComment };
