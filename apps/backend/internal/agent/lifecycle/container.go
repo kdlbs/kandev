@@ -160,58 +160,49 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 // instance is created inside the running container.
 // Returns an error if the container no longer exists (caller should fall through to fresh creation).
 func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID string, config ContainerConfig) (*agentctl.Client, error) {
-	// Check if container exists and get its state
 	info, err := cm.dockerClient.GetContainerInfo(ctx, containerID)
 	if err != nil {
 		return nil, fmt.Errorf("container not found or inaccessible: %w", err)
 	}
 
-	// Verify the container belongs to this system and the correct task
-	labels, labelsErr := cm.dockerClient.GetContainerLabels(ctx, containerID)
-	if labelsErr != nil {
-		return nil, fmt.Errorf("failed to read container labels: %w", labelsErr)
-	}
-	if labels["kandev.managed"] != "true" {
-		return nil, fmt.Errorf("container %s is not managed by kandev", containerID)
-	}
-	if taskID := labels["kandev.task_id"]; taskID != "" && taskID != config.TaskID {
-		return nil, fmt.Errorf("container %s belongs to a different task", containerID)
+	if err := cm.validateContainerOwnership(info, containerID, config.TaskID); err != nil {
+		return nil, err
 	}
 
-	// Start the container if it's not running
-	if info.State != "running" {
-		cm.logger.Info("restarting stopped container for reuse",
-			zap.String("container_id", containerID),
-			zap.String("state", info.State))
-		if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
-			return nil, fmt.Errorf("failed to restart container: %w", err)
-		}
-	} else {
-		cm.logger.Info("reconnecting to running container",
-			zap.String("container_id", containerID))
+	if err := cm.ensureContainerRunning(ctx, info, containerID); err != nil {
+		return nil, err
 	}
 
-	// Get container IP for agentctl communication
-	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
-	if err != nil {
-		cm.logger.Warn("failed to get container IP, trying localhost",
-			zap.String("container_id", containerID),
-			zap.Error(err))
+	containerIP := info.IP
+	if containerIP == "" {
 		containerIP = "127.0.0.1"
 	}
 
-	// Wait for agentctl, create instance, and return client
-	agentctlClient, err := cm.createAgentctlInstance(ctx, containerIP, config)
-	if err != nil {
-		return nil, fmt.Errorf("reconnect instance setup: %w", err)
+	return cm.createAgentctlInstance(ctx, containerIP, config)
+}
+
+func (cm *ContainerManager) validateContainerOwnership(info *docker.ContainerInfo, containerID, taskID string) error {
+	if info.Labels["kandev.managed"] != "true" {
+		return fmt.Errorf("container %s is not managed by kandev", containerID)
 	}
+	if ownerTask := info.Labels["kandev.task_id"]; ownerTask != "" && ownerTask != taskID {
+		return fmt.Errorf("container %s belongs to a different task", containerID)
+	}
+	return nil
+}
 
-	cm.logger.Info("reconnected to existing container",
+func (cm *ContainerManager) ensureContainerRunning(ctx context.Context, info *docker.ContainerInfo, containerID string) error {
+	if info.State == "running" {
+		cm.logger.Info("reconnecting to running container", zap.String("container_id", containerID))
+		return nil
+	}
+	cm.logger.Info("restarting stopped container for reuse",
 		zap.String("container_id", containerID),
-		zap.String("container_ip", containerIP),
-		zap.String("instance_id", config.InstanceID))
-
-	return agentctlClient, nil
+		zap.String("state", info.State))
+	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
+		return fmt.Errorf("failed to restart container: %w", err)
+	}
+	return nil
 }
 
 // createAgentctlInstance waits for agentctl health, creates a new instance via

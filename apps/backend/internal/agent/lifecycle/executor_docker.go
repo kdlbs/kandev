@@ -203,6 +203,7 @@ func (r *DockerExecutor) reconnectToContainer(
 		InstanceID:  req.InstanceID,
 		Credentials: req.Env,
 		McpServers:  req.McpServers,
+		McpMode:     req.McpMode,
 	}
 
 	client, err := containerMgr.ReconnectContainer(ctx, containerID, containerCfg)

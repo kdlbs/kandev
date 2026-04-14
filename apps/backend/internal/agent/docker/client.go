@@ -55,6 +55,8 @@ type ContainerInfo struct {
 	FinishedAt time.Time
 	ExitCode   int
 	Health     string
+	Labels     map[string]string
+	IP         string
 }
 
 // Client wraps the Docker client.
@@ -334,6 +336,21 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 	// Get health status if available
 	if inspect.State.Health != nil {
 		info.Health = inspect.State.Health.Status
+	}
+
+	// Include labels
+	if inspect.Config != nil && inspect.Config.Labels != nil {
+		info.Labels = inspect.Config.Labels
+	}
+
+	// Include IP from first available network
+	if inspect.NetworkSettings != nil {
+		for _, netSettings := range inspect.NetworkSettings.Networks {
+			if netSettings.IPAddress != "" {
+				info.IP = netSettings.IPAddress
+				break
+			}
+		}
 	}
 
 	return info, nil
