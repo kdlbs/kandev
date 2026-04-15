@@ -83,6 +83,7 @@ func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID
 type mockTaskRepo struct {
 	tasks         map[string]*v1.Task
 	updatedStates map[string]v1.TaskState
+	getTaskErr    error // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
@@ -93,6 +94,9 @@ func newMockTaskRepo() *mockTaskRepo {
 }
 
 func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, error) {
+	if m.getTaskErr != nil {
+		return nil, m.getTaskErr
+	}
 	if t, ok := m.tasks[taskID]; ok {
 		return t, nil
 	}

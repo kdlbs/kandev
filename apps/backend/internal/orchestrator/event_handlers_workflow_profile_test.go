@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -408,6 +409,76 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if len(sessions) != 1 {
 			t.Errorf("expected 1 session, got %d", len(sessions))
+		}
+	})
+}
+
+func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("old session not completed when scheduler.GetTask fails", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		task := &models.Task{
+			ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step2",
+			Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		_ = repo.CreateTask(ctx, task)
+
+		session := &models.TaskSession{
+			ID:                "s1",
+			TaskID:            "t1",
+			AgentProfileID:    "profile-a",
+			ExecutorID:        "exec-local",
+			ExecutorProfileID: "ep1",
+			AgentExecutionID:  "ae1",
+			State:             models.TaskSessionStateRunning,
+			IsPrimary:         true,
+			StartedAt:         now,
+			UpdatedAt:         now,
+		}
+		_ = repo.CreateTaskSession(ctx, session)
+
+		// Make scheduler.GetTask fail — the old session must stay untouched.
+		taskRepo := newMockTaskRepo()
+		taskRepo.getTaskErr = errors.New("task store unavailable")
+
+		agentMgr := &mockAgentManager{}
+		log := testLogger()
+		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+		svc := &Service{
+			logger:             log,
+			repo:               repo,
+			workflowStepGetter: newMockStepGetter(),
+			taskRepo:           taskRepo,
+			agentManager:       agentMgr,
+			messageQueue:       messagequeue.NewService(log),
+			executor:           exec,
+			scheduler:          sched,
+		}
+
+		_, err := svc.switchSessionForStep(ctx, "t1", session, "profile-b")
+		if err == nil {
+			t.Fatal("expected error when scheduler.GetTask fails")
+		}
+
+		// The old session must NOT be completed — failure happened before touching it.
+		oldSession, getErr := repo.GetTaskSession(ctx, "s1")
+		if getErr != nil {
+			t.Fatalf("failed to get old session: %v", getErr)
+		}
+		if oldSession.State == models.TaskSessionStateCompleted {
+			t.Error("old session must not be marked completed when PrepareSession fails before it")
+		}
+		if oldSession.CompletedAt != nil {
+			t.Error("old session must not have CompletedAt set when PrepareSession fails before it")
 		}
 	})
 }

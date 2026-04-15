@@ -439,6 +439,8 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 
 // switchSessionForStep stops the current session and creates a new one with a different agent profile.
 // Returns the new session, or nil + error if the switch fails.
+// The new session is prepared BEFORE completing the old one: if PrepareSession fails, the old
+// session remains active and the task stays recoverable.
 func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
 	s.logger.Info("switching session for workflow step agent profile change",
 		zap.String("task_id", taskID),
@@ -446,25 +448,8 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
 
-	// Stop the current agent process gracefully
-	if currentSession.AgentExecutionID != "" {
-		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
-			s.logger.Warn("failed to stop agent for session switch",
-				zap.String("session_id", currentSession.ID),
-				zap.Error(err))
-		}
-	}
-
-	// Mark the current session as completed
-	currentSession.State = models.TaskSessionStateCompleted
-	now := time.Now().UTC()
-	currentSession.CompletedAt = &now
-	currentSession.UpdatedAt = now
-	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
-		return nil, fmt.Errorf("failed to complete current session: %w", err)
-	}
-
-	// Get task (v1) for PrepareSession and DB task for workflow step ID
+	// Prepare the new session BEFORE touching the old one.
+	// If any step below fails, the old session remains active and the task stays recoverable.
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
@@ -484,6 +469,27 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+
+	// New session is ready — now safe to stop the old agent and complete the old session.
+	if currentSession.AgentExecutionID != "" {
+		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
+			s.logger.Warn("failed to stop agent for session switch",
+				zap.String("session_id", currentSession.ID),
+				zap.Error(err))
+		}
+	}
+
+	// Mark the current session as completed.
+	currentSession.State = models.TaskSessionStateCompleted
+	now := time.Now().UTC()
+	currentSession.CompletedAt = &now
+	currentSession.UpdatedAt = now
+	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
+		// New session is already created; log but don't abort.
+		s.logger.Warn("failed to complete old session after switch",
+			zap.String("session_id", currentSession.ID),
+			zap.Error(err))
 	}
 
 	return newSession, nil
