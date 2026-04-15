@@ -543,22 +543,29 @@ function FileDiffSection({
       <div ref={sentinelRef} />
       {!collapsed &&
         (shouldRenderContent && file.diff ? (
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            onRevertBlock={handleRevertBlock}
-            onCommentRun={handleCommentRun}
-            sessionId={sessionId}
-            wordWrap={effectiveWordWrap}
-            enableExpansion={true}
-            baseRef="HEAD"
-            hideHeader
-            expandUnchanged={expandUnchanged}
-            onToggleExpandUnchanged={handleToggleExpandUnchanged}
-          />
+          <>
+            <FileDiffViewer
+              filePath={file.path}
+              diff={file.diff}
+              status={file.status}
+              enableComments
+              enableAcceptReject
+              onRevertBlock={handleRevertBlock}
+              onCommentRun={handleCommentRun}
+              sessionId={sessionId}
+              wordWrap={effectiveWordWrap}
+              enableExpansion={true}
+              baseRef="HEAD"
+              hideHeader
+              expandUnchanged={expandUnchanged}
+              onToggleExpandUnchanged={handleToggleExpandUnchanged}
+            />
+            {file.diff_skip_reason === "truncated" && (
+              <div className="flex items-center justify-center py-1 text-muted-foreground text-xs border-t border-border/40">
+                Diff truncated — showing first 256 KB
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
             {diffSkipReasonLabel(file.diff_skip_reason)}
