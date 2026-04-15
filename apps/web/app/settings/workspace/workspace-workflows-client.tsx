@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   IconDownload,
   IconGripVertical,
-  IconLayoutColumns,
+  IconArrowsShuffle,
   IconPlus,
   IconUpload,
 } from "@tabler/icons-react";
@@ -468,7 +468,7 @@ export function WorkspaceWorkflowsClient({
       </div>
       <Separator />
       <SettingsSection
-        icon={<IconLayoutColumns className="h-5 w-5" />}
+        icon={<IconArrowsShuffle className="h-5 w-5" />}
         title="Workflows"
         description="Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself"
         action={
