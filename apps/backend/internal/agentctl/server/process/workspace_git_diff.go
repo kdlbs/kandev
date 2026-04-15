@@ -112,6 +112,7 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 		return "", false
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
 		return "", false
 	}
 
@@ -291,11 +292,14 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 			continue
 		}
 
-		// Read rest of file (capped at maxDiffFileSize).
+		// Read only enough content to fill maxDiffOutputSize of diff output.
+		// No need to read the full file — any diff beyond maxDiffOutputSize gets truncated anyway.
 		var buf bytes.Buffer
 		buf.Write(header[:n])
-		remaining := maxDiffFileSize - int64(n)
-		_, _ = io.Copy(&buf, io.LimitReader(f, remaining))
+		remaining := int64(maxDiffOutputSize) - int64(n)
+		if remaining > 0 {
+			_, _ = io.Copy(&buf, io.LimitReader(f, remaining))
+		}
 		_ = f.Close()
 
 		content := buf.String()
