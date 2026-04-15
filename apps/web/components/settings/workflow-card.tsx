@@ -15,6 +15,7 @@ import { WorkflowExportDialog } from "@/components/settings/workflow-export-dial
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
+import { HelpTip } from "./workflow-pipeline-editor-helpers";
 import { WorkflowDeleteDialog, StepDeleteDialog } from "./workflow-card-dialogs";
 import {
   useWorkflowStepActions,
@@ -266,24 +267,29 @@ function WorkflowCardBody({
 
   return (
     <>
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <span>Workflow Name</span>
-          {isWorkflowDirty && <UnsavedChangesBadge />}
-        </Label>
-        <div className="flex items-center gap-2">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 space-y-1.5">
+          <Label className="flex items-center gap-2">
+            <span>Workflow Name</span>
+            {isWorkflowDirty && <UnsavedChangesBadge />}
+          </Label>
           <Input
             value={workflow.name}
             onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-            className="flex-1"
           />
+        </div>
+        <div className="w-[240px] shrink-0 space-y-1.5">
+          <Label className="flex items-center gap-1">
+            <span>Agent Profile</span>
+            <HelpTip text="Default agent profile for tasks in this workflow. When set, the agent selector is locked in the task creation dialog." />
+          </Label>
           <Select
             value={workflow.agent_profile_id ?? "none"}
             onValueChange={(value) =>
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }
           >
-            <SelectTrigger className="w-[240px] shrink-0 cursor-pointer">
+            <SelectTrigger className="w-full cursor-pointer">
               <SelectValue placeholder="None (use task default)" />
             </SelectTrigger>
             <SelectContent>
@@ -297,13 +303,13 @@ function WorkflowCardBody({
               ))}
             </SelectContent>
           </Select>
-          <UnsavedSaveButton
-            isDirty={isWorkflowDirty}
-            isLoading={activeSaveRequest.isLoading}
-            status={activeSaveRequest.status}
-            onClick={handleSaveWorkflow}
-          />
         </div>
+        <UnsavedSaveButton
+          isDirty={isWorkflowDirty}
+          isLoading={activeSaveRequest.isLoading}
+          status={activeSaveRequest.status}
+          onClick={handleSaveWorkflow}
+        />
       </div>
       <div className="space-y-2">
         <Label>Workflow Steps</Label>
