@@ -114,8 +114,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       // stale closures that could cause incorrect behavior (e.g. queuing
       // comments when the agent is idle, or sending with wrong plan mode).
       const state = storeApi.getState();
-      const sid = state.tasks.activeSessionId;
-      const activeSession = sid ? (state.taskSessions.items[sid] ?? null) : null;
+      const activeSession = state.taskSessions.items[sessionId] ?? null;
       const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
       const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
       const content = formatSingleComment(comment);

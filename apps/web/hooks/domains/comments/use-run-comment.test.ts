@@ -9,10 +9,11 @@ import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
 const mockRequest = vi.fn();
 const mockAppendToQueue = vi.fn();
 const mockMarkCommentsSent = vi.fn();
+const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
+  getWebSocketClient: () => mockGetWebSocketClient(),
 }));
 
 vi.mock("@/lib/api/domains/queue-api", () => ({
@@ -225,5 +226,19 @@ describe("useRunComment — edge cases", () => {
 
     const payload = mockRequest.mock.calls[0][1];
     expect(payload.has_review_comments).toBeUndefined();
+  });
+
+  it("returns { queued: false } without marking sent when WS client is null", async () => {
+    mockGetWebSocketClient.mockReturnValueOnce(null as unknown as { request: typeof mockRequest });
+    const { result } = renderCommentHook();
+
+    let res: { queued: boolean } | undefined;
+    await act(async () => {
+      res = await result.current.runComment(makeDiffComment());
+    });
+
+    expect(res).toEqual({ queued: false });
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
 });
