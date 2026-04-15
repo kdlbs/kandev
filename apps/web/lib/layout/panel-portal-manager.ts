@@ -52,7 +52,7 @@ export type PortalEntry = {
 
 type Listener = () => void;
 
-class PanelPortalManager {
+export class PanelPortalManager {
   private entries = new Map<string, PortalEntry>();
   private listeners = new Set<Listener>();
 
