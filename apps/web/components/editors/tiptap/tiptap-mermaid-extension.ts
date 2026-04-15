@@ -15,6 +15,8 @@ import {
   MAX_SCALE,
   getSvgDimensions,
   sanitizeMermaidCode,
+  cleanupMermaidOrphans,
+  emitMermaidRenderError,
 } from "@/components/shared/mermaid-utils";
 
 /**
@@ -244,15 +246,18 @@ class MermaidNodeView implements NodeView {
     mermaid
       .render(id, sanitizedCode)
       .then(({ svg }) => {
+        cleanupMermaidOrphans(id);
         this.svgContainer.innerHTML = svg;
         this.updateSizeWrapper();
       })
       .catch((err: Error) => {
+        cleanupMermaidOrphans(id);
         this.svgContainer.innerHTML = "";
         const pre = document.createElement("pre");
         pre.className = "mermaid-error";
         pre.textContent = `Error rendering diagram: ${err.message}`;
         this.svgContainer.appendChild(pre);
+        emitMermaidRenderError(err.message);
       });
   }
 

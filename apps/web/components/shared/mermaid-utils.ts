@@ -5,6 +5,17 @@ export const SCALE_STEP = 0.1;
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 1.5;
 
+export const MERMAID_ERROR_EVENT = "mermaid:render-error";
+
+export function cleanupMermaidOrphans(id: string): void {
+  document.getElementById(id)?.remove();
+  document.getElementById(`d${id}`)?.remove();
+}
+
+export function emitMermaidRenderError(message: string): void {
+  document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message } }));
+}
+
 /** Read intrinsic width/height from an SVG element's viewBox or attributes. */
 export function getSvgDimensions(container: HTMLElement): { w: number; h: number } | null {
   const svg = container.querySelector("svg");

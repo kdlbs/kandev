@@ -16,6 +16,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Markdown } from "tiptap-markdown";
 import { createCodeBlockWithMermaid } from "./tiptap-mermaid-extension";
+import { useMermaidErrorToast } from "@/components/shared/mermaid-error-toast";
 import { common, createLowlight } from "lowlight";
 import {
   CommentMark,
@@ -369,6 +370,8 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash } =
     usePlanEditor(props);
+
+  useMermaidErrorToast();
 
   useCommentClickHandler(wrapperRef, onCommentClickRef);
   useCommentShortcut(wrapperRef, editorRef, onSelectionChangeRef);

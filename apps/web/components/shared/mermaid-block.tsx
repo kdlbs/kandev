@@ -10,7 +10,9 @@ import {
   MAX_SCALE,
   getSvgDimensions,
   sanitizeMermaidCode,
+  cleanupMermaidOrphans,
 } from "./mermaid-utils";
+import { useToast } from "@/components/toast-provider";
 
 type MermaidAPI = typeof import("mermaid").default;
 
@@ -35,6 +37,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
   const [showCode, setShowCode] = useState(false);
   const { resolvedTheme } = useTheme();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!code.trim()) return;
@@ -51,6 +54,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         return mermaid.render(id, sanitizedCode);
       })
       .then(({ svg }) => {
+        cleanupMermaidOrphans(id);
         if (!cancelled && containerRef.current) {
           containerRef.current.innerHTML = svg;
           setSvgSize(getSvgDimensions(containerRef.current));
@@ -58,13 +62,17 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         }
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        cleanupMermaidOrphans(id);
+        if (!cancelled) {
+          setError(err.message);
+          toast({ title: "Failed to render diagram", variant: "error" });
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [code, resolvedTheme]);
+  }, [code, resolvedTheme, toast]);
 
   const zoomIn = useCallback(() => setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE)), []);
   const zoomOut = useCallback(() => setScale((s) => Math.max(s - SCALE_STEP, MIN_SCALE)), []);
