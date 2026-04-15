@@ -128,7 +128,7 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	}
 
 	req := launcher.getRequest()
-	assert.Equal(t, "exec-worktree", req.ExecutorID, "should default to exec-worktree")
+	assert.Equal(t, models.ExecutorIDWorktree, req.ExecutorID, "should default to exec-worktree")
 	assert.Equal(t, "", req.ExecutorProfileID)
 	assert.Equal(t, "agent-profile-1", req.AgentProfileID)
 }

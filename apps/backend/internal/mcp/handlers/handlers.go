@@ -339,7 +339,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// For top-level tasks, inherit repositories from the calling agent's current task
 	// so the new task is associated with the same codebase.
-	if req.ParentID == "" && req.SourceTaskID != "" && len(inheritedRepos) == 0 {
+	if req.ParentID == "" && req.SourceTaskID != "" {
 		sourceTask, err := h.taskSvc.GetTask(ctx, req.SourceTaskID)
 		if err != nil {
 			h.logger.Warn("source task not found, skipping repo inheritance",
@@ -401,7 +401,7 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProf
 		}
 	}
 	if executorID == "" && executorProfileID == "" {
-		executorID = "exec-worktree"
+		executorID = models.ExecutorIDWorktree
 	}
 
 	if agentProfileID == "" {
