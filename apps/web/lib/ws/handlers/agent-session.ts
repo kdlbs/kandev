@@ -162,7 +162,11 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);
 
-      if (newState === "FAILED" && payload.suppress_toast !== true) {
+      if (
+        newState === "FAILED" &&
+        payload.suppress_toast !== true &&
+        existingSession?.state !== "FAILED"
+      ) {
         store.getState().setSessionFailureNotification({
           sessionId,
           taskId,
