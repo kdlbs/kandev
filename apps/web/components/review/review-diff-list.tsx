@@ -387,7 +387,12 @@ function useCommentRunHandler(sessionId: string) {
     sessionId,
     taskId: activeTaskId ?? null,
   });
-  return useCallback((comment: DiffComment) => runComment(comment), [runComment]);
+  return useCallback(
+    (comment: DiffComment) => {
+      runComment(comment).catch((err) => console.error("Failed to run diff comment:", err));
+    },
+    [runComment],
+  );
 }
 
 async function revertBlock(sessionId: string, filePath: string, info: RevertBlockInfo) {

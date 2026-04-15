@@ -43,7 +43,6 @@ import { useRunComment } from "./use-run-comment";
 
 function makeStoreState(sessionState: string, planMode = false) {
   return {
-    tasks: { activeSessionId: "sess-1" },
     taskSessions: {
       items: { "sess-1": { state: sessionState } },
     },
