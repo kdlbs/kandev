@@ -2,6 +2,7 @@
 
 import type { HTMLAttributes } from "react";
 import { Badge } from "@kandev/ui/badge";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { IconChevronRight, IconGripVertical } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 
@@ -11,6 +12,8 @@ export type SwimlaneHeaderProps = {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   dragHandleProps?: HTMLAttributes<HTMLDivElement>;
+  onToggleMultiSelect?: () => void;
+  isMultiSelectMode?: boolean;
 };
 
 export function SwimlaneHeader({
@@ -19,6 +22,8 @@ export function SwimlaneHeader({
   isCollapsed,
   onToggleCollapse,
   dragHandleProps,
+  onToggleMultiSelect,
+  isMultiSelectMode,
 }: SwimlaneHeaderProps) {
   return (
     <div className="flex items-center gap-1 py-1.5 w-full" data-testid="swimlane-header">
@@ -30,6 +35,20 @@ export function SwimlaneHeader({
         >
           <IconGripVertical className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
+      )}
+      {onToggleMultiSelect && (
+        <button
+          type="button"
+          onClick={onToggleMultiSelect}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
+        >
+          <Checkbox
+            checked={!!isMultiSelectMode}
+            className="pointer-events-none h-3.5 w-3.5"
+            tabIndex={-1}
+          />
+          Multi-select
+        </button>
       )}
       <button
         type="button"

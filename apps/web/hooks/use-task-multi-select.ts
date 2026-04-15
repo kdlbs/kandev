@@ -44,12 +44,14 @@ export function useTaskMultiSelect(workflowId: string | null) {
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
 
+  const [isMultiSelectEnabled, setIsMultiSelectEnabled] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const isProcessing = isDeleting || isArchiving;
 
   useEffect(() => {
     setSelectedIds(new Set());
+    setIsMultiSelectEnabled(false);
     setIsDeleting(false);
     setIsArchiving(false);
   }, [workflowId]);
@@ -69,9 +71,23 @@ export function useTaskMultiSelect(workflowId: string | null) {
     });
   }, []);
 
+  const enableMultiSelect = useCallback(() => {
+    setIsMultiSelectEnabled(true);
+  }, []);
+
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
+    setIsMultiSelectEnabled(false);
   }, []);
+
+  const toggleMultiSelect = useCallback(() => {
+    if (isMultiSelectEnabled || selectedIds.size > 0) {
+      setSelectedIds(new Set());
+      setIsMultiSelectEnabled(false);
+    } else {
+      setIsMultiSelectEnabled(true);
+    }
+  }, [isMultiSelectEnabled, selectedIds]);
 
   const bulkDelete = useCallback(async () => {
     const ids = selectedIdsRef.current;
@@ -125,8 +141,10 @@ export function useTaskMultiSelect(workflowId: string | null) {
 
   return {
     selectedIds,
-    isMultiSelectMode: selectedIds.size > 0,
+    isMultiSelectMode: isMultiSelectEnabled || selectedIds.size > 0,
     isProcessing,
+    enableMultiSelect,
+    toggleMultiSelect,
     toggleSelect,
     clearSelection,
     bulkDelete,

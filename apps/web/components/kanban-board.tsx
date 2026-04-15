@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
@@ -219,6 +219,43 @@ function useKanbanBoardSetup(
   const multiSelect = useTaskMultiSelect(kanban.workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
 
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+
+  const isMixedWorkflowSelection = useMemo(() => {
+    if (multiSelect.selectedIds.size === 0) return false;
+    const taskToWorkflow = new Map<string, string>();
+    for (const [wfId, snap] of Object.entries(snapshots)) {
+      for (const task of snap.tasks) {
+        taskToWorkflow.set(task.id, wfId);
+      }
+    }
+    const wfIds = new Set<string>();
+    for (const id of multiSelect.selectedIds) {
+      const wfId = taskToWorkflow.get(id);
+      if (wfId) wfIds.add(wfId);
+    }
+    return wfIds.size > 1;
+  }, [multiSelect.selectedIds, snapshots]);
+
+  const multiSelectSteps = useMemo(() => {
+    if (multiSelect.selectedIds.size > 0) {
+      for (const snap of Object.values(snapshots)) {
+        if (snap.tasks.some((t) => multiSelect.selectedIds.has(t.id))) {
+          return snap.steps.map((step) => ({
+            id: step.id,
+            title: step.title,
+            color: step.color ?? "",
+          }));
+        }
+      }
+    }
+    return hooks.activeSteps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      color: step.color ?? "",
+    }));
+  }, [multiSelect.selectedIds, snapshots, hooks.activeSteps]);
+
   // Mobile bottom sheet: intercept card clicks to show task info first
   const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
 
@@ -264,6 +301,8 @@ function useKanbanBoardSetup(
     mobileSheetTask,
     setMobileSheetTask,
     multiSelect,
+    isMixedWorkflowSelection,
+    multiSelectSteps,
   };
 }
 
@@ -280,11 +319,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     events: step.events,
   }));
 
-  const multiSelectSteps = s.activeSteps.map((step) => ({
-    id: step.id,
-    title: step.title,
-    color: step.color ?? "",
-  }));
 
   return (
     <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">
@@ -328,11 +362,13 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         selectedIds={s.multiSelect.selectedIds}
         onToggleSelect={s.multiSelect.toggleSelect}
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
+        onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
       />
       <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}
-        steps={multiSelectSteps}
+        steps={s.multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
+        canMove={!s.isMixedWorkflowSelection}
         onClearSelection={s.multiSelect.clearSelection}
         onBulkDelete={s.multiSelect.bulkDelete}
         onBulkArchive={s.multiSelect.bulkArchive}

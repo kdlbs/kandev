@@ -26,6 +26,7 @@ interface TaskMultiSelectToolbarProps {
   selectedIds: Set<string>;
   steps: WorkflowStep[];
   isProcessing: boolean;
+  canMove?: boolean;
   onClearSelection: () => void;
   onBulkDelete: () => Promise<void>;
   onBulkArchive: () => Promise<void>;
@@ -90,6 +91,7 @@ export function TaskMultiSelectToolbar({
   selectedIds,
   steps,
   isProcessing,
+  canMove = true,
   onClearSelection,
   onBulkDelete,
   onBulkArchive,
@@ -117,7 +119,8 @@ export function TaskMultiSelectToolbar({
               size="sm"
               variant="outline"
               className="cursor-pointer gap-1.5"
-              disabled={isProcessing}
+              disabled={isProcessing || !canMove}
+              title={!canMove ? "Cannot move tasks from different workflows" : undefined}
               data-testid="bulk-move-button"
             >
               Move to

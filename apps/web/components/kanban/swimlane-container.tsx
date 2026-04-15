@@ -49,6 +49,7 @@ export type SwimlaneContainerProps = {
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
+  onToggleMultiSelect?: () => void;
 };
 
 function getEmptyMessage(
@@ -119,6 +120,7 @@ type WorkflowItemProps = {
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
+  onToggleMultiSelect?: () => void;
 };
 
 function SortableWorkflowItem({ wf, hideHeader, isSortable, ...rest }: WorkflowItemProps) {
@@ -153,6 +155,7 @@ function WorkflowItemContent({
   isCollapsed,
   onToggleCollapse,
   dragHandleProps,
+  onToggleMultiSelect,
   ...viewProps
 }: Omit<WorkflowItemProps, "isSortable"> & { dragHandleProps?: HTMLAttributes<HTMLDivElement> }) {
   const steps = [...snapshot.steps].sort((a, b) => a.position - b.position);
@@ -169,6 +172,8 @@ function WorkflowItemContent({
       isCollapsed={isCollapsed}
       onToggleCollapse={onToggleCollapse}
       dragHandleProps={dragHandleProps}
+      onToggleMultiSelect={onToggleMultiSelect}
+      isMultiSelectMode={viewProps.isMultiSelectMode}
     >
       {content}
     </SwimlaneSection>
@@ -224,6 +229,7 @@ export function SwimlaneContainer({
   selectedIds,
   onToggleSelect,
   isMultiSelectMode,
+  onToggleMultiSelect,
 }: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
@@ -285,7 +291,7 @@ export function SwimlaneContainer({
         strategy={verticalListSortingStrategy}
       >
         <div className={cls} data-testid="swimlane-container">
-          {visibleWorkflows.map((wf) => {
+          {visibleWorkflows.map((wf, index) => {
             const snapshot = snapshots[wf.id];
             if (!snapshot) return null;
             return (
@@ -311,6 +317,7 @@ export function SwimlaneContainer({
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
                 isMultiSelectMode={isMultiSelectMode}
+                onToggleMultiSelect={index === 0 ? onToggleMultiSelect : undefined}
               />
             );
           })}

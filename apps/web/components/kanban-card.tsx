@@ -441,33 +441,24 @@ function KanbanCardCheckbox({
   taskId,
   taskTitle,
   isSelected,
-  showCheckbox,
   onCheckboxClick,
 }: {
   taskId: string;
   taskTitle: string;
   isSelected?: boolean;
-  showCheckbox: boolean;
   onCheckboxClick: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
-      className={cn(
-        "mt-0.5 shrink-0 transition-opacity",
-        showCheckbox
-          ? "opacity-100 pointer-events-auto"
-          : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto",
-      )}
+      className="mt-0.5 shrink-0"
       onClick={onCheckboxClick}
       onPointerDown={(e) => e.stopPropagation()}
-      aria-hidden={!showCheckbox}
       data-testid={`task-select-checkbox-${taskId}`}
     >
       <Checkbox
         checked={!!isSelected}
         aria-label={`Select task ${taskTitle}`}
         className="cursor-pointer border-muted-foreground/50"
-        tabIndex={showCheckbox ? 0 : -1}
       />
     </div>
   );
@@ -534,13 +525,14 @@ export function KanbanCard({
     >
       <CardContent className="px-2 py-1">
         <div className="flex items-start gap-1.5">
-          <KanbanCardCheckbox
-            taskId={task.id}
-            taskTitle={task.title}
-            isSelected={isSelected}
-            showCheckbox={showCheckbox}
-            onCheckboxClick={handleCheckboxClick}
-          />
+          {showCheckbox && (
+            <KanbanCardCheckbox
+              taskId={task.id}
+              taskTitle={task.title}
+              isSelected={isSelected}
+              onCheckboxClick={handleCheckboxClick}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <KanbanCardBody
               task={task}
