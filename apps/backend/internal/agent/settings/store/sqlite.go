@@ -171,7 +171,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		id TEXT PRIMARY KEY,
 		agent_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		agent_display_name TEXT NOT NULL DEFAULT '',
+		agent_display_name TEXT NOT NULL,
 		model TEXT NOT NULL DEFAULT '',
 		mode TEXT DEFAULT NULL,
 		migrated_from TEXT DEFAULT NULL,

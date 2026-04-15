@@ -189,6 +189,35 @@ func TestMigration_LegacyDB_PreservesAllColumns(t *testing.T) {
 	}
 }
 
+// TestMigration_LegacyDB_MCPConfigSurvives verifies that agent_profile_mcp_configs
+// rows (which FK-reference agent_profiles) survive the table recreation.
+func TestMigration_LegacyDB_MCPConfigSurvives(t *testing.T) {
+	db := newLegacyDB(t)
+	ctx := context.Background()
+
+	_, _ = db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'claude-acp', datetime('now'), datetime('now'))`)
+	_, _ = db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, created_at, updated_at)
+		VALUES ('p1', 'a1', 'Claude', 'Claude', 'claude-sonnet-4-6', datetime('now'), datetime('now'))`)
+	_, err := db.Exec(`INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
+		VALUES ('p1', 1, '{"test-server":{}}', '{}', datetime('now'), datetime('now'))`)
+	if err != nil {
+		t.Fatalf("seed mcp config: %v", err)
+	}
+
+	repo, err := newSQLiteRepository(db, db, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+
+	cfg, err := repo.GetAgentProfileMcpConfig(ctx, "p1")
+	if err != nil {
+		t.Fatalf("mcp config missing after migration: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("expected mcp config to be enabled after migration")
+	}
+}
+
 // TestMigration_FreshDB_NoOp verifies that initSchema on a fresh database
 // (no legacy CHECK constraint) doesn't error or corrupt the table.
 func TestMigration_FreshDB_NoOp(t *testing.T) {
