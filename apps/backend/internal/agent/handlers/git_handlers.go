@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -658,10 +659,17 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 	// This is a workspace-oriented operation that doesn't require a running agent process.
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-			"commits": []any{},
-			"ready":   false,
-		})
+		// Check for specific "not ready" errors that indicate the session workspace
+		// is still being prepared. For these, return ready:false so the client can retry.
+		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
+			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"commits": []any{},
+				"ready":   false,
+			})
+		}
+		// For unexpected errors (database failures, etc.), return the error
+		// so the client can display an appropriate error message.
+		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)
 	}
 
 	agentClient := execution.GetAgentCtlClient()
