@@ -330,6 +330,7 @@ type BackendWorkflowStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
+  agent_profile_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -346,6 +347,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   is_start_step: step.is_start_step,
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
+  agent_profile_id: step.agent_profile_id,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });

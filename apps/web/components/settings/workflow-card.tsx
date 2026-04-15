@@ -441,7 +441,7 @@ export function WorkflowCard({
   return (
     <Card
       data-testid={`workflow-card-${workflow.id}`}
-      className={isWorkflowDirty ? "border-yellow-500/40" : undefined}
+      className={isWorkflowDirty ? "ring-yellow-500/50" : undefined}
     >
       <CardContent className="pt-6">
         <div className="space-y-4">

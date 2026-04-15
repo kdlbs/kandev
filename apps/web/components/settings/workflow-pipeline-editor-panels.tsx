@@ -102,7 +102,10 @@ function StepConfigHeader({
                   }}
                   disabled={readOnly}
                 >
-                  <SelectTrigger className="w-[220px] h-8 cursor-pointer" data-testid="step-agent-profile-select">
+                  <SelectTrigger
+                    className="w-[220px] h-8 cursor-pointer"
+                    data-testid="step-agent-profile-select"
+                  >
                     <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <SelectValue placeholder="No profile override" />
                   </SelectTrigger>
@@ -432,7 +435,7 @@ function StepPromptSection({
         }
         rows={3}
         disabled={readOnly}
-        className="font-mono text-xs max-h-[200px] overflow-y-auto resize-y"
+        className="font-mono text-xs overflow-y-auto resize-y!"
       />
       <p className="text-[11px] text-muted-foreground/60">
         If set, this prompt will be used instead of the task description. Use{" "}
