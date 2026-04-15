@@ -459,7 +459,7 @@ function PromptField({
         <ScriptEditor
           value={form.prompt}
           onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
-          language="plaintext"
+          language="markdown"
           height={computeEditorHeight(form.prompt)}
           lineNumbers="off"
           placeholders={REVIEW_WATCH_PLACEHOLDERS}
