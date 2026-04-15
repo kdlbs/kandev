@@ -417,6 +417,7 @@ export async function updateWorkflowStepAction(
       | "is_start_step"
       | "show_in_command_panel"
       | "auto_archive_after_hours"
+      | "agent_profile_id"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -432,6 +433,7 @@ export async function updateWorkflowStepAction(
     body.show_in_command_panel = payload.show_in_command_panel;
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
+  if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {

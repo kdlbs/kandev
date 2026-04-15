@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { IconTrash } from "@tabler/icons-react";
+import { IconRobot, IconTrash } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
@@ -89,28 +90,41 @@ function StepConfigHeader({
             ))}
           </SelectContent>
         </Select>
-        <Select
-          value={step.agent_profile_id ?? "none"}
-          onValueChange={(value) => {
-            if (readOnly) return;
-            onUpdate({ agent_profile_id: value === "none" ? "" : value });
-          }}
-          disabled={readOnly}
-        >
-          <SelectTrigger className="w-[200px] h-8 cursor-pointer">
-            <SelectValue placeholder="No profile override" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none" className="cursor-pointer">
-              No profile override
-            </SelectItem>
-            {healthyProfiles.map((p) => (
-              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center">
+                <Select
+                  value={step.agent_profile_id ?? "none"}
+                  onValueChange={(value) => {
+                    if (readOnly) return;
+                    onUpdate({ agent_profile_id: value === "none" ? "" : value });
+                  }}
+                  disabled={readOnly}
+                >
+                  <SelectTrigger className="w-[220px] h-8 cursor-pointer">
+                    <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <SelectValue placeholder="No profile override" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="cursor-pointer">
+                      No profile override
+                    </SelectItem>
+                    {healthyProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              Override the agent profile for this step. A different profile creates a new session
+              with fresh context when entering this step.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       <Button
         type="button"
