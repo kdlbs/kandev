@@ -580,7 +580,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		if errors.Is(err, executor.ErrTaskArchived) {
 			return nil, err
 		}
-		if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
+		if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
 			return nil, executor.ErrTaskArchived
 		}
 		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
