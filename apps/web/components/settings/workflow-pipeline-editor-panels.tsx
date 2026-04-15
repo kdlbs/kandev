@@ -108,7 +108,7 @@ function StepConfigHeader({
             <TooltipTrigger asChild>
               <div className="flex items-center">
                 <Select
-                  value={step.agent_profile_id ?? "none"}
+                  value={step.agent_profile_id || "none"}
                   onValueChange={(value) => {
                     if (readOnly) return;
                     onUpdate({ agent_profile_id: value === "none" ? "" : value });

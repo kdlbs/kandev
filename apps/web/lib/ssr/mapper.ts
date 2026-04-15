@@ -53,6 +53,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         prompt: step.prompt,
         is_start_step: step.is_start_step,
         show_in_command_panel: step.show_in_command_panel,
+        agent_profile_id: step.agent_profile_id,
       })),
       tasks,
     },

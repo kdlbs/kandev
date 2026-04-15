@@ -284,7 +284,7 @@ function WorkflowCardBody({
             <HelpTip text="Default agent profile for tasks in this workflow. When set, the agent selector is locked in the task creation dialog." />
           </Label>
           <Select
-            value={workflow.agent_profile_id ?? "none"}
+            value={workflow.agent_profile_id || "none"}
             onValueChange={(value) =>
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }

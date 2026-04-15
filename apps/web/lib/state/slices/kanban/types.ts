@@ -19,6 +19,7 @@ export type KanbanState = {
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
+    agent_profile_id?: string;
   }>;
   tasks: Array<{
     id: string;

@@ -18,6 +18,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         position: step.position ?? index,
         events: step.events,
         show_in_command_panel: step.show_in_command_panel,
+        agent_profile_id: step.agent_profile_id,
       }));
       const tasks: KanbanTask[] = message.payload.tasks
         // Filter out ephemeral tasks (e.g., quick chat)
