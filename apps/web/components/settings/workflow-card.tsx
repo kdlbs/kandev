@@ -266,34 +266,24 @@ function WorkflowCardBody({
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="flex items-center gap-2">
-            <span>Workflow Name</span>
-            {isWorkflowDirty && <UnsavedChangesBadge />}
-          </Label>
-          <div className="flex items-center gap-2">
-            <Input
-              value={workflow.name}
-              onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-            />
-            <UnsavedSaveButton
-              isDirty={isWorkflowDirty}
-              isLoading={activeSaveRequest.isLoading}
-              status={activeSaveRequest.status}
-              onClick={handleSaveWorkflow}
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label>Default Agent Profile</Label>
+      <div className="space-y-2">
+        <Label className="flex items-center gap-2">
+          <span>Workflow Name</span>
+          {isWorkflowDirty && <UnsavedChangesBadge />}
+        </Label>
+        <div className="flex items-center gap-2">
+          <Input
+            value={workflow.name}
+            onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+            className="flex-1"
+          />
           <Select
             value={workflow.agent_profile_id ?? "none"}
             onValueChange={(value) =>
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }
           >
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger className="w-[240px] shrink-0 cursor-pointer">
               <SelectValue placeholder="None (use task default)" />
             </SelectTrigger>
             <SelectContent>
@@ -307,6 +297,12 @@ function WorkflowCardBody({
               ))}
             </SelectContent>
           </Select>
+          <UnsavedSaveButton
+            isDirty={isWorkflowDirty}
+            isLoading={activeSaveRequest.isLoading}
+            status={activeSaveRequest.status}
+            onClick={handleSaveWorkflow}
+          />
         </div>
       </div>
       <div className="space-y-2">
