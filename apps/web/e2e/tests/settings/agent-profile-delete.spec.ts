@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Agent profile deletion", () => {
-  test("deleting profile with no active sessions succeeds immediately", async ({
+  test("deleting profile with no active sessions shows confirm dialog then succeeds", async ({
     testPage,
     apiClient,
   }) => {
@@ -17,7 +17,6 @@ test.describe("Agent profile deletion", () => {
     // Navigate to profile settings page
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
-    // Wait for the profile page to load — use the heading which includes the profile name
     // Wait for the delete card to load (the card title is "Delete profile")
     await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -26,11 +25,19 @@ test.describe("Agent profile deletion", () => {
     // Click the delete button inside the delete card
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();
 
-    // Should redirect to agents settings page (no dialog since no active sessions)
+    // Confirmation dialog should appear
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText("This action cannot be undone")).toBeVisible();
+
+    // Confirm the deletion
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+    // Should redirect to agents settings page
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
   });
 
-  test("deleting profile with active task shows conflict dialog and allows cancel", async ({
+  test("deleting profile with active task shows confirm then conflict dialog and allows cancel", async ({
     testPage,
     apiClient,
     seedData,
@@ -60,7 +67,6 @@ test.describe("Agent profile deletion", () => {
     // Navigate to profile settings page
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
-    // Wait for the profile page to load
     // Wait for the delete card to load (the card title is "Delete profile")
     await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -69,23 +75,30 @@ test.describe("Agent profile deletion", () => {
     // Click the delete button
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();
 
-    // The conflict dialog should appear
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-    await expect(dialog.getByText("Active Task For Profile")).toBeVisible();
-    await expect(dialog.getByText("This profile is currently in use")).toBeVisible();
+    // Initial confirmation dialog should appear
+    const confirmDialog = testPage.getByRole("alertdialog");
+    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+
+    // Confirm the initial deletion
+    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+    // The conflict dialog should appear with active session info
+    const conflictDialog = testPage.getByRole("alertdialog");
+    await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
+    await expect(conflictDialog.getByText("Active Task For Profile")).toBeVisible();
+    await expect(conflictDialog.getByText("This profile is currently in use")).toBeVisible();
 
     // Cancel the deletion
-    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await conflictDialog.getByRole("button", { name: "Cancel" }).click();
 
     // Dialog should close and we should still be on the profile page
-    await expect(dialog).not.toBeVisible();
+    await expect(conflictDialog).not.toBeVisible();
     await expect(testPage).toHaveURL(
       new RegExp(`/settings/agents/${agent.name}/profiles/${profile.id}`),
     );
   });
 
-  test("force-deleting profile with active task succeeds after confirmation", async ({
+  test("force-deleting profile with active task succeeds after both confirmations", async ({
     testPage,
     apiClient,
     seedData,
@@ -110,7 +123,6 @@ test.describe("Agent profile deletion", () => {
     // Navigate to profile settings page
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
-    // Wait for the profile page to load
     // Wait for the delete card to load (the card title is "Delete profile")
     await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -119,13 +131,20 @@ test.describe("Agent profile deletion", () => {
     // Click the delete button
     await testPage.getByRole("button", { name: "Delete", exact: true }).click();
 
-    // Conflict dialog should appear
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-    await expect(dialog.getByText("Task For Force Delete")).toBeVisible();
+    // Initial confirmation dialog should appear
+    const confirmDialog = testPage.getByRole("alertdialog");
+    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+
+    // Confirm the initial deletion
+    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+    // Conflict dialog should appear with active session info
+    const conflictDialog = testPage.getByRole("alertdialog");
+    await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
+    await expect(conflictDialog.getByText("Task For Force Delete")).toBeVisible();
 
     // Confirm force deletion
-    await dialog.getByRole("button", { name: "Delete Anyway" }).click();
+    await conflictDialog.getByRole("button", { name: "Delete Anyway" }).click();
 
     // Should redirect to agents settings page
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });

@@ -12,17 +12,51 @@ import {
 } from "@kandev/ui/alert-dialog";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 
-type AgentProfileDeleteDialogProps = {
+type AgentProfileDeleteConfirmDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+};
+
+export function AgentProfileDeleteConfirmDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: AgentProfileDeleteConfirmDialogProps) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete agent profile?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete this profile. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+type AgentProfileDeleteConflictDialogProps = {
   activeSessions: ActiveSessionInfo[] | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 };
 
-export function AgentProfileDeleteDialog({
+export function AgentProfileDeleteConflictDialog({
   activeSessions,
   onOpenChange,
   onConfirm,
-}: AgentProfileDeleteDialogProps) {
+}: AgentProfileDeleteConflictDialogProps) {
   const tasks = activeSessions?.filter((s) => !s.is_ephemeral) ?? [];
   const quickChats = activeSessions?.filter((s) => s.is_ephemeral) ?? [];
 

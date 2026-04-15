@@ -13,7 +13,10 @@ import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/un
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
-import { AgentProfileDeleteDialog } from "@/components/settings/agent-profile-delete-dialog";
+import {
+  AgentProfileDeleteConfirmDialog,
+  AgentProfileDeleteConflictDialog,
+} from "@/components/settings/agent-profile-delete-dialog";
 import type {
   Agent,
   AgentProfile,
@@ -266,6 +269,7 @@ function useProfileDelete(
   syncAgentsToStore: (agents: Agent[]) => void,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [conflictSessions, setConflictSessions] = useState<ActiveSessionInfo[] | null>(null);
 
   const removeProfileFromStore = () => {
@@ -281,7 +285,12 @@ function useProfileDelete(
     window.location.assign("/settings/agents");
   };
 
+  const requestDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
   const handleDeleteProfile = async () => {
+    setShowDeleteConfirm(false);
     const result = await deleteAgentProfileAction(draft.id);
     if (result.status === "ok") {
       removeProfileFromStore();
@@ -302,7 +311,15 @@ function useProfileDelete(
     }
   };
 
-  return { handleDeleteProfile, conflictSessions, setConflictSessions, handleForceDelete };
+  return {
+    requestDelete,
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    handleDeleteProfile,
+    conflictSessions,
+    setConflictSessions,
+    handleForceDelete,
+  };
 }
 
 function ProfileEditor({
@@ -328,8 +345,15 @@ function ProfileEditor({
     syncAgentsToStore,
     toast,
   });
-  const { handleDeleteProfile, conflictSessions, setConflictSessions, handleForceDelete } =
-    useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
+  const {
+    requestDelete,
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    handleDeleteProfile,
+    conflictSessions,
+    setConflictSessions,
+    handleForceDelete,
+  } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
   return (
     <div className="space-y-8">
@@ -376,9 +400,17 @@ function ProfileEditor({
         }
       />
 
-      <DeleteProfileCard onDelete={handleDeleteProfile} />
+      <DeleteProfileCard onDelete={requestDelete} />
 
-      <AgentProfileDeleteDialog
+      <AgentProfileDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={(open) => {
+          if (!open) setShowDeleteConfirm(false);
+        }}
+        onConfirm={handleDeleteProfile}
+      />
+
+      <AgentProfileDeleteConflictDialog
         activeSessions={conflictSessions}
         onOpenChange={(open) => {
           if (!open) setConflictSessions(null);
