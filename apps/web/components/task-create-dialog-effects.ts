@@ -38,9 +38,7 @@ export function useWorkflowAgentProfileEffect(
       setWorkflowAgentProfileId("");
       // Restore the user's last-used agent profile when unlocking
       const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      if (lastId) {
-        setAgentProfileId(lastId);
-      }
+      setAgentProfileId(lastId ?? "");
     }
   }, [selectedWorkflowId, workflows, setAgentProfileId, setWorkflowAgentProfileId]);
 }

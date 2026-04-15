@@ -83,6 +83,16 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 	return wf, nil
 }
 
+func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+	for i, wf := range m.workflows {
+		if wf.ID == workflow.ID {
+			m.workflows[i] = workflow
+			return nil
+		}
+	}
+	return fmt.Errorf("workflow %s not found", workflow.ID)
+}
+
 func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {
 	now := time.Now().UTC()
 	m.workflows = append(m.workflows, &taskmodels.Workflow{
@@ -647,6 +657,11 @@ func TestImportWorkflows(t *testing.T) {
 		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
 		require.NoError(t, err)
 		require.Len(t, result.Created, 1)
+
+		// Verify workflow-level agent profile was persisted
+		imported, err := svc.workflowProvider.GetWorkflow(ctx, "imported-ProfileWF")
+		require.NoError(t, err)
+		assert.Equal(t, "matched-prof-1", imported.AgentProfileID, "workflow-level agent profile should be persisted")
 
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-ProfileWF")
 		require.NoError(t, err)

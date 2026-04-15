@@ -211,6 +211,16 @@ func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceI
 	})
 }
 
+// UpdateWorkflow implements workflowservice.WorkflowProvider.
+func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
+	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
+		Name:           &workflow.Name,
+		Description:    &workflow.Description,
+		AgentProfileID: &workflow.AgentProfileID,
+	})
+	return err
+}
+
 // buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.
 func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolver {
 	return func(profileID string) *wfmodels.AgentProfilePortable {

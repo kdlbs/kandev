@@ -19,6 +19,7 @@ type WorkflowProvider interface {
 	ListWorkflows(ctx context.Context, workspaceID string) ([]*taskmodels.Workflow, error)
 	GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error)
 	CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error)
+	UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error
 }
 
 // Service provides workflow business logic
@@ -453,6 +454,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
 			wf.AgentProfileID = profileID
+			if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
+				return fmt.Errorf("set workflow agent profile: %w", err)
+			}
 		}
 	}
 
