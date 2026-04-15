@@ -178,6 +178,7 @@ export function useDefaultSelectionsEffect(
   const { agentProfiles, executors, workspaceDefaults } = sel;
   const {
     agentProfileId,
+    workflowAgentProfileId,
     executorId,
     executorProfileId,
     setAgentProfileId,
@@ -185,7 +186,7 @@ export function useDefaultSelectionsEffect(
     setExecutorProfileId,
   } = fs;
   useEffect(() => {
-    if (!open || agentProfileId || agentProfiles.length === 0) return;
+    if (!open || agentProfileId || workflowAgentProfileId || agentProfiles.length === 0) return;
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
     if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
       void Promise.resolve().then(() => setAgentProfileId(lastId));
@@ -197,7 +198,7 @@ export function useDefaultSelectionsEffect(
       return;
     }
     void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
-  }, [open, agentProfileId, agentProfiles, workspaceDefaults, setAgentProfileId]);
+  }, [open, agentProfileId, workflowAgentProfileId, agentProfiles, workspaceDefaults, setAgentProfileId]);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;

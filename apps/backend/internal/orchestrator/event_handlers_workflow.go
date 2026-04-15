@@ -454,6 +454,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
 	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found for session switch", taskID)
+	}
 	dbTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get db task for session switch: %w", err)
