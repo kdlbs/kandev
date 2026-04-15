@@ -29,7 +29,8 @@ function makeMockApi() {
     panels: [],
     layout: vi.fn(),
     fromJSON: vi.fn(),
-    getPanel: vi.fn(),
+    getPanel: vi.fn(() => null),
+    addPanel: vi.fn(),
   } as unknown as SessionSwitchParams["api"];
 }
 

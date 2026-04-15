@@ -2,10 +2,25 @@ import { describe, it, expect } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionRuntimeSlice } from "./session-runtime-slice";
+import { createSessionSlice } from "../session/session-slice";
 import type { SessionRuntimeSlice } from "./types";
+import type { SessionSlice } from "../session/types";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer(createSessionRuntimeSlice));
+}
+
+type CombinedSlice = SessionRuntimeSlice & SessionSlice;
+
+function makeCombinedStore() {
+  return create<CombinedSlice>()(
+    immer((set, get, api) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSessionSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSessionRuntimeSlice(set as any, get as any, api as any),
+    })),
+  );
 }
 
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
@@ -87,5 +102,85 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     // Other stores should have no data for either key
     expect(state.sessionCommits.byEnvironmentId["env-3"]).toBeUndefined();
     expect(state.sessionCommits.byEnvironmentId["sess-3"]).toBeUndefined();
+  });
+});
+
+describe("setTaskSession — cross-slice migration", () => {
+  it("migrates env-keyed data when task_environment_id is set", () => {
+    const store = makeCombinedStore();
+
+    // Data arrives under fallback sessionId key before the mapping is known
+    store.getState().setGitStatus("sess-1", { branch: "main" } as never);
+    store.getState().setSessionCommits("sess-1", [{ commit_sha: "abc" } as never]);
+
+    // Session update arrives with task_environment_id
+    store.getState().setTaskSession({
+      id: "sess-1",
+      task_id: "task-1",
+      state: "RUNNING",
+      task_environment_id: "env-1",
+      started_at: "",
+      updated_at: "",
+    });
+
+    const state = store.getState();
+    expect(state.environmentIdBySessionId["sess-1"]).toBe("env-1");
+    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main" });
+    expect(state.gitStatus.byEnvironmentId["sess-1"]).toBeUndefined();
+    expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "abc" }]);
+    expect(state.sessionCommits.byEnvironmentId["sess-1"]).toBeUndefined();
+  });
+
+  it("does not migrate when task_environment_id is absent", () => {
+    const store = makeCombinedStore();
+
+    store.getState().setGitStatus("sess-2", { branch: "dev" } as never);
+
+    store.getState().setTaskSession({
+      id: "sess-2",
+      task_id: "task-2",
+      state: "RUNNING",
+      started_at: "",
+      updated_at: "",
+    });
+
+    const state = store.getState();
+    expect(state.environmentIdBySessionId["sess-2"]).toBeUndefined();
+    expect(state.gitStatus.byEnvironmentId["sess-2"]).toEqual({ branch: "dev" });
+  });
+});
+
+describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
+  it("migrates env-keyed data for all sessions with task_environment_id", () => {
+    const store = makeCombinedStore();
+
+    // Data under fallback keys
+    store.getState().setGitStatus("sess-a", { branch: "a" } as never);
+    store.getState().appendShellOutput("sess-b", "hello");
+
+    store.getState().setTaskSessionsForTask("task-1", [
+      {
+        id: "sess-a",
+        task_id: "task-1",
+        state: "COMPLETED",
+        task_environment_id: "env-x",
+        started_at: "",
+        updated_at: "",
+      },
+      {
+        id: "sess-b",
+        task_id: "task-1",
+        state: "RUNNING",
+        task_environment_id: "env-y",
+        started_at: "",
+        updated_at: "",
+      },
+    ]);
+
+    const state = store.getState();
+    expect(state.gitStatus.byEnvironmentId["env-x"]).toEqual({ branch: "a" });
+    expect(state.gitStatus.byEnvironmentId["sess-a"]).toBeUndefined();
+    expect(state.shell.outputs["env-y"]).toBe("hello");
+    expect(state.shell.outputs["sess-b"]).toBeUndefined();
   });
 });

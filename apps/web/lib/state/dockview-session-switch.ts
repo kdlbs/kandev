@@ -83,6 +83,31 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
   // Session-scoped portals (browser, vscode, etc.) will be re-acquired
   // via usePortalSlot's sessionId dependency change.
   removeEphemeralPanels(api, newSessionId);
+
+  // Create the new session tab inline so there's no gap between removing the
+  // old tab and creating the new one. useAutoSessionTab will detect the panel
+  // already exists and skip creation.
+  if (!api.getPanel(`session:${newSessionId}`)) {
+    const chatPanel = api.panels.find(
+      (p) => p.id.startsWith("session:") || p.api.component === "chat",
+    );
+    const sidebarPanel = api.getPanel("sidebar");
+    let position: import("dockview-react").AddPanelOptions["position"];
+    if (chatPanel) {
+      position = { referenceGroup: chatPanel.group.id };
+    } else if (sidebarPanel) {
+      position = { direction: "right" as const, referencePanel: "sidebar" };
+    }
+    api.addPanel({
+      id: `session:${newSessionId}`,
+      component: "chat",
+      tabComponent: "sessionTab",
+      title: "Agent",
+      params: { sessionId: newSessionId },
+      position,
+    });
+  }
+
   api.layout(params.safeWidth, params.safeHeight);
   return applyLayoutFixups(api);
 }

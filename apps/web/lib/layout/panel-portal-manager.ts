@@ -112,6 +112,28 @@ class PanelPortalManager {
     this.notify();
   }
 
+  /**
+   * Release portals whose panel no longer exists in dockview.
+   * Call after fast-path session switches where `isRestoringLayout` blocked
+   * the normal `onDidRemovePanel` cleanup.
+   */
+  reconcile(livePanelIds: Set<string>): void {
+    const toRemove: string[] = [];
+    for (const panelId of this.entries.keys()) {
+      if (!livePanelIds.has(panelId)) {
+        toRemove.push(panelId);
+      }
+    }
+    if (toRemove.length === 0) return;
+    for (const panelId of toRemove) {
+      const entry = this.entries.get(panelId)!;
+      entry.element.remove();
+      entry.api = null;
+      this.entries.delete(panelId);
+    }
+    this.notify();
+  }
+
   /** Release all portals (e.g. when the layout component unmounts entirely). */
   releaseAll(): void {
     if (this.entries.size === 0) return;
