@@ -323,7 +323,7 @@ export function WorkflowPipelineEditor({
 
   return (
     <div className="space-y-3">
-      <ScrollArea className="w-full">
+      <ScrollArea className="w-full pb-1">
         {isMounted ? (
           <DndContext
             collisionDetection={closestCenter}
@@ -337,7 +337,7 @@ export function WorkflowPipelineEditor({
         ) : (
           pipelineArea
         )}
-        <ScrollBar orientation="horizontal" />
+        <ScrollBar orientation="horizontal" forceMount className="mt-1" />
       </ScrollArea>
       {selectedStep && (
         <StepConfigPanel
