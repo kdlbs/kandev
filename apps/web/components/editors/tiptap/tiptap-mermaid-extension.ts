@@ -114,6 +114,7 @@ class MermaidNodeView implements NodeView {
   private scale = DEFAULT_SCALE;
   private node: PmNode;
   private showingCode = false;
+  private latestRenderId: string | null = null;
 
   constructor(node: PmNode) {
     this.node = node;
@@ -242,16 +243,19 @@ class MermaidNodeView implements NodeView {
     if (!mermaidInitialized) initMermaid();
     if (!code.trim()) return;
     const id = `mermaid-${++mermaidIdCounter}`;
+    this.latestRenderId = id;
     const sanitizedCode = sanitizeMermaidCode(code);
     mermaid
       .render(id, sanitizedCode)
       .then(({ svg }) => {
         cleanupMermaidOrphans(id);
+        if (id !== this.latestRenderId) return;
         this.svgContainer.innerHTML = svg;
         this.updateSizeWrapper();
       })
       .catch((err: Error) => {
         cleanupMermaidOrphans(id);
+        if (id !== this.latestRenderId) return;
         this.svgContainer.innerHTML = "";
         const pre = document.createElement("pre");
         pre.className = "mermaid-error";

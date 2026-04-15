@@ -8,8 +8,9 @@ export function useMermaidErrorToast(): void {
   const { toast } = useToast();
 
   useEffect(() => {
-    const handler = () => {
-      toast({ title: "Failed to render diagram", variant: "error" });
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent<{ message: string }>).detail?.message;
+      toast({ title: "Failed to render diagram", description: msg, variant: "error" });
     };
     document.addEventListener(MERMAID_ERROR_EVENT, handler);
     return () => document.removeEventListener(MERMAID_ERROR_EVENT, handler);
