@@ -10,10 +10,13 @@ export class KanbanPage {
   readonly bulkClearButton: Locator;
   readonly bulkDeleteConfirm: Locator;
 
+  readonly multiSelectToggle: Locator;
+
   constructor(private page: Page) {
     this.board = page.getByTestId("kanban-board");
     this.createTaskButton = page.getByTestId("create-task-button");
     this.multiSelectToolbar = page.getByTestId("multi-select-toolbar");
+    this.multiSelectToggle = page.getByTestId("multi-select-toggle");
     this.bulkDeleteButton = page.getByTestId("bulk-delete-button");
     this.bulkArchiveButton = page.getByTestId("bulk-archive-button");
     this.bulkMoveButton = page.getByTestId("bulk-move-button");
@@ -54,10 +57,18 @@ export class KanbanPage {
     });
   }
 
+  async enableMultiSelect() {
+    await this.multiSelectToggle.waitFor({ state: "visible" });
+    const isEnabled = await this.multiSelectToolbar.isVisible();
+    if (!isEnabled) {
+      await this.multiSelectToggle.click();
+    }
+  }
+
   async selectTask(taskId: string) {
+    await this.enableMultiSelect();
     const card = this.taskCard(taskId);
     await card.waitFor({ state: "visible" });
-    await card.hover();
     await this.taskSelectCheckbox(taskId).click();
   }
 }

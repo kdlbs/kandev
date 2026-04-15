@@ -40,6 +40,7 @@ export function SwimlaneHeader({
         <button
           type="button"
           onClick={onToggleMultiSelect}
+          data-testid="multi-select-toggle"
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
         >
           <Checkbox

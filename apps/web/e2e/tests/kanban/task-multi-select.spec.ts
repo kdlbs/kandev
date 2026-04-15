@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Multi-select bulk actions", () => {
-  test("toolbar appears when a task is selected via checkbox hover", async ({
+  test("toolbar appears when a task is selected via checkbox", async ({
     testPage,
     apiClient,
     seedData,
