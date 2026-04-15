@@ -388,6 +388,14 @@ function StepTransitionsSection({
 
 // --- StepPromptSection ---
 
+function computeEditorHeight(value: string): string {
+  const lineCount = Math.max((value || "").split("\n").length, 3);
+  const lineHeight = 19; // Monaco default line height at fontSize 13
+  const padding = 16; // top + bottom padding
+  const height = Math.min(Math.max(lineCount * lineHeight + padding, 80), 400);
+  return `${height}px`;
+}
+
 type StepPromptSectionProps = {
   step: WorkflowStep;
   localPrompt: string;
@@ -441,7 +449,7 @@ function StepPromptSection({
             debouncedUpdatePrompt(v);
           }}
           language="plaintext"
-          height="100px"
+          height={computeEditorHeight(localPrompt)}
           lineNumbers="off"
           readOnly={readOnly}
           placeholders={STEP_PROMPT_PLACEHOLDERS}
