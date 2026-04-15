@@ -478,11 +478,19 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     async (annotation: string) => {
       const comment = createCommentFromSelection(annotation);
       if (comment) {
-        const { queued } = await runComment(comment);
-        toast({
-          title: "Comment sent",
-          description: queued ? "Queued for the agent." : "Sent to the agent.",
-        });
+        try {
+          const { queued } = await runComment(comment);
+          toast({
+            title: "Comment sent",
+            description: queued ? "Queued for the agent." : "Sent to the agent.",
+          });
+        } catch {
+          toast({
+            title: "Failed to send comment",
+            description: "Please try again.",
+            variant: "error",
+          });
+        }
       }
     },
     [createCommentFromSelection, runComment, toast],
