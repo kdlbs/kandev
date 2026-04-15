@@ -30,11 +30,10 @@ const (
 	// binaryCheckSize is how many bytes to inspect for null bytes to detect binary files.
 	binaryCheckSize = 8 * 1024 // 8 KB
 
-	// diffSkipReasonBudgetExceeded is the DiffSkipReason value when the cumulative diff budget is exceeded.
-	diffSkipReasonBudgetExceeded = "budget_exceeded"
-
-	// diffSkipReasonTruncated is the DiffSkipReason value when a diff is truncated due to size limits.
-	diffSkipReasonTruncated = "truncated"
+	diffSkipReasonTooLarge        = "too_large"
+	diffSkipReasonBinary          = "binary"
+	diffSkipReasonTruncated       = "truncated"
+	diffSkipReasonBudgetExceeded  = "budget_exceeded"
 )
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
@@ -272,7 +271,7 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 			continue
 		}
 		if info.Size() > maxDiffFileSize {
-			fileInfo.DiffSkipReason = "too_large"
+			fileInfo.DiffSkipReason = diffSkipReasonTooLarge
 			update.Files[filePath] = fileInfo
 			continue
 		}
@@ -287,7 +286,7 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 		n, _ := f.Read(header)
 		if n > 0 && isBinaryContent(header[:n]) {
 			_ = f.Close()
-			fileInfo.DiffSkipReason = "binary"
+			fileInfo.DiffSkipReason = diffSkipReasonBinary
 			update.Files[filePath] = fileInfo
 			continue
 		}

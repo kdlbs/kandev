@@ -35,6 +35,7 @@ type TaskChangesPanelProps = {
 
 type UncommittedFile = {
   diff?: string;
+  diff_skip_reason?: ReviewFile["diff_skip_reason"];
   status?: string;
   additions?: number;
   deletions?: number;
@@ -48,9 +49,7 @@ function addUncommittedFiles(
 ) {
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    const skipReason = (file as Record<string, unknown>).diff_skip_reason as
-      | ReviewFile["diff_skip_reason"]
-      | undefined;
+    const skipReason = file.diff_skip_reason;
     if (diff || skipReason) {
       fileMap.set(path, {
         path,
