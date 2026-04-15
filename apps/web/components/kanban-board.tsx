@@ -188,6 +188,41 @@ function useKanbanBoardHooks(
   };
 }
 
+type SnapEntry = { tasks: { id: string }[]; steps: { id: string; title: string; color?: string | null }[] };
+
+function useMultiSelectDerived(
+  selectedIds: Set<string>,
+  snapshots: Record<string, SnapEntry>,
+  activeSteps: { id: string; title: string; color?: string | null }[],
+) {
+  const isMixedWorkflowSelection = useMemo(() => {
+    if (selectedIds.size === 0) return false;
+    const taskToWorkflow = new Map<string, string>();
+    for (const [wfId, snap] of Object.entries(snapshots)) {
+      for (const task of snap.tasks) taskToWorkflow.set(task.id, wfId);
+    }
+    const wfIds = new Set<string>();
+    for (const id of selectedIds) {
+      const wfId = taskToWorkflow.get(id);
+      if (wfId) wfIds.add(wfId);
+    }
+    return wfIds.size > 1;
+  }, [selectedIds, snapshots]);
+
+  const multiSelectSteps = useMemo(() => {
+    if (selectedIds.size > 0) {
+      for (const snap of Object.values(snapshots)) {
+        if (snap.tasks.some((t) => selectedIds.has(t.id))) {
+          return snap.steps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
+        }
+      }
+    }
+    return activeSteps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
+  }, [selectedIds, snapshots, activeSteps]);
+
+  return { isMixedWorkflowSelection, multiSelectSteps };
+}
+
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
@@ -218,47 +253,14 @@ function useKanbanBoardSetup(
 
   const multiSelect = useTaskMultiSelect(kanban.workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
-
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
+    multiSelect.selectedIds,
+    snapshots,
+    hooks.activeSteps,
+  );
 
-  const isMixedWorkflowSelection = useMemo(() => {
-    if (multiSelect.selectedIds.size === 0) return false;
-    const taskToWorkflow = new Map<string, string>();
-    for (const [wfId, snap] of Object.entries(snapshots)) {
-      for (const task of snap.tasks) {
-        taskToWorkflow.set(task.id, wfId);
-      }
-    }
-    const wfIds = new Set<string>();
-    for (const id of multiSelect.selectedIds) {
-      const wfId = taskToWorkflow.get(id);
-      if (wfId) wfIds.add(wfId);
-    }
-    return wfIds.size > 1;
-  }, [multiSelect.selectedIds, snapshots]);
-
-  const multiSelectSteps = useMemo(() => {
-    if (multiSelect.selectedIds.size > 0) {
-      for (const snap of Object.values(snapshots)) {
-        if (snap.tasks.some((t) => multiSelect.selectedIds.has(t.id))) {
-          return snap.steps.map((step) => ({
-            id: step.id,
-            title: step.title,
-            color: step.color ?? "",
-          }));
-        }
-      }
-    }
-    return hooks.activeSteps.map((step) => ({
-      id: step.id,
-      title: step.title,
-      color: step.color ?? "",
-    }));
-  }, [multiSelect.selectedIds, snapshots, hooks.activeSteps]);
-
-  // Mobile bottom sheet: intercept card clicks to show task info first
   const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
-
   const handleCardClickOrSelect = useCallback(
     (task: Task) => {
       if (isMultiSelectMode) {

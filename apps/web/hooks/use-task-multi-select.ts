@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
@@ -80,46 +80,165 @@ function useTaskMultiSelectStore() {
   return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask };
 }
 
-export function useTaskMultiSelect(workflowId: string | null) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const selectedIdsRef = useRef(selectedIds);
-  selectedIdsRef.current = selectedIds;
+function useBulkOperations({
+  workflowId,
+  selectedIdsRef,
+  setSelectedIds,
+  setIsDeleting,
+  setIsArchiving,
+  moveTaskById,
+  deleteTaskById,
+  archiveTaskById,
+  removeTasksFromStore,
+  applyMoveInStore,
+  getWorkflowIdForTask,
+}: {
+  workflowId: string | null;
+  selectedIdsRef: RefObject<Set<string>>;
+  setSelectedIds: (ids: Set<string>) => void;
+  setIsDeleting: (v: boolean) => void;
+  setIsArchiving: (v: boolean) => void;
+  moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
+  deleteTaskById: ReturnType<typeof useTaskActions>["deleteTaskById"];
+  archiveTaskById: ReturnType<typeof useTaskActions>["archiveTaskById"];
+  removeTasksFromStore: (ids: Set<string>) => void;
+  applyMoveInStore: (ids: Set<string>, stepId: string) => void;
+  getWorkflowIdForTask: (id: string) => string | null;
+}) {
+  const bulkDelete = useCallback(async () => {
+    const ids = selectedIdsRef.current;
+    if (!ids || ids.size === 0) return;
+    setIsDeleting(true);
+    try {
+      const idList = [...ids];
+      const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
+      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+      removeTasksFromStore(succeeded);
+      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteTaskById, removeTasksFromStore, selectedIdsRef, setIsDeleting, setSelectedIds]);
 
-  const [isMultiSelectEnabled, setIsMultiSelectEnabled] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isArchiving, setIsArchiving] = useState(false);
+  const bulkArchive = useCallback(async () => {
+    const ids = selectedIdsRef.current;
+    if (!ids || ids.size === 0) return;
+    setIsArchiving(true);
+    try {
+      const idList = [...ids];
+      const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
+      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+      removeTasksFromStore(succeeded);
+      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
+    } finally {
+      setIsArchiving(false);
+    }
+  }, [archiveTaskById, removeTasksFromStore, selectedIdsRef, setIsArchiving, setSelectedIds]);
+
+  const bulkMove = useCallback(
+    async (targetStepId: string) => {
+      const idList = [...(selectedIdsRef.current ?? [])];
+      if (idList.length === 0) return;
+      const results = await Promise.allSettled(
+        idList.map((id, i) => {
+          const wfId = getWorkflowIdForTask(id) ?? workflowId;
+          if (!wfId) return Promise.reject(new Error("no workflow"));
+          return moveTaskById(id, { workflow_id: wfId, workflow_step_id: targetStepId, position: i });
+        }),
+      );
+      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+      applyMoveInStore(succeeded, targetStepId);
+    },
+    [workflowId, moveTaskById, applyMoveInStore, getWorkflowIdForTask, selectedIdsRef],
+  );
+
+  return { bulkDelete, bulkArchive, bulkMove };
+}
+
+type MultiSelectState = {
+  selectedIds: Set<string>;
+  isMultiSelectEnabled: boolean;
+  isDeleting: boolean;
+  isArchiving: boolean;
+};
+
+type MultiSelectAction =
+  | { type: "reset" }
+  | { type: "toggle_select"; taskId: string }
+  | { type: "set_selected"; ids: Set<string> }
+  | { type: "set_enabled"; value: boolean }
+  | { type: "set_deleting"; value: boolean }
+  | { type: "set_archiving"; value: boolean };
+
+const INITIAL_STATE: MultiSelectState = {
+  selectedIds: new Set(),
+  isMultiSelectEnabled: false,
+  isDeleting: false,
+  isArchiving: false,
+};
+
+function multiSelectReducer(state: MultiSelectState, action: MultiSelectAction): MultiSelectState {
+  switch (action.type) {
+    case "reset":
+      return INITIAL_STATE;
+    case "toggle_select": {
+      const next = new Set(state.selectedIds);
+      if (next.has(action.taskId)) next.delete(action.taskId);
+      else next.add(action.taskId);
+      return { ...state, selectedIds: next };
+    }
+    case "set_selected":
+      return { ...state, selectedIds: action.ids };
+    case "set_enabled":
+      return { ...state, isMultiSelectEnabled: action.value };
+    case "set_deleting":
+      return { ...state, isDeleting: action.value };
+    case "set_archiving":
+      return { ...state, isArchiving: action.value };
+  }
+}
+
+export function useTaskMultiSelect(workflowId: string | null) {
+  const [state, dispatch] = useReducer(multiSelectReducer, INITIAL_STATE);
+  const { selectedIds, isMultiSelectEnabled, isDeleting, isArchiving } = state;
+  const selectedIdsRef = useRef(selectedIds);
+  useLayoutEffect(() => {
+    selectedIdsRef.current = selectedIds;
+  });
   const isProcessing = isDeleting || isArchiving;
 
+  const setSelectedIds = useCallback((ids: Set<string>) => dispatch({ type: "set_selected", ids }), []);
+  const setIsMultiSelectEnabled = useCallback(
+    (value: boolean) => dispatch({ type: "set_enabled", value }),
+    [],
+  );
+  const setIsDeleting = useCallback((value: boolean) => dispatch({ type: "set_deleting", value }), []);
+  const setIsArchiving = useCallback(
+    (value: boolean) => dispatch({ type: "set_archiving", value }),
+    [],
+  );
+
   useEffect(() => {
-    setSelectedIds(new Set());
-    setIsMultiSelectEnabled(false);
-    setIsDeleting(false);
-    setIsArchiving(false);
+    dispatch({ type: "reset" });
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
   const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask } = useTaskMultiSelectStore();
 
-  const toggleSelect = useCallback((taskId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
-      }
-      return next;
-    });
-  }, []);
+  const toggleSelect = useCallback(
+    (taskId: string) => dispatch({ type: "toggle_select", taskId }),
+    [],
+  );
 
-  const enableMultiSelect = useCallback(() => {
-    setIsMultiSelectEnabled(true);
-  }, []);
+  const enableMultiSelect = useCallback(
+    () => setIsMultiSelectEnabled(true),
+    [setIsMultiSelectEnabled],
+  );
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
     setIsMultiSelectEnabled(false);
-  }, []);
+  }, [setSelectedIds, setIsMultiSelectEnabled]);
 
   const toggleMultiSelect = useCallback(() => {
     if (isMultiSelectEnabled || selectedIds.size > 0) {
@@ -128,58 +247,21 @@ export function useTaskMultiSelect(workflowId: string | null) {
     } else {
       setIsMultiSelectEnabled(true);
     }
-  }, [isMultiSelectEnabled, selectedIds]);
+  }, [isMultiSelectEnabled, selectedIds, setSelectedIds, setIsMultiSelectEnabled]);
 
-  const bulkDelete = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (ids.size === 0) return;
-    setIsDeleting(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
-      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [deleteTaskById, removeTasksFromStore]);
-
-  const bulkArchive = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (ids.size === 0) return;
-    setIsArchiving(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
-      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeededIds);
-      setSelectedIds(new Set(idList.filter((_, i) => results[i].status === "rejected")));
-    } finally {
-      setIsArchiving(false);
-    }
-  }, [archiveTaskById, removeTasksFromStore]);
-
-  const bulkMove = useCallback(
-    async (targetStepId: string) => {
-      const idList = [...selectedIdsRef.current];
-      if (idList.length === 0) return;
-      const results = await Promise.allSettled(
-        idList.map((id, i) => {
-          const resolvedWorkflowId = getWorkflowIdForTask(id) ?? workflowId;
-          if (!resolvedWorkflowId) return Promise.reject(new Error("no workflow"));
-          return moveTaskById(id, {
-            workflow_id: resolvedWorkflowId,
-            workflow_step_id: targetStepId,
-            position: i,
-          });
-        }),
-      );
-      const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      applyMoveInStore(succeededIds, targetStepId);
-    },
-    [workflowId, moveTaskById, applyMoveInStore, getWorkflowIdForTask],
-  );
+  const { bulkDelete, bulkArchive, bulkMove } = useBulkOperations({
+    workflowId,
+    selectedIdsRef,
+    setSelectedIds,
+    setIsDeleting,
+    setIsArchiving,
+    moveTaskById,
+    deleteTaskById,
+    archiveTaskById,
+    removeTasksFromStore,
+    applyMoveInStore,
+    getWorkflowIdForTask,
+  });
 
   return {
     selectedIds,

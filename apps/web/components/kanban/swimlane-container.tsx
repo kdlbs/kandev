@@ -212,6 +212,41 @@ function useWorkflowReorder(
   return { sensors, canSort, handleDragEnd };
 }
 
+function useSwimlaneData(
+  workflowFilter: string | null | undefined,
+  selectedRepositoryIds: string[],
+  searchQuery: string,
+) {
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+
+  const repositories = useMemo(
+    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
+    [repositoriesByWorkspace],
+  );
+  const repoFilter = useMemo(
+    () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
+    [repositories, selectedRepositoryIds],
+  );
+  const orderedWorkflows = useMemo(() => {
+    if (workflowFilter) {
+      const snapshot = snapshots[workflowFilter];
+      if (!snapshot) return [];
+      return [{ id: workflowFilter, name: snapshot.workflowName }];
+    }
+    return workflows.filter((wf) => snapshots[wf.id]);
+  }, [workflowFilter, workflows, snapshots]);
+
+  const getFilteredTasks = useCallback(
+    (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery),
+    [snapshots, repoFilter, searchQuery],
+  );
+
+  return { snapshots, isLoading, orderedWorkflows, getFilteredTasks };
+}
+
 export function SwimlaneContainer({
   viewMode,
   workflowFilter,
@@ -232,31 +267,12 @@ export function SwimlaneContainer({
   onToggleMultiSelect,
 }: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
-
-  const repositories = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
-    [repositoriesByWorkspace],
+  const { snapshots, isLoading, orderedWorkflows, getFilteredTasks } = useSwimlaneData(
+    workflowFilter,
+    selectedRepositoryIds,
+    searchQuery ?? "",
   );
-  const repoFilter = useMemo(
-    () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
-    [repositories, selectedRepositoryIds],
-  );
-
-  const orderedWorkflows = useMemo(() => {
-    if (workflowFilter) {
-      const snapshot = snapshots[workflowFilter];
-      if (!snapshot) return [];
-      return [{ id: workflowFilter, name: snapshot.workflowName }];
-    }
-    return workflows.filter((wf) => snapshots[wf.id]);
-  }, [workflowFilter, workflows, snapshots]);
-
-  const getFilteredTasks = (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery);
   const {
     sensors: workflowSensors,
     canSort: canSortWorkflows,
