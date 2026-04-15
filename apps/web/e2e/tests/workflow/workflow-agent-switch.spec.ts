@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 async function createProfiles(
