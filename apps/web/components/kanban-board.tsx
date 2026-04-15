@@ -188,7 +188,10 @@ function useKanbanBoardHooks(
   };
 }
 
-type SnapEntry = { tasks: { id: string }[]; steps: { id: string; title: string; color?: string | null }[] };
+type SnapEntry = {
+  tasks: { id: string }[];
+  steps: { id: string; title: string; color?: string | null }[];
+};
 
 function useMultiSelectDerived(
   selectedIds: Set<string>,
@@ -321,7 +324,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     title: step.title,
     events: step.events,
   }));
-
 
   return (
     <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">

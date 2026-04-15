@@ -143,7 +143,11 @@ function useBulkOperations({
         idList.map((id, i) => {
           const wfId = getWorkflowIdForTask(id) ?? workflowId;
           if (!wfId) return Promise.reject(new Error("no workflow"));
-          return moveTaskById(id, { workflow_id: wfId, workflow_step_id: targetStepId, position: i });
+          return moveTaskById(id, {
+            workflow_id: wfId,
+            workflow_step_id: targetStepId,
+            position: i,
+          });
         }),
       );
       const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
@@ -207,12 +211,18 @@ export function useTaskMultiSelect(workflowId: string | null) {
   });
   const isProcessing = isDeleting || isArchiving;
 
-  const setSelectedIds = useCallback((ids: Set<string>) => dispatch({ type: "set_selected", ids }), []);
+  const setSelectedIds = useCallback(
+    (ids: Set<string>) => dispatch({ type: "set_selected", ids }),
+    [],
+  );
   const setIsMultiSelectEnabled = useCallback(
     (value: boolean) => dispatch({ type: "set_enabled", value }),
     [],
   );
-  const setIsDeleting = useCallback((value: boolean) => dispatch({ type: "set_deleting", value }), []);
+  const setIsDeleting = useCallback(
+    (value: boolean) => dispatch({ type: "set_deleting", value }),
+    [],
+  );
   const setIsArchiving = useCallback(
     (value: boolean) => dispatch({ type: "set_archiving", value }),
     [],
@@ -223,7 +233,8 @@ export function useTaskMultiSelect(workflowId: string | null) {
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
-  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask } = useTaskMultiSelectStore();
+  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask } =
+    useTaskMultiSelectStore();
 
   const toggleSelect = useCallback(
     (taskId: string) => dispatch({ type: "toggle_select", taskId }),
