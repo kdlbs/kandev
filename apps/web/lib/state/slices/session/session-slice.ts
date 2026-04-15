@@ -38,7 +38,8 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
-/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key. */
+/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
+ *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
   if (!environmentId) return;
