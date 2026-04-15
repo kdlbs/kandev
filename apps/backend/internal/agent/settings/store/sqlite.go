@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -97,7 +98,105 @@ func (r *sqliteRepository) initSchema() error {
 	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
 	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
 
+	// Migration: drop CHECK(model != '') constraint from agent_profiles.
+	//
+	// The ACP-first model means models and modes are populated from the host
+	// utility probe cache at boot. An empty model is valid — it means "use the
+	// agent's default". SQLite does not support ALTER COLUMN or DROP CONSTRAINT,
+	// so we must recreate the table. This is idempotent: we check whether the
+	// old CHECK constraint still exists before doing anything.
+	if err := r.migrateDropModelCheckConstraint(); err != nil {
+		return fmt.Errorf("failed to migrate agent_profiles model constraint: %w", err)
+	}
+
 	return nil
+}
+
+// migrateDropModelCheckConstraint recreates agent_profiles without the legacy
+// CHECK(model != '') constraint. Existing databases created before the ACP-first
+// migration carry this constraint, which prevents empty model values. New
+// databases (created by the CREATE TABLE IF NOT EXISTS above) never have it.
+//
+// The migration is idempotent: it inspects sqlite_master for the CHECK keyword
+// and only proceeds when the constraint is present.
+func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
+	var tableDDL string
+	err := r.db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_profiles'`,
+	).Scan(&tableDDL)
+	if err != nil {
+		// Table doesn't exist yet (fresh DB, CREATE TABLE IF NOT EXISTS
+		// hasn't run or was a no-op) — nothing to migrate.
+		return nil
+	}
+
+	// Only migrate if the old CHECK constraint is still present.
+	if !strings.Contains(tableDDL, "CHECK") {
+		return nil
+	}
+
+	// SQLite table recreation: copy data into a new table without the
+	// constraint, drop the old table, rename the new one. Wrapped in a
+	// transaction so a crash mid-migration doesn't leave the DB without
+	// the agent_profiles table.
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migration tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Column list shared between the old and new tables. mode and
+	// migrated_from may or may not exist yet (the ALTER TABLEs above
+	// already ran), but we include them unconditionally — they were
+	// added by the preceding idempotent ALTERs.
+	const columns = `id, agent_id, name, agent_display_name, model, mode, migrated_from,
+		auto_approve, dangerously_skip_permissions, allow_indexing,
+		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
+
+	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		agent_display_name TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		mode TEXT DEFAULT NULL,
+		migrated_from TEXT DEFAULT NULL,
+		auto_approve INTEGER NOT NULL DEFAULT 0,
+		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
+		allow_indexing INTEGER NOT NULL DEFAULT 1,
+		cli_passthrough INTEGER NOT NULL DEFAULT 0,
+		user_modified INTEGER NOT NULL DEFAULT 0,
+		plan TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP,
+		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+	)`); err != nil {
+		return fmt.Errorf("create new table: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO agent_profiles_new (` + columns + `) SELECT ` + columns + ` FROM agent_profiles`,
+	); err != nil {
+		return fmt.Errorf("copy data: %w", err)
+	}
+
+	if _, err := tx.Exec(`DROP TABLE agent_profiles`); err != nil {
+		return fmt.Errorf("drop old table: %w", err)
+	}
+
+	if _, err := tx.Exec(`ALTER TABLE agent_profiles_new RENAME TO agent_profiles`); err != nil {
+		return fmt.Errorf("rename new table: %w", err)
+	}
+
+	// Recreate the index that was on the old table.
+	if _, err := tx.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id)`,
+	); err != nil {
+		return fmt.Errorf("recreate index: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 func (r *sqliteRepository) Close() error {
