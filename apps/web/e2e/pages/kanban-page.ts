@@ -66,9 +66,9 @@ export class KanbanPage {
   }
 
   async selectTask(taskId: string) {
-    await this.enableMultiSelect();
     const card = this.taskCard(taskId);
     await card.waitFor({ state: "visible" });
+    await this.enableMultiSelect();
     await this.taskSelectCheckbox(taskId).click();
   }
 }
