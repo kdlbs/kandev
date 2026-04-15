@@ -52,7 +52,7 @@ export type PortalEntry = {
 
 type Listener = () => void;
 
-class PanelPortalManager {
+export class PanelPortalManager {
   private entries = new Map<string, PortalEntry>();
   private listeners = new Set<Listener>();
 
@@ -99,6 +99,28 @@ class PanelPortalManager {
     const toRemove: string[] = [];
     for (const [panelId, entry] of this.entries) {
       if (entry.sessionId === sessionId) {
+        toRemove.push(panelId);
+      }
+    }
+    if (toRemove.length === 0) return;
+    for (const panelId of toRemove) {
+      const entry = this.entries.get(panelId)!;
+      entry.element.remove();
+      entry.api = null;
+      this.entries.delete(panelId);
+    }
+    this.notify();
+  }
+
+  /**
+   * Release portals whose panel no longer exists in dockview.
+   * Call after fast-path session switches where `isRestoringLayout` blocked
+   * the normal `onDidRemovePanel` cleanup.
+   */
+  reconcile(livePanelIds: Set<string>): void {
+    const toRemove: string[] = [];
+    for (const panelId of this.entries.keys()) {
+      if (!livePanelIds.has(panelId)) {
         toRemove.push(panelId);
       }
     }

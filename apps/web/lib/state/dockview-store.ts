@@ -472,6 +472,7 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
       });
       set(ids);
       set({ isRestoringLayout: false });
+      panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });
     }

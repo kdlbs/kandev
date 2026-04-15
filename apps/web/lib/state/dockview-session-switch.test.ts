@@ -29,7 +29,8 @@ function makeMockApi() {
     panels: [],
     layout: vi.fn(),
     fromJSON: vi.fn(),
-    getPanel: vi.fn(),
+    getPanel: vi.fn(() => null),
+    addPanel: vi.fn(),
   } as unknown as SessionSwitchParams["api"];
 }
 
@@ -71,6 +72,36 @@ describe("performSessionSwitch", () => {
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
     expect(params.api.fromJSON).not.toHaveBeenCalled();
+  });
+
+  it("creates session panel inline on the fast path when it does not exist", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performSessionSwitch(params);
+
+    expect(params.api.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "session:new-session",
+        component: "chat",
+        params: { sessionId: "new-session" },
+      }),
+    );
+  });
+
+  it("skips addPanel on the fast path when the session panel already exists", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const panel = { id: "session:new-session", api: { component: "chat" }, group: { id: "g1" } };
+    const params = makeParams({
+      api: {
+        ...makeMockApi(),
+        getPanel: vi.fn((id: string) => (id === "session:new-session" ? panel : null)),
+      } as unknown as SessionSwitchParams["api"],
+    });
+
+    performSessionSwitch(params);
+
+    expect(params.api.addPanel).not.toHaveBeenCalled();
   });
 
   it("calls api.layout on the slow path (buildDefault fallback)", () => {

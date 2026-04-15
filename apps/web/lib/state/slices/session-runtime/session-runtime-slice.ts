@@ -190,7 +190,7 @@ function buildUserShellActions(set: ImmerSet) {
  * proper `environmentId` key so selectors don't see stale data after the
  * session→environment mapping is registered.
  */
-function migrateEnvKeyedData(
+export function migrateEnvKeyedData(
   draft: SessionRuntimeSliceState,
   sessionId: string,
   environmentId: string,

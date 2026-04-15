@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
+import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -35,6 +36,15 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       target[key] = source[key];
     }
   }
+}
+
+/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
+ *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
+  if (!environmentId) return;
+  draft.environmentIdBySessionId[sessionId] = environmentId;
+  migrateEnvKeyedData(draft, sessionId, environmentId);
 }
 
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
@@ -205,11 +215,7 @@ export const createSessionSlice: StateCreator<
         const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
         if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
       }
-      // Eagerly populate session→environment mapping (cross-slice access to session-runtime)
-      if (mergedSession.task_environment_id) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (draft as any).environmentIdBySessionId[session.id] = mergedSession.task_environment_id;
-      }
+      syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
     }),
   removeTaskSession: (taskId, sessionId) =>
     set((draft) => {
@@ -230,11 +236,7 @@ export const createSessionSlice: StateCreator<
       draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
       for (const session of sessions) {
         draft.taskSessions.items[session.id] = session;
-        // Eagerly populate session→environment mapping (cross-slice access to session-runtime)
-        if (session.task_environment_id) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (draft as any).environmentIdBySessionId[session.id] = session.task_environment_id;
-        }
+        syncEnvironmentMapping(draft, session.id, session.task_environment_id);
       }
     }),
   setTaskSessionsLoading: (taskId, loading) =>
