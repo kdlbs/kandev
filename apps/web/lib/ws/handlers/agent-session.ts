@@ -165,7 +165,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       if (
         newState === "FAILED" &&
         payload.suppress_toast !== true &&
-        existingSession?.state !== "FAILED"
+        existingSession?.state !== "FAILED" // replay guard; hook dedup is the second layer
       ) {
         store.getState().setSessionFailureNotification({
           sessionId,

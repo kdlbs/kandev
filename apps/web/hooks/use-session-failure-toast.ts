@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 
+/** Watches for session failure notifications and shows an error toast. Mount once inside ToastProvider. */
 export function useSessionFailureToast() {
   const notification = useAppStore((s) => s.sessionFailureNotification);
   const clearNotification = useAppStore((s) => s.setSessionFailureNotification);
