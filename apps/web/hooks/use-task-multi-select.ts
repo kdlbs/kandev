@@ -10,21 +10,35 @@ function useTaskMultiSelectStore() {
 
   const removeTasksFromStore = useCallback(
     (ids: Set<string>) => {
-      const currentKanban = store.getState().kanban;
-      store.getState().hydrate({
+      const state = store.getState();
+      // Remove from single-workflow view
+      const currentKanban = state.kanban;
+      state.hydrate({
         kanban: {
           ...currentKanban,
           tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
         },
       });
+      // Remove from multi-workflow snapshots
+      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+        const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) => ids.has(t.id));
+        if (affected) {
+          state.setWorkflowSnapshot(wfId, {
+            ...snapshot,
+            tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
+          });
+        }
+      }
     },
     [store],
   );
 
   const applyMoveInStore = useCallback(
     (succeededIds: Set<string>, targetStepId: string) => {
-      const currentKanban = store.getState().kanban;
-      store.getState().hydrate({
+      const state = store.getState();
+      // Update single-workflow view
+      const currentKanban = state.kanban;
+      state.hydrate({
         kanban: {
           ...currentKanban,
           tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
@@ -32,11 +46,38 @@ function useTaskMultiSelectStore() {
           ),
         },
       });
+      // Update multi-workflow snapshots
+      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+        const affected = snapshot.tasks.filter((t: KanbanState["tasks"][number]) =>
+          succeededIds.has(t.id),
+        );
+        if (affected.length > 0) {
+          state.setWorkflowSnapshot(wfId, {
+            ...snapshot,
+            tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+              succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
+            ),
+          });
+        }
+      }
     },
     [store],
   );
 
-  return { removeTasksFromStore, applyMoveInStore };
+  const getWorkflowIdForTask = useCallback(
+    (taskId: string): string | null => {
+      const snapshots = store.getState().kanbanMulti.snapshots;
+      for (const [wfId, snapshot] of Object.entries(snapshots)) {
+        if (snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
+          return wfId;
+        }
+      }
+      return store.getState().kanban.workflowId;
+    },
+    [store],
+  );
+
+  return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask };
 }
 
 export function useTaskMultiSelect(workflowId: string | null) {
@@ -57,7 +98,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
-  const { removeTasksFromStore, applyMoveInStore } = useTaskMultiSelectStore();
+  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask } = useTaskMultiSelectStore();
 
   const toggleSelect = useCallback((taskId: string) => {
     setSelectedIds((prev) => {
@@ -121,22 +162,23 @@ export function useTaskMultiSelect(workflowId: string | null) {
 
   const bulkMove = useCallback(
     async (targetStepId: string) => {
-      if (!workflowId) return;
       const idList = [...selectedIdsRef.current];
       if (idList.length === 0) return;
       const results = await Promise.allSettled(
-        idList.map((id, i) =>
-          moveTaskById(id, {
-            workflow_id: workflowId,
+        idList.map((id, i) => {
+          const resolvedWorkflowId = getWorkflowIdForTask(id) ?? workflowId;
+          if (!resolvedWorkflowId) return Promise.reject(new Error("no workflow"));
+          return moveTaskById(id, {
+            workflow_id: resolvedWorkflowId,
             workflow_step_id: targetStepId,
             position: i,
-          }),
-        ),
+          });
+        }),
       );
       const succeededIds = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
       applyMoveInStore(succeededIds, targetStepId);
     },
-    [workflowId, moveTaskById, applyMoveInStore],
+    [workflowId, moveTaskById, applyMoveInStore, getWorkflowIdForTask],
   );
 
   return {
