@@ -38,9 +38,7 @@ describe("useMermaidErrorToast", () => {
     unmount();
 
     act(() => {
-      document.dispatchEvent(
-        new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message: "oops" } }),
-      );
+      document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message: "oops" } }));
     });
 
     expect(mockToast).not.toHaveBeenCalled();
