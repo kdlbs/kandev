@@ -143,6 +143,11 @@ test.describe("Workflow agent profile switching", () => {
     seedData,
   }) => {
     const { profileA } = await createProfiles(apiClient);
+    const stepId = seedData.steps[0].id;
+
+    // Ensure clean state
+    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
+
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -159,9 +164,7 @@ test.describe("Workflow agent profile switching", () => {
     await expect(resetCheckbox).toBeEnabled();
 
     // Set an agent profile on this step via API
-    await apiClient.updateWorkflowStep(seedData.steps[0].id, {
-      agent_profile_id: profileA.id,
-    });
+    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: profileA.id });
 
     // Reload and re-open the step
     await page.goto(seedData.workspaceId);
@@ -175,8 +178,6 @@ test.describe("Workflow agent profile switching", () => {
     await expect(reloadedCheckbox).toBeDisabled();
 
     // Clean up
-    await apiClient.updateWorkflowStep(seedData.steps[0].id, {
-      agent_profile_id: "",
-    });
+    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
   });
 });
