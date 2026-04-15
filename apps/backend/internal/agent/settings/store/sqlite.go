@@ -114,7 +114,7 @@ func (r *sqliteRepository) initSchema() error {
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
-// CHECK(model != ”) constraint. Existing databases created before the ACP-first
+// CHECK(model != '') constraint. Existing databases created before the ACP-first
 // migration carry this constraint, which prevents empty model values. New
 // databases (created by the CREATE TABLE IF NOT EXISTS above) never have it.
 //
@@ -141,11 +141,14 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 		return nil
 	}
 
-	// SQLite table recreation: copy data into a new table without the
-	// constraint, drop the old table, rename the new one. Wrapped in a
-	// transaction so a crash mid-migration doesn't leave the DB without
-	// the agent_profiles table.
-	//
+	return r.recreateAgentProfilesWithoutModelCheck()
+}
+
+// recreateAgentProfilesWithoutModelCheck performs the actual SQLite table
+// recreation: copy data into a new table without the CHECK constraint, drop
+// the old table, rename the new one. Wrapped in a transaction so a crash
+// mid-migration doesn't leave the DB without the agent_profiles table.
+func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	// Disable FK enforcement during the recreation: the DB is opened with
 	// _foreign_keys=on, and agent_profile_mcp_configs references
 	// agent_profiles(id). This matches the pattern in task/repository.
@@ -160,10 +163,6 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Column list shared between the old and new tables. mode and
-	// migrated_from may or may not exist yet (the ALTER TABLEs above
-	// already ran), but we include them unconditionally — they were
-	// added by the preceding idempotent ALTERs.
 	const columns = `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -204,7 +203,6 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 		return fmt.Errorf("rename new table: %w", err)
 	}
 
-	// Recreate the index that was on the old table.
 	if _, err := tx.Exec(
 		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id)`,
 	); err != nil {
