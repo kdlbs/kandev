@@ -104,6 +104,7 @@ type mockAgentManager struct {
 	restartProcessErr   error
 	promptErr           error
 	promptResult        *executor.PromptResult
+	launchAgentFunc     func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
@@ -129,7 +130,10 @@ type passthroughStdinCall struct {
 	Data      string
 }
 
-func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+	if m.launchAgentFunc != nil {
+		return m.launchAgentFunc(ctx, req)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }

@@ -60,6 +60,7 @@ var (
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
 	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
+	ErrTaskArchived            = errors.New("task is archived")
 )
 
 // PromptResult contains the result of a prompt operation

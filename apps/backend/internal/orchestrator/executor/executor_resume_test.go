@@ -1,11 +1,48 @@
 package executor
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestResumeSession_RejectsArchivedTask(t *testing.T) {
+	repo := newMockRepository()
+	agentMgr := &mockAgentManager{}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	now := time.Now().UTC()
+	archivedAt := now.Add(-time.Minute)
+
+	repo.tasks["task-1"] = &models.Task{
+		ID:         "task-1",
+		ArchivedAt: &archivedAt,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	repo.sessions["sess-1"] = &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         "task-1",
+		AgentProfileID: "profile-1",
+		State:          models.TaskSessionStateWaitingForInput,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		SessionID: "sess-1",
+		TaskID:    "task-1",
+	}
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if err == nil {
+		t.Fatal("expected error when task is archived, got nil")
+	}
+	if !errors.Is(err, ErrTaskArchived) {
+		t.Fatalf("expected ErrTaskArchived, got: %v", err)
+	}
+}
 
 func TestBuildExecutorRunning(t *testing.T) {
 	t.Run("basic field mapping", func(t *testing.T) {

@@ -573,6 +573,16 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 				return existing, nil
 			}
 		}
+		// Task was archived while the resume was in flight — return the error
+		// without mutating task/session state (archive already handled cleanup).
+		// Check both the sentinel (early rejection) and re-read the task to catch
+		// the race where archive completed after the executor's archived check.
+		if errors.Is(err, executor.ErrTaskArchived) {
+			return nil, err
+		}
+		if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
+			return nil, executor.ErrTaskArchived
+		}
 		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
 		if stateErr := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after resume error",

@@ -309,6 +309,10 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 			zap.Error(err))
 		return nil, func() {}, err
 	}
+	if taskModel.ArchivedAt != nil {
+		unlock()
+		return nil, func() {}, ErrTaskArchived
+	}
 	task := taskModel.ToAPI()
 	if task == nil {
 		unlock()

@@ -433,6 +433,81 @@ func TestResumeTaskSession_NotResumable(t *testing.T) {
 	}
 }
 
+func TestResumeTaskSession_ArchivedTaskSkipsFailedState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	// Archive the task after seeding
+	if err := repo.ArchiveTask(ctx, "task1"); err != nil {
+		t.Fatalf("failed to archive task: %v", err)
+	}
+
+	// Insert executor running record so we pass the "not resumable" check
+	now := time.Now().UTC()
+	_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	_, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if !errors.Is(err, executor.ErrTaskArchived) {
+		t.Fatalf("expected ErrTaskArchived, got: %v", err)
+	}
+
+	// Task state should NOT have been updated to FAILED
+	if _, ok := taskRepo.updatedStates["task1"]; ok {
+		t.Error("task state should not be updated when task is archived")
+	}
+}
+
+func TestResumeTaskSession_ArchivedDuringLaunch(t *testing.T) {
+	// Simulates the race: task is NOT archived when the executor checks,
+	// but LaunchAgent fails (archive's async cleanup killed the agent),
+	// and by the time the error path re-reads the task it IS archived.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			// Simulate archive completing while launch is in progress:
+			// archive the task, then fail the launch (as if async cleanup killed the process).
+			_ = repo.ArchiveTask(ctx, "task1")
+			return nil, fmt.Errorf("connection refused")
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	now := time.Now().UTC()
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	// Set agent profile ID so the executor doesn't reject the session early
+	session, _ := repo.GetTaskSession(ctx, "session1")
+	session.AgentProfileID = "profile-1"
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	_, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if !errors.Is(err, executor.ErrTaskArchived) {
+		t.Fatalf("expected ErrTaskArchived, got: %v", err)
+	}
+
+	// Task state should NOT have been updated to FAILED
+	if _, ok := taskRepo.updatedStates["task1"]; ok {
+		t.Error("task state should not be updated when task is archived during launch")
+	}
+}
+
 // --- CompleteTask ---
 
 func TestCompleteTask_UpdatesTaskState(t *testing.T) {
