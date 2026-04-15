@@ -65,7 +65,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         cleanupMermaidOrphans(id);
         if (!cancelled) {
           setError(err.message);
-          toast({ title: "Failed to render diagram", variant: "error" });
+          toast({ title: "Failed to render diagram", description: err.message, variant: "error" });
         }
       });
 
