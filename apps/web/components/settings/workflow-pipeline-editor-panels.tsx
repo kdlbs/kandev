@@ -12,7 +12,10 @@ import type { WorkflowStep } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
-import { ScriptEditor, computeEditorHeight } from "@/components/settings/profile-edit/script-editor";
+import {
+  ScriptEditor,
+  computeEditorHeight,
+} from "@/components/settings/profile-edit/script-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   HelpTip,

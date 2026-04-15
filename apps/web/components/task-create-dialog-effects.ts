@@ -198,7 +198,14 @@ export function useDefaultSelectionsEffect(
       return;
     }
     void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
-  }, [open, agentProfileId, workflowAgentProfileId, agentProfiles, workspaceDefaults, setAgentProfileId]);
+  }, [
+    open,
+    agentProfileId,
+    workflowAgentProfileId,
+    agentProfiles,
+    workspaceDefaults,
+    setAgentProfileId,
+  ]);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
