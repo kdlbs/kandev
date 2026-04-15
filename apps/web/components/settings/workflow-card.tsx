@@ -259,10 +259,15 @@ function WorkflowCardBody({
 }: WorkflowCardBodyProps) {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
 
+  const healthyProfiles = agentProfiles.filter(
+    (p) =>
+      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
+  );
+
   return (
     <>
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-2 flex-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
           <Label className="flex items-center gap-2">
             <span>Workflow Name</span>
             {isWorkflowDirty && <UnsavedChangesBadge />}
@@ -280,32 +285,29 @@ function WorkflowCardBody({
             />
           </div>
         </div>
-      </div>
-      <div className="space-y-2">
-        <Label>Default Agent Profile</Label>
-        <Select
-          value={workflow.agent_profile_id ?? "none"}
-          onValueChange={(value) =>
-            onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
-          }
-        >
-          <SelectTrigger className="w-[320px] cursor-pointer">
-            <SelectValue placeholder="None (use task default)" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none" className="cursor-pointer">
-              None (use task default)
-            </SelectItem>
-            {agentProfiles.map((p) => (
-              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                {p.label}
+        <div className="space-y-2">
+          <Label>Default Agent Profile</Label>
+          <Select
+            value={workflow.agent_profile_id ?? "none"}
+            onValueChange={(value) =>
+              onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
+            }
+          >
+            <SelectTrigger className="cursor-pointer">
+              <SelectValue placeholder="None (use task default)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="cursor-pointer">
+                None (use task default)
               </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">
-          When set, new tasks using this workflow will default to this agent profile.
-        </p>
+              {healthyProfiles.map((p) => (
+                <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       <div className="space-y-2">
         <Label>Workflow Steps</Label>

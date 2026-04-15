@@ -46,6 +46,12 @@ function StepConfigHeader({
   readOnly,
   debouncedUpdateName,
 }: StepConfigHeaderProps) {
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const healthyProfiles = agentProfiles.filter(
+    (p) =>
+      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
+  );
+
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -79,6 +85,28 @@ function StepConfigHeader({
                   <div className={cn("w-3 h-3 rounded-full", color.value)} />
                   {color.label}
                 </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={step.agent_profile_id ?? "none"}
+          onValueChange={(value) => {
+            if (readOnly) return;
+            onUpdate({ agent_profile_id: value === "none" ? "" : value });
+          }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="w-[200px] h-8 cursor-pointer">
+            <SelectValue placeholder="No profile override" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none" className="cursor-pointer">
+              No profile override
+            </SelectItem>
+            {healthyProfiles.map((p) => (
+              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                {p.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -331,51 +359,6 @@ function StepTransitionsSection({
   );
 }
 
-// --- StepAgentProfileSection ---
-
-type StepAgentProfileSectionProps = {
-  step: WorkflowStep;
-  onUpdate: (updates: Partial<WorkflowStep>) => void;
-  readOnly: boolean;
-};
-
-function StepAgentProfileSection({ step, onUpdate, readOnly }: StepAgentProfileSectionProps) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          Agent Profile Override
-        </Label>
-        <HelpTip text="Override the workflow or task default agent profile for this specific step." />
-      </div>
-      <Select
-        value={step.agent_profile_id ?? "none"}
-        onValueChange={(value) => {
-          if (readOnly) return;
-          onUpdate({ agent_profile_id: value === "none" ? "" : value });
-        }}
-        disabled={readOnly}
-      >
-        <SelectTrigger className="w-[320px] cursor-pointer">
-          <SelectValue placeholder="None (use workflow default)" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none" className="cursor-pointer">
-            None (use workflow default)
-          </SelectItem>
-          {agentProfiles.map((p) => (
-            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-              {p.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
 // --- StepPromptSection ---
 
 type StepPromptSectionProps = {
@@ -496,7 +479,6 @@ export function StepConfigPanel({
           toggleOnEnterAction={actions.toggleOnEnterAction}
           readOnly={readOnly}
         />
-        <StepAgentProfileSection step={step} onUpdate={onUpdate} readOnly={readOnly} />
         <StepTransitionsSection
           step={step}
           steps={steps}
