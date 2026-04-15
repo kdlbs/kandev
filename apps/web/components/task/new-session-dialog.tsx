@@ -239,9 +239,7 @@ function NewSessionForm({
         if (!response.session_id) {
           throw new Error("Session created but no session ID returned");
         }
-        const profile = agentProfiles.find(
-          (p: AgentProfileOption) => p.id === selectedProfileId,
-        );
+        const profile = agentProfiles.find((p: AgentProfileOption) => p.id === selectedProfileId);
         activateNewSession(
           response.session_id,
           taskId,
@@ -319,7 +317,13 @@ function NewSessionForm({
             onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isBusy && hasPrompt && hasProfiles) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !isBusy &&
+                hasPrompt &&
+                hasProfiles
+              ) {
                 e.preventDefault();
                 handleSubmit(e);
               }

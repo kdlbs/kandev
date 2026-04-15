@@ -98,8 +98,10 @@ function FailedSessionBanner({
   const agentProfileId = useAppStore((s) =>
     sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
   );
-  const profileExists = useAppStore((s) =>
-    agentProfileId !== "" && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
+  const profileExists = useAppStore(
+    (s) =>
+      agentProfileId !== "" &&
+      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
   );
 
   const handleResume = useCallback(async () => {
@@ -144,9 +146,7 @@ function FailedSessionBanner({
                     </Button>
                   </span>
                 </TooltipTrigger>
-                {!profileExists && (
-                  <TooltipContent>Agent profile no longer exists</TooltipContent>
-                )}
+                {!profileExists && <TooltipContent>Agent profile no longer exists</TooltipContent>}
               </Tooltip>
             )}
             <Button

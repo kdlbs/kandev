@@ -89,10 +89,9 @@ test.describe("New session with deleted agent profile", () => {
 
     // 6. Hover the span wrapper (tooltip trigger) and verify the tooltip text
     await testPage.getByTestId("failed-session-resume-wrapper").hover();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "Agent profile no longer exists",
-      { timeout: 5_000 },
-    );
+    await expect(testPage.getByRole("tooltip")).toContainText("Agent profile no longer exists", {
+      timeout: 5_000,
+    });
   });
 
   test("new agent dialog falls back to available profile when original was deleted", async ({
@@ -106,14 +105,10 @@ test.describe("New session with deleted agent profile", () => {
     const { agents } = await apiClient.listAgents();
     const agent = agents[0];
     if (!agent) throw new Error("No agents available");
-    const profile = await apiClient.createAgentProfile(
-      agent.id,
-      "Temp Profile for Dialog Test",
-      {
-        model: agent.profiles[0]?.model ?? "mock",
-        auto_approve: true,
-      },
-    );
+    const profile = await apiClient.createAgentProfile(agent.id, "Temp Profile for Dialog Test", {
+      model: agent.profiles[0]?.model ?? "mock",
+      auto_approve: true,
+    });
 
     // 2. Create task using the custom profile with a slow response so we can cancel it
     await apiClient.createTaskWithAgent(
