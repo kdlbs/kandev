@@ -267,7 +267,7 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 			continue
 		}
 
-		info, err := os.Stat(safePath)
+		info, err := os.Stat(filepath.Clean(safePath))
 		if err != nil {
 			continue
 		}
