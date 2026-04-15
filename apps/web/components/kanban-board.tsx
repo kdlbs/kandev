@@ -260,6 +260,7 @@ function useKanbanBoardSetup(
     hooks.activeSteps,
   );
 
+  // Mobile bottom sheet: intercept card clicks to show task info first
   const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
   const handleCardClickOrSelect = useCallback(
     (task: Task) => {
