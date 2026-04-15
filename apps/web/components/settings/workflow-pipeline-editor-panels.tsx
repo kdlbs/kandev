@@ -440,7 +440,7 @@ function StepPromptSection({
             onLocalPromptChange(v);
             debouncedUpdatePrompt(v);
           }}
-          language="plaintext"
+          language="markdown"
           height={computeEditorHeight(localPrompt)}
           lineNumbers="off"
           readOnly={readOnly}
