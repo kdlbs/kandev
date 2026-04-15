@@ -30,7 +30,7 @@ export function UnsavedSaveButton({
   return (
     <Button
       type="button"
-      size="lg"
+      size="default"
       variant={isDirty ? "secondary" : "outline"}
       onClick={onClick}
       disabled={isLoading || Boolean(disabled)}
