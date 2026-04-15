@@ -301,9 +301,13 @@ function StepBehaviorSection({
           id={`${step.id}-reset-context`}
           checked={hasOnEnterAction(step, "reset_agent_context")}
           onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")}
-          disabled={readOnly}
+          disabled={readOnly || !!step.agent_profile_id}
           label="Reset agent context"
-          helpText="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
+          helpText={
+            step.agent_profile_id
+              ? "Not needed — switching agent profiles already creates a new session with fresh context."
+              : "Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
+          }
         />
         <StepCheckboxRow
           id={`${step.id}-manual-move`}

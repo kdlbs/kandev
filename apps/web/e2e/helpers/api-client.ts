@@ -660,6 +660,7 @@ export class ApiClient {
     sessions: Array<{
       id: string;
       task_id: string;
+      agent_profile_id?: string;
       state: string;
       started_at: string;
       task_environment_id?: string;
