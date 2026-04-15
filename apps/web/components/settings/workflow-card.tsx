@@ -382,17 +382,9 @@ function WorkflowCardDialogs({
   );
 }
 
-export function WorkflowCard({
-  workflow,
-  isWorkflowDirty,
-  initialWorkflowSteps,
-  templateStepCount = 0,
-  otherWorkflows = [],
-  onUpdateWorkflow,
-  onDeleteWorkflow,
-  onSaveWorkflow,
-  onWorkflowCreated,
-}: WorkflowCardProps) {
+function useWorkflowCardState(props: WorkflowCardProps) {
+  const { workflow, initialWorkflowSteps, templateStepCount = 0, otherWorkflows = [] } = props;
+  const { onDeleteWorkflow, onSaveWorkflow, onWorkflowCreated } = props;
   const { toast } = useToast();
   const [exportOpen, setExportOpen] = useState(false);
   const [exportYaml, setExportYaml] = useState("");
@@ -440,6 +432,30 @@ export function WorkflowCard({
   const stepsForStepMigration = stepDel.stepToDelete
     ? workflowSteps.filter((s) => s.id !== stepDel.stepToDelete)
     : [];
+  return {
+    toast,
+    exportOpen,
+    setExportOpen,
+    exportYaml,
+    setExportYaml,
+    wfDel,
+    stepDel,
+    isNewWorkflow,
+    deleteWorkflowRequest,
+    workflowSteps,
+    workflowLoading,
+    stepActions,
+    activeSaveRequest,
+    handleSaveWorkflow,
+    wfDeleteHandlers,
+    stepDeleteHandlers,
+    stepsForStepMigration,
+  };
+}
+
+export function WorkflowCard(props: WorkflowCardProps) {
+  const { workflow, isWorkflowDirty, otherWorkflows = [], onUpdateWorkflow } = props;
+  const s = useWorkflowCardState(props);
 
   return (
     <Card
@@ -452,34 +468,34 @@ export function WorkflowCard({
             workflow={workflow}
             isWorkflowDirty={isWorkflowDirty}
             onUpdateWorkflow={onUpdateWorkflow}
-            activeSaveRequest={activeSaveRequest}
-            handleSaveWorkflow={handleSaveWorkflow}
-            workflowLoading={workflowLoading}
-            workflowSteps={workflowSteps}
-            stepActions={stepActions}
+            activeSaveRequest={s.activeSaveRequest}
+            handleSaveWorkflow={s.handleSaveWorkflow}
+            workflowLoading={s.workflowLoading}
+            workflowSteps={s.workflowSteps}
+            stepActions={s.stepActions}
           />
           <WorkflowCardActions
-            isNewWorkflow={isNewWorkflow}
+            isNewWorkflow={s.isNewWorkflow}
             workflowId={workflow.id}
-            setExportYaml={setExportYaml}
-            setExportOpen={setExportOpen}
-            toast={toast}
-            onDeleteClick={wfDeleteHandlers.handleDeleteWorkflowClick}
-            deleteDisabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading}
+            setExportYaml={s.setExportYaml}
+            setExportOpen={s.setExportOpen}
+            toast={s.toast}
+            onDeleteClick={s.wfDeleteHandlers.handleDeleteWorkflowClick}
+            deleteDisabled={s.deleteWorkflowRequest.isLoading || s.wfDel.workflowDeleteLoading}
           />
         </div>
       </CardContent>
       <WorkflowCardDialogs
-        wfDel={wfDel}
+        wfDel={s.wfDel}
         otherWorkflows={otherWorkflows}
-        deleteWorkflowLoading={deleteWorkflowRequest.isLoading}
-        wfDeleteHandlers={wfDeleteHandlers}
-        exportOpen={exportOpen}
-        setExportOpen={setExportOpen}
-        exportYaml={exportYaml}
-        stepDel={stepDel}
-        stepsForStepMigration={stepsForStepMigration}
-        stepDeleteHandlers={stepDeleteHandlers}
+        deleteWorkflowLoading={s.deleteWorkflowRequest.isLoading}
+        wfDeleteHandlers={s.wfDeleteHandlers}
+        exportOpen={s.exportOpen}
+        setExportOpen={s.setExportOpen}
+        exportYaml={s.exportYaml}
+        stepDel={s.stepDel}
+        stepsForStepMigration={s.stepsForStepMigration}
+        stepDeleteHandlers={s.stepDeleteHandlers}
       />
     </Card>
   );

@@ -39,6 +39,65 @@ const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
   },
 ];
 
+// --- StepAgentProfileSelect ---
+
+function StepAgentProfileSelect({
+  step,
+  onUpdate,
+  readOnly,
+}: {
+  step: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+}) {
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const healthyProfiles = agentProfiles.filter(
+    (p) =>
+      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
+  );
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center">
+            <Select
+              value={step.agent_profile_id || "none"}
+              onValueChange={(value) => {
+                if (readOnly) return;
+                onUpdate({ agent_profile_id: value === "none" ? "" : value });
+              }}
+              disabled={readOnly}
+            >
+              <SelectTrigger
+                className="w-[220px] h-8 cursor-pointer"
+                data-testid="step-agent-profile-select"
+              >
+                <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="No profile override" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none" className="cursor-pointer">
+                  No profile override
+                </SelectItem>
+                {healthyProfiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          Override the agent profile for this step. A different profile creates a new session with
+          fresh context when entering this step.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 // --- StepConfigHeader ---
 
 type StepConfigHeaderProps = {
@@ -60,12 +119,6 @@ function StepConfigHeader({
   readOnly,
   debouncedUpdateName,
 }: StepConfigHeaderProps) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const healthyProfiles = agentProfiles.filter(
-    (p) =>
-      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
-  );
-
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -103,44 +156,7 @@ function StepConfigHeader({
             ))}
           </SelectContent>
         </Select>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center">
-                <Select
-                  value={step.agent_profile_id || "none"}
-                  onValueChange={(value) => {
-                    if (readOnly) return;
-                    onUpdate({ agent_profile_id: value === "none" ? "" : value });
-                  }}
-                  disabled={readOnly}
-                >
-                  <SelectTrigger
-                    className="w-[220px] h-8 cursor-pointer"
-                    data-testid="step-agent-profile-select"
-                  >
-                    <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <SelectValue placeholder="No profile override" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none" className="cursor-pointer">
-                      No profile override
-                    </SelectItem>
-                    {healthyProfiles.map((p) => (
-                      <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                        {p.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs">
-              Override the agent profile for this step. A different profile creates a new session
-              with fresh context when entering this step.
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <StepAgentProfileSelect step={step} onUpdate={onUpdate} readOnly={readOnly} />
       </div>
       <Button
         type="button"
