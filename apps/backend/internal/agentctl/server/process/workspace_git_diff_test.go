@@ -186,27 +186,34 @@ func TestEnrichUntrackedFileDiffs_BudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestStripDiffContent(t *testing.T) {
-	files := map[string]streams.FileInfo{
-		"a.go": {Path: "a.go", Status: "modified", Diff: "large diff content", DiffSkipReason: ""},
-		"b.go": {Path: "b.go", Status: "added", Diff: "another diff", DiffSkipReason: "truncated"},
+func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	txtPath := filepath.Join(repoDir, "hello.txt")
+	if err := os.WriteFile(txtPath, []byte("hello world\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Import the function from lifecycle package — test it inline since it's simple
-	stripped := make(map[string]streams.FileInfo, len(files))
-	for path, fi := range files {
-		fi.Diff = ""
-		stripped[path] = fi
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	update := &streams.GitStatusUpdate{
+		Files: map[string]streams.FileInfo{
+			"hello.txt": {Path: "hello.txt", Status: "untracked"},
+		},
 	}
 
-	for path, fi := range stripped {
-		if fi.Diff != "" {
-			t.Errorf("stripped[%q].Diff = %q, want empty", path, fi.Diff)
-		}
-		// DiffSkipReason should be preserved
-		orig := files[path]
-		if fi.DiffSkipReason != orig.DiffSkipReason {
-			t.Errorf("stripped[%q].DiffSkipReason = %q, want %q", path, fi.DiffSkipReason, orig.DiffSkipReason)
-		}
+	wt.enrichUntrackedFileDiffs(context.Background(), update)
+
+	fi := update.Files["hello.txt"]
+	if fi.Diff == "" {
+		t.Error("expected non-empty Diff for small text file")
+	}
+	if fi.DiffSkipReason != "" {
+		t.Errorf("expected empty DiffSkipReason, got %q", fi.DiffSkipReason)
+	}
+	if fi.Additions != 2 {
+		t.Errorf("Additions = %d, want 2", fi.Additions)
 	}
 }
