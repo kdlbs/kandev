@@ -124,7 +124,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
           await appendToQueue(buildQueuePayload(sessionId, taskId, content, planModeEnabled));
         } else {
           const client = getWebSocketClient();
-          if (!client) return { queued: false };
+          if (!client) throw new Error("WebSocket client unavailable");
           await client.request(
             "message.add",
             buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),

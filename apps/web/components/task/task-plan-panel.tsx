@@ -272,7 +272,7 @@ function PlanSelectionPopoverWrapper({
         createdAt: new Date().toISOString(),
         status: "pending",
       };
-      runComment(newComment);
+      runComment(newComment).catch((err) => console.error("Failed to run plan comment:", err));
     },
     [addCommentAndApplyMark, activeSessionId, runComment, textSelection],
   );

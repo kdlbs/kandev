@@ -227,16 +227,16 @@ describe("useRunComment — edge cases", () => {
     expect(payload.has_review_comments).toBeUndefined();
   });
 
-  it("returns { queued: false } without marking sent when WS client is null", async () => {
+  it("throws when WS client is null and does not mark comment sent", async () => {
     mockGetWebSocketClient.mockReturnValueOnce(null as unknown as { request: typeof mockRequest });
     const { result } = renderCommentHook();
 
-    let res: { queued: boolean } | undefined;
-    await act(async () => {
-      res = await result.current.runComment(makeDiffComment());
-    });
+    await expect(
+      act(async () => {
+        await result.current.runComment(makeDiffComment());
+      }),
+    ).rejects.toThrow("WebSocket client unavailable");
 
-    expect(res).toEqual({ queued: false });
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
