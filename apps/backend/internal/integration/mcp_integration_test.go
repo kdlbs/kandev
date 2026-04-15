@@ -236,3 +236,50 @@ func TestMCPCreateTask_StartAgentTrue_RequiresDescription(t *testing.T) {
 	// Should fail because the sub-agent needs the description as initial prompt
 	assert.Equal(t, ws.MessageTypeError, resp.Type, "start_agent=true should require description for subtask")
 }
+
+func TestMCPCreateTask_SourceTaskID_TopLevel_Succeeds(t *testing.T) {
+	ts, parentTaskID, workspaceID, workflowID, _ := setupMCPTestServer(t)
+	defer ts.Close()
+
+	client := NewWSClient(t, ts.Server.URL)
+	defer client.Close()
+
+	// source_task_id is set by agentctl to the current task; verify the path succeeds
+	// and the task is created (even though parentTaskID has no repositories).
+	resp, err := client.SendRequest("top-source", ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":   workspaceID,
+		"workflow_id":    workflowID,
+		"title":          "Top Level with Source Task",
+		"source_task_id": parentTaskID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "valid source_task_id should not cause failure")
+
+	var payload map[string]interface{}
+	require.NoError(t, resp.ParsePayload(&payload))
+	assert.NotEmpty(t, payload["id"])
+}
+
+func TestMCPCreateTask_SourceTaskID_NotFound_StillCreatesTask(t *testing.T) {
+	ts, _, workspaceID, workflowID, _ := setupMCPTestServer(t)
+	defer ts.Close()
+
+	client := NewWSClient(t, ts.Server.URL)
+	defer client.Close()
+
+	// Non-existent source_task_id must silently fall through (Warn log only),
+	// not cause a validation error. This covers the error-swallow branch at
+	// resolveTaskRepositories:422.
+	resp, err := client.SendRequest("top-notfound", ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":   workspaceID,
+		"workflow_id":    workflowID,
+		"title":          "Top Level with Missing Source Task",
+		"source_task_id": "nonexistent-task-id-xyz",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "missing source_task_id should silently succeed, not fail")
+
+	var payload map[string]interface{}
+	require.NoError(t, resp.ParsePayload(&payload))
+	assert.NotEmpty(t, payload["id"])
+}
