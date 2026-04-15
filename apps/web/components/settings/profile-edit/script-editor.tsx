@@ -46,6 +46,15 @@ function unregisterProvider() {
   }
 }
 
+/** Compute editor height from content lines (min 80px, max 400px). */
+export function computeEditorHeight(value: string, minLines = 3): string {
+  const lineCount = Math.max((value || "").split("\n").length, minLines);
+  const lineHeight = 19;
+  const padding = 16;
+  const height = Math.min(Math.max(lineCount * lineHeight + padding, 80), 400);
+  return `${height}px`;
+}
+
 type ScriptEditorProps = {
   value: string;
   onChange: (value: string) => void;

@@ -12,7 +12,7 @@ import type { WorkflowStep } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
-import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { ScriptEditor, computeEditorHeight } from "@/components/settings/profile-edit/script-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   HelpTip,
@@ -387,14 +387,6 @@ function StepTransitionsSection({
 }
 
 // --- StepPromptSection ---
-
-function computeEditorHeight(value: string): string {
-  const lineCount = Math.max((value || "").split("\n").length, 3);
-  const lineHeight = 19; // Monaco default line height at fontSize 13
-  const padding = 16; // top + bottom padding
-  const height = Math.min(Math.max(lineCount * lineHeight + padding, 80), 400);
-  return `${height}px`;
-}
 
 type StepPromptSectionProps = {
   step: WorkflowStep;
