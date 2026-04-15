@@ -66,6 +66,7 @@ func TestCreateTask_SelfResolvesToTaskID(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "task-current", payload["parent_id"], "self should resolve to current task ID")
 	assert.Equal(t, "Write tests", payload["title"])
+	assert.Equal(t, "task-current", payload["source_task_id"], "source_task_id should be set to current task")
 }
 
 func TestCreateTask_SelfWithNoTaskContext_ReturnsError(t *testing.T) {
@@ -129,4 +130,39 @@ func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
 	assert.Equal(t, "", payload["parent_id"])
 	assert.Equal(t, "ws-1", payload["workspace_id"])
 	assert.Equal(t, "wf-1", payload["workflow_id"])
+	assert.Equal(t, "task-current", payload["source_task_id"])
+}
+
+func TestCreateTask_SourceTaskID_AlwaysSet(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := newTaskModeServer(t, backend, "my-task-123")
+
+	callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "New task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "my-task-123", payload["source_task_id"])
+}
+
+func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := newTaskModeServer(t, backend, "")
+
+	callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "New task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "", payload["source_task_id"])
 }

@@ -105,6 +105,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"description":         req.GetString("description", ""),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
+			"source_task_id":      s.taskID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {
