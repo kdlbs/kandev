@@ -244,7 +244,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 
 // isBinaryContent checks for null bytes in the data, same heuristic git uses.
 func isBinaryContent(data []byte) bool {
-	return bytes.ContainsRune(data, 0)
+	return bytes.IndexByte(data, 0) != -1
 }
 
 // enrichUntrackedFileDiffs builds a synthetic git diff for untracked files showing all
