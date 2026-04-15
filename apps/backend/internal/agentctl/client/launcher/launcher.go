@@ -178,6 +178,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 
 	// Close read-end in parent (child inherited it). Keep write-end open —
 	// it closes automatically when this process exits, signaling agentctl.
+	// On Windows these are no-ops (no liveness pipe); parentPipe stays nil.
 	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
 
