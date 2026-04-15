@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -113,7 +114,7 @@ func (r *sqliteRepository) initSchema() error {
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
-// CHECK(model != '') constraint. Existing databases created before the ACP-first
+// CHECK(model != ”) constraint. Existing databases created before the ACP-first
 // migration carry this constraint, which prevents empty model values. New
 // databases (created by the CREATE TABLE IF NOT EXISTS above) never have it.
 //
@@ -124,14 +125,19 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 	err := r.db.QueryRow(
 		`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_profiles'`,
 	).Scan(&tableDDL)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		// Table doesn't exist yet (fresh DB, CREATE TABLE IF NOT EXISTS
 		// hasn't run or was a no-op) — nothing to migrate.
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("query agent_profiles DDL: %w", err)
+	}
 
-	// Only migrate if the old CHECK constraint is still present.
-	if !strings.Contains(tableDDL, "CHECK") {
+	// Only migrate if the old model CHECK constraint is still present.
+	// Use a targeted match to avoid false-positives from unrelated future
+	// CHECK constraints on the same table.
+	if !strings.Contains(tableDDL, "CHECK(model") {
 		return nil
 	}
 
@@ -139,6 +145,15 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 	// constraint, drop the old table, rename the new one. Wrapped in a
 	// transaction so a crash mid-migration doesn't leave the DB without
 	// the agent_profiles table.
+	//
+	// Disable FK enforcement during the recreation: the DB is opened with
+	// _foreign_keys=on, and agent_profile_mcp_configs references
+	// agent_profiles(id). This matches the pattern in task/repository.
+	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return fmt.Errorf("disable foreign keys for migration: %w", err)
+	}
+	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
+
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin migration tx: %w", err)

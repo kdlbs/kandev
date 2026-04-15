@@ -11,7 +11,7 @@ import (
 )
 
 // legacySchema is the CREATE TABLE DDL that existing databases have, including
-// the CHECK(model != '') constraint that the ACP-first migration must remove.
+// the CHECK(model != ”) constraint that the ACP-first migration must remove.
 const legacySchema = `
 CREATE TABLE IF NOT EXISTS agents (
 	id TEXT PRIMARY KEY,
@@ -78,7 +78,7 @@ func newLegacyDB(t *testing.T) *sqlx.DB {
 }
 
 // TestMigration_LegacyDB_DropCheckConstraint verifies that opening the store
-// on a database with the old CHECK(model != '') constraint succeeds and that
+// on a database with the old CHECK(model != ”) constraint succeeds and that
 // empty models can be inserted afterwards.
 func TestMigration_LegacyDB_DropCheckConstraint(t *testing.T) {
 	db := newLegacyDB(t)
