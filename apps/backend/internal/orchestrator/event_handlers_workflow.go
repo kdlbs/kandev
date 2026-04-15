@@ -498,30 +498,41 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	return newSession, nil
 }
 
+// maybySwitchSessionForProfile checks whether the step requires a different agent profile
+// and switches the session if so. Passthrough sessions are returned unchanged.
+// Returns the effective session (new or original) and whether processing should continue.
+// A false return means the switch failed; the caller should return immediately.
+func (s *Service) maybySwitchSessionForProfile(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+) (*models.TaskSession, bool) {
+	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
+		return session, true
+	}
+	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
+		return session, true
+	}
+	newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
+	if err != nil {
+		s.logger.Error("failed to switch session for step agent profile",
+			zap.String("task_id", taskID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return nil, false
+	}
+	return newSession, true
+}
+
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+	// Switch session if this step requires a different agent profile.
+	var ok bool
+	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step); !ok {
+		return
+	}
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
-
-	// Check if this step requires a different agent profile
-	if !isPassthrough {
-		effectiveProfile := s.resolveStepAgentProfile(ctx, step)
-		if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
-			newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
-			if err != nil {
-				s.logger.Error("failed to switch session for step agent profile",
-					zap.String("task_id", taskID),
-					zap.String("step_id", step.ID),
-					zap.Error(err))
-				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-				return
-			}
-			// Continue processing on_enter with the new session
-			session = newSession
-			sessionID = newSession.ID
-			isPassthrough = s.agentManager.IsPassthroughSession(ctx, sessionID)
-		}
-	}
 
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 

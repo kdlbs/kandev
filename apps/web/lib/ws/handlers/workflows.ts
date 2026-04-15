@@ -51,7 +51,9 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
         workflows: {
           ...state.workflows,
           items: state.workflows.items.map((item) =>
-            item.id === message.payload.id ? { ...item, name: message.payload.name } : item,
+            item.id === message.payload.id
+              ? { ...item, name: message.payload.name, agent_profile_id: message.payload.agent_profile_id }
+              : item,
           ),
         },
       }));
