@@ -22,6 +22,7 @@ type Step = {
   allow_manual_move?: boolean;
   prompt?: string;
   is_start_step?: boolean;
+  agent_profile_id?: string;
 };
 
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -250,7 +251,7 @@ function StepHoverContent({
         </Button>
       )}
       {isCurrent && <div className="text-[11px] text-muted-foreground">Current step</div>}
-      <StepCapabilityIcons events={step.events} />
+      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </HoverCardContent>
   );
 }

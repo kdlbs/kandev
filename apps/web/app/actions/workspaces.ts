@@ -123,7 +123,7 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string },
+  payload: { name?: string; description?: string; agent_profile_id?: string },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",

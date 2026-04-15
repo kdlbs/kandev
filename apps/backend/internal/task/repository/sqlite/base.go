@@ -158,6 +158,8 @@ func (r *Repository) runMigrations() error {
 	}
 	// Add sort_order column to workflows for user-defined ordering (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
+	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	return nil
 }
 

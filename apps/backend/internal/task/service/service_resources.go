@@ -165,6 +165,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if req.Description != nil {
 		workflow.Description = *req.Description
 	}
+	if req.AgentProfileID != nil {
+		workflow.AgentProfileID = *req.AgentProfileID
+	}
 	workflow.UpdatedAt = time.Now().UTC()
 
 	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {

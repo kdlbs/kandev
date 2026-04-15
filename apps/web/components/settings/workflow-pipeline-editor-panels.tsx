@@ -9,6 +9,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
+import { useAppStore } from "@/components/state-provider";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
@@ -330,6 +331,51 @@ function StepTransitionsSection({
   );
 }
 
+// --- StepAgentProfileSection ---
+
+type StepAgentProfileSectionProps = {
+  step: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+};
+
+function StepAgentProfileSection({ step, onUpdate, readOnly }: StepAgentProfileSectionProps) {
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Agent Profile Override
+        </Label>
+        <HelpTip text="Override the workflow or task default agent profile for this specific step." />
+      </div>
+      <Select
+        value={step.agent_profile_id ?? "none"}
+        onValueChange={(value) => {
+          if (readOnly) return;
+          onUpdate({ agent_profile_id: value === "none" ? "" : value });
+        }}
+        disabled={readOnly}
+      >
+        <SelectTrigger className="w-[320px] cursor-pointer">
+          <SelectValue placeholder="None (use workflow default)" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none" className="cursor-pointer">
+            None (use workflow default)
+          </SelectItem>
+          {agentProfiles.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 // --- StepPromptSection ---
 
 type StepPromptSectionProps = {
@@ -450,6 +496,7 @@ export function StepConfigPanel({
           toggleOnEnterAction={actions.toggleOnEnterAction}
           readOnly={readOnly}
         />
+        <StepAgentProfileSection step={step} onUpdate={onUpdate} readOnly={readOnly} />
         <StepTransitionsSection
           step={step}
           steps={steps}

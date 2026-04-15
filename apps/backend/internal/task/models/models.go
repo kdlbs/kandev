@@ -52,6 +52,7 @@ type Workflow struct {
 	WorkspaceID        string    `json:"workspace_id"`
 	Name               string    `json:"name"`
 	Description        string    `json:"description"`
+	AgentProfileID     string    `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"`
 	SortOrder          int       `json:"sort_order"`
 	CreatedAt          time.Time `json:"created_at"`

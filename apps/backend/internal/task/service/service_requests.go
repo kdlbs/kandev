@@ -57,8 +57,9 @@ type CreateWorkflowRequest struct {
 
 // UpdateWorkflowRequest contains the data for updating a workflow
 type UpdateWorkflowRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Name           *string `json:"name,omitempty"`
+	Description    *string `json:"description,omitempty"`
+	AgentProfileID *string `json:"agent_profile_id,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace

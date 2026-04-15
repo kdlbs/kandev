@@ -20,6 +20,31 @@ import type {
 } from "@/components/task-create-dialog-types";
 import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 
+export function useWorkflowAgentProfileEffect(
+  fs: DialogFormState,
+  workflows: Array<{ id: string; agent_profile_id?: string }>,
+) {
+  const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
+  useEffect(() => {
+    if (!selectedWorkflowId) {
+      setWorkflowAgentProfileId("");
+      return;
+    }
+    const workflow = workflows.find((w) => w.id === selectedWorkflowId);
+    if (workflow?.agent_profile_id) {
+      setAgentProfileId(workflow.agent_profile_id);
+      setWorkflowAgentProfileId(workflow.agent_profile_id);
+    } else {
+      setWorkflowAgentProfileId("");
+      // Restore the user's last-used agent profile when unlocking
+      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
+      if (lastId) {
+        setAgentProfileId(lastId);
+      }
+    }
+  }, [selectedWorkflowId, workflows, setAgentProfileId, setWorkflowAgentProfileId]);
+}
+
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
   useEffect(() => {
@@ -351,8 +376,9 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading, branches } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast } = args;
+  const { agentProfiles, executors, workspaceDefaults, toast, workflows } = args;
   useWorkflowStepsEffect(fs, workflowId);
+  useWorkflowAgentProfileEffect(fs, workflows);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs, branches);

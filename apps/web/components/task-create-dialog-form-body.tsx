@@ -5,6 +5,9 @@ import Link from "next/link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
+import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
+import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 
 type SelectorOption = {
   value: string;
@@ -61,6 +64,7 @@ type CreateEditSelectorsProps = {
   }>;
   isLocalExecutor: boolean;
   useGitHubUrl: boolean;
+  workflowAgentProfileId?: string;
 };
 
 export const CreateEditSelectors = memo(function CreateEditSelectors({
@@ -83,11 +87,14 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   executorsLoading,
   isLocalExecutor,
   useGitHubUrl,
+  workflowAgentProfileId,
   BranchSelectorComponent,
   AgentSelectorComponent,
   ExecutorProfileSelectorComponent,
 }: CreateEditSelectorsProps) {
   if (isTaskStarted) return null;
+
+  const agentLockedByWorkflow = Boolean(workflowAgentProfileId);
 
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
 
@@ -133,13 +140,18 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
             </Link>
           </div>
         ) : (
-          <AgentSelectorComponent
-            options={agentProfileOptions}
-            value={agentProfileId}
-            onValueChange={onAgentProfileChange}
-            placeholder={agentPlaceholder}
-            disabled={agentProfilesLoading || isCreatingSession}
-          />
+          <>
+            <AgentSelectorComponent
+              options={agentProfileOptions}
+              value={agentProfileId}
+              onValueChange={onAgentProfileChange}
+              placeholder={agentPlaceholder}
+              disabled={agentProfilesLoading || isCreatingSession || agentLockedByWorkflow}
+            />
+            {agentLockedByWorkflow && (
+              <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
+            )}
+          </>
         )}
       </div>
       <div>
@@ -258,3 +270,49 @@ export const WorkflowSection = memo(function WorkflowSection({
     />
   );
 });
+
+export type DialogPromptSectionProps = {
+  isSessionMode: boolean;
+  isTaskStarted: boolean;
+  isPassthroughProfile: boolean;
+  initialDescription: string;
+  hasDescription: boolean;
+  fs: DialogFormState;
+  handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
+  enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+};
+
+export function DialogPromptSection({
+  isSessionMode,
+  isTaskStarted,
+  isPassthroughProfile,
+  initialDescription,
+  hasDescription,
+  fs,
+  handleKeyDown,
+  enhance,
+}: DialogPromptSectionProps) {
+  return (
+    <>
+      <TaskFormInputs
+        key={fs.openCycle}
+        isSessionMode={isSessionMode}
+        autoFocus={isTaskStarted ? false : true}
+        initialDescription={initialDescription}
+        onDescriptionChange={fs.setHasDescription}
+        onKeyDown={handleKeyDown}
+        descriptionValueRef={fs.descriptionInputRef}
+        disabled={isTaskStarted || isPassthroughProfile}
+        placeholder={
+          isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined
+        }
+        onEnhancePrompt={enhance?.onEnhance}
+        isEnhancingPrompt={enhance?.isLoading}
+        isUtilityConfigured={enhance?.isConfigured}
+      />
+      {isPassthroughProfile && hasDescription && (
+        <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
+      )}
+    </>
+  );
+}

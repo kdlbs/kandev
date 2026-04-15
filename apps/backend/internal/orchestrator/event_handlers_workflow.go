@@ -317,7 +317,10 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		return
 	}
 
-	agentProfileID, _ := task.Metadata[models.MetaKeyAgentProfileID].(string)
+	agentProfileID := s.resolveStepAgentProfile(ctx, step)
+	if agentProfileID == "" {
+		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
+	}
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
@@ -419,10 +422,98 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 	return hasPlanMode
 }
 
+// resolveStepAgentProfile returns the effective agent profile ID for a step.
+// Resolution order: step override -> workflow default -> empty (use current session's profile).
+func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if step.AgentProfileID != "" {
+		return step.AgentProfileID
+	}
+	if s.workflowStepGetter != nil && step.WorkflowID != "" {
+		wfProfileID, err := s.workflowStepGetter.GetWorkflowAgentProfileID(ctx, step.WorkflowID)
+		if err == nil && wfProfileID != "" {
+			return wfProfileID
+		}
+	}
+	return ""
+}
+
+// switchSessionForStep stops the current session and creates a new one with a different agent profile.
+// Returns the new session, or nil + error if the switch fails.
+func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
+	s.logger.Info("switching session for workflow step agent profile change",
+		zap.String("task_id", taskID),
+		zap.String("current_session", currentSession.ID),
+		zap.String("current_profile", currentSession.AgentProfileID),
+		zap.String("new_profile", newAgentProfileID))
+
+	// Stop the current agent process gracefully
+	if currentSession.AgentExecutionID != "" {
+		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
+			s.logger.Warn("failed to stop agent for session switch",
+				zap.String("session_id", currentSession.ID),
+				zap.Error(err))
+		}
+	}
+
+	// Mark the current session as completed
+	currentSession.State = models.TaskSessionStateCompleted
+	now := time.Now().UTC()
+	currentSession.CompletedAt = &now
+	currentSession.UpdatedAt = now
+	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
+		return nil, fmt.Errorf("failed to complete current session: %w", err)
+	}
+
+	// Get task (v1) for PrepareSession and DB task for workflow step ID
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
+	}
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get db task for session switch: %w", err)
+	}
+
+	// Create a new session with the new agent profile.
+	// Reuse the same executor profile from the current session.
+	sessionID, err := s.executor.PrepareSession(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare new session: %w", err)
+	}
+
+	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+
+	return newSession, nil
+}
+
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
+
+	// Check if this step requires a different agent profile
+	if !isPassthrough {
+		effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+		if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
+			newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
+			if err != nil {
+				s.logger.Error("failed to switch session for step agent profile",
+					zap.String("task_id", taskID),
+					zap.String("step_id", step.ID),
+					zap.Error(err))
+				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+				return
+			}
+			// Continue processing on_enter with the new session
+			session = newSession
+			sessionID = newSession.ID
+			isPassthrough = s.agentManager.IsPassthroughSession(ctx, sessionID)
+		}
+	}
+
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
 	if len(step.Events.OnEnter) == 0 {

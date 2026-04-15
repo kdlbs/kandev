@@ -79,6 +79,7 @@ export type TaskCreateEffectsArgs = {
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
+  workflows: Array<{ id: string; agent_profile_id?: string }>;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -147,6 +148,9 @@ export type DialogFormState = {
   setGitHubUrlError: (v: string | null) => void;
   githubPrHeadBranch: string | null;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  /** When non-empty, the selected workflow overrides the agent profile */
+  workflowAgentProfileId: string;
+  setWorkflowAgentProfileId: (v: string) => void;
   /** Clear draft on successful submission (before closing dialog) */
   clearDraft: () => void;
 };

@@ -33,7 +33,8 @@ import (
 
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
-	steps map[string]*wfmodels.WorkflowStep // stepID -> step
+	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
+	workflowAgentProfileID string                            // returned by GetWorkflowAgentProfileID
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -69,6 +70,13 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 		}
 	}
 	return best, nil
+}
+
+func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID string) (string, error) {
+	if m.workflowAgentProfileID != "" {
+		return m.workflowAgentProfileID, nil
+	}
+	return "", nil
 }
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.

@@ -9,13 +9,14 @@ import (
 )
 
 type WorkflowDTO struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	WorkspaceID    string    `json:"workspace_id"`
+	Name           string    `json:"name"`
+	Description    *string   `json:"description,omitempty"`
+	AgentProfileID string    `json:"agent_profile_id,omitempty"`
+	SortOrder      int       `json:"sort_order"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type WorkspaceDTO struct {
@@ -330,13 +331,14 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	}
 
 	return WorkflowDTO{
-		ID:          workflow.ID,
-		WorkspaceID: workflow.WorkspaceID,
-		Name:        workflow.Name,
-		Description: description,
-		SortOrder:   workflow.SortOrder,
-		CreatedAt:   workflow.CreatedAt,
-		UpdatedAt:   workflow.UpdatedAt,
+		ID:             workflow.ID,
+		WorkspaceID:    workflow.WorkspaceID,
+		Name:           workflow.Name,
+		Description:    description,
+		AgentProfileID: workflow.AgentProfileID,
+		SortOrder:      workflow.SortOrder,
+		CreatedAt:      workflow.CreatedAt,
+		UpdatedAt:      workflow.UpdatedAt,
 	}
 }
 
@@ -606,6 +608,7 @@ type WorkflowStepDTO struct {
 	IsStartStep           bool           `json:"is_start_step"`
 	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 }

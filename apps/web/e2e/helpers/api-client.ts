@@ -425,10 +425,18 @@ export class ApiClient {
     });
   }
 
+  async updateWorkflow(
+    workflowId: string,
+    updates: { name?: string; description?: string; agent_profile_id?: string },
+  ): Promise<Workflow> {
+    return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
+  }
+
   async updateWorkflowStep(
     stepId: string,
     updates: {
       prompt?: string;
+      agent_profile_id?: string;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;

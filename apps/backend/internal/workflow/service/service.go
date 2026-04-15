@@ -26,11 +26,19 @@ type Service struct {
 	repo             *repository.Repository
 	logger           *logger.Logger
 	workflowProvider WorkflowProvider
+	resolveProfile   models.AgentProfileResolver
+	matchProfile     models.AgentProfileMatcher
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
 func (s *Service) SetWorkflowProvider(wp WorkflowProvider) {
 	s.workflowProvider = wp
+}
+
+// SetAgentProfileFuncs wires the agent profile resolver and matcher for export/import.
+func (s *Service) SetAgentProfileFuncs(resolve models.AgentProfileResolver, match models.AgentProfileMatcher) {
+	s.resolveProfile = resolve
+	s.matchProfile = match
 }
 
 // NewService creates a new workflow service
@@ -129,6 +137,15 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 	}
 
 	return nil, nil // No next step found (current step is the last one)
+}
+
+// GetWorkflowAgentProfileID returns the default agent profile ID for a workflow.
+func (s *Service) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return wf.AgentProfileID, nil
 }
 
 // GetPreviousStepByPosition returns the previous step before the given position for a workflow.
@@ -372,7 +389,7 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 		return nil, fmt.Errorf("failed to list steps: %w", err)
 	}
 	stepMap := map[string][]*models.WorkflowStep{wf.ID: steps}
-	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap), nil
+	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile), nil
 }
 
 // ExportWorkflows exports all workflows for a workspace.
@@ -389,7 +406,7 @@ func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string) (*mod
 		}
 		stepMap[wf.ID] = steps
 	}
-	return models.BuildWorkflowExport(workflows, stepMap), nil
+	return models.BuildWorkflowExport(workflows, stepMap, s.resolveProfile), nil
 }
 
 // ImportWorkflows imports workflows into a workspace. Deduplicates by name.
@@ -432,6 +449,13 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		return fmt.Errorf("create workflow: %w", err)
 	}
 
+	// Match workflow-level agent profile if present.
+	if pw.AgentProfile != nil && s.matchProfile != nil {
+		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
+			wf.AgentProfileID = profileID
+		}
+	}
+
 	// Generate UUIDs for all steps and build position→ID map.
 	posToID := make(map[int]string, len(pw.Steps))
 	for _, sp := range pw.Steps {
@@ -452,6 +476,10 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 			ShowInCommandPanel:    sp.ShowInCommandPanel,
 			AllowManualMove:       sp.AllowManualMove,
 			AutoArchiveAfterHours: sp.AutoArchiveAfterHours,
+		}
+		// Match step-level agent profile if present.
+		if sp.AgentProfile != nil && s.matchProfile != nil {
+			step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
 		}
 		if err := s.repo.CreateStep(ctx, step); err != nil {
 			return fmt.Errorf("create step %q: %w", sp.Name, err)

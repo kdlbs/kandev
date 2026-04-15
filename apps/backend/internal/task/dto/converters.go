@@ -19,6 +19,7 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		IsStartStep:           step.IsStartStep,
 		ShowInCommandPanel:    step.ShowInCommandPanel,
 		AutoArchiveAfterHours: step.AutoArchiveAfterHours,
+		AgentProfileID:        step.AgentProfileID,
 	}
 	if len(step.Events.OnEnter) > 0 || len(step.Events.OnTurnComplete) > 0 {
 		events := &StepEventsDTO{}

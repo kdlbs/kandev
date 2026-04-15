@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, memo, useMemo, useState } from "react";
-import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconLogicBuffer, IconUserCog } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -29,7 +30,12 @@ function InlineSteps({ steps }: { steps: StepItem[] }) {
 }
 
 type WorkflowSelectorRowProps = {
-  workflows: Array<{ id: string; name: string; description?: string | null }>;
+  workflows: Array<{
+    id: string;
+    name: string;
+    description?: string | null;
+    agent_profile_id?: string;
+  }>;
   snapshots: Record<string, WorkflowSnapshotData>;
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
@@ -88,6 +94,16 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
               <div className="flex items-center gap-2">
                 <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-sm">{wf.name}</span>
+                {wf.agent_profile_id && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <IconUserCog className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent>Custom agent profile</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </div>
               {steps.length > 0 && (
                 <div className="pl-[calc(0.875rem+0.5rem)]">

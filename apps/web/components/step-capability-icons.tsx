@@ -7,12 +7,14 @@ import {
   IconMessageForward,
   IconRefresh,
   IconRobot,
+  IconUserCog,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 
 type StepCapabilityIconsProps = {
   events?: KanbanStepEvents;
+  agentProfileId?: string;
   className?: string;
   fallback?: React.ReactNode;
 };
@@ -65,16 +67,32 @@ const CAPABILITIES: CapabilityDef[] = [
   },
 ];
 
-export function StepCapabilityIcons({ events, className, fallback }: StepCapabilityIconsProps) {
+export function StepCapabilityIcons({
+  events,
+  agentProfileId,
+  className,
+  fallback,
+}: StepCapabilityIconsProps) {
   const defaultClassName = "flex items-center gap-1.5 text-muted-foreground";
   const activeCapabilities = events ? CAPABILITIES.filter((cap) => cap.check(events)) : [];
+  const hasAgentProfile = Boolean(agentProfileId);
 
-  if (activeCapabilities.length === 0) {
+  if (activeCapabilities.length === 0 && !hasAgentProfile) {
     return fallback ? <div className={className ?? defaultClassName}>{fallback}</div> : null;
   }
 
   return (
     <div className={className ?? defaultClassName}>
+      {hasAgentProfile && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <IconUserCog className="h-3.5 w-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>Custom agent profile</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
       {activeCapabilities.map((cap) => {
         const IconComponent = cap.icon;
         return (

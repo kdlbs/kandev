@@ -19,33 +19,49 @@ type WorkflowExport struct {
 	Workflows []WorkflowPortable `json:"workflows" yaml:"workflows"`
 }
 
+// AgentProfilePortable stores enough agent profile info for cross-workspace matching.
+type AgentProfilePortable struct {
+	AgentName string `json:"agent_name" yaml:"agent_name"`
+	Model     string `json:"model,omitempty" yaml:"model,omitempty"`
+	Mode      string `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+// AgentProfileResolver resolves an agent profile ID to its portable representation.
+type AgentProfileResolver func(profileID string) *AgentProfilePortable
+
+// AgentProfileMatcher finds a matching agent profile ID by agent name, model, and mode.
+type AgentProfileMatcher func(agentName, model, mode string) string
+
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
-	Name        string         `json:"name" yaml:"name"`
-	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
-	Steps       []StepPortable `json:"steps" yaml:"steps"`
+	Name         string                `json:"name" yaml:"name"`
+	Description  string                `json:"description,omitempty" yaml:"description,omitempty"`
+	AgentProfile *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	Steps        []StepPortable        `json:"steps" yaml:"steps"`
 }
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                  string     `json:"name" yaml:"name"`
-	Position              int        `json:"position" yaml:"position"`
-	Color                 string     `json:"color" yaml:"color"`
-	Prompt                string     `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                StepEvents `json:"events" yaml:"events"`
-	IsStartStep           bool       `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel    bool       `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove       bool       `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	Name                  string                `json:"name" yaml:"name"`
+	Position              int                   `json:"position" yaml:"position"`
+	Color                 string                `json:"color" yaml:"color"`
+	Prompt                string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                StepEvents            `json:"events" yaml:"events"`
+	IsStartStep           bool                  `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel    bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove       bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile          *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
 // stepsByWorkflow maps workflow ID → its steps (ordered by position).
-func BuildWorkflowExport(workflows []*taskmodels.Workflow, stepsByWorkflow map[string][]*WorkflowStep) *WorkflowExport {
+// resolveProfile converts agent profile IDs to portable form (may be nil).
+func BuildWorkflowExport(workflows []*taskmodels.Workflow, stepsByWorkflow map[string][]*WorkflowStep, resolveProfile AgentProfileResolver) *WorkflowExport {
 	portable := make([]WorkflowPortable, 0, len(workflows))
 	for _, wf := range workflows {
 		steps := stepsByWorkflow[wf.ID]
-		portable = append(portable, buildWorkflowPortable(wf, steps))
+		portable = append(portable, buildWorkflowPortable(wf, steps, resolveProfile))
 	}
 	return &WorkflowExport{
 		Version:   ExportVersion,
@@ -54,7 +70,7 @@ func BuildWorkflowExport(workflows []*taskmodels.Workflow, stepsByWorkflow map[s
 	}
 }
 
-func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep) WorkflowPortable {
+func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resolveProfile AgentProfileResolver) WorkflowPortable {
 	portableSteps := make([]StepPortable, 0, len(steps))
 	// Build step ID → position map for converting move_to_step references.
 	idToPos := make(map[string]int, len(steps))
@@ -62,7 +78,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep) Workf
 		idToPos[s.ID] = s.Position
 	}
 	for _, s := range steps {
-		portableSteps = append(portableSteps, StepPortable{
+		sp := StepPortable{
 			Name:                  s.Name,
 			Position:              s.Position,
 			Color:                 s.Color,
@@ -72,13 +88,22 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep) Workf
 			ShowInCommandPanel:    s.ShowInCommandPanel,
 			AllowManualMove:       s.AllowManualMove,
 			AutoArchiveAfterHours: s.AutoArchiveAfterHours,
-		})
+		}
+		if resolveProfile != nil && s.AgentProfileID != "" {
+			sp.AgentProfile = resolveProfile(s.AgentProfileID)
+		}
+		portableSteps = append(portableSteps, sp)
 	}
-	return WorkflowPortable{
+
+	wp := WorkflowPortable{
 		Name:        wf.Name,
 		Description: wf.Description,
 		Steps:       portableSteps,
 	}
+	if resolveProfile != nil && wf.AgentProfileID != "" {
+		wp.AgentProfile = resolveProfile(wf.AgentProfileID)
+	}
+	return wp
 }
 
 // Validate checks that the export data is well-formed.

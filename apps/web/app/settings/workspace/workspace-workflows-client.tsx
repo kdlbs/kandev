@@ -207,7 +207,7 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string },
+    updates: { name?: string; description?: string; agent_profile_id?: string },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) => (wf.id === workflowId ? { ...wf, ...updates } : wf)),
@@ -234,8 +234,9 @@ function useWorkflowActions({
   const handleSaveWorkflow = async (workflowId: string) => {
     const workflow = workflowItems.find((item) => item.id === workflowId);
     if (!workflow) return;
-    const updates: { name?: string; description?: string } = {};
+    const updates: { name?: string; description?: string; agent_profile_id?: string } = {};
     if (workflow.name.trim()) updates.name = workflow.name.trim();
+    updates.agent_profile_id = workflow.agent_profile_id ?? "";
     if (Object.keys(updates).length) await updateWorkflowAction(workflowId, updates);
     setWorkflowItems((prev) =>
       prev.map((item) => (item.id === workflowId ? { ...item, ...updates } : item)),
@@ -298,7 +299,10 @@ type WorkflowListProps = {
   workspaceId: string;
   templateStepsById: Map<string, StepDefinition[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
-  onUpdate: (id: string, u: { name?: string; description?: string }) => void;
+  onUpdate: (
+    id: string,
+    u: { name?: string; description?: string; agent_profile_id?: string },
+  ) => void;
   onDelete: (id: string) => void;
   onSave: (id: string) => void;
   onCreated: (id: string, wf: Workflow) => void;

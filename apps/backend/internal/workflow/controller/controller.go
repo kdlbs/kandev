@@ -143,6 +143,7 @@ type UpdateStepRequest struct {
 	IsStartStep           *bool              `json:"is_start_step,omitempty"`
 	ShowInCommandPanel    *bool              `json:"show_in_command_panel,omitempty"`
 	AutoArchiveAfterHours *int               `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID        *string            `json:"agent_profile_id,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
@@ -177,6 +178,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	}
 	if req.AutoArchiveAfterHours != nil {
 		step.AutoArchiveAfterHours = *req.AutoArchiveAfterHours
+	}
+	if req.AgentProfileID != nil {
+		step.AgentProfileID = *req.AgentProfileID
 	}
 	if err := c.svc.UpdateStep(ctx, step); err != nil {
 		return nil, err

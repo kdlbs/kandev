@@ -16,6 +16,7 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
           name: workflow.name,
           description: workflow.description,
           sortOrder: workflow.sort_order ?? 0,
+          agent_profile_id: workflow.agent_profile_id,
         }));
         setWorkflows(mapped);
       })

@@ -6,7 +6,9 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { useAppStore } from "@/components/state-provider";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
@@ -28,7 +30,11 @@ type WorkflowCardProps = {
   initialWorkflowSteps?: WorkflowStep[];
   templateStepCount?: number;
   otherWorkflows?: Workflow[];
-  onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
+  onUpdateWorkflow: (updates: {
+    name?: string;
+    description?: string;
+    agent_profile_id?: string;
+  }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
   onSaveWorkflow: () => Promise<unknown>;
   onWorkflowCreated?: (created: Workflow) => void;
@@ -224,7 +230,11 @@ type WorkflowCardDialogsProps = {
 type WorkflowCardBodyProps = {
   workflow: Workflow;
   isWorkflowDirty: boolean;
-  onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
+  onUpdateWorkflow: (updates: {
+    name?: string;
+    description?: string;
+    agent_profile_id?: string;
+  }) => void;
   activeSaveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   handleSaveWorkflow: () => Promise<void>;
   workflowLoading: boolean;
@@ -247,6 +257,8 @@ function WorkflowCardBody({
   workflowSteps,
   stepActions,
 }: WorkflowCardBodyProps) {
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+
   return (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -268,6 +280,32 @@ function WorkflowCardBody({
             />
           </div>
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Default Agent Profile</Label>
+        <Select
+          value={workflow.agent_profile_id ?? "none"}
+          onValueChange={(value) =>
+            onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
+          }
+        >
+          <SelectTrigger className="w-[320px] cursor-pointer">
+            <SelectValue placeholder="None (use task default)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none" className="cursor-pointer">
+              None (use task default)
+            </SelectItem>
+            {agentProfiles.map((p) => (
+              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">
+          When set, new tasks using this workflow will default to this agent profile.
+        </p>
       </div>
       <div className="space-y-2">
         <Label>Workflow Steps</Label>

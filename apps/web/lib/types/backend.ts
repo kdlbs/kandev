@@ -179,6 +179,7 @@ export type WorkflowPayload = {
   workspace_id: string;
   name: string;
   description?: string;
+  agent_profile_id?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -196,6 +197,7 @@ export type StepPayload = {
   allow_manual_move?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
+  agent_profile_id?: string;
   created_at?: string;
   updated_at?: string;
 };

@@ -134,6 +134,7 @@ function PipelineNode({
         </div>
         <StepCapabilityIcons
           events={step.events}
+          agentProfileId={step.agent_profile_id}
           fallback={<span className="text-xs text-muted-foreground/50">manual</span>}
         />
       </div>
