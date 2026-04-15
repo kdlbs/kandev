@@ -325,7 +325,7 @@ function SortableWorkflowItem({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className="relative">
+    <div ref={setNodeRef} style={style} className="relative min-w-0">
       <div
         className="absolute left-0 top-6 -ml-8 flex items-center cursor-grab active:cursor-grabbing z-10"
         data-testid={`workflow-drag-handle-${workflow.id}`}
@@ -373,7 +373,7 @@ function WorkflowList({
         items={workflowItems.map((wf) => wf.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="grid gap-3 pl-8">
+        <div className="grid min-w-0 gap-3 pl-8">
           {workflowItems.map((workflow) => {
             const isTempWorkflow = workflow.id.startsWith("temp-");
             const templateSteps =
