@@ -87,9 +87,7 @@ test.describe("Workflow agent profile", () => {
 
     // The step node should have a UserCog icon indicating a custom agent profile
     const reloadedStepNode = page.stepNodeByName(reloadedCard, firstStepName!);
-    await expect(
-      reloadedStepNode.locator(".tabler-icon-user-cog"),
-    ).toBeVisible();
+    await expect(reloadedStepNode.locator(".tabler-icon-user-cog")).toBeVisible();
   });
 
   test("task creation dialog locks agent selector when workflow has agent profile", async ({

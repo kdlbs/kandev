@@ -303,9 +303,7 @@ export function DialogPromptSection({
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
         disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={
-          isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined
-        }
+        placeholder={isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
