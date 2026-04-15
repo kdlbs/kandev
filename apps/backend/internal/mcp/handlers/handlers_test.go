@@ -78,14 +78,20 @@ func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
-	mu  sync.Mutex
-	req *orchestrator.LaunchSessionRequest
+	mu     sync.Mutex
+	req    *orchestrator.LaunchSessionRequest
+	called chan struct{}
+}
+
+func newMockSessionLauncher() *mockSessionLauncher {
+	return &mockSessionLauncher{called: make(chan struct{})}
 }
 
 func (m *mockSessionLauncher) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.req = req
+	m.mu.Unlock()
+	close(m.called)
 	return &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -100,7 +106,7 @@ func (m *mockSessionLauncher) getRequest() *orchestrator.LaunchSessionRequest {
 }
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
-	launcher := &mockSessionLauncher{}
+	launcher := newMockSessionLauncher()
 	log := testLogger(t)
 	h := &Handlers{
 		sessionLauncher: launcher,
@@ -115,10 +121,11 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	// Call with agent profile but no executor info
 	h.autoStartTask(task, "agent-profile-1", "")
 
-	// autoStartTask runs in a goroutine; wait for it
-	require.Eventually(t, func() bool {
-		return launcher.getRequest() != nil
-	}, 2*time.Second, 50*time.Millisecond)
+	select {
+	case <-launcher.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession was not called within timeout")
+	}
 
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-worktree", req.ExecutorID, "should default to exec-worktree")
@@ -127,7 +134,7 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 }
 
 func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
-	launcher := &mockSessionLauncher{}
+	launcher := newMockSessionLauncher()
 	log := testLogger(t)
 	h := &Handlers{
 		sessionLauncher: launcher,
@@ -142,9 +149,11 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	// Call with explicit executor profile
 	h.autoStartTask(task, "agent-profile-1", "exec-profile-docker")
 
-	require.Eventually(t, func() bool {
-		return launcher.getRequest() != nil
-	}, 2*time.Second, 50*time.Millisecond)
+	select {
+	case <-launcher.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession was not called within timeout")
+	}
 
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")

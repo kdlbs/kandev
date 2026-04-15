@@ -341,7 +341,10 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// so the new task is associated with the same codebase.
 	if req.ParentID == "" && req.SourceTaskID != "" && len(inheritedRepos) == 0 {
 		sourceTask, err := h.taskSvc.GetTask(ctx, req.SourceTaskID)
-		if err == nil {
+		if err != nil {
+			h.logger.Warn("source task not found, skipping repo inheritance",
+				zap.String("source_task_id", req.SourceTaskID), zap.Error(err))
+		} else {
 			for _, r := range sourceTask.Repositories {
 				inheritedRepos = append(inheritedRepos, service.TaskRepositoryInput{
 					RepositoryID:   r.RepositoryID,
@@ -382,7 +385,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 // autoStartTask launches an agent session for a newly created task in the background.
 // It resolves the agent profile: explicit > parent's session > workspace default.
 // It resolves the executor: explicit executor_profile_id > parent's executor_profile_id >
-// parent's executor_id (fallback for sessions that have no profile).
+// parent's executor_id > "exec-worktree" (default for MCP-created tasks).
 func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID string) {
 	if h.sessionLauncher == nil {
 		return
