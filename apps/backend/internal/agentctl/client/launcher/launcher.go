@@ -151,16 +151,14 @@ func (l *Launcher) Start(ctx context.Context) error {
 	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.
 	l.cmd.SysProcAttr = buildSysProcAttr()
 
-	// Parent liveness pipe: agentctl inherits the read-end (FD 3 via ExtraFiles)
-	// and blocks on it. When this process dies — even via SIGKILL — the kernel
-	// closes the write-end, breaking the pipe. agentctl detects the break and
-	// initiates graceful shutdown. This is the portable equivalent of Pdeathsig.
-	pipeRead, pipeWrite, err := os.Pipe()
+	// Parent liveness pipe (Unix only): agentctl inherits the read-end via
+	// ExtraFiles and blocks on it. When the parent dies the kernel closes the
+	// write-end, signaling agentctl to shut down. On Windows this is a no-op
+	// because ExtraFiles is not supported; cleanup relies on gracefulStop.
+	pipeWrite, err := setupLivenessPipe(l.cmd)
 	if err != nil {
-		return fmt.Errorf("failed to create parent liveness pipe: %w", err)
+		return err
 	}
-	l.cmd.ExtraFiles = []*os.File{pipeRead} // child FD 3
-	l.cmd.Env = append(l.cmd.Env, "KANDEV_PARENT_PIPE_FD=3")
 
 	// Capture stdout and stderr
 	stdout, err := l.cmd.StdoutPipe()
@@ -174,14 +172,13 @@ func (l *Launcher) Start(ctx context.Context) error {
 
 	// Start the process
 	if err := l.cmd.Start(); err != nil {
-		_ = pipeRead.Close()
-		_ = pipeWrite.Close()
+		closePipeOnStartFailure(pipeWrite, l.cmd)
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
 
 	// Close read-end in parent (child inherited it). Keep write-end open —
 	// it closes automatically when this process exits, signaling agentctl.
-	_ = pipeRead.Close()
+	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
 
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
