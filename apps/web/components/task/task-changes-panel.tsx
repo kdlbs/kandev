@@ -48,7 +48,10 @@ function addUncommittedFiles(
 ) {
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff) {
+    const skipReason = (file as Record<string, unknown>).diff_skip_reason as
+      | ReviewFile["diff_skip_reason"]
+      | undefined;
+    if (diff || skipReason) {
       fileMap.set(path, {
         path,
         diff,
@@ -57,6 +60,7 @@ function addUncommittedFiles(
         deletions: file.deletions ?? 0,
         staged: file.staged ?? false,
         source: "uncommitted",
+        diff_skip_reason: skipReason,
       });
     }
   }

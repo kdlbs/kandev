@@ -225,6 +225,8 @@ func (p *EventPublisher) PublishGitEvent(payload *GitEventPayload) {
 }
 
 // PublishGitStatus publishes a git status update event.
+// Diff content is stripped from Files before publishing — the frontend receives
+// diffs directly via the workspace stream, not through the event bus path.
 func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	p.PublishGitEvent(&GitEventPayload{
 		Type:      GitEventTypeStatusUpdate,
@@ -244,11 +246,24 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 			Renamed:         update.Renamed,
 			Ahead:           update.Ahead,
 			Behind:          update.Behind,
-			Files:           update.Files,
+			Files:           stripDiffContent(update.Files),
 			BranchAdditions: update.BranchAdditions,
 			BranchDeletions: update.BranchDeletions,
 		},
 	})
+}
+
+// stripDiffContent returns a copy of the files map with Diff content cleared.
+func stripDiffContent(files map[string]streams.FileInfo) map[string]streams.FileInfo {
+	if len(files) == 0 {
+		return files
+	}
+	stripped := make(map[string]streams.FileInfo, len(files))
+	for path, fi := range files {
+		fi.Diff = ""
+		stripped[path] = fi
+	}
+	return stripped
 }
 
 // PublishGitCommit publishes a git commit created event.

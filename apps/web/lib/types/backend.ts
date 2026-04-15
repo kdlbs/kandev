@@ -264,6 +264,7 @@ export type FileInfo = {
   deletions?: number;
   old_path?: string;
   diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
 };
 
 export type ProcessOutputPayload = {

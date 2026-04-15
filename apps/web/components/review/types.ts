@@ -8,6 +8,7 @@ export type ReviewFile = {
   deletions: number;
   staged: boolean;
   source: "uncommitted" | "committed" | "pr";
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
 };
 
 export type FileTreeNode = {

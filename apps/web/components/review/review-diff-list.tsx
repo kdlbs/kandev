@@ -36,6 +36,21 @@ function isMarkdownPath(filePath: string): boolean {
   return ext === "md" || ext === "mdx";
 }
 
+function diffSkipReasonLabel(reason?: string): string {
+  switch (reason) {
+    case "too_large":
+      return "File too large to diff (>10 MB)";
+    case "binary":
+      return "Binary file — not diffable";
+    case "truncated":
+      return "Diff truncated (>256 KB)";
+    case "budget_exceeded":
+      return "Diff skipped — too many changed files";
+    default:
+      return "Loading diff...";
+  }
+}
+
 type ReviewDiffListProps = {
   files: ReviewFile[];
   reviewedFiles: Set<string>;
@@ -546,7 +561,7 @@ function FileDiffSection({
           />
         ) : (
           <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-            Loading diff...
+            {diffSkipReasonLabel(file.diff_skip_reason)}
           </div>
         ))}
     </div>

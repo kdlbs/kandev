@@ -78,6 +78,10 @@ type FileInfo struct {
 
 	// Diff contains the unified diff content for this file.
 	Diff string `json:"diff,omitempty"`
+
+	// DiffSkipReason explains why diff content was omitted or truncated.
+	// Values: "too_large", "binary", "truncated", "budget_exceeded".
+	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
 }
 
 // GitCommitNotification is sent when a new commit is detected in the workspace.

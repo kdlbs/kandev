@@ -3,6 +3,9 @@ package api
 
 import (
 	"net/http"
+	"net/http/pprof"
+	"os"
+	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -155,6 +158,11 @@ func (s *Server) setupRoutes() {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 	}
+
+	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
+	if os.Getenv("KANDEV_DEBUG_PPROF_ENABLED") == "true" {
+		s.registerPprofRoutes()
+	}
 }
 
 // Health check response
@@ -168,6 +176,36 @@ func (s *Server) handleHealth(c *gin.Context) {
 		Status:    "ok",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+func (s *Server) registerPprofRoutes() {
+	g := s.router.Group("/debug/pprof")
+	g.GET("/", gin.WrapF(pprof.Index))
+	g.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+	g.GET("/profile", gin.WrapF(pprof.Profile))
+	g.GET("/symbol", gin.WrapF(pprof.Symbol))
+	g.POST("/symbol", gin.WrapF(pprof.Symbol))
+	g.GET("/trace", gin.WrapF(pprof.Trace))
+	for _, name := range []string{"allocs", "block", "goroutine", "heap", "mutex", "threadcreate"} {
+		g.GET("/"+name, gin.WrapH(pprof.Handler(name)))
+	}
+
+	s.router.GET("/api/v1/debug/memory", func(c *gin.Context) {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		c.JSON(http.StatusOK, gin.H{
+			"heap_alloc_mb":  float64(m.HeapAlloc) / (1024 * 1024),
+			"heap_inuse_mb":  float64(m.HeapInuse) / (1024 * 1024),
+			"heap_sys_mb":    float64(m.HeapSys) / (1024 * 1024),
+			"heap_objects":   m.HeapObjects,
+			"goroutines":     runtime.NumGoroutine(),
+			"num_gc":         m.NumGC,
+			"sys_mb":         float64(m.Sys) / (1024 * 1024),
+			"stack_inuse_mb": float64(m.StackInuse) / (1024 * 1024),
+		})
+	})
+
+	s.logger.Info("pprof endpoints registered at /debug/pprof/")
 }
 
 // handleSetMcpMode changes the MCP tool mode for this instance.
