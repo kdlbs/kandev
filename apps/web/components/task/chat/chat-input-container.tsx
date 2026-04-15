@@ -3,7 +3,9 @@
 import { forwardRef, useCallback, useState } from "react";
 import { IconAlertTriangle, IconPlus, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
+import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
@@ -93,6 +95,15 @@ function FailedSessionBanner({
 }) {
   const [isResuming, setIsResuming] = useState(false);
 
+  const agentProfileId = useAppStore((s) =>
+    sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
+  );
+  const profileExists = useAppStore(
+    (s) =>
+      agentProfileId !== "" &&
+      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
+  );
+
   const handleResume = useCallback(async () => {
     if (!sessionId || !taskId) return;
     const client = getWebSocketClient();
@@ -119,16 +130,24 @@ function FailedSessionBanner({
           </div>
           <div className="flex items-center gap-2">
             {sessionId && taskId && (
-              <Button
-                variant="default"
-                size="sm"
-                className="shrink-0 gap-1.5 cursor-pointer"
-                onClick={handleResume}
-                disabled={isResuming}
-              >
-                <IconPlayerPlay className="h-3.5 w-3.5" />
-                {isResuming ? "Resuming..." : "Resume"}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex" data-testid="failed-session-resume-wrapper">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      data-testid="failed-session-resume-button"
+                      className="shrink-0 gap-1.5 cursor-pointer"
+                      onClick={handleResume}
+                      disabled={isResuming || !profileExists}
+                    >
+                      <IconPlayerPlay className="h-3.5 w-3.5" />
+                      {isResuming ? "Resuming..." : "Resume"}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!profileExists && <TooltipContent>Agent profile no longer exists</TooltipContent>}
+              </Tooltip>
             )}
             <Button
               variant="outline"

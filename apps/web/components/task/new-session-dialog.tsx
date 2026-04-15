@@ -71,7 +71,22 @@ function useNewSessionDialogState(taskId: string) {
     return executor?.name ?? null;
   });
 
-  return { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel };
+  const sessionProfileId = currentSession?.agent_profile_id ?? "";
+  const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
+  const effectiveDefaultProfileId: string = profileIsValid
+    ? sessionProfileId
+    : (agentProfiles[0]?.id ?? "");
+
+  return {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    sessionProfileId,
+    effectiveDefaultProfileId,
+  };
 }
 
 function activateNewSession(
@@ -111,6 +126,7 @@ function useSessionOptions(taskId: string) {
 function NewSessionForm({
   taskId,
   defaultProfileId,
+  initialProfileId,
   executorId,
   executorLabel,
   worktreeBranch,
@@ -121,6 +137,7 @@ function NewSessionForm({
 }: {
   taskId: string;
   defaultProfileId: string;
+  initialProfileId?: string;
   executorId: string;
   executorLabel: string | null;
   worktreeBranch: string | null;
@@ -134,7 +151,7 @@ function NewSessionForm({
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
-  const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
+  const [selectedProfileId, setSelectedProfileId] = useState(initialProfileId ?? defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
@@ -167,6 +184,12 @@ function NewSessionForm({
       }
     });
   }, [enhancePrompt]);
+  const hasProfiles = profileOptions.length > 0;
+  const showAgentSelector =
+    hasProfiles &&
+    (profileOptions.length > 1 ||
+      (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
+  const isBusy = isCreating || isSummarizing;
 
   const handleContextChange = useCallback(
     async (value: string) => {
@@ -207,7 +230,7 @@ function NewSessionForm({
       if (!prompt) return;
       setIsCreating(true);
       try {
-        const { request } = buildStartRequest(taskId, selectedProfileId || defaultProfileId, {
+        const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
           attachments: toMessageAttachments(attachments),
@@ -216,9 +239,7 @@ function NewSessionForm({
         if (!response.session_id) {
           throw new Error("Session created but no session ID returned");
         }
-        const profile = agentProfiles.find(
-          (p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId),
-        );
+        const profile = agentProfiles.find((p: AgentProfileOption) => p.id === selectedProfileId);
         activateNewSession(
           response.session_id,
           taskId,
@@ -240,7 +261,6 @@ function NewSessionForm({
     [
       taskId,
       selectedProfileId,
-      defaultProfileId,
       executorId,
       contextValue,
       initialPrompt,
@@ -253,17 +273,20 @@ function NewSessionForm({
     ],
   );
 
-  const showSessions = sessionOptions;
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      {profileOptions.length > 1 && (
+      {!hasProfiles && (
+        <p className="text-xs text-center text-muted-foreground">
+          No agent profiles configured. Add one in Settings → Agents first.
+        </p>
+      )}
+      {showAgentSelector && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
             options={profileOptions}
-            value={selectedProfileId || defaultProfileId}
+            value={selectedProfileId}
             onValueChange={setSelectedProfileId}
             disabled={isCreating}
             placeholder="Select agent profile"
@@ -274,7 +297,7 @@ function NewSessionForm({
         value={contextValue}
         onValueChange={handleContextChange}
         hasInitialPrompt={!!initialPrompt}
-        sessionOptions={showSessions}
+        sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
       />
       <div
@@ -290,18 +313,24 @@ function NewSessionForm({
             placeholder="What should the agent work on?"
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
             autoFocus
-            disabled={isCreating || isSummarizing}
+            disabled={isBusy}
             onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !isBusy &&
+                hasPrompt &&
+                hasProfiles
+              ) {
                 e.preventDefault();
                 handleSubmit(e);
               }
             }}
           />
           <div className="flex items-center px-1 pb-1">
-            <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
+            <AttachButton onClick={handleAttachClick} disabled={isBusy} />
             <EnhancePromptButton
               onClick={handleEnhancePrompt}
               isLoading={isEnhancingPrompt}
@@ -343,7 +372,7 @@ function NewSessionForm({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt}
+          disabled={isBusy || !hasPrompt || !hasProfiles}
           className="cursor-pointer"
         >
           {isCreating ? "Creating..." : "Start Agent"}
@@ -354,8 +383,16 @@ function NewSessionForm({
 }
 
 export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSessionDialogProps) {
-  const { taskTitle, agentProfiles, currentSession, worktreeBranch, initialPrompt, executorLabel } =
-    useNewSessionDialogState(taskId);
+  const {
+    taskTitle,
+    agentProfiles,
+    currentSession,
+    worktreeBranch,
+    initialPrompt,
+    executorLabel,
+    sessionProfileId,
+    effectiveDefaultProfileId,
+  } = useNewSessionDialogState(taskId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -368,7 +405,8 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
         <NewSessionForm
           key={`${open}`}
           taskId={taskId}
-          defaultProfileId={currentSession?.agent_profile_id ?? ""}
+          defaultProfileId={sessionProfileId}
+          initialProfileId={effectiveDefaultProfileId}
           executorId={currentSession?.executor_id ?? ""}
           executorLabel={executorLabel}
           worktreeBranch={worktreeBranch}
