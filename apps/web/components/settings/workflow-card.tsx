@@ -289,7 +289,7 @@ function WorkflowCardBody({
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }
           >
-            <SelectTrigger className="w-full cursor-pointer">
+            <SelectTrigger className="w-full cursor-pointer" data-testid="workflow-agent-profile-select">
               <SelectValue placeholder="None (use task default)" />
             </SelectTrigger>
             <SelectContent>

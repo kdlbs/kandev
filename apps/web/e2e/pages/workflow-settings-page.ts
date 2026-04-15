@@ -114,20 +114,14 @@ export class WorkflowSettingsPage {
     await expect(this.createDialog).not.toBeVisible();
   }
 
-  /** The "Default Agent Profile" select trigger within a workflow card. */
+  /** The workflow-level agent profile select trigger within a workflow card. */
   workflowAgentProfileSelect(card: Locator): Locator {
-    return card
-      .locator("div")
-      .filter({ has: this.page.getByText("Default Agent Profile") })
-      .locator("button[role='combobox']");
+    return card.getByTestId("workflow-agent-profile-select");
   }
 
-  /** The "Agent Profile Override" select trigger in the step config panel within a workflow card. */
+  /** The step agent profile override select trigger in the step config panel within a workflow card. */
   stepAgentProfileSelect(card: Locator): Locator {
-    return card
-      .locator("div")
-      .filter({ has: this.page.getByText("Agent Profile Override") })
-      .locator("button[role='combobox']");
+    return card.getByTestId("step-agent-profile-select");
   }
 
   /** Hover over a step node to reveal the trash button, then click it. */

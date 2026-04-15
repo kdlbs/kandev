@@ -102,7 +102,7 @@ function StepConfigHeader({
                   }}
                   disabled={readOnly}
                 >
-                  <SelectTrigger className="w-[220px] h-8 cursor-pointer">
+                  <SelectTrigger className="w-[220px] h-8 cursor-pointer" data-testid="step-agent-profile-select">
                     <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <SelectValue placeholder="No profile override" />
                   </SelectTrigger>
