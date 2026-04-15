@@ -68,6 +68,7 @@ export function ScriptEditor({
   lineNumbers = "on",
 }: ScriptEditorProps) {
   const mountedRef = useRef(false);
+  const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
 
   useEffect(() => {
     return () => {
@@ -78,12 +79,21 @@ export function ScriptEditor({
     };
   }, []);
 
+  // Re-register provider when placeholders arrive after Monaco has already mounted
+  useEffect(() => {
+    if (monacoRef.current && placeholders && placeholders.length > 0) {
+      if (!mountedRef.current) mountedRef.current = true;
+      registerProvider(monacoRef.current, language, placeholders, executorType);
+    }
+  }, [placeholders, executorType, language]);
+
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
   }, []);
 
   const handleMount: OnMount = useCallback(
     (_editor, monaco) => {
+      monacoRef.current = monaco;
       if (placeholders && placeholders.length > 0) {
         mountedRef.current = true;
         registerProvider(monaco, language, placeholders, executorType);

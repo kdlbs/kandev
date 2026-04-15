@@ -5,7 +5,6 @@ import { IconRobot, IconTrash } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -13,6 +12,8 @@ import type { WorkflowStep } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
+import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   HelpTip,
   STEP_COLORS,
@@ -25,6 +26,15 @@ import {
   TurnStartSelect,
   TurnCompleteSelect,
 } from "./workflow-pipeline-editor-step-actions";
+
+const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
+  {
+    key: "task_prompt",
+    description: "The original task description provided by the user",
+    example: "Implement user authentication with OAuth2",
+    executor_types: [],
+  },
+];
 
 // --- StepConfigHeader ---
 
@@ -422,25 +432,25 @@ function StepPromptSection({
           ))}
         </div>
       )}
-      <Textarea
-        id={`${step.id}-prompt`}
-        value={localPrompt}
-        onChange={(e) => {
-          if (readOnly) return;
-          onLocalPromptChange(e.target.value);
-          debouncedUpdatePrompt(e.target.value);
-        }}
-        placeholder={
-          "Instructions for the agent on this step.\nUse {{task_prompt}} to include the task description."
-        }
-        rows={3}
-        disabled={readOnly}
-        className="font-mono text-xs overflow-y-auto resize-y!"
-      />
+      <div className="rounded-md border overflow-hidden">
+        <ScriptEditor
+          value={localPrompt}
+          onChange={(v) => {
+            if (readOnly) return;
+            onLocalPromptChange(v);
+            debouncedUpdatePrompt(v);
+          }}
+          language="plaintext"
+          height="100px"
+          lineNumbers="off"
+          readOnly={readOnly}
+          placeholders={STEP_PROMPT_PLACEHOLDERS}
+        />
+      </div>
       <p className="text-[11px] text-muted-foreground/60">
-        If set, this prompt will be used instead of the task description. Use{" "}
+        Type {"{{"} to see available placeholders. Use{" "}
         <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code> to
-        include the original task description within it.
+        include the original task description.
       </p>
     </div>
   );
