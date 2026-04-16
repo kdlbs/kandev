@@ -30,7 +30,9 @@ type GitHubService interface {
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
-	RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error
+	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
+	AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error
+	ReleaseReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int) error
 }
 
 // ReviewTaskCreator creates tasks from review watch events.
@@ -125,6 +127,29 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 		zap.String("base_branch", pr.BaseBranch),
 		zap.String("review_watch_id", evt.ReviewWatchID))
 
+	// Atomically claim the dedup slot BEFORE the slow clone + task creation
+	// so two concurrent events for the same PR cannot both produce a task.
+	// Without this, the previous flow checked-then-wrote the dedup row after
+	// task creation completed (10-30s window), which allowed duplicates.
+	if s.githubService != nil {
+		reserved, reserveErr := s.githubService.ReserveReviewPRTask(
+			ctx, evt.ReviewWatchID, pr.RepoOwner, pr.RepoName, pr.Number, pr.HTMLURL,
+		)
+		if reserveErr != nil {
+			s.logger.Error("failed to reserve review PR slot",
+				zap.String("review_watch_id", evt.ReviewWatchID),
+				zap.Int("pr_number", pr.Number),
+				zap.Error(reserveErr))
+			return
+		}
+		if !reserved {
+			s.logger.Debug("review PR already reserved by concurrent handler, skipping",
+				zap.String("review_watch_id", evt.ReviewWatchID),
+				zap.Int("pr_number", pr.Number))
+			return
+		}
+	}
+
 	title := fmt.Sprintf("PR #%d: %s", pr.Number, pr.Title)
 	description := interpolateReviewPrompt(evt.Prompt, pr)
 
@@ -154,18 +179,28 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 			zap.String("review_watch_id", evt.ReviewWatchID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(err))
+		// Release the reservation so a later poll can retry this PR.
+		if s.githubService != nil {
+			if relErr := s.githubService.ReleaseReviewPRTask(
+				ctx, evt.ReviewWatchID, pr.RepoOwner, pr.RepoName, pr.Number,
+			); relErr != nil {
+				s.logger.Warn("failed to release review PR reservation after task-create failure",
+					zap.Int("pr_number", pr.Number),
+					zap.Error(relErr))
+			}
+		}
 		return
 	}
 
-	// Record dedup entry so this PR won't be picked up again
+	// Attach the task ID to the reservation so cleanup can locate the task.
 	if s.githubService != nil {
-		if recordErr := s.githubService.RecordReviewPRTask(
-			ctx, evt.ReviewWatchID, pr.RepoOwner, pr.RepoName, pr.Number, pr.HTMLURL, task.ID,
-		); recordErr != nil {
-			s.logger.Error("failed to record review PR task",
+		if assignErr := s.githubService.AssignReviewPRTaskID(
+			ctx, evt.ReviewWatchID, pr.RepoOwner, pr.RepoName, pr.Number, task.ID,
+		); assignErr != nil {
+			s.logger.Error("failed to assign task ID to review PR reservation",
 				zap.String("task_id", task.ID),
 				zap.Int("pr_number", pr.Number),
-				zap.Error(recordErr))
+				zap.Error(assignErr))
 		}
 
 		// Associate PR with task so the frontend can display PR info

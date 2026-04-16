@@ -771,7 +771,12 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		zap.String("watch_id", watch.ID),
 		zap.Int("total_prs", len(prs)))
 
-	// Filter out PRs we already created tasks for
+	// Pre-filter PRs that are already tracked. This is a best-effort check
+	// that avoids publishing events for PRs that clearly have tasks; it does
+	// NOT need to be race-free, because the orchestrator's createReviewTask
+	// atomically reserves the dedup slot before doing any task-creation work
+	// (see ReserveReviewPRTask). So a race here at most causes an extra event
+	// that the reservation step will drop.
 	var newPRs []*PR
 	for _, pr := range prs {
 		exists, err := s.store.HasReviewPRTask(ctx, watch.ID, pr.RepoOwner, pr.RepoName, pr.Number)
@@ -955,17 +960,27 @@ func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]R
 	return s.client.ListRepoBranches(ctx, owner, repo)
 }
 
-// RecordReviewPRTask records that a task was created for a review PR.
-func (s *Service) RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error {
-	rpt := &ReviewPRTask{
-		ReviewWatchID: watchID,
-		RepoOwner:     repoOwner,
-		RepoName:      repoName,
-		PRNumber:      prNumber,
-		PRURL:         prURL,
-		TaskID:        taskID,
-	}
-	return s.store.CreateReviewPRTask(ctx, rpt)
+// ReserveReviewPRTask atomically claims the dedup slot for a (watch, repo, PR)
+// tuple before task creation begins. Returns true if this caller won and
+// should proceed to create the task, false if another caller already holds
+// the slot (duplicate, skip). This closes the race window that existed when
+// the dedup row was only written AFTER the slow clone + task-creation work,
+// which could produce duplicate tasks when two pollers or events raced.
+func (s *Service) ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error) {
+	return s.store.ReserveReviewPRTask(ctx, watchID, repoOwner, repoName, prNumber, prURL)
+}
+
+// AssignReviewPRTaskID attaches a task ID to a previously reserved slot so
+// downstream cleanup (CleanupMergedReviewTasks) can locate and delete the
+// task when its PR is merged or closed.
+func (s *Service) AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error {
+	return s.store.AssignReviewPRTaskID(ctx, watchID, repoOwner, repoName, prNumber, taskID)
+}
+
+// ReleaseReviewPRTask removes a reservation when task creation fails, so a
+// later poll can retry this PR instead of it being blocked by an orphan row.
+func (s *Service) ReleaseReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int) error {
+	return s.store.ReleaseReviewPRTask(ctx, watchID, repoOwner, repoName, prNumber)
 }
 
 // CleanupMergedReviewTasks checks PRs tracked by a review watch and deletes

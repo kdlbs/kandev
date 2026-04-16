@@ -449,6 +449,48 @@ func (s *Store) HasReviewPRTask(ctx context.Context, reviewWatchID, repoOwner, r
 	return count > 0, err
 }
 
+// ReserveReviewPRTask atomically claims a slot for a (watch, repo, PR) tuple
+// using INSERT OR IGNORE against the UNIQUE constraint. Returns true if this
+// caller won the race and should proceed to create the task, false if another
+// caller already holds the slot. The caller is expected to call
+// AssignReviewPRTaskID once the task is created, or ReleaseReviewPRTask if
+// task creation fails.
+func (s *Store) ReserveReviewPRTask(ctx context.Context, reviewWatchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO github_review_pr_tasks (id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), reviewWatchID, repoOwner, repoName, prNumber, prURL, "", time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
+// AssignReviewPRTaskID sets the task_id on a reserved dedup row. Called after
+// the task has been created so cleanup logic can locate and delete it later.
+func (s *Store) AssignReviewPRTaskID(ctx context.Context, reviewWatchID, repoOwner, repoName string, prNumber int, taskID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE github_review_pr_tasks SET task_id = ?
+		WHERE review_watch_id = ? AND repo_owner = ? AND repo_name = ? AND pr_number = ?`,
+		taskID, reviewWatchID, repoOwner, repoName, prNumber)
+	return err
+}
+
+// ReleaseReviewPRTask removes a reservation for a (watch, repo, PR) tuple.
+// Used when task creation fails so a later poll can retry instead of the PR
+// being permanently blocked by an orphan reservation.
+func (s *Store) ReleaseReviewPRTask(ctx context.Context, reviewWatchID, repoOwner, repoName string, prNumber int) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM github_review_pr_tasks
+		WHERE review_watch_id = ? AND repo_owner = ? AND repo_name = ? AND pr_number = ?`,
+		reviewWatchID, repoOwner, repoName, prNumber)
+	return err
+}
+
 // ListReviewPRTasksByWatch lists all dedup records for a given review watch.
 func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewPRTask, error) {
 	var tasks []*ReviewPRTask
