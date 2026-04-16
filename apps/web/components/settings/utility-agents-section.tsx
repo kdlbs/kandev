@@ -20,7 +20,7 @@ import {
 
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
-    ia.models.map((m) => ({
+    (ia.models ?? []).map((m) => ({
       value: `${ia.id}|${m.id}`,
       label: `${ia.display_name} / ${m.name}`,
       agentName: ia.display_name,

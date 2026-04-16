@@ -199,7 +199,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
   // Auto-select default model when agent changes
   useEffect(() => {
     if (selectedAgent && !form.model) {
-      const defaultModel = selectedAgent.models.find((m) => m.is_default);
+      const defaultModel = (selectedAgent.models ?? []).find((m) => m.is_default);
       if (defaultModel) {
         setForm((f) => ({ ...f, model: defaultModel.id }));
       }

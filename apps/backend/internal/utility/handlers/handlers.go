@@ -27,9 +27,11 @@ type InferenceExecutor interface {
 }
 
 // HostUtilityExecutor runs sessionless utility prompts via the long-lived
-// per-agent-type host agentctl instances.
+// per-agent-type host agentctl instances and exposes the cached per-agent
+// capabilities (models, modes) populated by the boot-time ACP probe.
 type HostUtilityExecutor interface {
 	ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (*hostutility.PromptResult, error)
+	Get(agentType string) (hostutility.AgentCapabilities, bool)
 }
 
 // UserSettingsProvider provides user settings for default utility agent/model.
@@ -310,15 +312,27 @@ func (h *Handlers) httpListCalls(c *gin.Context) {
 func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 	inferenceAgents := h.executor.ListInferenceAgentsWithContext(c.Request.Context())
 
-	// Convert to DTO. Models are no longer listed per-agent here — the
-	// frontend should read them from the host utility capability cache via
-	// GET /api/v1/agents/:type/capabilities.
+	// Populate each agent's models from the host utility capability cache
+	// (boot-time ACP probe). If the probe hasn't completed yet, Models stays
+	// an empty slice — never nil — so the frontend can safely iterate.
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
 	for _, ia := range inferenceAgents {
+		models := []dto.InferenceModelDTO{}
+		if caps, ok := h.hostExecutor.Get(ia.Name); ok {
+			for _, m := range caps.Models {
+				models = append(models, dto.InferenceModelDTO{
+					ID:          m.ID,
+					Name:        m.Name,
+					Description: m.Description,
+					IsDefault:   m.ID == caps.CurrentModelID,
+				})
+			}
+		}
 		result = append(result, dto.InferenceAgentDTO{
 			ID:          ia.ID,
 			Name:        ia.Name,
 			DisplayName: ia.DisplayName,
+			Models:      models,
 		})
 	}
 	c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})
