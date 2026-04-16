@@ -29,26 +29,12 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
+import { diffSkipReasonLabel } from "./types";
 import type { ReviewFile } from "./types";
 
 function isMarkdownPath(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase();
   return ext === "md" || ext === "mdx";
-}
-
-function diffSkipReasonLabel(reason?: string): string {
-  switch (reason) {
-    case "too_large":
-      return "File too large to diff (>10 MB)";
-    case "binary":
-      return "Binary file — not diffable";
-    case "truncated":
-      return "Diff truncated (>256 KB)";
-    case "budget_exceeded":
-      return "Diff skipped — too many changed files";
-    default:
-      return "Loading diff...";
-  }
 }
 
 type ReviewDiffListProps = {
