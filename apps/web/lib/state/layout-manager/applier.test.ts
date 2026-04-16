@@ -57,4 +57,15 @@ describe("resolveGroupIds", () => {
 
     expect(ids.centerGroupId).toBe(sessionGroupId);
   });
+
+  it("returns the CENTER_GROUP constant as last-resort when nothing matches", () => {
+    // Last-resort fallback: returns the well-known constant even when no live
+    // group carries that ID. The caller (focusOrAddPanel) detects the stale ID
+    // and applies its own fallback via fallbackGroupPosition.
+    const api = makeApi([{ id: SIDEBAR_GROUP }], []);
+
+    const ids = resolveGroupIds(api);
+
+    expect(ids.centerGroupId).toBe(CENTER_GROUP);
+  });
 });
