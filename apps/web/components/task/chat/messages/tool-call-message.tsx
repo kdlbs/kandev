@@ -290,7 +290,14 @@ export const ToolCallMessage = memo(function ToolCallMessage({
           >
             <span className="font-mono text-xs text-muted-foreground">{title}</span>
             {inlineOutput && (
-              <span className="text-xs text-muted-foreground/80">{inlineOutput}</span>
+              <span
+                className={cn(
+                  "text-xs",
+                  isHttpError ? "text-red-600 dark:text-red-400" : "text-muted-foreground/80",
+                )}
+              >
+                {inlineOutput}
+              </span>
             )}
             {!isSuccess && getToolCallStatusIcon(status, permissionStatus)}
           </span>
