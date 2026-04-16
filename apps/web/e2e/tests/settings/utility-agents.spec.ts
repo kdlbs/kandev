@@ -183,7 +183,9 @@ test.describe("Utility Agents settings page", () => {
     await modelSelect.click();
     const modelListbox = testPage.getByRole("listbox");
     await expect(modelListbox).toBeVisible();
-    await expect(modelListbox.getByRole("option", { name: "Mock Fast", exact: true })).toBeVisible();
+    await expect(
+      modelListbox.getByRole("option", { name: "Mock Fast", exact: true }),
+    ).toBeVisible();
     await expect(
       modelListbox.getByRole("option", { name: "Mock Smart", exact: true }),
     ).toBeVisible();
