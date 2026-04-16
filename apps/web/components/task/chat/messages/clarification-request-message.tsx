@@ -98,7 +98,10 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
             </div>
           )}
           {isExpired && (
-            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80">
+            <div
+              data-testid="clarification-expired-notice"
+              className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80"
+            >
               {getStatusIndicator()}
               Timed out (agent moved on)
             </div>

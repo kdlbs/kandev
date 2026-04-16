@@ -34,8 +34,14 @@ func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logge
 
 // CancelSessionAndNotify cancels all pending clarifications for a session,
 // unblocking WaitForResponse callers, and marks the database messages
-// with agent_disconnected=true so the frontend shows a deferred notice.
+// as expired (with agent_disconnected=true for context) so the frontend
+// closes the interactive overlay and renders a "Timed out" history entry.
 // Returns the number of cancelled clarifications.
+//
+// Setting status=expired also prevents a UX bug where clicking the overlay's
+// X button after the agent moved on would trigger a new turn via the
+// respond handler's event fallback path (rejected responses were being
+// forwarded to the orchestrator as "User declined to answer").
 func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
 	if len(pendingIDs) == 0 {
@@ -54,8 +60,9 @@ func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string
 			msg.Metadata = map[string]any{}
 		}
 		msg.Metadata["agent_disconnected"] = true
+		msg.Metadata["status"] = "expired"
 		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
-			c.logger.Warn("failed to update message with agent_disconnected",
+			c.logger.Warn("failed to update message with expired status",
 				zap.String("pending_id", id),
 				zap.String("message_id", msg.ID),
 				zap.Error(err))

@@ -227,8 +227,21 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	}
 
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
-	// Look up the original request context from the database message and
-	// publish an event so the orchestrator resumes the agent with a new turn.
+	// If the user rejected (clicked X to dismiss), they're discarding a stale
+	// overlay — not continuing the conversation. Treat as a no-op so we don't
+	// surprise them by resuming the agent with "User declined to answer".
+	// The message status is already "expired" (set by the canceller), so the
+	// chat history will keep rendering the "Timed out" entry.
+	if body.Rejected {
+		h.logger.Info("clarification rejected after agent moved on; no-op",
+			zap.String("pending_id", pendingID))
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	}
+
+	// User is providing an affirmative answer after the agent moved on. Update
+	// the clarification record and publish an event so the orchestrator resumes
+	// the agent with a new turn containing the answer.
 	h.logger.Info("clarification entry not found, using event fallback",
 		zap.String("pending_id", pendingID),
 		zap.String("error", err.Error()))

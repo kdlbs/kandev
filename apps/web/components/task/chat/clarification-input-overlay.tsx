@@ -68,16 +68,25 @@ function ClarificationOptions({
           disabled={isSubmitting}
           data-testid="clarification-option"
           className={cn(
-            "flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors",
+            "flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-1 -ml-1.5 transition-colors",
             "hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400",
             isSubmitting ? "opacity-50 cursor-not-allowed" : "text-foreground/80 cursor-pointer",
           )}
         >
-          <span className="text-muted-foreground flex-shrink-0">•</span>
-          <span>{option.label}</span>
-          {option.description && (
-            <span className="text-muted-foreground/60">— {option.description}</span>
-          )}
+          <span className="text-muted-foreground flex-shrink-0 leading-5">•</span>
+          <span className="flex-1 min-w-0">
+            <span data-testid="clarification-option-label" className="block leading-5">
+              {option.label}
+            </span>
+            {option.description && (
+              <span
+                data-testid="clarification-option-description"
+                className="block text-muted-foreground/70 mt-0.5 leading-snug"
+              >
+                {option.description}
+              </span>
+            )}
+          </span>
         </button>
       ))}
     </div>

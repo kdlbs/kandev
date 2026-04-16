@@ -227,6 +227,21 @@ export class SessionPage {
     return this.page.getByTestId("clarification-deferred-notice");
   }
 
+  /** Expired notice rendered in chat history when the agent timed out waiting. */
+  clarificationExpiredNotice(): Locator {
+    return this.page.getByTestId("clarification-expired-notice");
+  }
+
+  /** Label span inside a clarification option. */
+  clarificationOptionLabels(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-option-label");
+  }
+
+  /** Description span inside a clarification option (hidden when option has none). */
+  clarificationOptionDescriptions(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-option-description");
+  }
+
   /** Reset context button in the chat input toolbar. */
   resetContextButton(): Locator {
     return this.page.getByTestId("reset-context-button");
