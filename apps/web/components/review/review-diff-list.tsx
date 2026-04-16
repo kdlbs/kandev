@@ -581,16 +581,17 @@ function FileDiffSection({
         onToggleWordWrap={handleToggleWordWrap}
       />
       <div ref={sentinelRef} />
-      {!collapsed && renderDiffContent({
-        shouldRender: shouldRenderContent,
-        file,
-        sessionId,
-        wordWrap: effectiveWordWrap,
-        expandUnchanged,
-        onRevertBlock: handleRevertBlock,
-        onCommentRun: handleCommentRun,
-        onToggleExpandUnchanged: handleToggleExpandUnchanged,
-      })}
+      {!collapsed &&
+        renderDiffContent({
+          shouldRender: shouldRenderContent,
+          file,
+          sessionId,
+          wordWrap: effectiveWordWrap,
+          expandUnchanged,
+          onRevertBlock: handleRevertBlock,
+          onCommentRun: handleCommentRun,
+          onToggleExpandUnchanged: handleToggleExpandUnchanged,
+        })}
     </div>
   );
 }
