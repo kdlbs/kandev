@@ -472,12 +472,25 @@ func (s *Store) ReserveReviewPRTask(ctx context.Context, reviewWatchID, repoOwne
 
 // AssignReviewPRTaskID sets the task_id on a reserved dedup row. Called after
 // the task has been created so cleanup logic can locate and delete it later.
+// Returns an error if no row was updated, which surfaces the narrow race where
+// the reservation was removed (e.g. by a concurrent cleanup sweep) between
+// Reserve and Assign — otherwise the task would leak with no dedup record.
 func (s *Store) AssignReviewPRTaskID(ctx context.Context, reviewWatchID, repoOwner, repoName string, prNumber int, taskID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		UPDATE github_review_pr_tasks SET task_id = ?
 		WHERE review_watch_id = ? AND repo_owner = ? AND repo_name = ? AND pr_number = ?`,
 		taskID, reviewWatchID, repoOwner, repoName, prNumber)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("assign task ID: reservation row not found for watch=%s pr=%d", reviewWatchID, prNumber)
+	}
+	return nil
 }
 
 // ReleaseReviewPRTask removes a reservation for a (watch, repo, PR) tuple.

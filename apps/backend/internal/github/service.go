@@ -995,6 +995,17 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 	}
 	deleted := 0
 	for _, rpt := range prTasks {
+		// Orphan reservation: process was killed after ReserveReviewPRTask
+		// succeeded but before AssignReviewPRTaskID ran, so task_id is empty
+		// and there is no task to delete. Clean up the dedup row once the PR
+		// reaches a terminal state, same gating as the normal path.
+		if rpt.TaskID == "" {
+			if should, _ := s.shouldDeleteReviewTask(ctx, rpt); should {
+				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+				deleted++
+			}
+			continue
+		}
 		shouldDelete, reason := s.shouldDeleteReviewTask(ctx, rpt)
 		if !shouldDelete {
 			continue
