@@ -269,7 +269,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
   const title = transformPathsInText(rawTitle, worktreePath);
 
-  const formattedOutput = hasOutput ? formatToolOutput(output) : null;
+  const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
 
   return (
     <ExpandableRow
