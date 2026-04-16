@@ -38,7 +38,7 @@ export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string 
 }
 
 /** Convert text to blockquote, handling multiline text properly. */
-function toBlockquote(text: string): string {
+export function toBlockquote(text: string): string {
   return text
     .split("\n")
     .map((line) => `> ${line}`)
