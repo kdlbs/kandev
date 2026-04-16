@@ -43,18 +43,34 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
 
 /**
  * Resolve a fallback group position when the intended reference is stale.
- * Tries the well-known center group, then any non-sidebar group. Returns
- * undefined when only the sidebar exists — the caller drops the position and
- * dockview picks a default placement. The sidebar group is never returned:
- * it is locked/pinned, and dropping panels there was the source of a UX bug
- * where tabs appeared inside the left navigation column.
+ *
+ * Tries to land in the center column, in this order:
+ *   1. Well-known CENTER_GROUP id.
+ *   2. Group containing the `chat` panel (post-drag, the well-known id may be
+ *      gone but the chat panel still marks the center column).
+ *   3. Group containing any `session:*` panel (active session: chat is removed
+ *      and replaced with per-session tabs).
+ *   4. Any group that is NOT the sidebar AND NOT a right-column group
+ *      (Changes/Files/Terminal). Returning a right-column group would leak the
+ *      panel into the narrow tools column — same UX bug as the sidebar leak.
+ *
+ * Returns undefined if no center-like group exists. The caller drops the
+ * position so dockview picks a default. Never returns the sidebar.
  */
 export function fallbackGroupPosition(api: DockviewApi): { referenceGroup: string } | undefined {
   const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
   if (centerGroup) return { referenceGroup: centerGroup.id };
 
-  const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
-  if (nonSidebarGroup) return { referenceGroup: nonSidebarGroup.id };
+  const chatGroupId = api.getPanel("chat")?.group?.id;
+  if (chatGroupId) return { referenceGroup: chatGroupId };
+
+  const sessionGroupId = api.panels.find((p) => p.id.startsWith("session:"))?.group?.id;
+  if (sessionGroupId) return { referenceGroup: sessionGroupId };
+
+  const centerish = api.groups.find(
+    (g) => g.id !== SIDEBAR_GROUP && g.id !== RIGHT_TOP_GROUP && g.id !== RIGHT_BOTTOM_GROUP,
+  );
+  if (centerish) return { referenceGroup: centerish.id };
 
   return undefined;
 }
