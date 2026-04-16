@@ -42,6 +42,13 @@ export type InferenceModel = {
   name: string;
   description: string;
   is_default: boolean;
+  /**
+   * Agent-specific extras from ACP's `_meta` field. GitHub Copilot exposes
+   * `copilotUsage` (e.g. "1x", "0.33x", "0x" — the premium-request
+   * multiplier) which the model combobox renders as a cost badge. Shape
+   * matches `ModelEntry.meta` so the same `<ModelCombobox>` accepts this.
+   */
+  meta?: Record<string, unknown>;
 };
 
 export type InferenceAgent = {

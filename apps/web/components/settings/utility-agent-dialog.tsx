@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { ModelCombobox } from "@/components/settings/model-combobox";
 import {
   type UtilityAgent,
   createUtilityAgent,
@@ -87,18 +88,14 @@ function AgentModelSelect({
       </div>
       <div className="space-y-2">
         <Label>Model</Label>
-        <Select value={model} onValueChange={onModelChange} disabled={availableModels.length === 0}>
-          <SelectTrigger className="cursor-pointer">
-            <SelectValue placeholder="Select model..." />
-          </SelectTrigger>
-          <SelectContent>
-            {availableModels.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {m.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ModelCombobox
+          value={model}
+          onChange={onModelChange}
+          models={availableModels}
+          currentModelId={availableModels.find((m) => m.is_default)?.id}
+          placeholder="Select model..."
+          disabled={availableModels.length === 0}
+        />
       </div>
     </div>
   );

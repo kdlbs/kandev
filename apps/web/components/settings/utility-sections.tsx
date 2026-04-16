@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { ModelCombobox } from "@/components/settings/model-combobox";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
@@ -27,6 +28,7 @@ export function DefaultModelSection({
 }: DefaultModelSectionProps) {
   const selectedAgent = inferenceAgents.find((a) => a.id === defaultAgentId);
   const modelOptions = selectedAgent?.models ?? [];
+  const currentModelId = modelOptions.find((m) => m.is_default)?.id;
 
   return (
     <div className="space-y-3">
@@ -52,24 +54,16 @@ export function DefaultModelSection({
             </SelectContent>
           </Select>
         </div>
-        <div className="w-[180px]">
+        <div className="w-[220px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
-          <Select
+          <ModelCombobox
             value={defaultModel}
-            onValueChange={(v) => onDefaultChange(defaultAgentId, v)}
+            onChange={(v) => onDefaultChange(defaultAgentId, v)}
+            models={modelOptions}
+            currentModelId={currentModelId}
+            placeholder="Select model..."
             disabled={!defaultAgentId}
-          >
-            <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder="Select model..." />
-            </SelectTrigger>
-            <SelectContent>
-              {modelOptions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         </div>
       </div>
     </div>

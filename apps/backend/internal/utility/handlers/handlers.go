@@ -312,28 +312,37 @@ func (h *Handlers) httpListCalls(c *gin.Context) {
 func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 	inferenceAgents := h.executor.ListInferenceAgentsWithContext(c.Request.Context())
 
-	// Populate each agent's models from the host utility capability cache
-	// (boot-time ACP probe). If the probe hasn't completed yet, Models stays
-	// an empty slice — never nil — so the frontend can safely iterate.
+	// Build the response from the host utility capability cache (boot-time
+	// ACP probe). Only include agents whose probe reached StatusOK — an
+	// agent that isn't authenticated, not installed, or still probing
+	// can't actually run a utility prompt, so showing it in the picker
+	// just leads the user into a dead end.
+	//
+	// hostExecutor is an optional dependency (see executeSessionless);
+	// without it we can't check health or surface models, so the list is
+	// empty by design rather than showing unusable options.
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
+	if h.hostExecutor == nil {
+		c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})
+		return
+	}
 	for _, ia := range inferenceAgents {
-		models := []dto.InferenceModelDTO{}
-		// hostExecutor is an optional dependency (see executeSessionless);
-		// guard against nil to avoid panicking when it isn't wired up.
-		// The host utility cache is keyed by ag.ID() (see bootstrapAgent),
-		// not ag.Name() — built-in ACP agents return distinct strings for
-		// the two (e.g. "claude-acp" vs "Claude ACP Agent").
-		if h.hostExecutor != nil {
-			if caps, ok := h.hostExecutor.Get(ia.ID); ok {
-				for _, m := range caps.Models {
-					models = append(models, dto.InferenceModelDTO{
-						ID:          m.ID,
-						Name:        m.Name,
-						Description: m.Description,
-						IsDefault:   m.ID == caps.CurrentModelID,
-					})
-				}
-			}
+		// The cache is keyed by ag.ID() (see bootstrapAgent), not
+		// ag.Name() — built-in ACP agents return distinct strings for the
+		// two (e.g. "claude-acp" vs "Claude ACP Agent").
+		caps, ok := h.hostExecutor.Get(ia.ID)
+		if !ok || caps.Status != hostutility.StatusOK {
+			continue
+		}
+		models := make([]dto.InferenceModelDTO, 0, len(caps.Models))
+		for _, m := range caps.Models {
+			models = append(models, dto.InferenceModelDTO{
+				ID:          m.ID,
+				Name:        m.Name,
+				Description: m.Description,
+				IsDefault:   m.ID == caps.CurrentModelID,
+				Meta:        m.Meta,
+			})
 		}
 		result = append(result, dto.InferenceAgentDTO{
 			ID:          ia.ID,

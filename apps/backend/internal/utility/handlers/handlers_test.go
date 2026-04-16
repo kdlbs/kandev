@@ -42,23 +42,33 @@ func (s *stubHostUtility) Get(agentType string) (hostutility.AgentCapabilities, 
 }
 
 // wantModel is the expected shape of a single model in the response for a
-// given agent. Used by TestHttpListInferenceAgentsNeverReturnsNullModels to
-// assert both IDs and is_default propagation.
+// given agent.
 type wantModel struct {
 	id        string
 	isDefault bool
+	meta      map[string]any
 }
 
-// TestHttpListInferenceAgentsNeverReturnsNullModels guards the
-// /api/v1/utility/inference-agents response contract: each agent's `models`
-// field must always be a JSON array, never null, and `is_default` must be
-// set on the model matching the agent's CurrentModelID. The frontend
-// iterates `ia.models` unconditionally during render (utility-agents-section)
-// and the create-agent dialog auto-selects the default model via
-// `find((m) => m.is_default)` (utility-agent-dialog). A null slice crashes
-// the settings page; a missing is_default silently breaks default selection.
-func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
+// TestHttpListInferenceAgents covers the full /api/v1/utility/inference-agents
+// response contract:
+//
+//   - Only agents whose host utility probe reached StatusOK are included —
+//     an agent that needs auth, isn't installed, or is still probing can't
+//     actually run a utility prompt, so it must be filtered out of the
+//     picker rather than leading the user into a dead end.
+//   - `models` is always a JSON array, never null — a null slice would
+//     crash the frontend's flatMap over `ia.models`.
+//   - `is_default` is set on the model matching CurrentModelID.
+//   - `meta` (e.g. Copilot's `copilotUsage` cost multiplier) propagates
+//     through to the DTO so the model combobox can render cost badges.
+func TestHttpListInferenceAgents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	// Fixtures use the real built-in ACP agent shape (distinct ID/Name) so
+	// a future ID/Name mixup in the cache lookup fails the test.
+	claude := lifecycle.InferenceAgentInfo{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"}
+	codex := lifecycle.InferenceAgentInfo{ID: "codex-acp", Name: "Codex ACP Agent", DisplayName: "Codex"}
+	copilot := lifecycle.InferenceAgentInfo{ID: "copilot-acp", Name: "Copilot ACP Agent", DisplayName: "Copilot"}
 
 	tests := []struct {
 		name        string
@@ -67,26 +77,13 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 		nilHost     bool
 		wantByAgent map[string][]wantModel
 	}{
-		// Fixtures deliberately use the real built-in ACP agent shape
-		// where ID ("claude-acp") and Name ("Claude ACP Agent") differ,
-		// so a Name/ID mixup in the cache lookup will always fail this
-		// test. The cache is keyed by ag.ID() in production.
 		{
-			name: "agent with no cached capabilities yields empty models array",
-			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
-			},
-			caps:        nil,
-			wantByAgent: map[string][]wantModel{"Claude ACP Agent": {}},
-		},
-		{
-			name: "agent with cached models yields populated array with is_default set",
-			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
-			},
+			name:   "healthy agent with cached models is included with is_default",
+			agents: []lifecycle.InferenceAgentInfo{claude},
 			caps: map[string]hostutility.AgentCapabilities{
-				"claude-acp": { // keyed by ID, matches bootstrapAgent
+				"claude-acp": {
 					AgentType:      "claude-acp",
+					Status:         hostutility.StatusOK,
 					CurrentModelID: "sonnet",
 					Models: []hostutility.Model{
 						{ID: "sonnet", Name: "Sonnet"},
@@ -102,21 +99,78 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 			},
 		},
 		{
-			name:        "no inference agents returns empty agents array",
+			// Primary UX bug this filter guards against: Codex/Auggie with
+			// lock icons (auth_required) appearing in the utility picker.
+			name:   "auth_required agent is filtered out",
+			agents: []lifecycle.InferenceAgentInfo{claude, codex},
+			caps: map[string]hostutility.AgentCapabilities{
+				"claude-acp": {
+					AgentType: "claude-acp",
+					Status:    hostutility.StatusOK,
+					Models:    []hostutility.Model{{ID: "sonnet", Name: "Sonnet"}},
+				},
+				"codex-acp": {
+					AgentType: "codex-acp",
+					Status:    hostutility.StatusAuthRequired,
+				},
+			},
+			wantByAgent: map[string][]wantModel{
+				"Claude ACP Agent": {{id: "sonnet", isDefault: false}},
+			},
+		},
+		{
+			name:   "failed and probing agents are filtered out",
+			agents: []lifecycle.InferenceAgentInfo{claude, codex, copilot},
+			caps: map[string]hostutility.AgentCapabilities{
+				"claude-acp":  {Status: hostutility.StatusFailed},
+				"codex-acp":   {Status: hostutility.StatusProbing},
+				"copilot-acp": {Status: hostutility.StatusOK, Models: []hostutility.Model{{ID: "gpt-5", Name: "GPT-5"}}},
+			},
+			wantByAgent: map[string][]wantModel{
+				"Copilot ACP Agent": {{id: "gpt-5", isDefault: false}},
+			},
+		},
+		{
+			name:        "agent with no cache entry is filtered out",
+			agents:      []lifecycle.InferenceAgentInfo{claude},
+			caps:        nil,
+			wantByAgent: map[string][]wantModel{},
+		},
+		{
+			name:   "model meta (copilot cost) propagates to DTO",
+			agents: []lifecycle.InferenceAgentInfo{copilot},
+			caps: map[string]hostutility.AgentCapabilities{
+				"copilot-acp": {
+					AgentType:      "copilot-acp",
+					Status:         hostutility.StatusOK,
+					CurrentModelID: "gpt-5",
+					Models: []hostutility.Model{
+						{ID: "gpt-5", Name: "GPT-5", Meta: map[string]any{"copilotUsage": "1x"}},
+						{ID: "gpt-5-mini", Name: "GPT-5 Mini", Meta: map[string]any{"copilotUsage": "0.33x"}},
+					},
+				},
+			},
+			wantByAgent: map[string][]wantModel{
+				"Copilot ACP Agent": {
+					{id: "gpt-5", isDefault: true, meta: map[string]any{"copilotUsage": "1x"}},
+					{id: "gpt-5-mini", isDefault: false, meta: map[string]any{"copilotUsage": "0.33x"}},
+				},
+			},
+		},
+		{
+			name:        "no inference agents returns empty list",
 			agents:      nil,
 			caps:        nil,
 			wantByAgent: map[string][]wantModel{},
 		},
 		{
-			// Guards against a panic when hostExecutor isn't wired up (the
-			// dep is treated as optional throughout the package — see the
-			// nil-guard in executeSessionless).
-			name: "nil hostExecutor does not panic and yields empty models",
-			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
-			},
+			// hostExecutor is optional throughout the package (see the nil
+			// guard in executeSessionless). Without it we can't check
+			// health, so the list is empty — never a panic.
+			name:        "nil hostExecutor yields empty list, no panic",
+			agents:      []lifecycle.InferenceAgentInfo{claude},
 			nilHost:     true,
-			wantByAgent: map[string][]wantModel{"Claude ACP Agent": {}},
+			wantByAgent: map[string][]wantModel{},
 		},
 	}
 
@@ -142,8 +196,8 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 				t.Fatalf("status = %d, want 200", rec.Code)
 			}
 
-			// The raw body must never contain "models":null — that's the
-			// exact shape that crashed the frontend before this fix.
+			// The raw body must never contain "models":null — that shape
+			// crashed the frontend before the original fix.
 			body := rec.Body.String()
 			if strings.Contains(body, `"models":null`) {
 				t.Fatalf("response must never contain \"models\":null, got body: %s", body)
@@ -153,8 +207,9 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 				Agents []struct {
 					Name   string `json:"name"`
 					Models []struct {
-						ID        string `json:"id"`
-						IsDefault bool   `json:"is_default"`
+						ID        string         `json:"id"`
+						IsDefault bool           `json:"is_default"`
+						Meta      map[string]any `json:"meta,omitempty"`
 					} `json:"models"`
 				} `json:"agents"`
 			}
@@ -163,7 +218,7 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 			}
 
 			if len(resp.Agents) != len(tt.wantByAgent) {
-				t.Fatalf("got %d agents, want %d", len(resp.Agents), len(tt.wantByAgent))
+				t.Fatalf("got %d agents (%v), want %d", len(resp.Agents), agentNames(resp.Agents), len(tt.wantByAgent))
 			}
 
 			for _, a := range resp.Agents {
@@ -186,8 +241,43 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 					if m.IsDefault != want[i].isDefault {
 						t.Errorf("agent %q model %q: got is_default=%v, want %v", a.Name, m.ID, m.IsDefault, want[i].isDefault)
 					}
+					if !equalMeta(m.Meta, want[i].meta) {
+						t.Errorf("agent %q model %q: got meta=%v, want %v", a.Name, m.ID, m.Meta, want[i].meta)
+					}
 				}
 			}
 		})
 	}
+}
+
+func agentNames(agents []struct {
+	Name   string `json:"name"`
+	Models []struct {
+		ID        string         `json:"id"`
+		IsDefault bool           `json:"is_default"`
+		Meta      map[string]any `json:"meta,omitempty"`
+	} `json:"models"`
+}) []string {
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		names = append(names, a.Name)
+	}
+	return names
+}
+
+// equalMeta does a shallow equality check on the meta maps. A nil want map
+// matches a nil or empty got map (JSON omits empty maps via omitempty).
+func equalMeta(got, want map[string]any) bool {
+	if len(want) == 0 {
+		return len(got) == 0
+	}
+	if len(got) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
 }

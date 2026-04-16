@@ -162,6 +162,11 @@ type InferenceModelDTO struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
+	// Meta carries agent-specific extras from ACP's `_meta` field. For
+	// GitHub Copilot this includes `copilotUsage` (e.g. "1x", "0.33x",
+	// "0x" — the premium-request multiplier) which the UI renders as a
+	// cost badge next to the model name.
+	Meta map[string]any `json:"meta,omitempty"`
 }
 
 // InferenceAgentDTO represents an agent that supports inference.
