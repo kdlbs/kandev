@@ -149,7 +149,9 @@ const INLINE_OUTPUT_MAX_LENGTH = 120;
 function getInlineOutput(output: unknown): string | null {
   if (typeof output !== "string") return null;
   const trimmed = output.trim();
-  if (!trimmed || trimmed.includes("\n") || trimmed.length > INLINE_OUTPUT_MAX_LENGTH) return null;
+  // Reject both \n and \r — shell tool output can carry \r progress-bar overwrites
+  // that would render as multiple visual lines even without a \n.
+  if (!trimmed || /[\n\r]/.test(trimmed) || trimmed.length > INLINE_OUTPUT_MAX_LENGTH) return null;
   return trimmed;
 }
 
