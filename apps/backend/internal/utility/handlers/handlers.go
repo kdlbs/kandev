@@ -318,14 +318,18 @@ func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
 	for _, ia := range inferenceAgents {
 		models := []dto.InferenceModelDTO{}
-		if caps, ok := h.hostExecutor.Get(ia.Name); ok {
-			for _, m := range caps.Models {
-				models = append(models, dto.InferenceModelDTO{
-					ID:          m.ID,
-					Name:        m.Name,
-					Description: m.Description,
-					IsDefault:   m.ID == caps.CurrentModelID,
-				})
+		// hostExecutor is an optional dependency (see executeSessionless);
+		// guard against nil to avoid panicking when it isn't wired up.
+		if h.hostExecutor != nil {
+			if caps, ok := h.hostExecutor.Get(ia.Name); ok {
+				for _, m := range caps.Models {
+					models = append(models, dto.InferenceModelDTO{
+						ID:          m.ID,
+						Name:        m.Name,
+						Description: m.Description,
+						IsDefault:   m.ID == caps.CurrentModelID,
+					})
+				}
 			}
 		}
 		result = append(result, dto.InferenceAgentDTO{
