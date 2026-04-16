@@ -101,11 +101,19 @@ func TestAggregator_AllSessionsPausedYieldsPaused(t *testing.T) {
 	mgr.pollAggregator.HandleSessionMode("s2", WorkspacePollModePaused)
 
 	mgr.pollAggregator.mu.Lock()
-	got := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	_, hasEntry := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	sessionEntries := len(mgr.pollAggregator.sessionModes)
 	mgr.pollAggregator.mu.Unlock()
 
-	if got != WorkspacePollModePaused {
-		t.Errorf("with both sessions paused, workspace mode = %q, want paused", got)
+	// When the workspace becomes paused we drop the lastPushed entry to keep
+	// the map bounded over a long-running gateway. The push itself happens via
+	// pushAsync (test inspects the bookkeeping, not the actual RPC).
+	if hasEntry {
+		t.Errorf("expected lastPushed entry for /tmp/ws1 to be deleted when workspace fully paused")
+	}
+	// Same cleanup applies to per-session entries.
+	if sessionEntries != 0 {
+		t.Errorf("expected sessionModes to be empty when all sessions paused, got %d entries", sessionEntries)
 	}
 }
 

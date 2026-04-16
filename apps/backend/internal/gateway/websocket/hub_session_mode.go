@@ -127,33 +127,38 @@ func (h *Hub) computeSessionModeLocked(sessionID string) SessionMode {
 // recomputeSessionMode is called after any state change that could affect a
 // session's mode (subscribe, unsubscribe, focus, unfocus, client disconnect).
 // Up-transitions notify immediately; down-transitions are debounced.
+//
+// Lock order: sessionMode.mu before h.mu (RLock). This is also the order used
+// by the timer callback in scheduleDownTransition, which lets the callback
+// re-read the latest mode atomically with respect to other recomputeSessionMode
+// calls (otherwise a TOCTOU window between "read latest" and "compare to
+// lastMode" can let a concurrent up-transition be silently overwritten).
 func (h *Hub) recomputeSessionMode(sessionID string) {
+	h.sessionMode.mu.Lock()
 	h.mu.RLock()
 	current := h.computeSessionModeLocked(sessionID)
 	h.mu.RUnlock()
 
-	h.sessionMode.mu.Lock()
 	prev, hadPrev := h.sessionMode.lastMode[sessionID]
-	if hadPrev && prev == current {
-		// Even if the mode didn't change, cancel any pending down-transition.
-		// This handles: slow → fast → slow → fast within the debounce window
-		// (we want the latest state to stick, not the first transition).
-		if t, ok := h.sessionMode.pendingDownTransitions[sessionID]; ok {
-			t.Stop()
-			delete(h.sessionMode.pendingDownTransitions, sessionID)
-		}
-		h.sessionMode.mu.Unlock()
-		return
-	}
 
-	// Cancel any pending debounced down-transition: it's stale now.
+	// Always cancel any pending debounced down-transition — either we're
+	// transitioning to a new mode (it's stale), or we're back at the same mode
+	// it was scheduled to drop us to (it's redundant). If we kept the old
+	// timer alive, a slow→fast→slow→fast within the debounce window would
+	// leave the original slow timer pending and fire after the user had
+	// already re-focused.
 	if t, ok := h.sessionMode.pendingDownTransitions[sessionID]; ok {
 		t.Stop()
 		delete(h.sessionMode.pendingDownTransitions, sessionID)
 	}
 
+	if hadPrev && prev == current {
+		h.sessionMode.mu.Unlock()
+		return
+	}
+
 	if isUpTransition(prev, current) {
-		// Update state and fire immediately.
+		// Up-transitions fire immediately so the user sees fresh data right away.
 		h.sessionMode.lastMode[sessionID] = current
 		listeners := h.snapshotListenersLocked()
 		h.sessionMode.mu.Unlock()
@@ -161,27 +166,56 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 		return
 	}
 
-	// Down-transition (or unknown→paused etc): debounce.
+	// Down-transition: debounce so quick tab churn doesn't tear down + restart.
 	h.sessionMode.pendingDownTransitions[sessionID] = time.AfterFunc(downTransitionDebounce, func() {
-		// Re-check on fire — state may have changed since we scheduled.
-		h.mu.RLock()
-		latest := h.computeSessionModeLocked(sessionID)
-		h.mu.RUnlock()
-
-		h.sessionMode.mu.Lock()
-		// Drop the timer pointer so a future scheduling can replace it cleanly.
-		delete(h.sessionMode.pendingDownTransitions, sessionID)
-		prevAtFire := h.sessionMode.lastMode[sessionID]
-		if prevAtFire == latest {
-			h.sessionMode.mu.Unlock()
-			return
-		}
-		h.sessionMode.lastMode[sessionID] = latest
-		listeners := h.snapshotListenersLocked()
-		h.sessionMode.mu.Unlock()
-		h.fireListeners(listeners, sessionID, latest)
+		h.fireDebouncedDownTransition(sessionID)
 	})
 	h.sessionMode.mu.Unlock()
+}
+
+// fireDebouncedDownTransition is called by the debounce timer. Acquires
+// sessionMode.mu first (matching recomputeSessionMode's lock order) so that
+// reading latest and comparing/updating lastMode happens atomically — no
+// concurrent recomputeSessionMode can sneak an up-transition between the two
+// reads.
+func (h *Hub) fireDebouncedDownTransition(sessionID string) {
+	h.sessionMode.mu.Lock()
+	// Drop the timer pointer so a future scheduling can replace it cleanly.
+	delete(h.sessionMode.pendingDownTransitions, sessionID)
+
+	h.mu.RLock()
+	latest := h.computeSessionModeLocked(sessionID)
+	h.mu.RUnlock()
+
+	prevAtFire, hadPrev := h.sessionMode.lastMode[sessionID]
+	if hadPrev && prevAtFire == latest {
+		h.sessionMode.mu.Unlock()
+		return
+	}
+
+	if latest == SessionModePaused {
+		// Session is fully idle — drop the entry so the maps don't grow
+		// unbounded over a long-running gateway. Next event re-adds.
+		delete(h.sessionMode.lastMode, sessionID)
+	} else {
+		h.sessionMode.lastMode[sessionID] = latest
+	}
+	listeners := h.snapshotListenersLocked()
+	h.sessionMode.mu.Unlock()
+	h.fireListeners(listeners, sessionID, latest)
+}
+
+// stopAllPendingTransitions cancels every pending debounce timer and clears
+// the tracking maps. Called from closeAllClients during shutdown so timers
+// don't outlive the hub and fire stale events into listeners.
+func (h *Hub) stopAllPendingTransitions() {
+	h.sessionMode.mu.Lock()
+	defer h.sessionMode.mu.Unlock()
+	for id, t := range h.sessionMode.pendingDownTransitions {
+		t.Stop()
+		delete(h.sessionMode.pendingDownTransitions, id)
+	}
+	h.sessionMode.lastMode = make(map[string]SessionMode)
 }
 
 // snapshotListenersLocked returns a copy of the listener slice. Caller holds h.sessionMode.mu.

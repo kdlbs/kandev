@@ -60,37 +60,47 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		case <-wt.stopCh:
 			return
 		case <-wt.gitPollModeChanged:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
+			if stop := wt.handleGitPollModeChange(ctx, timer, &consecutiveFailures); stop {
+				return
 			}
-			if wt.GetPollMode() == PollModeFast {
-				if atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
-					if stop := wt.gitPollTick(ctx, &consecutiveFailures); stop {
-						return
-					}
-				}
-			}
-			continue
 		case <-timer.C:
-			if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
-				continue
-			}
-
-			// Skip this tick if the previous cycle is still running (prevents process pile-up
-			// when git commands take longer than the poll interval on large repos).
-			if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
-				continue
-			}
-
-			stop := wt.gitPollTick(ctx, &consecutiveFailures)
-			if stop {
+			if stop := wt.handleGitPollTimerTick(ctx, &consecutiveFailures); stop {
 				return
 			}
 		}
 	}
+}
+
+// handleGitPollModeChange responds to a SetPollMode wake-up: drains the timer
+// and runs an immediate scan if we just transitioned into fast mode. Returns
+// true if pollGitChanges should exit.
+func (wt *WorkspaceTracker) handleGitPollModeChange(ctx context.Context, timer *time.Timer, consecutiveFailures *int) bool {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	if wt.GetPollMode() != PollModeFast {
+		return false
+	}
+	if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+		return false
+	}
+	return wt.gitPollTick(ctx, consecutiveFailures)
+}
+
+// handleGitPollTimerTick is the body of a regular timer-driven tick. In paused
+// mode it's a no-op (we still wake periodically as a safety net). Returns true
+// if pollGitChanges should exit.
+func (wt *WorkspaceTracker) handleGitPollTimerTick(ctx context.Context, consecutiveFailures *int) bool {
+	if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
+		return false
+	}
+	if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+		return false
+	}
+	return wt.gitPollTick(ctx, consecutiveFailures)
 }
 
 // gitPollTick runs a single git poll cycle: checks for manual git operations

@@ -85,43 +85,50 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 		case <-wt.stopCh:
 			return
 		case <-wt.monitorModeChanged:
-			// Mode changed; drain the timer and loop to reset with the new
-			// interval. If we just transitioned into fast mode, run an
-			// immediate scan instead of waiting up to 30s for the next tick.
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
+			if stop := wt.handleMonitorModeChange(ctx, timer, &lastState, &consecutiveFailures); stop {
+				return
 			}
-			if wt.GetPollMode() == PollModeFast {
-				if atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
-					if stop := wt.monitorTick(ctx, &lastState, &consecutiveFailures); stop {
-						return
-					}
-				}
-			}
-			continue
 		case <-timer.C:
-			// In paused mode the body is a no-op; we still wake up periodically
-			// (pausedTickInterval) so SetPollMode lifting us out of paused is
-			// handled even if the channel signal was somehow missed.
-			if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
-				continue
-			}
-
-			// Skip this tick if the previous cycle is still running (prevents process pile-up
-			// when git commands take longer than the poll interval on large repos).
-			if !atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
-				continue
-			}
-
-			stop := wt.monitorTick(ctx, &lastState, &consecutiveFailures)
-			if stop {
+			if stop := wt.handleMonitorTimerTick(ctx, &lastState, &consecutiveFailures); stop {
 				return
 			}
 		}
 	}
+}
+
+// handleMonitorModeChange responds to a SetPollMode-triggered wake-up: drains
+// any pending timer and, if we just transitioned into fast mode, runs an
+// immediate scan so the user sees fresh state without waiting for the next tick.
+// Returns true if monitorLoop should exit.
+func (wt *WorkspaceTracker) handleMonitorModeChange(ctx context.Context, timer *time.Timer, lastState *workspaceState, consecutiveFailures *int) bool {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	if wt.GetPollMode() != PollModeFast {
+		return false
+	}
+	if !atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
+		return false
+	}
+	return wt.monitorTick(ctx, lastState, consecutiveFailures)
+}
+
+// handleMonitorTimerTick is the body of a regular timer-driven tick. In paused
+// mode the body is a no-op (we still wake periodically to check the mode in
+// case the change-signal was missed). Returns true if monitorLoop should exit.
+func (wt *WorkspaceTracker) handleMonitorTimerTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
+	if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
+		return false
+	}
+	// Skip this tick if the previous cycle is still running (prevents process
+	// pile-up when git commands take longer than the poll interval on large repos).
+	if !atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
+		return false
+	}
+	return wt.monitorTick(ctx, lastState, consecutiveFailures)
 }
 
 // monitorTick runs a single monitor cycle: checks workspace state and triggers

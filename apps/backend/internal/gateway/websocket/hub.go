@@ -89,11 +89,11 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// closeAllClients closes all client connections
+// closeAllClients closes all client connections.
+// Cancels any pending debounced session-mode transitions so timers don't fire
+// after shutdown and call into listeners with stale state.
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	for client := range h.clients {
 		client.closeSend()
 		delete(h.clients, client)
@@ -101,6 +101,9 @@ func (h *Hub) closeAllClients() {
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
+	h.mu.Unlock()
+
+	h.stopAllPendingTransitions()
 }
 
 // removeClient removes a client from the hub

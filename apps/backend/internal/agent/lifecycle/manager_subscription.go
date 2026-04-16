@@ -66,14 +66,27 @@ func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 //
 // Best-effort: errors are logged, never returned. The hub should not block on
 // this (the call is debounced + computed off the hub critical path already).
+//
+// Pre-execution focus race: if a session.focus arrives before the lifecycle
+// has created its execution, we cache the mode in sessionModes but cannot push
+// to agentctl yet (no client). The session stays at agentctl's default (slow)
+// until the next mode change actually reaches the running agentctl. To avoid
+// drifting permanently in that case, callers that create executions should
+// invoke RefreshWorkspacePollMode once the execution is registered (TODO).
+// In practice the user re-focusing or any subscribe/unsubscribe re-triggers
+// the push, so the window self-heals quickly.
 func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode WorkspacePollMode) {
 	execution, exists := a.mgr.GetExecutionBySessionID(sessionID)
 	if !exists {
-		// No execution for this session — nothing to throttle. This is normal
-		// for sessions whose execution hasn't been created yet (the gateway
-		// will send another mode change once it is).
+		// No execution yet — cache the mode so the next event can still
+		// aggregate correctly. If the mode is paused there's nothing to
+		// remember, so drop any prior entry to keep the map bounded.
 		a.mu.Lock()
-		a.sessionModes[sessionID] = mode
+		if mode == WorkspacePollModePaused {
+			delete(a.sessionModes, sessionID)
+		} else {
+			a.sessionModes[sessionID] = mode
+		}
 		a.mu.Unlock()
 		return
 	}
@@ -93,11 +106,19 @@ func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode Works
 // returns the new workspace-effective mode, plus whether it changed since the
 // last push. We compute this under a single lock so concurrent transitions in
 // the same workspace can't observe inconsistent intermediate state.
+//
+// When a session goes to paused we drop its sessionModes entry so the map
+// doesn't grow unbounded over a long-running gateway. Same for lastPushed
+// when the workspace itself becomes paused.
 func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode WorkspacePollMode, workspacePath string) (string, WorkspacePollMode, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.sessionModes[sessionID] = mode
+	if mode == WorkspacePollModePaused {
+		delete(a.sessionModes, sessionID)
+	} else {
+		a.sessionModes[sessionID] = mode
+	}
 
 	effective := WorkspacePollModePaused
 	for sid, m := range a.sessionModes {
@@ -118,7 +139,11 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	if hadPrev && prev == effective {
 		return workspacePath, effective, false
 	}
-	a.lastPushed[workspacePath] = effective
+	if effective == WorkspacePollModePaused {
+		delete(a.lastPushed, workspacePath)
+	} else {
+		a.lastPushed[workspacePath] = effective
+	}
 	return workspacePath, effective, true
 }
 

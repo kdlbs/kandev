@@ -14,7 +14,15 @@ func newTestHub(t *testing.T) *Hub {
 	if err != nil {
 		t.Fatalf("logger: %v", err)
 	}
-	return NewHub(nil, log)
+	h := NewHub(nil, log)
+	// Cancel any pending debounce timers when the test exits — otherwise a
+	// 5-second timer from a debounced down-transition can fire after t.Run
+	// returns and call into a listener whose closure references the test's
+	// recorder, racing with the next test that reads from it.
+	t.Cleanup(func() {
+		h.stopAllPendingTransitions()
+	})
+	return h
 }
 
 func newTestClient(id string) *Client {

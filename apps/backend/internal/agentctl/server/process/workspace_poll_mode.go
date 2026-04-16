@@ -1,6 +1,10 @@
 package process
 
-import "time"
+import (
+	"time"
+
+	"go.uber.org/zap"
+)
 
 // PollMode controls how aggressively WorkspaceTracker polls for workspace changes.
 //
@@ -76,7 +80,7 @@ func (wt *WorkspaceTracker) GetPollMode() PollMode {
 // the slow-poll interval for the next tick.
 func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	if !mode.IsValid() {
-		wt.logger.Warn("ignoring invalid poll mode")
+		wt.logger.Warn("ignoring invalid poll mode", zap.String("mode", string(mode)))
 		return
 	}
 
