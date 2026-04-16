@@ -466,6 +466,51 @@ function useScrollIntoViewOnSelect(
   }, [isSelected, sectionRef, setCollapsed]);
 }
 
+function renderDiffContent(opts: {
+  shouldRender: boolean;
+  file: ReviewFile;
+  sessionId: string;
+  wordWrap: boolean;
+  expandUnchanged: boolean;
+  onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
+  onCommentRun: ReturnType<typeof useRunComment>;
+  onToggleExpandUnchanged: () => void;
+}) {
+  const { shouldRender, file, sessionId, wordWrap, expandUnchanged, onRevertBlock, onCommentRun, onToggleExpandUnchanged } = opts;
+  if (shouldRender && file.diff) {
+    return (
+      <>
+        <FileDiffViewer
+          filePath={file.path}
+          diff={file.diff}
+          status={file.status}
+          enableComments
+          enableAcceptReject
+          onRevertBlock={onRevertBlock}
+          onCommentRun={onCommentRun}
+          sessionId={sessionId}
+          wordWrap={wordWrap}
+          enableExpansion={true}
+          baseRef="HEAD"
+          hideHeader
+          expandUnchanged={expandUnchanged}
+          onToggleExpandUnchanged={onToggleExpandUnchanged}
+        />
+        {file.diff_skip_reason === "truncated" && (
+          <div className="flex items-center justify-center py-1 text-muted-foreground text-xs border-t border-border/40">
+            Diff truncated — showing first 256 KB
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
+      {diffSkipReasonLabel(file.diff_skip_reason)}
+    </div>
+  );
+}
+
 function FileDiffSection({
   file,
   isReviewed,
@@ -541,36 +586,16 @@ function FileDiffSection({
         onToggleWordWrap={handleToggleWordWrap}
       />
       <div ref={sentinelRef} />
-      {!collapsed &&
-        (shouldRenderContent && file.diff ? (
-          <>
-            <FileDiffViewer
-              filePath={file.path}
-              diff={file.diff}
-              status={file.status}
-              enableComments
-              enableAcceptReject
-              onRevertBlock={handleRevertBlock}
-              onCommentRun={handleCommentRun}
-              sessionId={sessionId}
-              wordWrap={effectiveWordWrap}
-              enableExpansion={true}
-              baseRef="HEAD"
-              hideHeader
-              expandUnchanged={expandUnchanged}
-              onToggleExpandUnchanged={handleToggleExpandUnchanged}
-            />
-            {file.diff_skip_reason === "truncated" && (
-              <div className="flex items-center justify-center py-1 text-muted-foreground text-xs border-t border-border/40">
-                Diff truncated — showing first 256 KB
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-            {diffSkipReasonLabel(file.diff_skip_reason)}
-          </div>
-        ))}
+      {!collapsed && renderDiffContent({
+        shouldRender: shouldRenderContent,
+        file,
+        sessionId,
+        wordWrap: effectiveWordWrap,
+        expandUnchanged,
+        onRevertBlock: handleRevertBlock,
+        onCommentRun: handleCommentRun,
+        onToggleExpandUnchanged: handleToggleExpandUnchanged,
+      })}
     </div>
   );
 }
