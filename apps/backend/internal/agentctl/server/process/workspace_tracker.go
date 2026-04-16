@@ -47,9 +47,21 @@ type WorkspaceTracker struct {
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
 	workspaceSubMu             sync.RWMutex
 
-	// Polling intervals
+	// Polling intervals (used in PollModeFast)
 	filePollInterval time.Duration
 	gitPollInterval  time.Duration
+
+	// pollMode is the current rate at which the polling loops scan git state.
+	// Default at construction is PollModeSlow — safe fallback before the gateway
+	// pushes a focus signal. Mutate via SetPollMode (never directly) so loops
+	// receive the wake-up notification on transitions.
+	pollMode   PollMode
+	pollModeMu sync.RWMutex
+	// One channel per loop because we need both loops to wake up on a mode
+	// change. A single shared channel would let the first reader steal the
+	// signal so only one loop wakes.
+	monitorModeChanged chan struct{} // buffered(1); read by monitorLoop
+	gitPollModeChanged chan struct{} // buffered(1); read by pollGitChanges
 
 	// Overlap guards: prevent tick pile-up when git commands take longer than the poll interval.
 	monitorRunning int32 // atomic; 1 if monitorLoop tick is in progress
@@ -84,9 +96,15 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
-		stopCh:                     make(chan struct{}),
-		cancelCtx:                  ctx,
-		cancelFunc:                 cancel,
+		// Default to slow polling. The gateway lifts to fast on focus and drops
+		// to paused when no UI client is subscribed. Slow is the safe fallback
+		// if the gateway never pushes a mode (e.g., agentctl running headless).
+		pollMode:           PollModeSlow,
+		monitorModeChanged: make(chan struct{}, 1),
+		gitPollModeChanged: make(chan struct{}, 1),
+		stopCh:             make(chan struct{}),
+		cancelCtx:          ctx,
+		cancelFunc:         cancel,
 	}
 }
 

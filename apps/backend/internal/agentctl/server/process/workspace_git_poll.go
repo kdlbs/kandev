@@ -14,7 +14,10 @@ import (
 )
 
 // pollGitChanges periodically checks for git changes (commits, branch switches, staging)
-// This catches manual git operations done via shell that file watching might miss
+// This catches manual git operations done via shell that file watching might miss.
+//
+// The tick interval is driven by PollMode (set via SetPollMode), same as
+// monitorLoop — see workspace_monitor.go for the wake-up channel design.
 func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	defer wt.wg.Done()
 
@@ -26,8 +29,11 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(wt.gitPollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
 
 	// Initialize cached HEAD SHA, branch name, and index hash
 	wt.gitStateMu.Lock()
@@ -37,19 +43,42 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	wt.gitStateMu.Unlock()
 
 	wt.logger.Info("git polling started",
-		zap.Duration("interval", wt.gitPollInterval),
+		zap.Duration("fast_interval", wt.gitPollInterval),
+		zap.String("initial_mode", string(wt.GetPollMode())),
 		zap.String("initial_head", wt.cachedHeadSHA),
 		zap.String("initial_branch", wt.cachedBranchName))
 
 	var consecutiveFailures int
 
 	for {
+		_, gitPoll, _ := wt.pollIntervals(wt.GetPollMode())
+		timer.Reset(gitPoll)
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-wt.stopCh:
 			return
-		case <-ticker.C:
+		case <-wt.gitPollModeChanged:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			if wt.GetPollMode() == PollModeFast {
+				if atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+					if stop := wt.gitPollTick(ctx, &consecutiveFailures); stop {
+						return
+					}
+				}
+			}
+			continue
+		case <-timer.C:
+			if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
+				continue
+			}
+
 			// Skip this tick if the previous cycle is still running (prevents process pile-up
 			// when git commands take longer than the poll interval on large repos).
 			if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {

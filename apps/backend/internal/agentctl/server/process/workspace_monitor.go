@@ -33,6 +33,10 @@ const maxConsecutiveGitFailures = 5
 
 // monitorLoop polls for file changes using file mtimes and quick git checks.
 // This is more efficient than fsnotify on macOS and avoids file descriptor exhaustion.
+//
+// The tick interval is driven by the current PollMode (set via SetPollMode):
+// fast (default 2s) for focused sessions, slow (30s) for sidebar-visible
+// sessions, paused (no-op tick) when nothing is watching.
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
@@ -45,27 +49,67 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(wt.filePollInterval)
-	defer ticker.Stop()
+	// Start with a stopped timer; we reset it explicitly per-iteration based
+	// on the current poll mode. Resettable timer (vs fixed Ticker) lets us
+	// react instantly when the mode changes — critical for the user-visible
+	// lag when a task gains focus.
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
 
-	// Initial update
+	// Initial update — done unconditionally so the first focus-grab isn't
+	// stuck waiting for the first tick. Skipped only in fully-paused initial
+	// state? No: even paused workspaces benefit from a one-time scan so
+	// transitioning to slow/fast later finds a populated cache.
 	wt.updateGitStatus(ctx)
 	wt.updateFiles(ctx)
 
 	// Cache the last known state (ignore error on initial fetch)
 	lastState, _ := wt.getWorkspaceState(ctx)
 
-	wt.logger.Info("file polling started", zap.Duration("interval", wt.filePollInterval))
+	wt.logger.Info("file polling started",
+		zap.Duration("fast_interval", wt.filePollInterval),
+		zap.String("initial_mode", string(wt.GetPollMode())))
 
 	var consecutiveFailures int
 
 	for {
+		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
+		timer.Reset(filePoll)
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-wt.stopCh:
 			return
-		case <-ticker.C:
+		case <-wt.monitorModeChanged:
+			// Mode changed; drain the timer and loop to reset with the new
+			// interval. If we just transitioned into fast mode, run an
+			// immediate scan instead of waiting up to 30s for the next tick.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			if wt.GetPollMode() == PollModeFast {
+				if atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {
+					if stop := wt.monitorTick(ctx, &lastState, &consecutiveFailures); stop {
+						return
+					}
+				}
+			}
+			continue
+		case <-timer.C:
+			// In paused mode the body is a no-op; we still wake up periodically
+			// (pausedTickInterval) so SetPollMode lifting us out of paused is
+			// handled even if the channel signal was somehow missed.
+			if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
+				continue
+			}
+
 			// Skip this tick if the previous cycle is still running (prevents process pile-up
 			// when git commands take longer than the poll interval on large repos).
 			if !atomic.CompareAndSwapInt32(&wt.monitorRunning, 0, 1) {

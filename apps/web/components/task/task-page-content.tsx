@@ -13,6 +13,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
+import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { fetchTask } from "@/lib/api";
@@ -602,6 +603,9 @@ export function TaskPageContent({
   const resumption = useSessionResumption(task?.id ?? null, effectiveSessionId);
   const merged = useMergedAgentState(agent, resumption, sessionPanel, effectiveSessionId, task);
   const archivedValue = useMemo(() => buildArchivedValue(task, repository), [task, repository]);
+  // Mark this session as actively focused so the backend lifts polling to fast.
+  // Sidebar cards subscribe but never focus, so they stay on the cheap slow tier.
+  useTaskFocus(effectiveSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));

@@ -184,6 +184,14 @@ func provideGateway(
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
 
+	// Route session focus/subscription transitions from the hub into the
+	// lifecycle manager so it can push poll-mode changes to agentctl.
+	if lifecycleMgr != nil {
+		gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
+			lifecycleMgr.HandleSessionMode(sessionID, lifecycle.WorkspacePollMode(mode))
+		})
+	}
+
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
