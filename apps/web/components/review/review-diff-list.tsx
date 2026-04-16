@@ -492,7 +492,7 @@ function renderDiffContent(opts: {
           onToggleExpandUnchanged={onToggleExpandUnchanged}
         />
         {file.diff_skip_reason === "truncated" && (
-          <div className="flex items-center justify-center py-1 text-muted-foreground text-xs border-t border-border/40">
+          <div className="py-1 text-center text-xs text-muted-foreground border-t">
             Diff truncated — showing first 256 KB
           </div>
         )}
@@ -533,7 +533,7 @@ function FileDiffSection({
     [wordWrap],
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
-  // Force load when: visible via intersection observer, or forceLoad is true (all files up to selected)
+  // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
   const scrollSentinelRef = useAutoMarkOnScroll({
