@@ -119,7 +119,6 @@ function useTaskOperations({
 }
 
 type TasksPageBodyProps = {
-  total: number;
   showArchived: boolean;
   setShowArchived: (show: boolean) => void;
   columns: ReturnType<typeof getColumns>;
@@ -132,7 +131,6 @@ type TasksPageBodyProps = {
 };
 
 function TasksPageBody({
-  total,
   showArchived,
   setShowArchived,
   columns,
@@ -150,7 +148,7 @@ function TasksPageBody({
           <div>
             <h1 className="text-xl font-semibold">All Tasks</h1>
             <p className="text-sm text-muted-foreground">
-              {total} task{total !== 1 ? "s" : ""} found
+              {tasks.length} task{tasks.length !== 1 ? "s" : ""} found
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -302,6 +300,9 @@ function useTasksPageComputed({
   deletingTaskId,
   router,
   activeWorkflowId,
+  tasks,
+  allRepositoriesSelected,
+  selectedRepositoryId,
 }: {
   total: number;
   pagination: PaginationState;
@@ -313,6 +314,9 @@ function useTasksPageComputed({
   deletingTaskId: string | null;
   router: ReturnType<typeof useRouter>;
   activeWorkflowId: string | null;
+  tasks: Task[];
+  allRepositoriesSelected: boolean;
+  selectedRepositoryId: string | null;
 }) {
   const pageCount = useMemo(
     () => Math.ceil(total / pagination.pageSize),
@@ -341,7 +345,20 @@ function useTasksPageComputed({
     : workflows[0];
   const defaultStep = steps.find((s) => s.workflow_id === defaultWorkflow?.id);
 
-  return { pageCount, columns, handleRowClick, defaultWorkflow, defaultStep };
+  const filteredTasks = useMemo(() => {
+    let result = tasks;
+    if (activeWorkflowId) {
+      result = result.filter((t) => t.workflow_id === activeWorkflowId);
+    }
+    if (!allRepositoriesSelected && selectedRepositoryId) {
+      result = result.filter((t) =>
+        t.repositories?.some((r) => r.repository_id === selectedRepositoryId),
+      );
+    }
+    return result;
+  }, [tasks, activeWorkflowId, allRepositoriesSelected, selectedRepositoryId]);
+
+  return { pageCount, columns, handleRowClick, defaultWorkflow, defaultStep, filteredTasks };
 }
 
 function useTasksPageSetup(props: TasksPageClientProps) {
@@ -350,6 +367,8 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     activeWorkspaceId,
     activeWorkflowId,
     repositories: storeRepositories,
+    allRepositoriesSelected,
+    selectedRepositoryId,
   } = useKanbanDisplaySettings();
   const viewState = useTasksPageViewState({
     initialWorkflows: props.initialWorkflows,
@@ -387,6 +406,9 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     deletingTaskId: ops.deletingTaskId,
     router,
     activeWorkflowId,
+    tasks: viewState.tasks,
+    allRepositoriesSelected,
+    selectedRepositoryId,
   });
   return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };
 }
@@ -404,11 +426,10 @@ export function TasksPageClient(props: TasksPageClientProps) {
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
       />
       <TasksPageBody
-        total={s.total}
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}
         columns={s.columns}
-        tasks={s.tasks}
+        tasks={s.filteredTasks}
         pageCount={s.pageCount}
         pagination={s.pagination}
         setPagination={s.setPagination}
