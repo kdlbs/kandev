@@ -58,10 +58,13 @@ export class KanbanPage {
   }
 
   async enableMultiSelect() {
-    await this.multiSelectToggle.waitFor({ state: "visible" });
-    const isEnabled = await this.multiSelectToolbar.isVisible();
+    await this.multiSelectToggle.first().waitFor({ state: "visible" });
+    const isEnabled = await this.page
+      .locator('[data-multi-select-active="true"]')
+      .first()
+      .isVisible();
     if (!isEnabled) {
-      await this.multiSelectToggle.click();
+      await this.multiSelectToggle.first().click();
     }
   }
 

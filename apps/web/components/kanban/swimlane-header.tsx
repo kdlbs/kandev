@@ -26,7 +26,11 @@ export function SwimlaneHeader({
   isMultiSelectMode,
 }: SwimlaneHeaderProps) {
   return (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 py-1.5 w-full" data-testid="swimlane-header">
+    <div
+      className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 py-1.5 w-full"
+      data-testid="swimlane-header"
+      data-multi-select-active={isMultiSelectMode ? "true" : undefined}
+    >
       <div className="flex items-center gap-1">
         {dragHandleProps && (
           <div
@@ -54,11 +58,7 @@ export function SwimlaneHeader({
         )}
         <div className="flex-1 border-t border-dashed border-border/50" />
       </div>
-      <button
-        type="button"
-        onClick={onToggleCollapse}
-        className="cursor-pointer group"
-      >
+      <button type="button" onClick={onToggleCollapse} className="cursor-pointer group">
         <Badge variant="secondary" className="text-xs shrink-0 gap-1.5 px-2.5 py-0.5">
           <IconChevronRight
             className={cn(
