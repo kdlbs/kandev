@@ -94,3 +94,6 @@ normalized-*.jsonl
 # Serena MCP
 .serena/*
 .gitnexus
+
+# playwright-cli snapshots/console logs
+.playwright-cli/
