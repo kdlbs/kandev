@@ -320,8 +320,11 @@ func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 		models := []dto.InferenceModelDTO{}
 		// hostExecutor is an optional dependency (see executeSessionless);
 		// guard against nil to avoid panicking when it isn't wired up.
+		// The host utility cache is keyed by ag.ID() (see bootstrapAgent),
+		// not ag.Name() — built-in ACP agents return distinct strings for
+		// the two (e.g. "claude-acp" vs "Claude ACP Agent").
 		if h.hostExecutor != nil {
-			if caps, ok := h.hostExecutor.Get(ia.Name); ok {
+			if caps, ok := h.hostExecutor.Get(ia.ID); ok {
 				for _, m := range caps.Models {
 					models = append(models, dto.InferenceModelDTO{
 						ID:          m.ID,

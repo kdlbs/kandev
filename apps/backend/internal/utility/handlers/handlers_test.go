@@ -67,22 +67,26 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 		nilHost     bool
 		wantByAgent map[string][]wantModel
 	}{
+		// Fixtures deliberately use the real built-in ACP agent shape
+		// where ID ("claude-acp") and Name ("Claude ACP Agent") differ,
+		// so a Name/ID mixup in the cache lookup will always fail this
+		// test. The cache is keyed by ag.ID() in production.
 		{
 			name: "agent with no cached capabilities yields empty models array",
 			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude", Name: "claude-code", DisplayName: "Claude Code"},
+				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
 			},
 			caps:        nil,
-			wantByAgent: map[string][]wantModel{"claude-code": {}},
+			wantByAgent: map[string][]wantModel{"Claude ACP Agent": {}},
 		},
 		{
 			name: "agent with cached models yields populated array with is_default set",
 			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude", Name: "claude-code", DisplayName: "Claude Code"},
+				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
 			},
 			caps: map[string]hostutility.AgentCapabilities{
-				"claude-code": {
-					AgentType:      "claude-code",
+				"claude-acp": { // keyed by ID, matches bootstrapAgent
+					AgentType:      "claude-acp",
 					CurrentModelID: "sonnet",
 					Models: []hostutility.Model{
 						{ID: "sonnet", Name: "Sonnet"},
@@ -91,7 +95,7 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 				},
 			},
 			wantByAgent: map[string][]wantModel{
-				"claude-code": {
+				"Claude ACP Agent": {
 					{id: "sonnet", isDefault: true},
 					{id: "opus", isDefault: false},
 				},
@@ -109,10 +113,10 @@ func TestHttpListInferenceAgentsNeverReturnsNullModels(t *testing.T) {
 			// nil-guard in executeSessionless).
 			name: "nil hostExecutor does not panic and yields empty models",
 			agents: []lifecycle.InferenceAgentInfo{
-				{ID: "claude", Name: "claude-code", DisplayName: "Claude Code"},
+				{ID: "claude-acp", Name: "Claude ACP Agent", DisplayName: "Claude"},
 			},
 			nilHost:     true,
-			wantByAgent: map[string][]wantModel{"claude-code": {}},
+			wantByAgent: map[string][]wantModel{"Claude ACP Agent": {}},
 		},
 	}
 
