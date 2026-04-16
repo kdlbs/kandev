@@ -15,6 +15,7 @@ interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   pageCount?: number;
+  rowCount?: number;
   pagination?: PaginationState;
   onPaginationChange?: (pagination: PaginationState) => void;
   isLoading?: boolean;
@@ -25,6 +26,7 @@ export function DataTable<TData, TValue>({
   columns,
   data,
   pageCount = -1,
+  rowCount,
   pagination,
   onPaginationChange,
   isLoading = false,
@@ -35,6 +37,7 @@ export function DataTable<TData, TValue>({
     data,
     columns,
     pageCount,
+    rowCount,
     state: {
       pagination,
     },

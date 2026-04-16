@@ -131,6 +131,7 @@ type TasksPageBodyProps = {
   setShowArchived: (show: boolean) => void;
   columns: ReturnType<typeof getColumns>;
   tasks: Task[];
+  total: number;
   pageCount: number;
   pagination: PaginationState;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -143,6 +144,7 @@ function TasksPageBody({
   setShowArchived,
   columns,
   tasks,
+  total,
   pageCount,
   pagination,
   setPagination,
@@ -156,7 +158,7 @@ function TasksPageBody({
           <div>
             <h1 className="text-xl font-semibold">All Tasks</h1>
             <p className="text-sm text-muted-foreground">
-              {tasks.length} task{tasks.length !== 1 ? "s" : ""} found
+              {total} task{total !== 1 ? "s" : ""} found
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -174,6 +176,7 @@ function TasksPageBody({
           columns={columns}
           data={tasks}
           pageCount={pageCount}
+          rowCount={total}
           pagination={pagination}
           onPaginationChange={setPagination}
           isLoading={isLoading}
@@ -420,6 +423,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         setShowArchived={s.setShowArchived}
         columns={s.columns}
         tasks={s.filteredTasks}
+        total={s.total}
         pageCount={s.pageCount}
         pagination={s.pagination}
         setPagination={s.setPagination}
