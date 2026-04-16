@@ -51,8 +51,12 @@ test.describe("PR watcher merged cleanup", () => {
     );
 
     // --- Trigger watch → should create a task for PR #101 ---
-    const triggerResult = await apiClient.triggerReviewWatch(watch.id);
-    expect(triggerResult.new_prs).toBeGreaterThanOrEqual(1);
+    // createReviewWatch already kicked off an initial poll; this explicit
+    // trigger is belt-and-suspenders. We do NOT assert on new_prs here
+    // because the atomic dedup reservation means whichever poll runs first
+    // claims the PR, and the subsequent trigger correctly returns 0 "new".
+    // The real check is the task-exists poll below.
+    await apiClient.triggerReviewWatch(watch.id);
 
     // Task creation is async (goroutine), poll until it appears
     let prTask: { id: string; title: string } | undefined;
