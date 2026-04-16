@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 
 const PINNED_CLASS = "dv-pinned-tab";
 const OFFSET_VAR = "--dv-pin-offset";
@@ -10,16 +10,21 @@ const OFFSET_VAR = "--dv-pin-offset";
  * that multiple pinned tabs stack side-by-side instead of overlapping at x=0.
  *
  * The first pinned tab sticks at `left: 0`, the second at `left: width_of_first`,
- * and so on. Uses a CSS custom property consumed by `.dv-pinned-tab` in
- * `dockview-theme.css`.
+ * and so on. Widths include horizontal margins so the trailing `margin: 0 2px`
+ * gap between `.dv-tab`s is preserved when the tabs are pinned.
+ *
+ * Exported for unit testing.
  */
-function updatePinnedOffsets(container: HTMLElement | null): void {
+export function updatePinnedOffsets(container: HTMLElement | null): void {
   if (!container) return;
   const pinned = container.querySelectorAll<HTMLElement>(`.${PINNED_CLASS}`);
   let offset = 0;
   pinned.forEach((el) => {
     el.style.setProperty(OFFSET_VAR, `${offset}px`);
-    offset += el.offsetWidth;
+    const style = getComputedStyle(el);
+    const marginLeft = parseFloat(style.marginLeft) || 0;
+    const marginRight = parseFloat(style.marginRight) || 0;
+    offset += el.offsetWidth + marginLeft + marginRight;
   });
 }
 
@@ -29,9 +34,13 @@ function updatePinnedOffsets(container: HTMLElement | null): void {
  *
  * `ref` must point to an element rendered directly inside the Dockview tab
  * wrapper — we walk up to `.dv-tab` and attach the pin class there.
+ *
+ * Uses `useLayoutEffect` so the class is applied before the browser paints,
+ * avoiding a one-frame flash of a non-sticky tab when the strip is already
+ * scrolled at mount time.
  */
 export function usePinnedDockviewTab(ref: RefObject<HTMLElement | null>): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const dvTab = el.closest<HTMLElement>(".dv-tab");

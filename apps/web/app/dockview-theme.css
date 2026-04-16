@@ -82,6 +82,13 @@
   background: var(--background);
 }
 
+/* The generic `.dv-tab:hover` rule below uses a semi-transparent background
+   (color-mix with transparent) — on a sticky pinned tab that would let the
+   scrolled-behind tabs bleed through. Keep the hover state opaque. */
+.dockview-theme-kandev .dv-tab.dv-pinned-tab:hover {
+  background: var(--muted);
+}
+
 /* ── Individual tabs — pill style ── */
 .dockview-theme-kandev .dv-tab {
   padding: 0;
