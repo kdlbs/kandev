@@ -25,7 +25,12 @@ function buildDocumentContext(
         if (c.selectedText) {
           context += "```\n" + c.selectedText + "\n```\n";
         }
-        context += `> ${c.text}\n\n`;
+        // Handle multiline text by prefixing each line with >
+        const blockquote = c.text
+          .split("\n")
+          .map((line) => `> ${line}`)
+          .join("\n");
+        context += blockquote + "\n\n";
       }
     }
 
