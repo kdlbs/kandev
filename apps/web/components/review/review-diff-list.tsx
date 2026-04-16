@@ -476,7 +476,16 @@ function renderDiffContent(opts: {
   onCommentRun: (comment: DiffComment) => void;
   onToggleExpandUnchanged: () => void;
 }) {
-  const { shouldRender, file, sessionId, wordWrap, expandUnchanged, onRevertBlock, onCommentRun, onToggleExpandUnchanged } = opts;
+  const {
+    shouldRender,
+    file,
+    sessionId,
+    wordWrap,
+    expandUnchanged,
+    onRevertBlock,
+    onCommentRun,
+    onToggleExpandUnchanged,
+  } = opts;
   if (shouldRender && file.diff) {
     return (
       <>
