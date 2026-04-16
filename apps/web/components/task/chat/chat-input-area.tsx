@@ -43,10 +43,7 @@ function buildSubmitMessage(
   }
   if (planComments.length > 0) {
     const planMarkdown = formatPlanCommentsAsMarkdown(planComments);
-    const header = "### Plan Comments\n\n";
-    finalMessage = finalMessage
-      ? `${header}${planMarkdown}\n\n---\n\n${finalMessage}`
-      : `${header}${planMarkdown}`;
+    finalMessage = finalMessage ? `${planMarkdown}${finalMessage}` : planMarkdown;
   }
   return finalMessage;
 }

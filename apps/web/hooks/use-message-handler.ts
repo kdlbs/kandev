@@ -4,6 +4,7 @@ import { useQueue } from "./domains/session/use-queue";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
+import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt } from "@/lib/types/http";
 
@@ -20,10 +21,13 @@ function buildDocumentContext(
     let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
 
     if (planComments && planComments.length > 0) {
-      context += `\n\nUser comments on the plan:`;
-      planComments.forEach((c, i) => {
-        context += `\nComment ${i + 1}:\n- Selected text: "${c.selectedText}"\n- Comment: "${c.text}"`;
-      });
+      context += `\n\nUser comments on the plan:\n`;
+      for (const c of planComments) {
+        if (c.selectedText) {
+          context += "```\n" + c.selectedText + "\n```\n";
+        }
+        context += toBlockquote(c.text) + "\n\n";
+      }
     }
 
     context += `\n</kandev-system>`;

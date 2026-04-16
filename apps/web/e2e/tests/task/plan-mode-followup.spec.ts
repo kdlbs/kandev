@@ -165,7 +165,7 @@ test.describe("Plan mode follow-up messages", () => {
     await runBtn.click();
 
     // The comment should appear in the chat formatted as plan comment markdown.
-    await expect(session.chat.getByText("Comment 1:", { exact: false })).toBeVisible({
+    await expect(session.chat.getByText("Plan Comments", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
     await expect(

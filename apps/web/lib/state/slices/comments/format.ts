@@ -37,19 +37,35 @@ export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string 
   return lines.join("\n");
 }
 
+/** Convert text to blockquote, handling multiline text properly. */
+export function toBlockquote(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
 /**
  * Format plan comments as markdown for sending to agent.
+ * Uses the same style as code review comments: code block for selected text + blockquote for comment.
  */
 export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
   if (!comments || comments.length === 0) return "";
 
-  const lines: string[] = [];
-  for (let i = 0; i < comments.length; i++) {
-    const c = comments[i];
-    lines.push(`Comment ${i + 1}:`);
-    lines.push(`- Selected text: "${c.selectedText}"`);
-    lines.push(`- Comment: "${c.text}"`);
+  const lines: string[] = ["### Plan Comments", ""];
+
+  for (const c of comments) {
+    if (c.selectedText) {
+      lines.push("```");
+      lines.push(c.selectedText);
+      lines.push("```");
+    }
+    lines.push(toBlockquote(c.text));
+    lines.push("");
   }
+
+  lines.push("---");
+  lines.push("");
   return lines.join("\n");
 }
 
