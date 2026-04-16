@@ -85,7 +85,11 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("timeout and reconciliation", async ({ testPage, apiClient, seedData }) => {
+  test("timeout closes overlay and renders expired entry in history", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const session = await seedClarificationTask(
       testPage,
       apiClient,
@@ -98,15 +102,52 @@ test.describe("Clarification flow", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
     // Wait for agent to time out (5s) and complete its turn.
-    // The "timed out" text appears in chat and the deferred notice should show.
     await expect(session.chat).toContainText("timed out", { timeout: 30_000 });
-    await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
 
-    // User responds after agent has moved on — this triggers the event fallback path
-    await session.clarificationOption("PostgreSQL").click();
+    // Overlay should auto-close once the canceller marks status=expired. The
+    // deferred "your response will be sent as a new message" notice must NOT
+    // appear — we're not keeping a stale interactive prompt around.
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationDeferredNotice()).not.toBeVisible();
 
-    // Orchestrator resumes agent with new turn via ClarificationAnswered event
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    // Chat history should show the question as expired (orange X + label).
+    await expect(session.clarificationExpiredNotice()).toBeVisible();
+
+    // Chat input returns to the default idle placeholder — not the clarification
+    // one. Confirms no new turn was triggered by the timeout flow.
+    await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("options render label and description on separate rows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Layout",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The mock scenario uses three options, each with a label and description.
+    const labels = session.clarificationOptionLabels();
+    const descriptions = session.clarificationOptionDescriptions();
+    await expect(labels).toHaveCount(3);
+    await expect(descriptions).toHaveCount(3);
+
+    // Label and description must be stacked vertically (description's top
+    // edge sits below the label's bottom edge). Regression guard for the
+    // old layout that rendered them side-by-side on a single row.
+    const labelBox = await labels.first().boundingBox();
+    const descriptionBox = await descriptions.first().boundingBox();
+    if (!labelBox || !descriptionBox) {
+      throw new Error("expected both label and description to have bounding boxes");
+    }
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
   });
 
   test("plan mode + clarification does not leave pointer-events stuck on body", async ({
