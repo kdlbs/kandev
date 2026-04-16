@@ -133,6 +133,94 @@ test.describe("Session layout", () => {
     await session.expectTerminalHasText(TERMINAL_MARKER);
   });
 
+  test("agent tab stays pinned when center tab strip overflows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    await seedTaskWithSession(testPage, apiClient, seedData, "Pinned Tab Test");
+
+    // The session tab (agent chat) lives in the center group. Our hook marks
+    // the wrapping `.dv-tab` with `dv-pinned-tab`.
+    const sessionDvTab = testPage
+      .locator(".dv-tab.dv-pinned-tab:has([data-testid^='session-tab-'])")
+      .first();
+    await expect(sessionDvTab).toBeVisible({ timeout: 10_000 });
+
+    // Sanity check: the sticky CSS rule is actually active.  This catches
+    // regressions where the `dv-pinned-tab` class is present but the CSS
+    // rule is removed, overridden, or the element isn't inside a scrollable
+    // ancestor that engages sticky.
+    const stickyPosition = await sessionDvTab.evaluate(
+      (el) => getComputedStyle(el as HTMLElement).position,
+    );
+    expect(stickyPosition).toBe("sticky");
+
+    // Scope to the center group's tabs container (the one that holds the
+    // session tab).
+    const tabsContainer = testPage
+      .locator(
+        ".dv-tabs-and-actions-container:has([data-testid^='session-tab-']) .dv-tabs-container.dv-horizontal",
+      )
+      .first();
+
+    // Simulate a user opening many diff/file tabs by injecting placeholder
+    // `.dv-tab` siblings directly into the tabs container.  Going through
+    // the + menu and opening real panels would also work, but that takes
+    // several UI round-trips per tab and introduces dropdown flakiness.
+    // The feature under test is purely about CSS sticky positioning, which
+    // depends only on the DOM layout of siblings inside the scrolling
+    // container — so synthetic siblings exercise the same code path.
+    await tabsContainer.evaluate((el) => {
+      const container = el as HTMLElement;
+      for (let i = 0; i < 12; i++) {
+        const dummy = document.createElement("div");
+        dummy.className = "dv-tab";
+        dummy.setAttribute("data-e2e-dummy-tab", "true");
+        dummy.textContent = `Diff [file_${i}.go]`;
+        dummy.style.cssText =
+          "padding: 0 12px; min-width: 140px; display: inline-flex; align-items: center; flex-shrink: 0;";
+        container.appendChild(dummy);
+      }
+    });
+
+    // Confirm the strip now overflows its visible width.
+    await expect
+      .poll(
+        async () =>
+          tabsContainer.evaluate(
+            (el) => (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth,
+          ),
+        { timeout: 5_000, message: "Expected the tab strip to overflow" },
+      )
+      .toBe(true);
+
+    // Scroll the strip all the way to the right — without sticky, this would
+    // push the session tab off-screen.
+    await tabsContainer.evaluate((el) => {
+      (el as HTMLElement).scrollLeft = (el as HTMLElement).scrollWidth;
+    });
+
+    // With sticky positioning, the session tab should remain glued to the
+    // left edge of the tab strip, regardless of scrollLeft.
+    await expect
+      .poll(
+        async () => {
+          const sessionBox = await sessionDvTab.boundingBox();
+          const containerBox = await tabsContainer.boundingBox();
+          if (!sessionBox || !containerBox) return Number.POSITIVE_INFINITY;
+          return Math.abs(sessionBox.x - containerBox.x);
+        },
+        {
+          timeout: 5_000,
+          message: "Expected the session tab to stay pinned at the tab strip's left edge",
+        },
+      )
+      .toBeLessThan(5);
+  });
+
   test("closing maximized panel exits maximize and restores layout", async ({
     testPage,
     apiClient,

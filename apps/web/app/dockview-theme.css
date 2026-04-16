@@ -71,6 +71,17 @@
   display: none !important;
 }
 
+/* ── Pinned tabs (agent/session chats) ──
+   Stay visible on the left when the tab strip overflows horizontally.
+   `--dv-pin-offset` is set per-tab by usePinnedDockviewTab so multiple
+   pinned tabs stack side-by-side instead of overlapping at x=0. */
+.dockview-theme-kandev .dv-tab.dv-pinned-tab {
+  position: sticky;
+  left: var(--dv-pin-offset, 0);
+  z-index: 2;
+  background: var(--background);
+}
+
 /* ── Individual tabs — pill style ── */
 .dockview-theme-kandev .dv-tab {
   padding: 0;

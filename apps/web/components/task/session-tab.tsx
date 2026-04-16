@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
+import { usePinnedDockviewTab } from "./use-pinned-dockview-tab";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -256,6 +257,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isActive, setIsActive] = useState(api.isActive);
+  const pinRef = useRef<HTMLDivElement>(null);
+  usePinnedDockviewTab(pinRef);
 
   useEffect(() => {
     const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
@@ -275,7 +278,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           className="flex h-full items-center"
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
         >
-          <div className="flex items-center">
+          <div ref={pinRef} className="flex items-center">
             {isPrimary && showMultiSessionBadges && (
               <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
             )}

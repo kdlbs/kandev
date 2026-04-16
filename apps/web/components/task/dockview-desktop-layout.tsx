@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, memo } from "react";
+import { usePinnedDockviewTab } from "./use-pinned-dockview-tab";
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -145,7 +146,13 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 
 // --- TAB COMPONENTS ---
 function PermanentTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose />;
+  const ref = useRef<HTMLDivElement>(null);
+  usePinnedDockviewTab(ref);
+  return (
+    <div ref={ref} className="flex h-full items-center">
+      <DockviewDefaultTab {...props} hideClose />
+    </div>
+  );
 }
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
