@@ -18,7 +18,7 @@ export function QuickChatButton({ workspaceId }: { workspaceId?: string | null }
   return (
     <KeyboardShortcutTooltip shortcut={quickChatShortcut} description="Quick Chat">
       <Button
-        size="icon"
+        size="icon-sm"
         variant="outline"
         className="cursor-pointer"
         onClick={handleOpenQuickChat}
