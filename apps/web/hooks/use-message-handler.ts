@@ -20,10 +20,13 @@ function buildDocumentContext(
     let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
 
     if (planComments && planComments.length > 0) {
-      context += `\n\nUser comments on the plan:`;
-      planComments.forEach((c, i) => {
-        context += `\nComment ${i + 1}:\n- Selected text: "${c.selectedText}"\n- Comment: "${c.text}"`;
-      });
+      context += `\n\nUser comments on the plan:\n`;
+      for (const c of planComments) {
+        if (c.selectedText) {
+          context += "```\n" + c.selectedText + "\n```\n";
+        }
+        context += `> ${c.text}\n\n`;
+      }
     }
 
     context += `\n</kandev-system>`;
