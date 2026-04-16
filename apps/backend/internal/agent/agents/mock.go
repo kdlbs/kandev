@@ -17,6 +17,7 @@ var mockLogoDark []byte
 var (
 	_ Agent            = (*MockAgent)(nil)
 	_ PassthroughAgent = (*MockAgent)(nil)
+	_ InferenceAgent   = (*MockAgent)(nil)
 )
 
 type MockAgent struct {
@@ -112,4 +113,19 @@ func (a *MockAgent) InstallScript() string { return "" }
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// InferenceConfig enables one-shot inference via ACP. The mock-agent binary
+// advertises its available models in the session/new response, so the host
+// utility capability probe populates them into the cache without any static
+// model list here.
+func (a *MockAgent) InferenceConfig() *InferenceConfig {
+	binary := "mock-agent"
+	if a.binaryPath != "" {
+		binary = a.binaryPath
+	}
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand(binary),
+	}
 }

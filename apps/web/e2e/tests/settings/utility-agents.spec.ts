@@ -106,4 +106,95 @@ test.describe("Utility Agents settings page", () => {
       [],
     );
   });
+
+  test("selecting an agent populates the model dropdown (ACP probe)", async ({
+    testPage,
+    backend,
+  }) => {
+    // Regression guard for "I select an agent but can't select a model".
+    // Models are populated from the host utility capability cache, which is
+    // seeded by the boot-time ACP probe. The mock-agent binary advertises
+    // `mock-fast` (default) and `mock-smart` in its session/new response, so
+    // after the probe completes the page must show those two in the Model
+    // dropdown once the user picks Mock as the agent.
+    const pageErrors: Error[] = [];
+    testPage.on("pageerror", (err) => pageErrors.push(err));
+
+    await testPage.goto("/settings/utility-agents");
+
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // The default-model section has two Selects side by side: Agent | Model.
+    // Each is scoped by the Label above it (no `htmlFor`, so we locate via
+    // the containing div).
+    const agentSelect = testPage
+      .locator('div:has(> label:text-is("Agent"))')
+      .first()
+      .getByRole("combobox");
+    const modelSelect = testPage
+      .locator('div:has(> label:text-is("Model"))')
+      .first()
+      .getByRole("combobox");
+
+    // Model dropdown starts disabled until an agent is picked — guards that
+    // the UI enforces "agent first" ordering.
+    await expect(modelSelect).toBeDisabled();
+
+    // The probe runs in a goroutine at boot, so the agent-list fetch from
+    // SSR/client may land before probe models are cached. Poll the backend
+    // directly until the inference-agents response carries models for
+    // mock-agent so the assertions below aren't racing the probe.
+    await expect
+      .poll(
+        async () => {
+          const resp = await testPage.request.get(
+            `${backend.baseUrl}/api/v1/utility/inference-agents`,
+          );
+          if (!resp.ok()) return 0;
+          const data = (await resp.json()) as {
+            agents: { id: string; models?: { id: string }[] | null }[];
+          };
+          const mock = data.agents.find((a) => a.id === "mock-agent");
+          return mock?.models?.length ?? 0;
+        },
+        { timeout: 15_000, intervals: [250, 500, 1000] },
+      )
+      .toBeGreaterThanOrEqual(2);
+
+    // Re-fetch the page so the initial state picks up the now-populated
+    // models (the section reads them from its own load snapshot, not live).
+    await testPage.reload();
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Open the Agent dropdown and pick Mock.
+    await agentSelect.click();
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await expect(listbox.getByRole("option", { name: "Mock", exact: true })).toBeVisible();
+    await listbox.getByRole("option", { name: "Mock", exact: true }).click();
+    await expect(listbox).not.toBeVisible();
+
+    // The model dropdown should now be enabled and carry both probed models.
+    await expect(modelSelect).toBeEnabled();
+    await modelSelect.click();
+    const modelListbox = testPage.getByRole("listbox");
+    await expect(modelListbox).toBeVisible();
+    await expect(modelListbox.getByRole("option", { name: "Mock Fast", exact: true })).toBeVisible();
+    await expect(
+      modelListbox.getByRole("option", { name: "Mock Smart", exact: true }),
+    ).toBeVisible();
+
+    // Pick a non-default model and verify it's reflected back on the trigger.
+    await modelListbox.getByRole("option", { name: "Mock Smart", exact: true }).click();
+    await expect(modelListbox).not.toBeVisible();
+    await expect(modelSelect).toContainText("Mock Smart");
+
+    expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
+      [],
+    );
+  });
 });

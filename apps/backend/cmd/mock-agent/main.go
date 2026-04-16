@@ -75,6 +75,9 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
+// The Models field advertises the available models so the host utility
+// capability probe can populate them in the cache — this is what makes
+// the utility-agents settings page show model options for mock-agent in E2E.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
@@ -85,7 +88,25 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
 
-	return acp.NewSessionResponse{SessionId: sid}, nil
+	return acp.NewSessionResponse{
+		SessionId: sid,
+		Models:    mockSessionModels(),
+	}, nil
+}
+
+// mockSessionModels returns the mock agent's advertised model list for ACP
+// session responses. Two models are exposed so tests can verify both
+// selection and default behavior (mock-fast is the default).
+func mockSessionModels() *acp.UnstableSessionModelState {
+	fastDesc := "Fast mock model for testing"
+	smartDesc := "Smart mock model for testing"
+	return &acp.UnstableSessionModelState{
+		CurrentModelId: "mock-fast",
+		AvailableModels: []acp.UnstableModelInfo{
+			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
+			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
+		},
+	}
 }
 
 // LoadSession restores a previous session for resume.

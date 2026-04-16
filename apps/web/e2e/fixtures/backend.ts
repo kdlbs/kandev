@@ -223,7 +223,11 @@ exec git "$@"
 
       const backendEnv = {
         ...stripGitHubTokens(process.env as Record<string, string>),
-        PATH: `${shimDir}:${originalPath}`,
+        // Prepend the kandev bin dir so the host utility probe can locate
+        // the `mock-agent` binary via PATH. In production that dir is the
+        // same as the running kandev binary's dir, but e2e spawns via an
+        // absolute path and doesn't inherit that location.
+        PATH: `${shimDir}:${path.join(BACKEND_DIR, "bin")}:${originalPath}`,
         KANDEV_E2E_ORIGINAL_PATH: originalPath,
         KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
         HOME: tmpDir,
