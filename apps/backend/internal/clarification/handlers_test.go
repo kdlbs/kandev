@@ -68,7 +68,7 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 			},
 		},
 	}
-	h, _, eventBus, _ := setupTestHandler(t, msgs)
+	h, _, eventBus, messageCreator := setupTestHandler(t, msgs)
 
 	body := RespondBody{
 		Rejected:     true,
@@ -81,8 +81,16 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 	}
 	for _, ev := range eventBus.events {
 		if ev.Type == events.ClarificationAnswered {
-			t.Errorf("expected no %s event, got %d", events.ClarificationAnswered, len(eventBus.events))
+			t.Errorf("expected no %s event; got events: %v", events.ClarificationAnswered, eventBus.events)
 		}
+	}
+
+	// The message is already "expired" (set by the canceller). The no-op path
+	// must NOT re-update the status — otherwise a stale X click would overwrite
+	// "expired" with "rejected" and the history entry would look wrong.
+	if len(messageCreator.updates) != 0 {
+		t.Errorf("expected no message updates in rejected no-op path, got %d: %+v",
+			len(messageCreator.updates), messageCreator.updates)
 	}
 }
 
