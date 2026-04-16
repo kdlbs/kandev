@@ -15,17 +15,18 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.
   ),
 });
 
+type Monaco = typeof import("monaco-editor");
+
 // Module-level singleton: only one completion provider registered for "shell" at a time.
 let globalDisposable: { dispose: () => void } | null = null;
 let registeredInstanceCount = 0;
 
-function registerProvider(
-  monaco: typeof import("monaco-editor"),
+function swapProvider(
+  monaco: Monaco,
   language: string,
   placeholders: ScriptPlaceholder[],
   executorType?: string,
 ) {
-  // Always dispose previous to avoid duplicates, then re-register with latest data
   globalDisposable?.dispose();
   import("./script-editor-completions").then(({ createPlaceholderCompletionProvider }) => {
     globalDisposable?.dispose();
@@ -34,7 +35,26 @@ function registerProvider(
       createPlaceholderCompletionProvider(monaco, placeholders, executorType),
     );
   });
+}
+
+function registerProvider(
+  monaco: Monaco,
+  language: string,
+  placeholders: ScriptPlaceholder[],
+  executorType?: string,
+) {
+  swapProvider(monaco, language, placeholders, executorType);
   registeredInstanceCount++;
+}
+
+// Re-register without incrementing the lifecycle counter (e.g., when placeholders change)
+function reRegisterProvider(
+  monaco: Monaco,
+  language: string,
+  placeholders: ScriptPlaceholder[],
+  executorType?: string,
+) {
+  swapProvider(monaco, language, placeholders, executorType);
 }
 
 function unregisterProvider() {
@@ -77,7 +97,7 @@ export function ScriptEditor({
   lineNumbers = "on",
 }: ScriptEditorProps) {
   const mountedRef = useRef(false);
-  const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
 
   useEffect(() => {
     return () => {
@@ -88,13 +108,25 @@ export function ScriptEditor({
     };
   }, []);
 
-  // Re-register provider when placeholders arrive after Monaco has already mounted
+  // Register/re-register the provider whenever Monaco is mounted and placeholders
+  // change. The singleton `registerProvider` disposes any previous registration,
+  // so swapping is idempotent. `mountedRef` guards the lifecycle counter.
+  const ensureProviderRegistered = useCallback(
+    (monaco: Monaco) => {
+      if (!placeholders || placeholders.length === 0) return;
+      if (!mountedRef.current) {
+        mountedRef.current = true;
+        registerProvider(monaco, language, placeholders, executorType);
+      } else {
+        reRegisterProvider(monaco, language, placeholders, executorType);
+      }
+    },
+    [placeholders, executorType, language],
+  );
+
   useEffect(() => {
-    if (monacoRef.current && placeholders && placeholders.length > 0) {
-      if (!mountedRef.current) mountedRef.current = true;
-      registerProvider(monacoRef.current, language, placeholders, executorType);
-    }
-  }, [placeholders, executorType, language]);
+    if (monacoRef.current) ensureProviderRegistered(monacoRef.current);
+  }, [ensureProviderRegistered]);
 
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
@@ -103,12 +135,9 @@ export function ScriptEditor({
   const handleMount: OnMount = useCallback(
     (_editor, monaco) => {
       monacoRef.current = monaco;
-      if (placeholders && placeholders.length > 0) {
-        mountedRef.current = true;
-        registerProvider(monaco, language, placeholders, executorType);
-      }
+      ensureProviderRegistered(monaco);
     },
-    [placeholders, executorType, language],
+    [ensureProviderRegistered],
   );
 
   return (

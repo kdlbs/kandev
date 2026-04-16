@@ -166,7 +166,7 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 		workflow.Description = *req.Description
 	}
 	if req.AgentProfileID != nil {
-		workflow.AgentProfileID = *req.AgentProfileID
+		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
 	workflow.UpdatedAt = time.Now().UTC()
 

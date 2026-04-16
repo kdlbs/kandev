@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/service"
@@ -180,7 +181,7 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 		step.AutoArchiveAfterHours = *req.AutoArchiveAfterHours
 	}
 	if req.AgentProfileID != nil {
-		step.AgentProfileID = *req.AgentProfileID
+		step.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
 	if err := c.svc.UpdateStep(ctx, step); err != nil {
 		return nil, err

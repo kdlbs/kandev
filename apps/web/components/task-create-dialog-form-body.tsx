@@ -297,7 +297,7 @@ export function DialogPromptSection({
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
-        autoFocus={isTaskStarted ? false : true}
+        autoFocus={!isTaskStarted}
         initialDescription={initialDescription}
         onDescriptionChange={fs.setHasDescription}
         onKeyDown={handleKeyDown}

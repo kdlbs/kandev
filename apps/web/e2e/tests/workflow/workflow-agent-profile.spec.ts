@@ -21,7 +21,7 @@ test.describe("Workflow agent profile", () => {
 
     // Get the available agent profiles from the API so we know the label to select
     const { agents } = await apiClient.listAgents();
-    const agentProfile = agents[0]?.profiles[0];
+    const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
     const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
 
@@ -65,7 +65,7 @@ test.describe("Workflow agent profile", () => {
 
     // Get agent profile info
     const { agents } = await apiClient.listAgents();
-    const agentProfile = agents[0]?.profiles[0];
+    const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
     const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
 
@@ -97,12 +97,13 @@ test.describe("Workflow agent profile", () => {
   }) => {
     // Set an agent profile on the seeded workflow via API
     const { agents } = await apiClient.listAgents();
-    const agentProfile = agents[0]?.profiles[0];
+    const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
     await apiClient.updateWorkflow(seedData.workflowId, {
       agent_profile_id: agentProfile.id,
     });
 
+    let noProfileWorkflowId: string | undefined;
     try {
       // Create a second workflow without an agent profile for comparison
       const noProfileWorkflow = await apiClient.createWorkflow(
@@ -110,6 +111,7 @@ test.describe("Workflow agent profile", () => {
         "No Profile Workflow",
         "simple",
       );
+      noProfileWorkflowId = noProfileWorkflow.id;
 
       // Open the kanban page — reload to pick up the updated workflow agent_profile_id
       const kanban = new KanbanPage(testPage);
@@ -129,15 +131,13 @@ test.describe("Workflow agent profile", () => {
       const agentSelector = testPage.getByTestId("agent-profile-selector");
       await expect(agentSelector).toBeVisible({ timeout: 15_000 });
 
-      // Wait for the agent profile lock to take effect
-      await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
-
       // "Agent set by workflow" text confirms the selector is locked — sufficient verification
-
-      // Clean up the second workflow
-      await apiClient.deleteWorkflow(noProfileWorkflow.id);
+      await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
     } finally {
-      // Always restore the workflow to no agent profile
+      // Always clean up, even if assertions fail
+      if (noProfileWorkflowId) {
+        await apiClient.deleteWorkflow(noProfileWorkflowId).catch(() => {});
+      }
       await apiClient.updateWorkflow(seedData.workflowId, {
         agent_profile_id: "",
       });

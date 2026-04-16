@@ -430,7 +430,12 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	}
 	if s.workflowStepGetter != nil && step.WorkflowID != "" {
 		wfProfileID, err := s.workflowStepGetter.GetWorkflowAgentProfileID(ctx, step.WorkflowID)
-		if err == nil && wfProfileID != "" {
+		if err != nil {
+			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
+				zap.String("workflow_id", step.WorkflowID),
+				zap.String("step_id", step.ID),
+				zap.Error(err))
+		} else if wfProfileID != "" {
 			return wfProfileID
 		}
 	}

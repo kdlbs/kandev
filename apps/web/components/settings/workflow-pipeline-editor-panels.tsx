@@ -9,7 +9,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
-import { useAppStore } from "@/components/state-provider";
+import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
@@ -50,11 +50,7 @@ function StepAgentProfileSelect({
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
 }) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const healthyProfiles = agentProfiles.filter(
-    (p) =>
-      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
-  );
+  const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
 
   return (
     <TooltipProvider>

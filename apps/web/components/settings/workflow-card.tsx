@@ -8,7 +8,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import { useAppStore } from "@/components/state-provider";
+import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
@@ -258,12 +258,7 @@ function WorkflowCardBody({
   workflowSteps,
   stepActions,
 }: WorkflowCardBodyProps) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-
-  const healthyProfiles = agentProfiles.filter(
-    (p) =>
-      !p.capability_status || p.capability_status === "ok" || p.capability_status === "probing",
-  );
+  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
   return (
     <>

@@ -5,6 +5,7 @@ async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
 ) {
   const { agents } = await apiClient.listAgents();
+  if (agents.length === 0) throw new Error("no agents available in test fixtures");
   const agentId = agents[0].id;
   const profileA = await apiClient.createAgentProfile(agentId, "Profile A (fast)", {
     model: "mock-fast",
@@ -145,39 +146,43 @@ test.describe("Workflow agent profile switching", () => {
     const { profileA } = await createProfiles(apiClient);
     const stepId = seedData.steps[0].id;
 
-    // Ensure clean state
-    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
+    try {
+      // Ensure clean state
+      await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
 
-    const page = new WorkflowSettingsPage(testPage);
-    await page.goto(seedData.workspaceId);
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
 
-    const card = await page.findWorkflowCard("E2E Workflow");
-    await expect(card).toBeVisible();
+      const card = await page.findWorkflowCard("E2E Workflow");
+      await expect(card).toBeVisible();
 
-    // Click first step to open config panel
-    const stepNodes = card.locator(".group.relative");
-    await stepNodes.first().click();
-    await testPage.waitForTimeout(500);
+      // Click first step to open config panel
+      const stepNodes = card.locator(".group.relative");
+      await stepNodes.first().click();
+      await testPage.waitForTimeout(500);
 
-    // Reset context checkbox should be enabled (no agent profile set)
-    const resetCheckbox = card.getByRole("checkbox", { name: "Reset agent context" });
-    await expect(resetCheckbox).toBeEnabled();
+      // Reset context checkbox should be enabled (no agent profile set)
+      const resetCheckbox = card.getByRole("checkbox", { name: "Reset agent context" });
+      await expect(resetCheckbox).toBeEnabled();
 
-    // Set an agent profile on this step via API
-    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: profileA.id });
+      // Set an agent profile on this step via API
+      await apiClient.updateWorkflowStep(stepId, { agent_profile_id: profileA.id });
 
-    // Reload and re-open the step
-    await page.goto(seedData.workspaceId);
-    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
-    const reloadedSteps = reloadedCard.locator(".group.relative");
-    await reloadedSteps.first().click();
-    await testPage.waitForTimeout(500);
+      // Reload and re-open the step
+      await page.goto(seedData.workspaceId);
+      const reloadedCard = await page.findWorkflowCard("E2E Workflow");
+      const reloadedSteps = reloadedCard.locator(".group.relative");
+      await reloadedSteps.first().click();
+      await testPage.waitForTimeout(500);
 
-    // Reset context checkbox should be disabled
-    const reloadedCheckbox = reloadedCard.getByRole("checkbox", { name: "Reset agent context" });
-    await expect(reloadedCheckbox).toBeDisabled();
-
-    // Clean up
-    await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
+      // Reset context checkbox should be disabled
+      const reloadedCheckbox = reloadedCard.getByRole("checkbox", {
+        name: "Reset agent context",
+      });
+      await expect(reloadedCheckbox).toBeDisabled();
+    } finally {
+      // Always clean up the seeded step to avoid leaking into other tests
+      await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
+    }
   });
 });
