@@ -12,6 +12,39 @@ import { TasksPageClient } from "./tasks-page-client";
 import type { Workflow, Task, WorkflowStep, Repository, Workspace, UserSettingsResponse } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
+type WorkspaceData = {
+  workflows: Workflow[];
+  repositories: Repository[];
+  tasks: Task[];
+  total: number;
+  steps: WorkflowStep[];
+  activeWorkflowId: string | null;
+};
+
+async function fetchWorkspaceData(workspaceId: string, settingsResponse: UserSettingsResponse | null): Promise<WorkspaceData> {
+  const savedWorkflowId = settingsResponse?.settings?.workflow_filter_id ?? null;
+  const savedRepositoryId = settingsResponse?.settings?.repository_ids?.[0] ?? null;
+
+  const [workflowsResponse, repositoriesResponse, tasksResponse, stepsResponse] = await Promise.all([
+    listWorkflowsAction(workspaceId),
+    listRepositoriesAction(workspaceId),
+    listTasksByWorkspaceAction(workspaceId, { page: 1, pageSize: 25, workflowId: savedWorkflowId, repositoryId: savedRepositoryId }),
+    listWorkspaceWorkflowStepsAction(workspaceId),
+  ]);
+
+  const workflows = workflowsResponse.workflows;
+  const activeWorkflowId = workflows.find((w) => w.id === savedWorkflowId)?.id ?? workflows[0]?.id ?? null;
+
+  return {
+    workflows,
+    repositories: repositoriesResponse.repositories,
+    tasks: tasksResponse.tasks,
+    total: tasksResponse.total,
+    steps: stepsResponse.steps,
+    activeWorkflowId,
+  };
+}
+
 export default async function TasksPage({
   searchParams,
 }: {
@@ -43,27 +76,14 @@ export default async function TasksPage({
     }
 
     if (workspaceId) {
-      // Fetch all data in parallel (including steps via single batch endpoint)
-      // Resolve active filters before fetching tasks so the server applies them
-      const savedWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
-      const savedRepositoryId = settingsResponse?.settings?.repository_ids?.[0] ?? null;
-
-      const [workflowsResponse, repositoriesResponse, tasksResponse, stepsResponse] =
-        await Promise.all([
-          listWorkflowsAction(workspaceId),
-          listRepositoriesAction(workspaceId),
-          listTasksByWorkspaceAction(workspaceId, 1, 25, "", savedWorkflowId, savedRepositoryId),
-          listWorkspaceWorkflowStepsAction(workspaceId),
-        ]);
-
-      workflows = workflowsResponse.workflows;
-      repositories = repositoriesResponse.repositories;
-
-      activeWorkflowId = workflows.find((w) => w.id === savedWorkflowId)?.id ?? workflows[0]?.id ?? null;
-
-      total = tasksResponse.total;
-      tasks = tasksResponse.tasks;
-      steps = stepsResponse.steps;
+      // Fetch all data in parallel; resolve active filters so the server applies them
+      const data = await fetchWorkspaceData(workspaceId, settingsResponse);
+      workflows = data.workflows;
+      repositories = data.repositories;
+      tasks = data.tasks;
+      total = data.total;
+      steps = data.steps;
+      activeWorkflowId = data.activeWorkflowId;
     }
   } catch (error) {
     console.error("Failed to load tasks page data:", error);
