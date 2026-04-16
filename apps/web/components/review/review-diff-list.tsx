@@ -473,7 +473,7 @@ function renderDiffContent(opts: {
   wordWrap: boolean;
   expandUnchanged: boolean;
   onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
-  onCommentRun: ReturnType<typeof useRunComment>;
+  onCommentRun: (comment: DiffComment) => void;
   onToggleExpandUnchanged: () => void;
 }) {
   const { shouldRender, file, sessionId, wordWrap, expandUnchanged, onRevertBlock, onCommentRun, onToggleExpandUnchanged } = opts;
