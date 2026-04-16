@@ -32,10 +32,23 @@ function findGroupId(api: DockviewApi, knownId: string, fallbackPanelId: string)
   return pnl?.group?.id ?? knownId;
 }
 
+/** Find the center group, preferring the well-known ID, then "chat", then any
+ *  "session:*" panel's group. When a session is active, "chat" is removed and
+ *  replaced with per-session tabs — without the session fallback the returned
+ *  ID would be a stale constant that doesn't match any live group. */
+function findCenterGroupId(api: DockviewApi): string {
+  if (api.groups.some((g) => g.id === CENTER_GROUP)) return CENTER_GROUP;
+  const chat = api.getPanel("chat");
+  if (chat?.group?.id) return chat.group.id;
+  const sessionPanel = api.panels.find((p) => p.id.startsWith("session:"));
+  if (sessionPanel?.group?.id) return sessionPanel.group.id;
+  return CENTER_GROUP;
+}
+
 export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
   return {
     sidebarGroupId: findGroupId(api, SIDEBAR_GROUP, "sidebar"),
-    centerGroupId: findGroupId(api, CENTER_GROUP, "chat"),
+    centerGroupId: findCenterGroupId(api),
     // Always use the well-known constant — do NOT fall back to the "changes"
     // panel's current group. In plan mode the "changes" panel moves into the
     // center group; a panel-based fallback would return the center group ID and

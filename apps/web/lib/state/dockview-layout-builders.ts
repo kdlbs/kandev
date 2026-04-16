@@ -43,17 +43,18 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
 
 /**
  * Resolve a fallback group position when the intended reference is stale.
- * Tries the well-known center group, then any non-sidebar group, then the
- * first group. Returns undefined if no groups exist (drops the position).
+ * Tries the well-known center group, then any non-sidebar group. Returns
+ * undefined when only the sidebar exists — the caller drops the position and
+ * dockview picks a default placement. The sidebar group is never returned:
+ * it is locked/pinned, and dropping panels there was the source of a UX bug
+ * where tabs appeared inside the left navigation column.
  */
-function fallbackGroupPosition(api: DockviewApi): { referenceGroup: string } | undefined {
+export function fallbackGroupPosition(api: DockviewApi): { referenceGroup: string } | undefined {
   const centerGroup = api.groups.find((g) => g.id === CENTER_GROUP);
   if (centerGroup) return { referenceGroup: centerGroup.id };
 
   const nonSidebarGroup = api.groups.find((g) => g.id !== SIDEBAR_GROUP);
   if (nonSidebarGroup) return { referenceGroup: nonSidebarGroup.id };
-
-  if (api.groups.length > 0) return { referenceGroup: api.groups[0].id };
 
   return undefined;
 }

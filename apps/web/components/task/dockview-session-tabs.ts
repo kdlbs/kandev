@@ -3,6 +3,7 @@ import type { DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 
@@ -138,12 +139,14 @@ export function useAutoPRPanel() {
 
         if (decision === "add") {
           const { centerGroupId } = useDockviewStore.getState();
-          const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
-          api.addPanel({
+          // Route through focusOrAddPanel so a stale centerGroupId falls back
+          // to another non-sidebar group rather than letting dockview place
+          // the panel in the active group (which may be the sidebar).
+          focusOrAddPanel(api, {
             id: "pr-detail",
             component: "pr-detail",
             title: "Pull Request",
-            position: centerGroupExists ? { referenceGroup: centerGroupId } : undefined,
+            position: { referenceGroup: centerGroupId },
             inactive: true,
           });
           markPRPanelOffered(sessionId);
