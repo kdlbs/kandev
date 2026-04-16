@@ -42,9 +42,11 @@ export function SwimlaneHeader({
           </div>
         )}
         {onToggleMultiSelect && (
-          <button
-            type="button"
+          <div
+            role="button"
+            tabIndex={0}
             onClick={onToggleMultiSelect}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onToggleMultiSelect()}
             data-testid="multi-select-toggle"
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
           >
@@ -52,9 +54,10 @@ export function SwimlaneHeader({
               checked={!!isMultiSelectMode}
               className="pointer-events-none h-3.5 w-3.5"
               tabIndex={-1}
+              aria-hidden
             />
             Multi-select
-          </button>
+          </div>
         )}
         <div className="flex-1 border-t border-dashed border-border/50" />
       </div>
