@@ -534,7 +534,7 @@ function FileDiffSection({
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when: visible via intersection observer, or forceLoad is true (all files up to selected)
-  const shouldRenderContent = isVisible || forceLoad;
+  const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
