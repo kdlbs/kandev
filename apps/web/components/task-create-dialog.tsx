@@ -13,6 +13,7 @@ import {
   CreateEditSelectors,
   SessionSelectors,
   WorkflowSection,
+  DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
 import {
   useRepositoryOptions,
@@ -25,7 +26,6 @@ import {
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
-  TaskFormInputs,
 } from "@/components/task-create-dialog-selectors";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
 import { useToast } from "@/components/toast-provider";
@@ -263,6 +263,7 @@ type DialogFormBodyProps = {
   hasRepositorySelection: boolean;
   isLocalExecutor: boolean;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+  workflowAgentProfileId?: string;
 };
 
 function DialogFormBody({
@@ -292,26 +293,20 @@ function DialogFormBody({
   hasRepositorySelection,
   isLocalExecutor,
   enhance,
+  workflowAgentProfileId,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-      <TaskFormInputs
-        key={fs.openCycle}
+      <DialogPromptSection
         isSessionMode={isSessionMode}
-        autoFocus={isTaskStarted ? false : true}
+        isTaskStarted={isTaskStarted}
+        isPassthroughProfile={isPassthroughProfile}
         initialDescription={initialDescription}
-        onDescriptionChange={fs.setHasDescription}
-        onKeyDown={handleKeyDown}
-        descriptionValueRef={fs.descriptionInputRef}
-        disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined}
-        onEnhancePrompt={enhance?.onEnhance}
-        isEnhancingPrompt={enhance?.isLoading}
-        isUtilityConfigured={enhance?.isConfigured}
+        hasDescription={hasDescription}
+        fs={fs}
+        handleKeyDown={handleKeyDown}
+        enhance={enhance}
       />
-      {isPassthroughProfile && hasDescription && (
-        <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
-      )}
       {!isSessionMode && (
         <CreateEditSelectors
           isTaskStarted={isTaskStarted}
@@ -333,6 +328,7 @@ function DialogFormBody({
           executorsLoading={executorsLoading}
           isLocalExecutor={isLocalExecutor}
           useGitHubUrl={fs.useGitHubUrl}
+          workflowAgentProfileId={workflowAgentProfileId}
           BranchSelectorComponent={BranchSelector}
           AgentSelectorComponent={AgentSelector}
           ExecutorProfileSelectorComponent={ExecutorProfileSelector}
@@ -415,6 +411,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     executors,
     workspaceDefaults: computed.workspaceDefaults,
     toast,
+    workflows,
   });
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useTaskSubmitHandlers({
@@ -543,6 +540,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             hasRepositorySelection={computed.hasRepositorySelection}
             isLocalExecutor={computed.isLocalExecutor}
             enhance={setup.enhance}
+            workflowAgentProfileId={fs.workflowAgentProfileId}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

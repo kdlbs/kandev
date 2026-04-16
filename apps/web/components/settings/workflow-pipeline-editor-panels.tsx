@@ -1,16 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { IconTrash } from "@tabler/icons-react";
+import { IconRobot, IconTrash } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
+import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
+import {
+  ScriptEditor,
+  computeEditorHeight,
+} from "@/components/settings/profile-edit/script-editor";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   HelpTip,
   STEP_COLORS,
@@ -23,6 +29,70 @@ import {
   TurnStartSelect,
   TurnCompleteSelect,
 } from "./workflow-pipeline-editor-step-actions";
+
+const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
+  {
+    key: "task_prompt",
+    description: "The original task description provided by the user",
+    example: "Implement user authentication with OAuth2",
+    executor_types: [],
+  },
+];
+
+// --- StepAgentProfileSelect ---
+
+function StepAgentProfileSelect({
+  step,
+  onUpdate,
+  readOnly,
+}: {
+  step: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+}) {
+  const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center">
+            <Select
+              value={step.agent_profile_id || "none"}
+              onValueChange={(value) => {
+                if (readOnly) return;
+                onUpdate({ agent_profile_id: value === "none" ? "" : value });
+              }}
+              disabled={readOnly}
+            >
+              <SelectTrigger
+                className="w-[220px] h-8 cursor-pointer"
+                data-testid="step-agent-profile-select"
+              >
+                <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="No profile override" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none" className="cursor-pointer">
+                  No profile override
+                </SelectItem>
+                {healthyProfiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          Override the agent profile for this step. A different profile creates a new session with
+          fresh context when entering this step.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 // --- StepConfigHeader ---
 
@@ -82,6 +152,7 @@ function StepConfigHeader({
             ))}
           </SelectContent>
         </Select>
+        <StepAgentProfileSelect step={step} onUpdate={onUpdate} readOnly={readOnly} />
       </div>
       <Button
         type="button"
@@ -226,9 +297,13 @@ function StepBehaviorSection({
           id={`${step.id}-reset-context`}
           checked={hasOnEnterAction(step, "reset_agent_context")}
           onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")}
-          disabled={readOnly}
+          disabled={readOnly || !!step.agent_profile_id}
           label="Reset agent context"
-          helpText="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
+          helpText={
+            step.agent_profile_id
+              ? "Not needed — switching agent profiles already creates a new session with fresh context."
+              : "Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
+          }
         />
         <StepCheckboxRow
           id={`${step.id}-manual-move`}
@@ -376,25 +451,25 @@ function StepPromptSection({
           ))}
         </div>
       )}
-      <Textarea
-        id={`${step.id}-prompt`}
-        value={localPrompt}
-        onChange={(e) => {
-          if (readOnly) return;
-          onLocalPromptChange(e.target.value);
-          debouncedUpdatePrompt(e.target.value);
-        }}
-        placeholder={
-          "Instructions for the agent on this step.\nUse {{task_prompt}} to include the task description."
-        }
-        rows={3}
-        disabled={readOnly}
-        className="font-mono text-xs max-h-[200px] overflow-y-auto resize-y"
-      />
+      <div className="rounded-md border overflow-hidden">
+        <ScriptEditor
+          value={localPrompt}
+          onChange={(v) => {
+            if (readOnly) return;
+            onLocalPromptChange(v);
+            debouncedUpdatePrompt(v);
+          }}
+          language="markdown"
+          height={computeEditorHeight(localPrompt)}
+          lineNumbers="off"
+          readOnly={readOnly}
+          placeholders={STEP_PROMPT_PLACEHOLDERS}
+        />
+      </div>
       <p className="text-[11px] text-muted-foreground/60">
-        If set, this prompt will be used instead of the task description. Use{" "}
+        Type {"{{"} to see available placeholders. Use{" "}
         <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code> to
-        include the original task description within it.
+        include the original task description.
       </p>
     </div>
   );

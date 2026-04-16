@@ -21,7 +21,10 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import {
+  ScriptEditor,
+  computeEditorHeight,
+} from "@/components/settings/profile-edit/script-editor";
 import {
   REVIEW_WATCH_PLACEHOLDERS,
   DEFAULT_REVIEW_WATCH_PROMPT,
@@ -459,8 +462,8 @@ function PromptField({
         <ScriptEditor
           value={form.prompt}
           onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
-          language="plaintext"
-          height="120px"
+          language="markdown"
+          height={computeEditorHeight(form.prompt)}
           lineNumbers="off"
           placeholders={REVIEW_WATCH_PLACEHOLDERS}
         />

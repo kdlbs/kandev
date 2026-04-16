@@ -317,7 +317,10 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		return
 	}
 
-	agentProfileID, _ := task.Metadata[models.MetaKeyAgentProfileID].(string)
+	agentProfileID := s.resolveStepAgentProfile(ctx, step)
+	if agentProfileID == "" {
+		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
+	}
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
@@ -419,10 +422,123 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 	return hasPlanMode
 }
 
+// resolveStepAgentProfile returns the effective agent profile ID for a step.
+// Resolution order: step override -> workflow default -> empty (use current session's profile).
+func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if step.AgentProfileID != "" {
+		return step.AgentProfileID
+	}
+	if s.workflowStepGetter != nil && step.WorkflowID != "" {
+		wfProfileID, err := s.workflowStepGetter.GetWorkflowAgentProfileID(ctx, step.WorkflowID)
+		if err != nil {
+			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
+				zap.String("workflow_id", step.WorkflowID),
+				zap.String("step_id", step.ID),
+				zap.Error(err))
+		} else if wfProfileID != "" {
+			return wfProfileID
+		}
+	}
+	return ""
+}
+
+// switchSessionForStep stops the current session and creates a new one with a different agent profile.
+// Returns the new session, or nil + error if the switch fails.
+// The new session is prepared BEFORE completing the old one: if PrepareSession fails, the old
+// session remains active and the task stays recoverable.
+func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
+	s.logger.Info("switching session for workflow step agent profile change",
+		zap.String("task_id", taskID),
+		zap.String("current_session", currentSession.ID),
+		zap.String("current_profile", currentSession.AgentProfileID),
+		zap.String("new_profile", newAgentProfileID))
+
+	// Prepare the new session BEFORE touching the old one.
+	// If any step below fails, the old session remains active and the task stays recoverable.
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found for session switch", taskID)
+	}
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get db task for session switch: %w", err)
+	}
+
+	// Create a new session with the new agent profile.
+	// Reuse the same executor profile from the current session.
+	sessionID, err := s.executor.PrepareSession(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare new session: %w", err)
+	}
+
+	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+
+	// New session is ready — now safe to stop the old agent and complete the old session.
+	if currentSession.AgentExecutionID != "" {
+		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
+			s.logger.Warn("failed to stop agent for session switch",
+				zap.String("session_id", currentSession.ID),
+				zap.Error(err))
+		}
+	}
+
+	// Mark the current session as completed.
+	currentSession.State = models.TaskSessionStateCompleted
+	now := time.Now().UTC()
+	currentSession.CompletedAt = &now
+	currentSession.UpdatedAt = now
+	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
+		// New session is already created; log but don't abort.
+		s.logger.Warn("failed to complete old session after switch",
+			zap.String("session_id", currentSession.ID),
+			zap.Error(err))
+	}
+
+	return newSession, nil
+}
+
+// maybySwitchSessionForProfile checks whether the step requires a different agent profile
+// and switches the session if so. Passthrough sessions are returned unchanged.
+// Returns the effective session (new or original) and whether processing should continue.
+// A false return means the switch failed; the caller should return immediately.
+func (s *Service) maybySwitchSessionForProfile(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+) (*models.TaskSession, bool) {
+	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
+		return session, true
+	}
+	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
+		return session, true
+	}
+	newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
+	if err != nil {
+		s.logger.Error("failed to switch session for step agent profile",
+			zap.String("task_id", taskID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return nil, false
+	}
+	return newSession, true
+}
+
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+	// Switch session if this step requires a different agent profile.
+	var ok bool
+	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step); !ok {
+		return
+	}
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
+
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
 	if len(step.Events.OnEnter) == 0 {

@@ -25,7 +25,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 		}
 		stepMap := map[string][]*WorkflowStep{"wf-1": steps}
 
-		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap)
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, nil)
 
 		require.Equal(t, ExportVersion, export.Version)
 		require.Equal(t, ExportType, export.Type)
@@ -57,7 +57,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 				},
 			},
 		}
-		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps})
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, nil)
 
 		sp := export.Workflows[0].Steps[0]
 		assert.Len(t, sp.Events.OnEnter, 1)
@@ -312,7 +312,7 @@ func TestRoundTrip(t *testing.T) {
 			},
 		}
 		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Pipeline"}
-		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps})
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, nil)
 
 		require.NoError(t, export.Validate())
 
@@ -346,12 +346,96 @@ func TestShowInCommandPanelExport(t *testing.T) {
 		export := BuildWorkflowExport(
 			[]*taskmodels.Workflow{wf},
 			map[string][]*WorkflowStep{"wf-1": steps},
+			nil,
 		)
 
 		require.Len(t, export.Workflows[0].Steps, 3)
 		assert.False(t, export.Workflows[0].Steps[0].ShowInCommandPanel)
 		assert.True(t, export.Workflows[0].Steps[1].ShowInCommandPanel)
 		assert.False(t, export.Workflows[0].Steps[2].ShowInCommandPanel)
+	})
+}
+
+func TestAgentProfileExport(t *testing.T) {
+	resolver := func(profileID string) *AgentProfilePortable {
+		profiles := map[string]*AgentProfilePortable{
+			"prof-1": {AgentName: "Claude Code", Model: "opus", Mode: "code"},
+			"prof-2": {AgentName: "Codex", Model: "o3"},
+		}
+		return profiles[profileID]
+	}
+
+	t.Run("includes agent profile on workflow and steps", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "WithProfiles", AgentProfileID: "prof-1"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Dev", Position: 0, Color: "blue", AgentProfileID: "prof-2"},
+			{ID: "s2", Name: "Review", Position: 1, Color: "green"},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			resolver,
+		)
+
+		pw := export.Workflows[0]
+		require.NotNil(t, pw.AgentProfile)
+		assert.Equal(t, "Claude Code", pw.AgentProfile.AgentName)
+		assert.Equal(t, "opus", pw.AgentProfile.Model)
+		assert.Equal(t, "code", pw.AgentProfile.Mode)
+
+		require.NotNil(t, pw.Steps[0].AgentProfile)
+		assert.Equal(t, "Codex", pw.Steps[0].AgentProfile.AgentName)
+		assert.Equal(t, "o3", pw.Steps[0].AgentProfile.Model)
+		assert.Empty(t, pw.Steps[0].AgentProfile.Mode)
+
+		assert.Nil(t, pw.Steps[1].AgentProfile, "step without profile should be nil")
+	})
+
+	t.Run("omits agent profile when resolver is nil", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "NoResolver", AgentProfileID: "prof-1"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Step", Position: 0, Color: "gray", AgentProfileID: "prof-2"},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			nil,
+		)
+
+		pw := export.Workflows[0]
+		assert.Nil(t, pw.AgentProfile)
+		assert.Nil(t, pw.Steps[0].AgentProfile)
+	})
+
+	t.Run("omits agent profile when IDs are empty", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "EmptyIDs"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Step", Position: 0, Color: "gray"},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			resolver,
+		)
+
+		pw := export.Workflows[0]
+		assert.Nil(t, pw.AgentProfile)
+		assert.Nil(t, pw.Steps[0].AgentProfile)
+	})
+
+	t.Run("handles unknown profile ID gracefully", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Unknown", AgentProfileID: "prof-unknown"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Step", Position: 0, Color: "gray"},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			resolver,
+		)
+
+		pw := export.Workflows[0]
+		assert.Nil(t, pw.AgentProfile, "unknown profile should resolve to nil")
 	})
 }
 

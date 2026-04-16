@@ -102,6 +102,9 @@ func (r *Repository) initSchema() error {
 	// Add show_in_command_panel column if it doesn't exist (idempotent migration)
 	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN show_in_command_panel INTEGER DEFAULT 1`)
 
+	// Add agent_profile_id column to workflow_steps for per-step agent profile override (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
@@ -540,11 +543,11 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -556,10 +559,10 @@ func (r *Repository) scanStep(row interface {
 	step := &models.WorkflowStep{}
 	var allowManualMove, isStartStep, showInCommandPanel int
 	var autoArchiveAfterHours sql.NullInt64
-	var color, prompt, eventsJSON sql.NullString
+	var color, prompt, eventsJSON, agentProfileID sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -570,6 +573,9 @@ func (r *Repository) scanStep(row interface {
 	step.ShowInCommandPanel = showInCommandPanel == 1
 	if autoArchiveAfterHours.Valid {
 		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
+	}
+	if agentProfileID.Valid {
+		step.AgentProfileID = agentProfileID.String
 	}
 	if color.Valid {
 		step.Color = color.String
@@ -586,7 +592,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -618,11 +624,11 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -725,7 +731,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

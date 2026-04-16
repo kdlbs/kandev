@@ -83,6 +83,16 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 	return wf, nil
 }
 
+func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+	for i, wf := range m.workflows {
+		if wf.ID == workflow.ID {
+			m.workflows[i] = workflow
+			return nil
+		}
+	}
+	return fmt.Errorf("workflow %s not found", workflow.ID)
+}
+
 func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {
 	now := time.Now().UTC()
 	m.workflows = append(m.workflows, &taskmodels.Workflow{
@@ -609,5 +619,87 @@ func TestImportWorkflows(t *testing.T) {
 		export := &models.WorkflowExport{Version: 99, Type: "wrong"}
 		_, err := svc.ImportWorkflows(ctx, "ws-1", export)
 		assert.ErrorContains(t, err, "invalid export data")
+	})
+
+	t.Run("matches agent profiles on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		matcher := func(agentName, model, mode string) string {
+			if agentName == "Claude Code" && model == "opus" {
+				return "matched-prof-1"
+			}
+			return ""
+		}
+		svc.SetAgentProfileFuncs(nil, matcher)
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:         "ProfileWF",
+					AgentProfile: &models.AgentProfilePortable{AgentName: "Claude Code", Model: "opus", Mode: "code"},
+					Steps: []models.StepPortable{
+						{
+							Name: "Dev", Position: 0, Color: "blue",
+							AgentProfile: &models.AgentProfilePortable{AgentName: "Claude Code", Model: "opus"},
+						},
+						{
+							Name: "Review", Position: 1, Color: "green",
+							AgentProfile: &models.AgentProfilePortable{AgentName: "Unknown Agent"},
+						},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		// Verify workflow-level agent profile was persisted
+		imported, err := svc.workflowProvider.GetWorkflow(ctx, "imported-ProfileWF")
+		require.NoError(t, err)
+		assert.Equal(t, "matched-prof-1", imported.AgentProfileID, "workflow-level agent profile should be persisted")
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-ProfileWF")
+		require.NoError(t, err)
+		require.Len(t, steps, 2)
+
+		devStep := findStepByName(steps, "Dev")
+		require.NotNil(t, devStep)
+		assert.Equal(t, "matched-prof-1", devStep.AgentProfileID, "should match known profile")
+
+		reviewStep := findStepByName(steps, "Review")
+		require.NotNil(t, reviewStep)
+		assert.Empty(t, reviewStep.AgentProfileID, "should not match unknown profile")
+	})
+
+	t.Run("skips agent profile matching when no matcher set", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:         "NoMatcher",
+					AgentProfile: &models.AgentProfilePortable{AgentName: "Claude Code"},
+					Steps: []models.StepPortable{
+						{Name: "S", Position: 0, Color: "gray", AgentProfile: &models.AgentProfilePortable{AgentName: "Claude Code"}},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-NoMatcher")
+		require.NoError(t, err)
+		assert.Empty(t, steps[0].AgentProfileID, "no matcher means no profile ID set")
 	})
 }

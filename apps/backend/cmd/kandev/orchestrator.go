@@ -170,6 +170,11 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetPreviousStepByPosition(ctx co
 	return a.svc.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
 }
 
+// GetWorkflowAgentProfileID implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
+	return a.svc.GetWorkflowAgentProfileID(ctx, workflowID)
+}
+
 // reviewTaskCreatorAdapter adapts the task service to the orchestrator's ReviewTaskCreator interface.
 type reviewTaskCreatorAdapter struct {
 	svc *taskservice.Service

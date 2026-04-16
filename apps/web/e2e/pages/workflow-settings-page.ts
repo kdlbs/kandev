@@ -114,6 +114,16 @@ export class WorkflowSettingsPage {
     await expect(this.createDialog).not.toBeVisible();
   }
 
+  /** The workflow-level agent profile select trigger within a workflow card. */
+  workflowAgentProfileSelect(card: Locator): Locator {
+    return card.getByTestId("workflow-agent-profile-select");
+  }
+
+  /** The step agent profile override select trigger in the step config panel within a workflow card. */
+  stepAgentProfileSelect(card: Locator): Locator {
+    return card.getByTestId("step-agent-profile-select");
+  }
+
   /** Hover over a step node to reveal the trash button, then click it. */
   async clickDeleteStepButton(card: Locator, stepName: string) {
     const node = this.stepNodeByName(card, stepName);

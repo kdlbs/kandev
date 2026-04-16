@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   IconDownload,
   IconGripVertical,
-  IconLayoutColumns,
+  IconArrowsShuffle,
   IconPlus,
   IconUpload,
 } from "@tabler/icons-react";
@@ -207,7 +207,7 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string },
+    updates: { name?: string; description?: string; agent_profile_id?: string },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) => (wf.id === workflowId ? { ...wf, ...updates } : wf)),
@@ -234,8 +234,9 @@ function useWorkflowActions({
   const handleSaveWorkflow = async (workflowId: string) => {
     const workflow = workflowItems.find((item) => item.id === workflowId);
     if (!workflow) return;
-    const updates: { name?: string; description?: string } = {};
+    const updates: { name?: string; description?: string; agent_profile_id?: string } = {};
     if (workflow.name.trim()) updates.name = workflow.name.trim();
+    updates.agent_profile_id = workflow.agent_profile_id ?? "";
     if (Object.keys(updates).length) await updateWorkflowAction(workflowId, updates);
     setWorkflowItems((prev) =>
       prev.map((item) => (item.id === workflowId ? { ...item, ...updates } : item)),
@@ -298,7 +299,10 @@ type WorkflowListProps = {
   workspaceId: string;
   templateStepsById: Map<string, StepDefinition[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
-  onUpdate: (id: string, u: { name?: string; description?: string }) => void;
+  onUpdate: (
+    id: string,
+    u: { name?: string; description?: string; agent_profile_id?: string },
+  ) => void;
   onDelete: (id: string) => void;
   onSave: (id: string) => void;
   onCreated: (id: string, wf: Workflow) => void;
@@ -321,7 +325,7 @@ function SortableWorkflowItem({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className="relative">
+    <div ref={setNodeRef} style={style} className="relative min-w-0">
       <div
         className="absolute left-0 top-6 -ml-8 flex items-center cursor-grab active:cursor-grabbing z-10"
         data-testid={`workflow-drag-handle-${workflow.id}`}
@@ -369,7 +373,7 @@ function WorkflowList({
         items={workflowItems.map((wf) => wf.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="grid gap-3 pl-8">
+        <div className="grid min-w-0 gap-3 pl-8">
           {workflowItems.map((workflow) => {
             const isTempWorkflow = workflow.id.startsWith("temp-");
             const templateSteps =
@@ -464,7 +468,7 @@ export function WorkspaceWorkflowsClient({
       </div>
       <Separator />
       <SettingsSection
-        icon={<IconLayoutColumns className="h-5 w-5" />}
+        icon={<IconArrowsShuffle className="h-5 w-5" />}
         title="Workflows"
         description="Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself"
         action={

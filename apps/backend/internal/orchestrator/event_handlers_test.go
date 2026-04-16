@@ -33,7 +33,8 @@ import (
 
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
-	steps map[string]*wfmodels.WorkflowStep // stepID -> step
+	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
+	workflowAgentProfileID string                            // returned by GetWorkflowAgentProfileID
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -71,10 +72,18 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 	return best, nil
 }
 
+func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID string) (string, error) {
+	if m.workflowAgentProfileID != "" {
+		return m.workflowAgentProfileID, nil
+	}
+	return "", nil
+}
+
 // mockTaskRepo implements scheduler.TaskRepository for testing.
 type mockTaskRepo struct {
 	tasks         map[string]*v1.Task
 	updatedStates map[string]v1.TaskState
+	getTaskErr    error // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
@@ -85,6 +94,9 @@ func newMockTaskRepo() *mockTaskRepo {
 }
 
 func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, error) {
+	if m.getTaskErr != nil {
+		return nil, m.getTaskErr
+	}
 	if t, ok := m.tasks[taskID]; ok {
 		return t, nil
 	}

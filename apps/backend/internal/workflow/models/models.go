@@ -104,6 +104,7 @@ type StepDefinition struct {
 	IsStartStep           bool       `json:"is_start_step"`
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -119,6 +120,7 @@ type WorkflowStep struct {
 	IsStartStep           bool       `json:"is_start_step"`
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 }

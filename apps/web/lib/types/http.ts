@@ -76,6 +76,7 @@ export type StepDefinition = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  agent_profile_id?: string;
 };
 
 // Workflow Step - instance of a step on a workflow
@@ -91,6 +92,7 @@ export type WorkflowStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
+  agent_profile_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -139,6 +141,7 @@ export type Workflow = {
   name: string;
   description?: string | null;
   workflow_template_id?: string | null;
+  agent_profile_id?: string;
   sort_order?: number;
   created_at: string;
   updated_at: string;
@@ -266,6 +269,7 @@ export type WorkflowStepDTO = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
+  agent_profile_id?: string;
   created_at?: string;
   updated_at?: string;
 };

@@ -15,17 +15,18 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.
   ),
 });
 
+type Monaco = typeof import("monaco-editor");
+
 // Module-level singleton: only one completion provider registered for "shell" at a time.
 let globalDisposable: { dispose: () => void } | null = null;
 let registeredInstanceCount = 0;
 
-function registerProvider(
-  monaco: typeof import("monaco-editor"),
+function swapProvider(
+  monaco: Monaco,
   language: string,
   placeholders: ScriptPlaceholder[],
   executorType?: string,
 ) {
-  // Always dispose previous to avoid duplicates, then re-register with latest data
   globalDisposable?.dispose();
   import("./script-editor-completions").then(({ createPlaceholderCompletionProvider }) => {
     globalDisposable?.dispose();
@@ -34,7 +35,26 @@ function registerProvider(
       createPlaceholderCompletionProvider(monaco, placeholders, executorType),
     );
   });
+}
+
+function registerProvider(
+  monaco: Monaco,
+  language: string,
+  placeholders: ScriptPlaceholder[],
+  executorType?: string,
+) {
+  swapProvider(monaco, language, placeholders, executorType);
   registeredInstanceCount++;
+}
+
+// Re-register without incrementing the lifecycle counter (e.g., when placeholders change)
+function reRegisterProvider(
+  monaco: Monaco,
+  language: string,
+  placeholders: ScriptPlaceholder[],
+  executorType?: string,
+) {
+  swapProvider(monaco, language, placeholders, executorType);
 }
 
 function unregisterProvider() {
@@ -44,6 +64,15 @@ function unregisterProvider() {
     globalDisposable = null;
     registeredInstanceCount = 0;
   }
+}
+
+/** Compute editor height from content lines (min 80px, max 400px). */
+export function computeEditorHeight(value: string, minLines = 3): string {
+  const lineCount = Math.max((value || "").split("\n").length, minLines);
+  const lineHeight = 19;
+  const padding = 16;
+  const height = Math.min(Math.max(lineCount * lineHeight + padding, 80), 400);
+  return `${height}px`;
 }
 
 type ScriptEditorProps = {
@@ -68,6 +97,7 @@ export function ScriptEditor({
   lineNumbers = "on",
 }: ScriptEditorProps) {
   const mountedRef = useRef(false);
+  const monacoRef = useRef<Monaco | null>(null);
 
   useEffect(() => {
     return () => {
@@ -78,18 +108,36 @@ export function ScriptEditor({
     };
   }, []);
 
+  // Register/re-register the provider whenever Monaco is mounted and placeholders
+  // change. The singleton `registerProvider` disposes any previous registration,
+  // so swapping is idempotent. `mountedRef` guards the lifecycle counter.
+  const ensureProviderRegistered = useCallback(
+    (monaco: Monaco) => {
+      if (!placeholders || placeholders.length === 0) return;
+      if (!mountedRef.current) {
+        mountedRef.current = true;
+        registerProvider(monaco, language, placeholders, executorType);
+      } else {
+        reRegisterProvider(monaco, language, placeholders, executorType);
+      }
+    },
+    [placeholders, executorType, language],
+  );
+
+  useEffect(() => {
+    if (monacoRef.current) ensureProviderRegistered(monacoRef.current);
+  }, [ensureProviderRegistered]);
+
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
   }, []);
 
   const handleMount: OnMount = useCallback(
     (_editor, monaco) => {
-      if (placeholders && placeholders.length > 0) {
-        mountedRef.current = true;
-        registerProvider(monaco, language, placeholders, executorType);
-      }
+      monacoRef.current = monaco;
+      ensureProviderRegistered(monaco);
     },
-    [placeholders, executorType, language],
+    [ensureProviderRegistered],
   );
 
   return (

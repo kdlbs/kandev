@@ -51,9 +51,9 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.SortOrder, workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -61,12 +61,12 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 // GetWorkflow retrieves a workflow by ID
 func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
-	var workflowTemplateID sql.NullString
+	var workflowTemplateID, agentProfileID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at
+		SELECT id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, created_at, updated_at
 		FROM workflows WHERE id = ?
-	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
+	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &agentProfileID, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workflow not found: %s", id)
@@ -75,6 +75,9 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 		return nil, err
 	}
 
+	if agentProfileID.Valid {
+		workflow.AgentProfileID = agentProfileID.String
+	}
 	if workflowTemplateID.Valid {
 		workflow.WorkflowTemplateID = &workflowTemplateID.String
 	}
@@ -86,8 +89,8 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflows SET name = ?, description = ?, workflow_template_id = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.UpdatedAt, workflow.ID)
+		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, updated_at = ? WHERE id = ?
+	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}
@@ -140,7 +143,7 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 // ListWorkflows returns all workflows
 func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
 	query := `
-		SELECT id, workspace_id, name, description, workflow_template_id, sort_order, created_at, updated_at FROM workflows
+		SELECT id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, created_at, updated_at FROM workflows
 	`
 	var args []interface{}
 	if workspaceID != "" {
@@ -158,10 +161,13 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 	var result []*models.Workflow
 	for rows.Next() {
 		workflow := &models.Workflow{}
-		var workflowTemplateID sql.NullString
-		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
+		var agentProfileID, workflowTemplateID sql.NullString
+		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &agentProfileID, &workflowTemplateID, &workflow.SortOrder, &workflow.CreatedAt, &workflow.UpdatedAt)
 		if err != nil {
 			return nil, err
+		}
+		if agentProfileID.Valid {
+			workflow.AgentProfileID = agentProfileID.String
 		}
 		if workflowTemplateID.Valid {
 			workflow.WorkflowTemplateID = &workflowTemplateID.String

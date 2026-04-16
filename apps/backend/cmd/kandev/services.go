@@ -75,6 +75,12 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 
+	// Wire agent profile resolver/matcher for workflow export/import
+	workflowSvc.SetAgentProfileFuncs(
+		buildAgentProfileResolver(repos),
+		buildAgentProfileMatcher(repos),
+	)
+
 	// Initialize GitHub service
 	secretsAdapter := &githubSecretAdapter{store: repos.Secrets}
 	githubSvc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), secretsAdapter, eventBus, log)
@@ -203,4 +209,54 @@ func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceI
 		Name:        name,
 		Description: description,
 	})
+}
+
+// UpdateWorkflow implements workflowservice.WorkflowProvider.
+func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
+	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
+		Name:           &workflow.Name,
+		Description:    &workflow.Description,
+		AgentProfileID: &workflow.AgentProfileID,
+	})
+	return err
+}
+
+// buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.
+func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolver {
+	return func(profileID string) *wfmodels.AgentProfilePortable {
+		if profileID == "" {
+			return nil
+		}
+		profile, err := repos.AgentSettings.GetAgentProfile(context.Background(), profileID)
+		if err != nil || profile == nil {
+			return nil
+		}
+		return &wfmodels.AgentProfilePortable{
+			AgentName: profile.AgentDisplayName,
+			Model:     profile.Model,
+			Mode:      profile.Mode,
+		}
+	}
+}
+
+// buildAgentProfileMatcher creates a matcher that finds profiles by agent name, model, and mode for import.
+func buildAgentProfileMatcher(repos *Repositories) wfmodels.AgentProfileMatcher {
+	return func(agentName, model, mode string) string {
+		agents, err := repos.AgentSettings.ListAgents(context.Background())
+		if err != nil {
+			return ""
+		}
+		for _, agent := range agents {
+			profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
+			if pErr != nil {
+				continue
+			}
+			for _, p := range profiles {
+				if p.AgentDisplayName == agentName && p.Model == model && p.Mode == mode {
+					return p.ID
+				}
+			}
+		}
+		return ""
+	}
 }

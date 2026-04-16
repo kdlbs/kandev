@@ -123,7 +123,7 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string },
+  payload: { name?: string; description?: string; agent_profile_id?: string },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",
@@ -330,6 +330,7 @@ type BackendWorkflowStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
+  agent_profile_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -346,6 +347,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   is_start_step: step.is_start_step,
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
+  agent_profile_id: step.agent_profile_id,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -417,6 +419,7 @@ export async function updateWorkflowStepAction(
       | "is_start_step"
       | "show_in_command_panel"
       | "auto_archive_after_hours"
+      | "agent_profile_id"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -432,6 +435,7 @@ export async function updateWorkflowStepAction(
     body.show_in_command_panel = payload.show_in_command_panel;
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
+  if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {

@@ -98,6 +98,7 @@ type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
+	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
 }
 
 // repoStore is the repository interface accepted by NewService.

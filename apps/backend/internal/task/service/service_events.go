@@ -147,12 +147,13 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 	}
 
 	data := map[string]interface{}{
-		"id":           workflow.ID,
-		"workspace_id": workflow.WorkspaceID,
-		"name":         workflow.Name,
-		"description":  workflow.Description,
-		"created_at":   workflow.CreatedAt.Format(time.RFC3339),
-		"updated_at":   workflow.UpdatedAt.Format(time.RFC3339),
+		"id":               workflow.ID,
+		"workspace_id":     workflow.WorkspaceID,
+		"name":             workflow.Name,
+		"description":      workflow.Description,
+		"agent_profile_id": workflow.AgentProfileID,
+		"created_at":       workflow.CreatedAt.Format(time.RFC3339),
+		"updated_at":       workflow.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "workflow", workflow.ID, data)

@@ -214,6 +214,74 @@ func TestSQLiteRepository_ReorderWorkflows_WrongWorkspace(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_WorkflowAgentProfileID(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	// Create workflow with agent_profile_id
+	workflow := &models.Workflow{
+		WorkspaceID:    "ws-1",
+		Name:           "Profile Workflow",
+		AgentProfileID: "profile-123",
+	}
+	if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	// Get and verify agent_profile_id persists
+	retrieved, err := repo.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("failed to get workflow: %v", err)
+	}
+	if retrieved.AgentProfileID != "profile-123" {
+		t.Errorf("expected agent_profile_id 'profile-123', got %q", retrieved.AgentProfileID)
+	}
+
+	// Update agent_profile_id
+	workflow.AgentProfileID = "profile-456"
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to update workflow: %v", err)
+	}
+	retrieved, _ = repo.GetWorkflow(ctx, workflow.ID)
+	if retrieved.AgentProfileID != "profile-456" {
+		t.Errorf("expected agent_profile_id 'profile-456', got %q", retrieved.AgentProfileID)
+	}
+
+	// Clear agent_profile_id
+	workflow.AgentProfileID = ""
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to update workflow: %v", err)
+	}
+	retrieved, _ = repo.GetWorkflow(ctx, workflow.ID)
+	if retrieved.AgentProfileID != "" {
+		t.Errorf("expected empty agent_profile_id, got %q", retrieved.AgentProfileID)
+	}
+
+	// Verify ListWorkflows includes agent_profile_id
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{
+		WorkspaceID:    "ws-1",
+		Name:           "Another Workflow",
+		AgentProfileID: "profile-789",
+	})
+	workflows, err := repo.ListWorkflows(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("failed to list workflows: %v", err)
+	}
+	found := false
+	for _, wf := range workflows {
+		if wf.AgentProfileID == "profile-789" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find workflow with agent_profile_id 'profile-789' in list")
+	}
+}
+
 func TestSQLiteRepository_WorkflowSortOrder_Isolation(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

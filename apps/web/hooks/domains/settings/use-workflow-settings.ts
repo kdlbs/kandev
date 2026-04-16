@@ -102,7 +102,11 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
   const isWorkflowDirty = (workflow: Workflow) => {
     const saved = savedWorkflowsById.get(workflow.id);
     if (!saved) return true;
-    return workflow.name !== saved.name || workflow.description !== saved.description;
+    return (
+      workflow.name !== saved.name ||
+      workflow.description !== saved.description ||
+      (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
+    );
   };
 
   return {

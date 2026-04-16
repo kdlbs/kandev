@@ -150,8 +150,9 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 }
 
 type httpUpdateWorkflowRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name           *string `json:"name"`
+	Description    *string `json:"description"`
+	AgentProfileID *string `json:"agent_profile_id"`
 }
 
 func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
@@ -162,8 +163,9 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 	}
 	id := c.Param("id")
 	workflow, err := h.service.UpdateWorkflow(c.Request.Context(), id, &service.UpdateWorkflowRequest{
-		Name:        body.Name,
-		Description: body.Description,
+		Name:           body.Name,
+		Description:    body.Description,
+		AgentProfileID: body.AgentProfileID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
@@ -368,9 +370,10 @@ func (h *WorkflowHandlers) wsGetWorkflow(ctx context.Context, msg *ws.Message) (
 }
 
 type wsUpdateWorkflowRequest struct {
-	ID          string  `json:"id"`
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	ID             string  `json:"id"`
+	Name           *string `json:"name,omitempty"`
+	Description    *string `json:"description,omitempty"`
+	AgentProfileID *string `json:"agent_profile_id,omitempty"`
 }
 
 func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -383,8 +386,9 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 	}
 
 	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
-		Name:        req.Name,
-		Description: req.Description,
+		Name:           req.Name,
+		Description:    req.Description,
+		AgentProfileID: req.AgentProfileID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workflow", zap.Error(err))

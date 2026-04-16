@@ -15,6 +15,8 @@ import {
   IconBrandGithub,
   IconSparkles,
   IconWand,
+  IconGitBranch,
+  IconArrowsShuffle,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -120,6 +122,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                       isActive={pathname === repositoriesPath}
                     >
                       <Link href={repositoriesPath}>
+                        <IconGitBranch className="h-3.5 w-3.5" />
                         <span>Repositories</span>
                       </Link>
                     </SidebarMenuSubButton>
@@ -127,6 +130,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                   <SidebarMenuSubItem>
                     <SidebarMenuSubButton asChild size="sm" isActive={pathname === workflowsPath}>
                       <Link href={workflowsPath}>
+                        <IconArrowsShuffle className="h-3.5 w-3.5" />
                         <span>Workflows</span>
                       </Link>
                     </SidebarMenuSubButton>

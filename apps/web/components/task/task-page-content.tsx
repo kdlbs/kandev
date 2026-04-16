@@ -115,6 +115,7 @@ function useWorkflowStepsMapped() {
         allow_manual_move: s.allow_manual_move,
         prompt: s.prompt,
         is_start_step: s.is_start_step,
+        agent_profile_id: s.agent_profile_id,
       })),
     [kanbanSteps],
   );

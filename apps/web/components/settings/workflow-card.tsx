@@ -6,13 +6,16 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
+import { HelpTip } from "./workflow-pipeline-editor-helpers";
 import { WorkflowDeleteDialog, StepDeleteDialog } from "./workflow-card-dialogs";
 import {
   useWorkflowStepActions,
@@ -28,7 +31,11 @@ type WorkflowCardProps = {
   initialWorkflowSteps?: WorkflowStep[];
   templateStepCount?: number;
   otherWorkflows?: Workflow[];
-  onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
+  onUpdateWorkflow: (updates: {
+    name?: string;
+    description?: string;
+    agent_profile_id?: string;
+  }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
   onSaveWorkflow: () => Promise<unknown>;
   onWorkflowCreated?: (created: Workflow) => void;
@@ -224,7 +231,11 @@ type WorkflowCardDialogsProps = {
 type WorkflowCardBodyProps = {
   workflow: Workflow;
   isWorkflowDirty: boolean;
-  onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
+  onUpdateWorkflow: (updates: {
+    name?: string;
+    description?: string;
+    agent_profile_id?: string;
+  }) => void;
   activeSaveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   handleSaveWorkflow: () => Promise<void>;
   workflowLoading: boolean;
@@ -247,27 +258,56 @@ function WorkflowCardBody({
   workflowSteps,
   stepActions,
 }: WorkflowCardBodyProps) {
+  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
+
   return (
     <>
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-2 flex-1">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 space-y-1.5">
           <Label className="flex items-center gap-2">
             <span>Workflow Name</span>
             {isWorkflowDirty && <UnsavedChangesBadge />}
           </Label>
-          <div className="flex items-center gap-2">
-            <Input
-              value={workflow.name}
-              onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-            />
-            <UnsavedSaveButton
-              isDirty={isWorkflowDirty}
-              isLoading={activeSaveRequest.isLoading}
-              status={activeSaveRequest.status}
-              onClick={handleSaveWorkflow}
-            />
-          </div>
+          <Input
+            value={workflow.name}
+            onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+          />
         </div>
+        <div className="w-[240px] shrink-0 space-y-1.5">
+          <Label className="flex items-center gap-1">
+            <span>Agent Profile</span>
+            <HelpTip text="Default agent profile for tasks in this workflow. When set, the agent selector is locked in the task creation dialog." />
+          </Label>
+          <Select
+            value={workflow.agent_profile_id || "none"}
+            onValueChange={(value) =>
+              onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
+            }
+          >
+            <SelectTrigger
+              className="w-full cursor-pointer"
+              data-testid="workflow-agent-profile-select"
+            >
+              <SelectValue placeholder="None (use task default)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="cursor-pointer">
+                None (use task default)
+              </SelectItem>
+              {healthyProfiles.map((p) => (
+                <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <UnsavedSaveButton
+          isDirty={isWorkflowDirty}
+          isLoading={activeSaveRequest.isLoading}
+          status={activeSaveRequest.status}
+          onClick={handleSaveWorkflow}
+        />
       </div>
       <div className="space-y-2">
         <Label>Workflow Steps</Label>
@@ -337,17 +377,9 @@ function WorkflowCardDialogs({
   );
 }
 
-export function WorkflowCard({
-  workflow,
-  isWorkflowDirty,
-  initialWorkflowSteps,
-  templateStepCount = 0,
-  otherWorkflows = [],
-  onUpdateWorkflow,
-  onDeleteWorkflow,
-  onSaveWorkflow,
-  onWorkflowCreated,
-}: WorkflowCardProps) {
+function useWorkflowCardState(props: WorkflowCardProps) {
+  const { workflow, initialWorkflowSteps, templateStepCount = 0, otherWorkflows = [] } = props;
+  const { onDeleteWorkflow, onSaveWorkflow, onWorkflowCreated } = props;
   const { toast } = useToast();
   const [exportOpen, setExportOpen] = useState(false);
   const [exportYaml, setExportYaml] = useState("");
@@ -395,43 +427,70 @@ export function WorkflowCard({
   const stepsForStepMigration = stepDel.stepToDelete
     ? workflowSteps.filter((s) => s.id !== stepDel.stepToDelete)
     : [];
+  return {
+    toast,
+    exportOpen,
+    setExportOpen,
+    exportYaml,
+    setExportYaml,
+    wfDel,
+    stepDel,
+    isNewWorkflow,
+    deleteWorkflowRequest,
+    workflowSteps,
+    workflowLoading,
+    stepActions,
+    activeSaveRequest,
+    handleSaveWorkflow,
+    wfDeleteHandlers,
+    stepDeleteHandlers,
+    stepsForStepMigration,
+  };
+}
+
+export function WorkflowCard(props: WorkflowCardProps) {
+  const { workflow, isWorkflowDirty, otherWorkflows = [], onUpdateWorkflow } = props;
+  const s = useWorkflowCardState(props);
 
   return (
-    <Card data-testid={`workflow-card-${workflow.id}`}>
+    <Card
+      data-testid={`workflow-card-${workflow.id}`}
+      className={isWorkflowDirty ? "ring-yellow-500/50" : undefined}
+    >
       <CardContent className="pt-6">
         <div className="space-y-4">
           <WorkflowCardBody
             workflow={workflow}
             isWorkflowDirty={isWorkflowDirty}
             onUpdateWorkflow={onUpdateWorkflow}
-            activeSaveRequest={activeSaveRequest}
-            handleSaveWorkflow={handleSaveWorkflow}
-            workflowLoading={workflowLoading}
-            workflowSteps={workflowSteps}
-            stepActions={stepActions}
+            activeSaveRequest={s.activeSaveRequest}
+            handleSaveWorkflow={s.handleSaveWorkflow}
+            workflowLoading={s.workflowLoading}
+            workflowSteps={s.workflowSteps}
+            stepActions={s.stepActions}
           />
           <WorkflowCardActions
-            isNewWorkflow={isNewWorkflow}
+            isNewWorkflow={s.isNewWorkflow}
             workflowId={workflow.id}
-            setExportYaml={setExportYaml}
-            setExportOpen={setExportOpen}
-            toast={toast}
-            onDeleteClick={wfDeleteHandlers.handleDeleteWorkflowClick}
-            deleteDisabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading}
+            setExportYaml={s.setExportYaml}
+            setExportOpen={s.setExportOpen}
+            toast={s.toast}
+            onDeleteClick={s.wfDeleteHandlers.handleDeleteWorkflowClick}
+            deleteDisabled={s.deleteWorkflowRequest.isLoading || s.wfDel.workflowDeleteLoading}
           />
         </div>
       </CardContent>
       <WorkflowCardDialogs
-        wfDel={wfDel}
+        wfDel={s.wfDel}
         otherWorkflows={otherWorkflows}
-        deleteWorkflowLoading={deleteWorkflowRequest.isLoading}
-        wfDeleteHandlers={wfDeleteHandlers}
-        exportOpen={exportOpen}
-        setExportOpen={setExportOpen}
-        exportYaml={exportYaml}
-        stepDel={stepDel}
-        stepsForStepMigration={stepsForStepMigration}
-        stepDeleteHandlers={stepDeleteHandlers}
+        deleteWorkflowLoading={s.deleteWorkflowRequest.isLoading}
+        wfDeleteHandlers={s.wfDeleteHandlers}
+        exportOpen={s.exportOpen}
+        setExportOpen={s.setExportOpen}
+        exportYaml={s.exportYaml}
+        stepDel={s.stepDel}
+        stepsForStepMigration={s.stepsForStepMigration}
+        stepDeleteHandlers={s.stepDeleteHandlers}
       />
     </Card>
   );

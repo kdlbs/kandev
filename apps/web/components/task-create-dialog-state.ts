@@ -217,6 +217,11 @@ function useDraftPersistence(
   return { clearDraft };
 }
 
+function useWorkflowAgentProfileState() {
+  const [workflowAgentProfileId, setWorkflowAgentProfileId] = useState("");
+  return { workflowAgentProfileId, setWorkflowAgentProfileId };
+}
+
 function useGitHubUrlState() {
   const [useGitHubUrl, setUseGitHubUrl] = useState(false);
   const [githubUrl, setGitHubUrl] = useState("");
@@ -345,6 +350,7 @@ export function useDialogFormState(
   const form = useFormStateValues(workflowId, workspaceId, open, initialValues);
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
+  const wfAgent = useWorkflowAgentProfileState();
 
   useFormResetEffects({
     open,
@@ -387,7 +393,7 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  return { ...form, ...discovery, ...ghUrl, clearDraft };
+  return { ...form, ...discovery, ...ghUrl, ...wfAgent, clearDraft };
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";
