@@ -274,11 +274,21 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	return nil
 }
 
-// CancelAgentBySessionID cancels the current agent turn for a specific session
+// ErrNoExecutionForSession is returned when no live execution is tracked for a session,
+// typically because the agent process has crashed, exited, or the session state is stuck
+// (for example after a backend restart that did not re-register the execution).
+//
+// Callers should treat this as a "there is nothing to cancel/stop" signal and still reconcile
+// the session's state in the database, otherwise the session will appear stuck as RUNNING
+// with no agent to drive it.
+var ErrNoExecutionForSession = errors.New("no execution for session")
+
+// CancelAgentBySessionID cancels the current agent turn for a specific session.
+// Returns ErrNoExecutionForSession (wrapped) when no execution is tracked for the session.
 func (m *Manager) CancelAgentBySessionID(ctx context.Context, sessionID string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent running for session %q", sessionID)
+		return fmt.Errorf("session %q: %w", sessionID, ErrNoExecutionForSession)
 	}
 
 	return m.CancelAgent(ctx, execution.ID)

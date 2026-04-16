@@ -3,12 +3,14 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -228,9 +230,22 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 
 // cancelAgentSilent cancels the agent turn without creating a visible message
 // in the chat. Used by clarification recovery so the cancel-and-retry is seamless.
+//
+// If the agent manager reports no live execution for the session, the session may be stuck
+// (agent crashed mid-turn). In that case, skip the cancel signal but still reconcile the
+// session's state so clarification recovery can proceed with a fresh prompt.
 func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		return fmt.Errorf("cancel agent: %w", err)
+		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			return fmt.Errorf("cancel agent: %w", err)
+		}
+		// Agent crashed or exited mid-turn — clarification recovery cannot signal a cancel,
+		// but we still reconcile state below so a fresh prompt can run. Error level so this
+		// surfaces for root-cause investigation of the crash.
+		s.logger.Error("agent process appears to have crashed during clarification recovery",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, nil)
