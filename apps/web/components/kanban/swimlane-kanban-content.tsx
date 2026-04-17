@@ -36,6 +36,9 @@ export type SwimlaneKanbanContentProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 type SwimlaneKanbanDndOptions = {
@@ -183,6 +186,9 @@ function MobileKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -198,6 +204,9 @@ function MobileKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 }) {
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -231,6 +240,9 @@ function MobileKanbanLayout({
         showMaximizeButton={showMaximizeButton}
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        isMultiSelectMode={isMultiSelectMode}
       />
       <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
     </div>
@@ -249,6 +261,9 @@ function TabletKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -261,6 +276,9 @@ function TabletKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -284,6 +302,9 @@ function TabletKanbanLayout({
             showMaximizeButton={showMaximizeButton}
             deletingTaskId={deletingTaskId}
             archivingTaskId={archivingTaskId}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
+            isMultiSelectMode={isMultiSelectMode}
           />
         </div>
       ))}
@@ -303,6 +324,9 @@ function DesktopKanbanLayout({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -315,6 +339,9 @@ function DesktopKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -338,6 +365,9 @@ function DesktopKanbanLayout({
           deletingTaskId={deletingTaskId}
           archivingTaskId={archivingTaskId}
           showMaximizeButton={showMaximizeButton}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
+          isMultiSelectMode={isMultiSelectMode}
         />
       ))}
     </div>
@@ -357,6 +387,9 @@ export function SwimlaneKanbanContent({
   deletingTaskId,
   archivingTaskId,
   showMaximizeButton,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: SwimlaneKanbanContentProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
@@ -377,6 +410,9 @@ export function SwimlaneKanbanContent({
     showMaximizeButton,
     deletingTaskId,
     archivingTaskId,
+    selectedIds,
+    onToggleSelect,
+    isMultiSelectMode,
   };
 
   let layoutContent: React.ReactNode;

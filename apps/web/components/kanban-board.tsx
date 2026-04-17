@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
@@ -13,10 +13,12 @@ import { KanbanHeader } from "./kanban/kanban-header";
 import { MobileFab } from "./kanban/mobile-fab";
 import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
+import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
 import {
@@ -186,6 +188,44 @@ function useKanbanBoardHooks(
   };
 }
 
+type SnapEntry = {
+  tasks: { id: string }[];
+  steps: { id: string; title: string; color?: string | null }[];
+};
+
+function useMultiSelectDerived(
+  selectedIds: Set<string>,
+  snapshots: Record<string, SnapEntry>,
+  activeSteps: { id: string; title: string; color?: string | null }[],
+) {
+  const isMixedWorkflowSelection = useMemo(() => {
+    if (selectedIds.size === 0) return false;
+    const taskToWorkflow = new Map<string, string>();
+    for (const [wfId, snap] of Object.entries(snapshots)) {
+      for (const task of snap.tasks) taskToWorkflow.set(task.id, wfId);
+    }
+    const wfIds = new Set<string>();
+    for (const id of selectedIds) {
+      const wfId = taskToWorkflow.get(id);
+      if (wfId) wfIds.add(wfId);
+    }
+    return wfIds.size > 1;
+  }, [selectedIds, snapshots]);
+
+  const multiSelectSteps = useMemo(() => {
+    if (selectedIds.size > 0) {
+      for (const snap of Object.values(snapshots)) {
+        if (snap.tasks.some((t) => selectedIds.has(t.id))) {
+          return snap.steps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
+        }
+      }
+    }
+    return activeSteps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
+  }, [selectedIds, snapshots, activeSteps]);
+
+  return { isMixedWorkflowSelection, multiSelectSteps };
+}
+
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
@@ -214,17 +254,30 @@ function useKanbanBoardSetup(
     onOpenTask,
   });
 
+  const multiSelect = useTaskMultiSelect(kanban.workflowId);
+  const { isMultiSelectMode, toggleSelect } = multiSelect;
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
+    multiSelect.selectedIds,
+    snapshots,
+    hooks.activeSteps,
+  );
+
   // Mobile bottom sheet: intercept card clicks to show task info first
   const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
-  const mobileCardClick = useCallback(
+  const handleCardClickOrSelect = useCallback(
     (task: Task) => {
+      if (isMultiSelectMode) {
+        toggleSelect(task.id);
+        return;
+      }
       if (isMobile) {
         setMobileSheetTask(task);
       } else {
         handleCardClick(task);
       }
     },
-    [isMobile, handleCardClick],
+    [isMultiSelectMode, toggleSelect, isMobile, handleCardClick],
   );
 
   const automation = useMoveErrorState(router);
@@ -250,9 +303,12 @@ function useKanbanBoardSetup(
     ...hooks,
     ...automation,
     handleOpenTask,
-    handleCardClick: mobileCardClick,
+    handleCardClick: handleCardClickOrSelect,
     mobileSheetTask,
     setMobileSheetTask,
+    multiSelect,
+    isMixedWorkflowSelection,
+    multiSelectSteps,
   };
 }
 
@@ -308,6 +364,20 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
+        selectedIds={s.multiSelect.selectedIds}
+        onToggleSelect={s.multiSelect.toggleSelect}
+        isMultiSelectMode={s.multiSelect.isMultiSelectMode}
+        onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
+      />
+      <TaskMultiSelectToolbar
+        selectedIds={s.multiSelect.selectedIds}
+        steps={s.multiSelectSteps}
+        isProcessing={s.multiSelect.isProcessing}
+        canMove={!s.isMixedWorkflowSelection}
+        onClearSelection={s.multiSelect.clearSelection}
+        onBulkDelete={s.multiSelect.bulkDelete}
+        onBulkArchive={s.multiSelect.bulkArchive}
+        onBulkMove={s.multiSelect.bulkMove}
       />
       {s.isMobile && (
         <>

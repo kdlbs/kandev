@@ -19,6 +19,9 @@ type SwipeableColumnsProps = {
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 export function SwipeableColumns({
@@ -35,6 +38,9 @@ export function SwipeableColumns({
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -118,6 +124,9 @@ export function SwipeableColumns({
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
               archivingTaskId={archivingTaskId}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
+              isMultiSelectMode={isMultiSelectMode}
               hideHeader
             />
           </div>
