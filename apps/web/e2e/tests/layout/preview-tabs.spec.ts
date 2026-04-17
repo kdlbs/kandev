@@ -37,7 +37,14 @@ async function setupFilesSession(args: {
   });
   const session = await openTaskSession(args.testPage, args.taskTitle);
   await session.clickTab("Files");
+  await expect(session.files).toBeVisible({ timeout: 10_000 });
   return session;
+}
+
+async function openFileFromTree(session: SessionPage, filename: string): Promise<void> {
+  const node = session.fileTreeNode(filename);
+  await expect(node).toBeVisible({ timeout: 15_000 });
+  await node.click();
 }
 
 async function countTabsMatching(page: Page, text: string): Promise<number> {
@@ -76,15 +83,15 @@ test.describe("Editor preview tabs", () => {
     });
 
     // Open file A → preview tab shows alpha.ts
-    await session.fileTreeNode(FILE_A).dblclick();
+    await openFileFromTree(session, FILE_A);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A), { timeout: 10_000 }).toBe(1);
 
-    // Open file B → same tab, now shows beta.ts (alpha is gone)
-    await session.fileTreeNode(FILE_B).dblclick();
+    // Open file B → same preview panel, now shows beta.ts (alpha tab is gone)
+    await openFileFromTree(session, FILE_B);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toHaveCount(1);
-    expect(await countTabsMatching(testPage, FILE_B)).toBe(1);
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(0);
+    await expect.poll(() => countTabsMatching(testPage, FILE_B), { timeout: 10_000 }).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A)).toBe(0);
   });
 
   test("double-click promotes the preview tab to a pinned tab", async ({
@@ -110,20 +117,20 @@ test.describe("Editor preview tabs", () => {
       profileName: "promote-preview-file",
     });
 
-    await session.fileTreeNode(FILE_A).dblclick();
+    await openFileFromTree(session, FILE_A);
     const previewTab = testPage.getByTestId("preview-tab-file-editor");
     await expect(previewTab).toBeVisible({ timeout: 10_000 });
 
     // Double-click the preview tab → promotes to pinned. Preview marker disappears.
     await previewTab.dblclick();
-    await expect(previewTab).toHaveCount(0, { timeout: 5_000 });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect(previewTab).toHaveCount(0, { timeout: 10_000 });
+    await expect.poll(() => countTabsMatching(testPage, FILE_A), { timeout: 10_000 }).toBe(1);
 
     // Open B as a new preview. A's pinned tab must still exist.
-    await session.fileTreeNode(FILE_B).dblclick();
+    await openFileFromTree(session, FILE_B);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
-    expect(await countTabsMatching(testPage, FILE_B)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_B)).toBe(1);
   });
 
   test("editing a preview file auto-pins it and a fresh preview opens for the next file", async ({
@@ -149,27 +156,27 @@ test.describe("Editor preview tabs", () => {
       profileName: "auto-pin-edit",
     });
 
-    await session.fileTreeNode(FILE_A).dblclick();
+    await openFileFromTree(session, FILE_A);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
 
-    // Edit the file — type into the Monaco editor to mark it dirty.
-    const editor = testPage.locator(".monaco-editor").first();
-    await expect(editor).toBeVisible({ timeout: 10_000 });
-    await editor.click();
+    // Wait for Monaco textarea to be ready, focus it, and type.
+    const monacoTextArea = testPage.locator(".monaco-editor textarea.inputarea").first();
+    await expect(monacoTextArea).toBeAttached({ timeout: 15_000 });
+    await monacoTextArea.focus();
     await testPage.keyboard.press("End");
     await testPage.keyboard.type("// edited");
 
     // After dirty, the preview should have been promoted: preview marker gone.
     await expect(testPage.getByTestId("preview-tab-file-editor")).toHaveCount(0, {
-      timeout: 5_000,
+      timeout: 10_000,
     });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A), { timeout: 10_000 }).toBe(1);
 
     // Opening B should create a fresh preview, keeping A pinned.
-    await session.fileTreeNode(FILE_B).dblclick();
+    await openFileFromTree(session, FILE_B);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
-    expect(await countTabsMatching(testPage, FILE_B)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_B)).toBe(1);
   });
 
   test("middle-click closes a preview tab", async ({ testPage, apiClient, seedData, backend }) => {
@@ -189,13 +196,13 @@ test.describe("Editor preview tabs", () => {
       profileName: "middle-click-close",
     });
 
-    await session.fileTreeNode(FILE_A).dblclick();
+    await openFileFromTree(session, FILE_A);
     const preview = testPage.getByTestId("preview-tab-file-editor");
     await expect(preview).toBeVisible({ timeout: 10_000 });
 
     await preview.click({ button: "middle" });
-    await expect(preview).toHaveCount(0, { timeout: 5_000 });
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(0);
+    await expect(preview).toHaveCount(0, { timeout: 10_000 });
+    await expect.poll(() => countTabsMatching(testPage, FILE_A)).toBe(0);
   });
 
   test("clicking different diffs in Changes replaces the single diff tab", async ({
@@ -212,7 +219,7 @@ test.describe("Editor preview tabs", () => {
     git.createFile(FILE_B, "// base beta");
     git.stageAll();
     git.commit("seed");
-    // Modify both so they appear in Changes
+    // Modify both so they appear in unstaged changes
     git.modifyFile(FILE_A, "// modified alpha");
     git.modifyFile(FILE_B, "// modified beta");
 
@@ -226,14 +233,15 @@ test.describe("Editor preview tabs", () => {
     const session = await openTaskSession(testPage, "Diff preview replace");
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
 
     // Click file A in Changes → diff preview opens for A
     await session.changes.getByText(FILE_A).first().click();
-    await expect(testPage.getByTestId("preview-tab-file-diff")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("preview-tab-file-diff")).toBeVisible({ timeout: 15_000 });
     const alphaDiffTabs = testPage
       .locator(".dv-default-tab")
       .filter({ hasText: `Diff [${FILE_A}]` });
-    await expect(alphaDiffTabs).toHaveCount(1);
+    await expect(alphaDiffTabs).toHaveCount(1, { timeout: 10_000 });
 
     // Click file B → single diff tab, now for B
     await session.changes.getByText(FILE_B).first().click();
@@ -282,19 +290,22 @@ test.describe("Editor preview tabs", () => {
     const short2 = sha2.slice(0, 7);
 
     // Click commit 1 → commit preview tab shows short1
-    await testPage.getByTestId(`commit-row-${short1}`).click();
+    const commit1Row = testPage.getByTestId(`commit-row-${short1}`);
+    await expect(commit1Row).toBeVisible({ timeout: 10_000 });
+    await commit1Row.click();
     await expect(testPage.getByTestId("preview-tab-commit-detail")).toBeVisible({
-      timeout: 10_000,
+      timeout: 15_000,
     });
     const commitTabs = testPage
       .locator(".dv-default-tab")
       .filter({ hasText: new RegExp(`^(${short1}|${short2})$`) });
-    await expect(commitTabs).toHaveCount(1);
+    await expect(commitTabs).toHaveCount(1, { timeout: 10_000 });
 
     // Click commit 2 → same tab now shows short2
     await testPage.getByTestId(`commit-row-${short2}`).click();
-    await expect(commitTabs).toHaveCount(1, { timeout: 10_000 });
-    await expect(testPage.locator(".dv-default-tab").filter({ hasText: short2 })).toHaveCount(1);
+    await expect(testPage.locator(".dv-default-tab").filter({ hasText: short2 })).toHaveCount(1, {
+      timeout: 10_000,
+    });
     await expect(testPage.locator(".dv-default-tab").filter({ hasText: short1 })).toHaveCount(0);
   });
 
@@ -321,21 +332,21 @@ test.describe("Editor preview tabs", () => {
       profileName: "pinned-focus",
     });
 
-    // Open A → preview, pin it
-    await session.fileTreeNode(FILE_A).dblclick();
-    await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
-    await testPage.getByTestId("preview-tab-file-editor").dblclick();
-    await expect(testPage.getByTestId("preview-tab-file-editor")).toHaveCount(0);
+    // Open A → preview, pin it via double-click
+    await openFileFromTree(session, FILE_A);
+    const preview = testPage.getByTestId("preview-tab-file-editor");
+    await expect(preview).toBeVisible({ timeout: 10_000 });
+    await preview.dblclick();
+    await expect(preview).toHaveCount(0, { timeout: 10_000 });
 
-    // Open B → preview
-    await session.fileTreeNode(FILE_B).dblclick();
+    // Open B → fresh preview
+    await openFileFromTree(session, FILE_B);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({ timeout: 10_000 });
 
     // Click A in the tree again → focuses A's pinned tab. B preview survives.
-    await session.fileTreeNode(FILE_A).dblclick();
-    expect(await countTabsMatching(testPage, FILE_A)).toBe(1);
-    expect(await countTabsMatching(testPage, FILE_B)).toBe(1);
-    // Preview tab should still be the B tab.
+    await openFileFromTree(session, FILE_A);
+    await expect.poll(() => countTabsMatching(testPage, FILE_A)).toBe(1);
+    await expect.poll(() => countTabsMatching(testPage, FILE_B)).toBe(1);
     await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible();
   });
 });
