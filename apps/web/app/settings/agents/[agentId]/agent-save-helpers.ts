@@ -123,6 +123,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     profiles: draftAgent.profiles.map((profile) => ({
       name: profile.name,
       model: profile.model,
+      mode: profile.mode,
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cli_passthrough ?? false,
     })),
@@ -175,6 +176,7 @@ async function saveExistingProfiles(
       const createdProfile = await createAgentProfileAction(savedAgent.id, {
         name: profile.name,
         model: profile.model,
+        mode: profile.mode,
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cli_passthrough ?? false,
       });
@@ -190,6 +192,7 @@ async function saveExistingProfiles(
       const updatedProfile = await updateAgentProfileAction(profile.id, {
         name: profile.name,
         model: profile.model,
+        mode: profile.mode,
         ...permissionsToProfilePatch(profile),
       });
       nextProfiles.push(updatedProfile);
@@ -255,6 +258,7 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
   return (
     draft.name !== saved.name ||
     draft.model !== saved.model ||
+    (draft.mode ?? "") !== (saved.mode ?? "") ||
     arePermissionsDirty(draft, saved) ||
     draft.cli_passthrough !== saved.cli_passthrough
   );
