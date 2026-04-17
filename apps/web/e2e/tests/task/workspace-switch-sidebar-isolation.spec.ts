@@ -1,14 +1,4 @@
-/**
- * Regression test: switching the active workspace must not leak tasks from
- * the previous workspace into the task sidebar.
- *
- * Bug: useAllWorkflowSnapshots accumulated kanbanMulti.snapshots across
- * workspace switches. The sidebar merges tasks from every snapshot; cross-
- * workspace tasks had a repositoryId that didn't match the current workspace
- * repo map, so they rendered under the "Unassigned" group.
- *
- * Fix: clearKanbanMulti() is called when workspaceId changes.
- */
+// Switching the active workspace must not leak tasks from the previous workspace into the sidebar.
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
@@ -34,7 +24,9 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     const workspaceB = await apiClient.createWorkspace("Workspace B");
     const workflowB = await apiClient.createWorkflow(workspaceB.id, "Workflow B", "simple");
     const { steps: stepsB } = await apiClient.listWorkflowSteps(workflowB.id);
-    const startStepB = stepsB.sort((a, b) => a.position - b.position).find((s) => s.is_start_step);
+    const startStepB = [...stepsB]
+      .sort((a, b) => a.position - b.position)
+      .find((s) => s.is_start_step);
     if (!startStepB) throw new Error("workspace B workflow has no start step");
 
     const repoBDir = path.join(backend.tmpDir, "repos", "e2e-repo-b");
