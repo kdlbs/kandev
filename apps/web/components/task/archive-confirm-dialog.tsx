@@ -46,7 +46,8 @@ export function ArchiveConfirmDialog({
           <AlertDialogAction
             disabled={isArchiving}
             className="cursor-pointer"
-            onClick={() => {
+            onClick={(e) => {
+              e.preventDefault();
               if (isArchiving) return;
               onConfirm();
             }}
