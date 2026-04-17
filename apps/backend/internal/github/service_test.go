@@ -208,6 +208,21 @@ func TestComputeOverallCheckStatus(t *testing.T) {
 			"",
 		},
 		{
+			"only neutral returns empty (no signal)",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "neutral"},
+				{Status: "completed", Conclusion: "neutral"},
+			},
+			"",
+		},
+		{
+			"unknown future conclusion treated as passing",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "stale"}, // hypothetical future enum
+			},
+			"success",
+		},
+		{
 			"neutral conclusion is ignored like skipped",
 			[]CheckRun{
 				{Status: "completed", Conclusion: "success"},

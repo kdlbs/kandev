@@ -70,6 +70,10 @@ test.describe("PR status badge", () => {
 
     // Seed task PR directly with checks_state=success (post-fix behaviour
     // when 20 success + 1 skipped checks flow through computeOverallCheckStatus).
+    // Associating after moveTask is intentional: the task may already reach Done
+    // before this call, and the mock controller's github.task_pr.updated event
+    // is what refreshes the badge on the already-rendered kanban card. Don't
+    // reorder before moveTask without preserving that event flow.
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",

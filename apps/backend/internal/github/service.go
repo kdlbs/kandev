@@ -1180,7 +1180,10 @@ func computeOverallCheckStatus(checks []CheckRun) string {
 			return checkConclusionFail
 		case checkConclusionSkipped, checkConclusionNeutral:
 			// ignore — GitHub's UI does
-		case checkConclusionSuccess:
+		default:
+			// Treat success and any future unknown terminal conclusion as passing.
+			// Being permissive preserves the success signal if GitHub introduces
+			// a new conclusion we haven't mapped yet.
 			hasPassing = true
 		}
 	}
