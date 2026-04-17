@@ -1492,7 +1492,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// session.state_changed broadcast to flip the composer/pause button out of
 		// "Agent is running". The wrapper's terminal-state guard is also correct here:
 		// if a concurrent agent-failure handler moved the session to FAILED we don't
-		// want to overwrite that with previousSessionState.
+		// want to overwrite that with previousSessionState. Do NOT pass the preloaded
+		// `session` — the wrapper must re-read the row to see any such concurrent
+		// terminal transition; the stale pre-RUNNING snapshot would defeat the guard.
 		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", true)
 		if !isTransientPromptError(err) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
