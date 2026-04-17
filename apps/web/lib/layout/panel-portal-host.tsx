@@ -29,22 +29,17 @@ type PanelPortalHostProps = {
  * dockview tree.  Mount this as a sibling to `<DockviewReact>`.
  */
 export function PanelPortalHost({ renderPanel }: PanelPortalHostProps) {
-  // Re-render when the set of registered panels changes OR when any panel's
-  // params change. The version counter bumps on both, so we track it as part
-  // of the snapshot to force re-render on in-place param updates (preview tabs).
-  const snapshot = useSyncExternalStore(
+  // Re-render when panels are added/removed OR when any panel's params change.
+  // The version counter bumps on all three — we read ids() at render time
+  // rather than encoding them in the snapshot so panel ids can contain any
+  // character (a path like `file:path/with,comma.txt` would break a delimiter).
+  useSyncExternalStore(
     useCallback((cb) => panelPortalManager.subscribe(cb), []),
-    useCallback(
-      () => `${panelPortalManager.getVersion()}|${panelPortalManager.ids().join(",")}`,
-      [],
-    ),
-    useCallback(
-      () => `${panelPortalManager.getVersion()}|${panelPortalManager.ids().join(",")}`,
-      [],
-    ),
+    useCallback(() => panelPortalManager.getVersion(), []),
+    useCallback(() => panelPortalManager.getVersion(), []),
   );
 
-  const panelIds = snapshot ? (snapshot.split("|")[1] ?? "").split(",").filter(Boolean) : [];
+  const panelIds = panelPortalManager.ids();
 
   return (
     <>

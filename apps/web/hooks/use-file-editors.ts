@@ -17,6 +17,8 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import type { FileContentResponse } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 
+const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
+
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
 let _restorationInProgress = false;
@@ -59,6 +61,22 @@ async function buildFileEditorState(
     isBinary: response.is_binary,
     resolvedPath: response.resolved_path,
   };
+}
+
+/** Build the sessionStorage tab records from live openFiles + dockview state. */
+function buildPersistedTabs(
+  api: ReturnType<typeof useDockviewStore.getState>["api"],
+  openFiles: Map<string, FileEditorState>,
+) {
+  const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
+  const previewPath = ((preview?.params as Record<string, unknown> | undefined)
+    ?.previewItemId ?? null) as string | null;
+  return Array.from(openFiles.values()).flatMap(({ path, name, markdownPreview }) => {
+    const isPinned = !!api?.getPanel(`file:${path}`);
+    const isPreview = !isPinned && path === previewPath;
+    if (!isPinned && !isPreview) return [];
+    return [{ path, name, ...(markdownPreview ? { markdownPreview } : {}), pinned: isPinned }];
+  });
 }
 
 /** Update dockview panel dirty state after a successful save. */
@@ -252,29 +270,7 @@ function useFileEditorEffects({
       if (state.openFiles === prevState.openFiles) return;
       const sessionId = activeSessionIdRef.current;
       if (!sessionId || _restorationInProgress || state.isRestoringLayout) return;
-      const dockApi = state.api;
-      const previewParams = (dockApi?.getPanel("preview:file-editor")?.params ?? {}) as Record<
-        string,
-        unknown
-      >;
-      const previewPath = (previewParams.previewItemId as string | undefined) ?? null;
-      const tabs = Array.from(state.openFiles.values()).flatMap(
-        ({ path, name, markdownPreview }) => {
-          const isPinned = !!dockApi?.getPanel(`file:${path}`);
-          const isPreview = !isPinned && path === previewPath;
-          // Only persist files that are actually represented by a dockview tab.
-          if (!isPinned && !isPreview) return [];
-          return [
-            {
-              path,
-              name,
-              ...(markdownPreview ? { markdownPreview } : {}),
-              pinned: isPinned,
-            },
-          ];
-        },
-      );
-      saveOpenFileTabs(sessionId, tabs);
+      saveOpenFileTabs(sessionId, buildPersistedTabs(state.api, state.openFiles));
     });
     return unsub;
   }, [activeSessionIdRef]);
@@ -295,11 +291,16 @@ function useFileEditorEffects({
         removeFileState(event.id.replace("file:", ""));
         return;
       }
-      // Preview panel closed: drop whichever file it was showing.
-      if (event.id === "preview:file-editor") {
-        const params = (event.api as unknown as { params?: Record<string, unknown> }).params;
-        const path = (params?.previewItemId as string | undefined) ?? null;
-        if (path) removeFileState(path);
+      // Preview panel closed: drop whichever file it was showing — but NOT if a
+      // pinned panel for the same file already exists (e.g. the preview was
+      // just promoted to pinned, which removes the preview before creating the
+      // pinned panel; wiping the file state here would drop the user's dirty
+      // buffer during auto-promote-on-edit).
+      if (event.id === PREVIEW_FILE_EDITOR_ID) {
+        const path = (event.params?.previewItemId as string | undefined) ?? null;
+        if (!path) return;
+        const pinnedStillOpen = !!api.getPanel(`file:${path}`);
+        if (!pinnedStillOpen) removeFileState(path);
       }
     });
     return () => disposable.dispose();
@@ -440,8 +441,17 @@ function useSaveDeleteActions(params: SaveDeleteParams) {
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const dockApi = useDockviewStore.getState().api;
-      const panel = dockApi?.getPanel(`file:${path}`);
-      if (panel) dockApi?.removePanel(panel);
+      // Close whichever panel is showing the file: the pinned per-item panel
+      // or, if it's currently in the preview slot, the preview panel itself.
+      const pinned = dockApi?.getPanel(`file:${path}`);
+      if (pinned) {
+        dockApi?.removePanel(pinned);
+      } else {
+        const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
+        if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
+          dockApi?.removePanel(preview);
+        }
+      }
       try {
         const response = await deleteFile(client, currentSessionId, path);
         if (!response.success) {
@@ -533,13 +543,10 @@ function useFileEditorActions({
       // VSCode-style: editing a preview file auto-promotes its tab so the
       // user's unsaved changes aren't silently discarded when they open
       // another file. Only promote when this file is the current preview.
-      if (nextIsDirty && !file.isDirty) {
-        const api = useDockviewStore.getState().api;
-        const preview = api?.getPanel("preview:file-editor");
-        const previewParams = (preview?.params ?? {}) as Record<string, unknown>;
-        if (previewParams.previewItemId === path) {
-          promotePreviewToPinned("file-editor");
-        }
+      if (!nextIsDirty || file.isDirty) return;
+      const preview = useDockviewStore.getState().api?.getPanel(PREVIEW_FILE_EDITOR_ID);
+      if ((preview?.params as Record<string, unknown> | undefined)?.previewItemId === path) {
+        promotePreviewToPinned("file-editor");
       }
     },
     [updateFileState, promotePreviewToPinned],

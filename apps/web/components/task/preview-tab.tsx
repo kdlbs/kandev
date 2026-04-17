@@ -4,7 +4,6 @@ import { useCallback } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { PreviewType } from "@/lib/state/dockview-panel-actions";
-import { cn } from "@kandev/ui/lib/utils";
 
 /**
  * Middle-click to close any tab (preview or pinned).
@@ -46,7 +45,7 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
 
   return (
     <div
-      className={cn("flex h-full items-center italic")}
+      className="flex h-full items-center italic"
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
       title="Double-click to keep this tab open"

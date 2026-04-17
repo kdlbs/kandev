@@ -110,6 +110,7 @@ export class PanelPortalManager {
     entry.element.remove();
     entry.api = null;
     this.entries.delete(panelId);
+    this.version++;
     this.notify();
   }
 
@@ -128,6 +129,7 @@ export class PanelPortalManager {
       entry.api = null;
       this.entries.delete(panelId);
     }
+    this.version++;
     this.notify();
   }
 
@@ -150,6 +152,7 @@ export class PanelPortalManager {
       entry.api = null;
       this.entries.delete(panelId);
     }
+    this.version++;
     this.notify();
   }
 
@@ -161,6 +164,7 @@ export class PanelPortalManager {
       entry.api = null;
     }
     this.entries.clear();
+    this.version++;
     this.notify();
   }
 

@@ -326,8 +326,8 @@ describe("preview slots are independent across types", () => {
   it("file, diff, and commit previews coexist", () => {
     const { api, actions } = build(makeApi());
 
-    actions.addFileEditorPanel(NAME_A, NAME_A);
-    actions.addFileDiffPanel(NAME_B);
+    actions.addFileEditorPanel(PATH_A, NAME_A);
+    actions.addFileDiffPanel(PATH_B);
     actions.addCommitDetailPanel(SHA_A);
 
     expect(api.getPanel(PREVIEW_FILE_ID)).toBeDefined();

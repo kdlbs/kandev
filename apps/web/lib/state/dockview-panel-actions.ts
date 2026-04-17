@@ -1,4 +1,4 @@
-import type { DockviewApi, AddPanelOptions } from "dockview-react";
+import type { DockviewApi } from "dockview-react";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 
 type StoreGet = () => {
@@ -127,11 +127,11 @@ function openOrReplacePreview(args: OpenPreviewArgs): void {
 
   const preview = api.getPanel(spec.previewId);
   if (preview) {
-    const sameItem = preview.params?.previewItemId === itemId;
-    if (!sameItem) {
-      preview.api.updateParameters({ ...params, previewItemId: itemId });
-      preview.setTitle(title);
-    }
+    // Always push fresh params + title. Even when the preview already points
+    // at the same item, caller-provided fields like `content` may have changed
+    // (e.g. a new diff snapshot for the same file).
+    preview.api.updateParameters({ ...params, previewItemId: itemId });
+    preview.setTitle(title);
     if (!quiet) preview.api.setActive();
     return;
   }
@@ -175,10 +175,13 @@ export function promotePreviewToPinned(
 
   const groupId = preview.group?.id;
   const title = preview.title;
-  const { previewItemId: _drop, ...params } = { ...(preview.params ?? {}) };
-  void _drop;
+  const params = { ...(preview.params ?? {}) } as Record<string, unknown>;
+  delete params.previewItemId;
 
-  api.removePanel(preview);
+  // Create the pinned panel first. Removing preview first would trigger
+  // onDidRemovePanel handlers that wipe file state before the pinned panel
+  // has a chance to adopt it (especially harmful for auto-promote-on-edit,
+  // which fires while the user has unsaved changes).
   focusOrAddPanel(api, {
     id: pinnedId,
     component: spec.component,
@@ -187,6 +190,7 @@ export function promotePreviewToPinned(
     ...(pinnedTabComponent ? { tabComponent: pinnedTabComponent } : {}),
     ...(groupId ? { position: { referenceGroup: groupId } } : {}),
   });
+  api.removePanel(preview);
   return pinnedId;
 }
 
@@ -400,7 +404,3 @@ export function buildExtraPanelActions(get: StoreGet) {
     },
   };
 }
-
-// Keep a bogus reference so AddPanelOptions import isn't elided by ts-unused.
-type _Keep = AddPanelOptions;
-void (null as unknown as _Keep);
