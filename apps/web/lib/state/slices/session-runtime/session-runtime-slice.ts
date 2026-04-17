@@ -186,6 +186,8 @@ function buildUserShellActions(set: ImmerSet) {
       }),
     setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
       set((draft) => {
+        const prev = draft.sessionPollMode.bySessionId[sessionId];
+        console.log("[poll-mode] store set", { sessionId, mode, prev });
         draft.sessionPollMode.bySessionId[sessionId] = mode;
       }),
   };

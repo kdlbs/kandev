@@ -11,6 +11,8 @@ export function registerSessionPollModeHandlers(store: StoreApi<AppState>): WsHa
       const { session_id, poll_mode } = message.payload;
       if (!session_id || !poll_mode) return;
       if (!VALID_MODES.has(poll_mode as SessionPollMode)) return;
+      const prev = store.getState().sessionPollMode.bySessionId[session_id];
+      console.log("[poll-mode] WS received", { session_id, poll_mode, prev });
       store.getState().setSessionPollMode(session_id, poll_mode as SessionPollMode);
     },
   };
