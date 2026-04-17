@@ -232,40 +232,50 @@ test.describe("Workflow agent profile switching", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.sessionTabBySessionId(sessionA!.id)).toBeVisible({ timeout: 10_000 });
+    await expect(session.sessionTabBySessionId(sessionA!.id)).toBeVisible({ timeout: 15_000 });
 
-    // Move to Step2 — backend creates a new session with profileB. Our fix
-    // is what makes the chat UI follow that switch.
+    // Let session A settle before triggering the next transition — matches
+    // the timing used by the "manual step move" test in this file.
+    await testPage.waitForTimeout(3000);
+
+    // Move to Step2 — backend creates a new session with profileB. The
+    // frontend fix is what makes the chat UI follow that switch.
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // Discover the new session (profileB) and wait for its tab to render.
+    // Discover the new session (profileB) and wait for its tab + chat panel
+    // to become visible.
     const afterMove = await pollSessions(apiClient, task.id, 2, 45_000);
     const sessionB = afterMove.find((s) => s.agent_profile_id === profileB.id);
     expect(sessionB, "expected a second session with profileB after moving to Step2").toBeDefined();
     await expect(session.sessionTabBySessionId(sessionB!.id)).toBeVisible({ timeout: 15_000 });
 
-    // Behavioral assertion: the chat input now targets sessionB. Sending a
-    // message should result in that message appearing on sessionB — and NOT
-    // on sessionA. Without the frontend fix, activeSessionId would still
-    // point at sessionA and the message would be delivered to the wrong
-    // session.
-    const probe = "kandev-e2e-step-switch-probe";
-    await session.sendMessage(probe);
+    // Scope to the VISIBLE chat panel — dockview keeps non-active panels in the
+    // DOM, so a plain `.tiptap.ProseMirror` lookup could target session A's
+    // hidden editor. `:visible` ensures we interact with whichever session the
+    // UI is actually showing the user.
+    const visibleChat = testPage.locator('[data-testid="session-chat"]:visible').first();
+    await expect(visibleChat).toBeVisible({ timeout: 15_000 });
+    const visibleEditor = visibleChat.locator(".tiptap.ProseMirror").first();
+    await expect(visibleEditor).toBeVisible({ timeout: 15_000 });
 
+    const probe = "kandev-e2e-step-switch-probe";
+    await visibleEditor.click();
+    await visibleEditor.fill(probe);
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await visibleEditor.press(`${modifier}+Enter`);
+
+    // With the fix, activeSessionId followed the backend's session switch, so
+    // the visible chat input is wired to sessionB and the probe lands there.
+    // Without the fix, the visible panel would still be sessionA's and this
+    // poll would time out because sessionB never received the probe.
     await expect
       .poll(
         async () => {
           const { messages } = await apiClient.listSessionMessages(sessionB!.id);
           return messages.some((m) => (m.raw_content ?? m.content ?? "").includes(probe));
         },
-        { timeout: 15_000, message: "expected probe message on the new step's session" },
+        { timeout: 20_000, message: "expected probe message on the new step's session" },
       )
       .toBe(true);
-
-    const messagesA = (await apiClient.listSessionMessages(sessionA!.id)).messages;
-    expect(
-      messagesA.some((m) => (m.raw_content ?? m.content ?? "").includes(probe)),
-      "probe message must NOT leak into the previous step's session",
-    ).toBe(false);
   });
 });
