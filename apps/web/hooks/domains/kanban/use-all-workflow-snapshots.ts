@@ -48,11 +48,14 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     // Bumping the generation counter invalidates any fetches still in flight
     // from the previous workspace, so their late writes can't re-pollute the
     // store after clearKanbanMulti runs.
+    // Skip the clear on initial mount so SSR-hydrated snapshots survive.
     if (lastWorkspaceIdRef.current !== workspaceId) {
-      store.getState().clearKanbanMulti();
-      lastFetchedRef.current = "";
+      if (lastWorkspaceIdRef.current !== null) {
+        store.getState().clearKanbanMulti();
+        lastFetchedRef.current = "";
+        fetchGenRef.current += 1;
+      }
       lastWorkspaceIdRef.current = workspaceId;
-      fetchGenRef.current += 1;
     }
 
     if (!workspaceId) {
