@@ -102,8 +102,7 @@ function PipelineStepNodes({
               isMoving={isMoving}
             />
 
-            {connectorType && <Graph2Connector type={connectorType} />
-}
+            {connectorType && <Graph2Connector type={connectorType} />}
           </div>
         );
       })}
@@ -117,7 +116,10 @@ function TaskActions({
   onArchiveTask,
   isDeleting,
   isArchiving,
-}: Pick<Graph2TaskPipelineProps, "task" | "onDeleteTask" | "onArchiveTask" | "isDeleting" | "isArchiving">) {
+}: Pick<
+  Graph2TaskPipelineProps,
+  "task" | "onDeleteTask" | "onArchiveTask" | "isDeleting" | "isArchiving"
+>) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 

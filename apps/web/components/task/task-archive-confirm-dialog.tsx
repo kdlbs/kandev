@@ -20,6 +20,7 @@ type TaskArchiveConfirmDialogProps = {
   count?: number;
   isArchiving?: boolean;
   onConfirm: () => void;
+  confirmTestId?: string;
 };
 
 export function TaskArchiveConfirmDialog({
@@ -30,6 +31,7 @@ export function TaskArchiveConfirmDialog({
   count,
   isArchiving,
   onConfirm,
+  confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
   const label = isBulkOperation ? `task${(count ?? 0) !== 1 ? "s" : ""}` : "task";
   const title = isBulkOperation ? `Archive ${count} ${label}?` : "Archive task?";
@@ -56,6 +58,7 @@ export function TaskArchiveConfirmDialog({
           <AlertDialogAction
             disabled={isArchiving}
             className="cursor-pointer"
+            data-testid={confirmTestId}
             onClick={(e) => {
               e.preventDefault();
               if (isArchiving) return;

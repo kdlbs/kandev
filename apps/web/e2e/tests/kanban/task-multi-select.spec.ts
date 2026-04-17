@@ -111,6 +111,7 @@ test.describe("Multi-select bulk actions", () => {
     await kanban.selectTask(t2.id);
 
     await kanban.bulkArchiveButton.click();
+    await kanban.bulkArchiveConfirm.click();
 
     await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });
     await expect(kanban.taskCard(t2.id)).not.toBeVisible();
@@ -142,6 +143,7 @@ test.describe("Multi-select bulk actions", () => {
     await expect(testPage.locator('[data-multi-select-active="true"]').first()).toBeVisible();
 
     await kanban.bulkArchiveButton.click();
+    await kanban.bulkArchiveConfirm.click();
     await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });
     await expect(kanban.taskCard(t2.id)).not.toBeVisible();
 

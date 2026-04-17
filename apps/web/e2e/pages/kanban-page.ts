@@ -9,6 +9,7 @@ export class KanbanPage {
   readonly bulkMoveButton: Locator;
   readonly bulkClearButton: Locator;
   readonly bulkDeleteConfirm: Locator;
+  readonly bulkArchiveConfirm: Locator;
 
   readonly multiSelectToggle: Locator;
 
@@ -22,6 +23,7 @@ export class KanbanPage {
     this.bulkMoveButton = page.getByTestId("bulk-move-button");
     this.bulkClearButton = page.getByTestId("bulk-clear-selection");
     this.bulkDeleteConfirm = page.getByTestId("bulk-delete-confirm");
+    this.bulkArchiveConfirm = page.getByTestId("bulk-archive-confirm");
   }
 
   async goto() {

@@ -56,6 +56,7 @@ function BulkArchiveDialog({
         count={count}
         isArchiving={isProcessing}
         onConfirm={onConfirm}
+        confirmTestId="bulk-archive-confirm"
       />
     </>
   );

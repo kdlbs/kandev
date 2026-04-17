@@ -352,8 +352,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
                 setShowArchiveConfirm(true);
               }}
             >
-              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" />
- : null}
+              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
               Archive
             </DropdownMenuItem>
           )}
