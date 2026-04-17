@@ -40,6 +40,7 @@ import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { ArchiveConfirmDialog } from "@/components/task/archive-confirm-dialog";
 
 export interface Task {
   id: string;
@@ -361,6 +362,7 @@ function KanbanCardMenu({
   steps?: WorkflowStep[];
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const isProcessing = isDeleting || isArchiving;
 
   return (
@@ -401,7 +403,7 @@ function KanbanCardMenu({
               disabled={isProcessing}
               onClick={(event) => {
                 event.stopPropagation();
-                onArchive(task);
+                setShowArchiveConfirm(true);
               }}
             >
               {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -428,6 +430,14 @@ function KanbanCardMenu({
         taskTitle={task.title}
         isDeleting={isDeleting}
         onConfirm={() => onDelete?.(task)}
+      />
+
+      <ArchiveConfirmDialog
+        open={showArchiveConfirm}
+        onOpenChange={setShowArchiveConfirm}
+        taskTitle={task.title}
+        isArchiving={isArchiving}
+        onConfirm={() => onArchive?.(task)}
       />
     </>
   );

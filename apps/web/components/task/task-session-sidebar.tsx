@@ -8,6 +8,7 @@ import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { TaskSwitcher } from "./task-switcher";
 import type { TaskSwitcherItem } from "./task-switcher";
 import { TaskRenameDialog } from "./task-rename-dialog";
+import { ArchiveConfirmDialog } from "./archive-confirm-dialog";
 import { Button } from "@kandev/ui/button";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { IconPlus } from "@tabler/icons-react";
@@ -498,16 +499,26 @@ function useSidebarActions(store: StoreApi) {
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
   );
 
-  const handleArchiveTask = useCallback(
-    async (taskId: string) => {
-      try {
-        await archiveAndSwitch(taskId);
-      } catch (error) {
-        console.error("Failed to archive task:", error);
-      }
-    },
-    [archiveAndSwitch],
-  );
+  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+
+  const handleArchiveTask = useCallback((taskId: string) => {
+    const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
+    setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
+  }, [store]);
+
+  const handleArchiveConfirm = useCallback(async () => {
+    if (!archivingTask) return;
+    setIsArchiving(true);
+    try {
+      await archiveAndSwitch(archivingTask.id);
+    } catch (error) {
+      console.error("Failed to archive task:", error);
+    } finally {
+      setIsArchiving(false);
+      setArchivingTask(null);
+    }
+  }, [archivingTask, archiveAndSwitch]);
 
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
@@ -558,6 +569,10 @@ function useSidebarActions(store: StoreApi) {
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    archivingTask,
+    setArchivingTask,
+    isArchiving,
+    handleArchiveConfirm,
   };
 }
 
@@ -601,6 +616,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    archivingTask,
+    setArchivingTask,
+    isArchiving,
+    handleArchiveConfirm,
   } = useSidebarActions(store);
 
   const displayTasks = useMemo(() => {
@@ -637,6 +656,15 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         }}
         currentTitle={renamingTask?.title ?? ""}
         onSubmit={handleRenameSubmit}
+      />
+      <ArchiveConfirmDialog
+        open={archivingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) setArchivingTask(null);
+        }}
+        taskTitle={archivingTask?.title ?? ""}
+        isArchiving={isArchiving}
+        onConfirm={handleArchiveConfirm}
       />
     </PanelRoot>
   );
