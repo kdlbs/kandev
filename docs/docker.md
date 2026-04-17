@@ -66,6 +66,9 @@ docker run -p 8080:8080 \
 | `KANDEV_HOME_DIR` | `/data` | Kandev home directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
+| `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
+| `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
 
 > **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. Either run a one-time migration on your volume:
 >
@@ -75,9 +78,6 @@ docker run -p 8080:8080 \
 > ```
 >
 > …or pin the DB to its old location with `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you set `KANDEV_DATA_DIR` explicitly on the old image, replace it with `KANDEV_HOME_DIR`.
-| `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
-| `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
 
 ### PostgreSQL
 
