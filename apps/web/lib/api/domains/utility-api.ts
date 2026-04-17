@@ -48,7 +48,24 @@ export type InferenceAgent = {
   id: string;
   name: string;
   display_name: string;
-  models: InferenceModel[];
+  models: InferenceModel[] | null;
+};
+
+/**
+ * AgentCapabilities represents the cached result of probing an agent type.
+ * This comes from the host utility manager via /api/v1/agent-capabilities.
+ */
+export type AgentCapabilities = {
+  agent_type: string;
+  agent_name?: string;
+  agent_version?: string;
+  status: "probing" | "ok" | "auth_required" | "not_installed" | "failed" | "not_configured";
+  error?: string;
+  models?: Array<{ id: string; name: string; description?: string }>;
+  current_model_id?: string;
+  modes?: Array<{ id: string; name: string; description?: string }>;
+  current_mode_id?: string;
+  last_checked_at: string;
 };
 
 export type ExecutePromptRequest = {
@@ -132,6 +149,16 @@ export async function listInferenceAgents(
   options?: ApiRequestOptions,
 ): Promise<{ agents: InferenceAgent[] }> {
   return fetchJson<{ agents: InferenceAgent[] }>("/api/v1/utility/inference-agents", options);
+}
+
+/**
+ * Fetches all agent capabilities from the host utility capability cache.
+ * This is the canonical source for models, modes, and other capabilities.
+ */
+export async function listAgentCapabilities(
+  options?: ApiRequestOptions,
+): Promise<{ agents: AgentCapabilities[] }> {
+  return fetchJson<{ agents: AgentCapabilities[] }>("/api/v1/agent-capabilities", options);
 }
 
 export async function executeUtilityPrompt(

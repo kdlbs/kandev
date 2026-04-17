@@ -12,6 +12,7 @@ import {
   updateUtilityAgent,
   getTemplateVariables,
   listInferenceAgents,
+  listAgentCapabilities,
   type TemplateVariable,
   type InferenceAgent,
   type InferenceModel,
@@ -177,14 +178,31 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
   const [inferenceAgents, setInferenceAgents] = useState<InferenceAgent[]>([]);
   const isEdit = Boolean(agent);
 
-  // Fetch template variables and inference agents
+  // Fetch template variables and inference agents with capabilities
   useEffect(() => {
     getTemplateVariables()
       .then(({ variables }) => setPlaceholders(toScriptPlaceholders(variables)))
       .catch(() => setPlaceholders([]));
 
-    listInferenceAgents()
-      .then(({ agents }) => setInferenceAgents(agents))
+    // Fetch both inference agents and capabilities, then merge
+    Promise.all([listInferenceAgents(), listAgentCapabilities()])
+      .then(([inferenceRes, capsRes]) => {
+        const capsMap = new Map(capsRes.agents.map((c) => [c.agent_type, c]));
+        const merged = inferenceRes.agents.map((agent) => {
+          const caps = capsMap.get(agent.id);
+          if (!caps?.models) return agent;
+          return {
+            ...agent,
+            models: caps.models.map((m) => ({
+              id: m.id,
+              name: m.name,
+              description: m.description ?? "",
+              is_default: m.id === caps.current_model_id,
+            })),
+          };
+        });
+        setInferenceAgents(merged);
+      })
       .catch(() => setInferenceAgents([]));
   }, []);
 
@@ -199,7 +217,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
   // Auto-select default model when agent changes
   useEffect(() => {
     if (selectedAgent && !form.model) {
-      const defaultModel = selectedAgent.models.find((m) => m.is_default);
+      const defaultModel = (selectedAgent.models ?? []).find((m) => m.is_default);
       if (defaultModel) {
         setForm((f) => ({ ...f, model: defaultModel.id }));
       }

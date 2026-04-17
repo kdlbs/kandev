@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   listUtilityAgents,
   listInferenceAgents,
+  listAgentCapabilities,
   updateUtilityAgent,
   deleteUtilityAgent,
   type UtilityAgent,
   type InferenceAgent,
+  type AgentCapabilities,
 } from "@/lib/api/domains/utility-api";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
@@ -18,9 +20,33 @@ import {
   USE_DEFAULT,
 } from "@/components/settings/utility-sections";
 
+/**
+ * Merges inference agents with capabilities to populate models.
+ * Models come from the agent-capabilities cache, not from inference-agents.
+ */
+function mergeAgentsWithCapabilities(
+  agents: InferenceAgent[],
+  capabilities: AgentCapabilities[],
+): InferenceAgent[] {
+  const capsMap = new Map(capabilities.map((c) => [c.agent_type, c]));
+  return agents.map((agent) => {
+    const caps = capsMap.get(agent.id);
+    if (!caps?.models) return agent;
+    return {
+      ...agent,
+      models: caps.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description ?? "",
+        is_default: m.id === caps.current_model_id,
+      })),
+    };
+  });
+}
+
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
-    ia.models.map((m) => ({
+    (ia.models ?? []).map((m) => ({
       value: `${ia.id}|${m.id}`,
       label: `${ia.display_name} / ${m.name}`,
       agentName: ia.display_name,
@@ -57,13 +83,16 @@ export function UtilityAgentsSection() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [agentsRes, inferenceRes, settingsRes] = await Promise.all([
+      const [agentsRes, inferenceRes, capsRes, settingsRes] = await Promise.all([
         listUtilityAgents({ cache: "no-store" }),
         listInferenceAgents(),
+        listAgentCapabilities(),
         fetchUserSettings({ cache: "no-store" }),
       ]);
       setAgents(agentsRes.agents);
-      setInferenceAgents(inferenceRes.agents);
+      // Merge inference agents with capabilities to get models
+      const mergedAgents = mergeAgentsWithCapabilities(inferenceRes.agents, capsRes.agents);
+      setInferenceAgents(mergedAgents);
       setDefaultAgentId(settingsRes.settings.default_utility_agent_id || "");
       setDefaultModel(settingsRes.settings.default_utility_model || "");
     } catch {
