@@ -34,9 +34,7 @@ export function ArchiveConfirmDialog({
           <AlertDialogTitle>Archive task?</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>
-                Are you sure you want to archive &quot;{taskTitle}&quot;?
-              </p>
+              <p>Are you sure you want to archive &quot;{taskTitle}&quot;?</p>
               <p className="mt-2">
                 This will delete the task&apos;s worktree and stop any running agent sessions.
               </p>

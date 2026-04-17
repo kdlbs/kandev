@@ -379,14 +379,26 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled={isProcessing} onClick={(e) => { e.stopPropagation(); onEdit?.(task); }}>
+          <DropdownMenuItem
+            disabled={isProcessing}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit?.(task);
+            }}
+          >
             Edit
           </DropdownMenuItem>
           {steps && steps.length > 1 && onMove && (
             <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
           )}
           {onArchive && (
-            <DropdownMenuItem disabled={isProcessing} onClick={(e) => { e.stopPropagation(); setShowArchiveConfirm(true); }}>
+            <DropdownMenuItem
+              disabled={isProcessing}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowArchiveConfirm(true);
+              }}
+            >
               {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
               Archive
             </DropdownMenuItem>
@@ -395,7 +407,10 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
           <DropdownMenuItem
             disabled={isProcessing}
             className="text-destructive focus:text-destructive"
-            onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDeleteConfirm(true);
+            }}
           >
             Delete
           </DropdownMenuItem>
