@@ -169,7 +169,7 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 
 	prev, hadPrev := h.sessionMode.lastMode[sessionID]
 
-	h.logger.Info("recomputeSessionMode",
+	h.logger.Debug("recomputeSessionMode",
 		zap.String("session_id", sessionID),
 		zap.String("current", string(current)),
 		zap.String("prev", string(prev)),
@@ -197,7 +197,7 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 	}
 
 	if hadPrev && prev == current {
-		h.logger.Info("recomputeSessionMode: no change, skipping",
+		h.logger.Debug("recomputeSessionMode: no change, skipping",
 			zap.String("session_id", sessionID))
 		h.sessionMode.mu.Unlock()
 		return
@@ -207,7 +207,7 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 		// Up-transitions fire immediately so the user sees fresh data right away.
 		h.sessionMode.lastMode[sessionID] = current
 		listeners := h.snapshotListenersLocked()
-		h.logger.Info("recomputeSessionMode: up-transition, firing listeners",
+		h.logger.Debug("recomputeSessionMode: up-transition, firing listeners",
 			zap.String("session_id", sessionID),
 			zap.String("from", string(prev)),
 			zap.String("to", string(current)),
@@ -218,7 +218,7 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 	}
 
 	// Down-transition: debounce so quick tab churn doesn't tear down + restart.
-	h.logger.Info("recomputeSessionMode: down-transition, scheduling debounce",
+	h.logger.Debug("recomputeSessionMode: down-transition, scheduling debounce",
 		zap.String("session_id", sessionID),
 		zap.String("from", string(prev)),
 		zap.String("to", string(current)))

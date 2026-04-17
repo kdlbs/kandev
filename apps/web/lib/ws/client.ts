@@ -152,7 +152,7 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
-    console.log("[poll-mode] subscribeSession", { sessionId, refCount: nextCount });
+
     if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
@@ -168,7 +168,7 @@ export class WebSocketClient {
     const currentCount = this.sessionFocusCounts.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionFocusCounts.set(sessionId, nextCount);
-    console.log("[poll-mode] focusSession", { sessionId, refCount: nextCount });
+
     if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
@@ -184,7 +184,7 @@ export class WebSocketClient {
     const currentCount = this.sessionFocusCounts.get(sessionId);
     if (!currentCount) return;
     const nextCount = currentCount - 1;
-    console.log("[poll-mode] unfocusSession", { sessionId, refCount: nextCount });
+
     if (nextCount <= 0) {
       this.sessionFocusCounts.delete(sessionId);
       if (this.status === "open") {
@@ -235,7 +235,7 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId);
     if (!currentCount) return;
     const nextCount = currentCount - 1;
-    console.log("[poll-mode] unsubscribeSession", { sessionId, refCount: nextCount });
+
     if (nextCount <= 0) {
       this.sessionSubscriptions.delete(sessionId);
       if (this.status === "open") {
@@ -294,13 +294,7 @@ export class WebSocketClient {
 
     const action = (message as { action?: string })?.action as BackendMessageType | undefined;
     if (!action) return;
-    if (action === "session.poll_mode_changed") {
-      console.log("[poll-mode] raw WS notification received", message);
-    }
     const handlers = this.handlers.get(action);
-    if (!handlers && action === "session.poll_mode_changed") {
-      console.warn("[poll-mode] no handler registered for session.poll_mode_changed!");
-    }
     if (handlers) {
       handlers.forEach((handler) => handler(message));
     }

@@ -35,7 +35,7 @@ import { useSessionState } from "./use-session-state";
 const createMockSession = (
   id: string,
   taskId: string,
-  state: TaskSession["state"] = "IDLE",
+  state: TaskSession["state"] = "CREATED",
 ): TaskSession =>
   ({
     id,

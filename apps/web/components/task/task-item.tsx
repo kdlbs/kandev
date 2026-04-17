@@ -129,14 +129,6 @@ function TaskItemStatsRow({
     DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
   );
 
-  if (DEBUG_UI) {
-    console.log("[poll-mode] TaskItemStatsRow render", {
-      primarySessionId,
-      pollMode,
-      updatedAt: !!updatedAt,
-    });
-  }
-
   if (!updatedAt && !prInfo && !pollMode) return null;
 
   const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
