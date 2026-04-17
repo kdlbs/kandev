@@ -70,14 +70,7 @@ docker run -p 8080:8080 \
 | `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
 
-> **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. Either run a one-time migration on your volume:
->
-> ```bash
-> docker run --rm -v kandev-data:/data alpine \
->   sh -c 'mkdir -p /data/data && mv /data/kandev.db /data/data/kandev.db 2>/dev/null || true'
-> ```
->
-> …or pin the DB to its old location with `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you set `KANDEV_DATA_DIR` explicitly on the old image, replace it with `KANDEV_HOME_DIR`.
+> **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the logs. If you prefer to pin the old location instead, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
 
 ### PostgreSQL
 
