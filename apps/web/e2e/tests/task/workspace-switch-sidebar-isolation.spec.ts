@@ -80,9 +80,9 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await session.waitForLoad();
     await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
 
-    await expect(
-      session.sidebar.getByText("Workspace B Task", { exact: true }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.sidebar.getByText("Workspace B Task", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // The core regression assertion: task A must not appear anywhere in the
     // sidebar — not under "Unassigned", not under any repo group.
