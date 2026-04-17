@@ -66,6 +66,10 @@ describe("isAgentBootResumeMessage", () => {
 });
 
 describe("deduplicateAgentBootResumes", () => {
+  it("returns an empty list unchanged", () => {
+    expect(deduplicateAgentBootResumes([])).toEqual([]);
+  });
+
   it("returns the list unchanged when there are no resume messages", () => {
     const messages = [bootStarted("s1"), makeMessage("m1", "message", undefined, "hi")];
     expect(deduplicateAgentBootResumes(messages)).toEqual(messages);

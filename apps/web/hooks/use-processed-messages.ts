@@ -141,7 +141,9 @@ export function isAgentBootResumeMessage(message: Message): boolean {
 
 /** A resumed session may produce many "Resumed agent …" boot messages over its
  *  lifetime (every backend restart emits one). They all convey the same info;
- *  keep only the most recent and drop the rest. */
+ *  keep only the most recent and drop the rest — unconditionally, even if user
+ *  messages occurred between them (unlike `deduplicateRecoveryMessages`). The
+ *  underlying DB rows are untouched; this only affects the rendered chat. */
 export function deduplicateAgentBootResumes(messages: Message[]): Message[] {
   let lastResumeIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
