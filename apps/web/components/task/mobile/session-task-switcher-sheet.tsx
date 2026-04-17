@@ -7,13 +7,14 @@ import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { ArchiveConfirmDialog } from "../archive-confirm-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useTasks } from "@/hooks/use-tasks";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import type {
@@ -273,7 +274,8 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { deleteTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
 
   const handleSelectTask = useCallback(
@@ -313,21 +315,29 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange],
   );
 
+  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+
   const handleArchiveTask = useCallback(
-    async (taskId: string) => {
-      // Capture active state before the async API call — the WS "task.updated"
-      // handler removes the archived task from kanbans before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
-      try {
-        await archiveTaskById(taskId);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
-      } catch (error) {
-        console.error("Failed to archive task:", error);
-      }
+    (taskId: string) => {
+      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
+      setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
-    [archiveTaskById, removeTaskFromBoard, store],
+    [store],
   );
+
+  const handleArchiveConfirm = useCallback(async () => {
+    if (!archivingTask) return;
+    setIsArchiving(true);
+    try {
+      await archiveAndSwitch(archivingTask.id);
+    } catch (error) {
+      console.error("Failed to archive task:", error);
+    } finally {
+      setIsArchiving(false);
+      setArchivingTask(null);
+    }
+  }, [archivingTask, archiveAndSwitch]);
 
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
@@ -362,6 +372,10 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
     handleDeleteTask,
     handleWorkspaceChange,
     handleTaskCreated,
+    archivingTask,
+    setArchivingTask,
+    isArchiving,
+    handleArchiveConfirm,
   };
 }
 
@@ -388,6 +402,10 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     handleDeleteTask,
     handleWorkspaceChange,
     handleTaskCreated,
+    archivingTask,
+    setArchivingTask,
+    isArchiving,
+    handleArchiveConfirm,
   } = useSheetActions(workspaceId, onOpenChange);
 
   return (
@@ -447,6 +465,16 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         defaultStepId={dialogSteps[0]?.id ?? null}
         steps={dialogSteps}
         onSuccess={handleTaskCreated}
+      />
+
+      <ArchiveConfirmDialog
+        open={archivingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) setArchivingTask(null);
+        }}
+        taskTitle={archivingTask?.title ?? ""}
+        isArchiving={isArchiving}
+        onConfirm={handleArchiveConfirm}
       />
     </Sheet>
   );
