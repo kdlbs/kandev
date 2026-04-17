@@ -69,6 +69,15 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// Cache the last known state (ignore error on initial fetch)
 	lastState, _ := wt.getWorkspaceState(ctx)
 
+	// Signal that the initial scan is done — tests wait on this instead of
+	// sleeping to avoid races with the goroutine's first getWorkspaceState.
+	select {
+	case <-wt.initialScanDone:
+		// already closed (shouldn't happen, but be safe)
+	default:
+		close(wt.initialScanDone)
+	}
+
 	wt.logger.Info("file polling started",
 		zap.Duration("fast_interval", wt.filePollInterval),
 		zap.String("initial_mode", string(wt.GetPollMode())))

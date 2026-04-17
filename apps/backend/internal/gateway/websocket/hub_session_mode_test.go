@@ -15,10 +15,10 @@ func newTestHub(t *testing.T) *Hub {
 		t.Fatalf("logger: %v", err)
 	}
 	h := NewHub(nil, log)
-	// Cancel any pending debounce timers when the test exits — otherwise a
-	// 5-second timer from a debounced down-transition can fire after t.Run
-	// returns and call into a listener whose closure references the test's
-	// recorder, racing with the next test that reads from it.
+	// Short debounce so tests don't block for 5+ real seconds.
+	h.setDebounceForTest(50 * time.Millisecond)
+	// Cancel any pending debounce timers when the test exits — otherwise the
+	// timer can fire after t.Run returns and race the next test.
 	t.Cleanup(func() {
 		h.stopAllPendingTransitions()
 	})
@@ -132,11 +132,15 @@ func TestHub_UnfocusDebouncesDownTransition(t *testing.T) {
 	h.FocusSession(c, "sess-1")
 	rec.waitForCount(2, time.Second)
 
-	// Unfocus — should NOT immediately fire slow (debounce).
+	// Unfocus — should NOT immediately fire slow (debounced). Check the count
+	// synchronously — the debounce timer (50ms in tests) cannot have fired yet
+	// because it runs asynchronously via time.AfterFunc.
 	h.UnfocusSession(c, "sess-1")
-	time.Sleep(100 * time.Millisecond)
-	if got := len(rec.events); got != 2 {
-		t.Errorf("down-transition fired immediately; expected 2 events, got %d (%+v)", got, rec.events)
+	rec.mu.Lock()
+	gotCount := len(rec.events)
+	rec.mu.Unlock()
+	if gotCount != 2 {
+		t.Errorf("down-transition fired immediately; expected 2 events, got %d (%+v)", gotCount, rec.events)
 	}
 }
 
@@ -155,10 +159,13 @@ func TestHub_RefocusWithinDebounceCancelsDownTransition(t *testing.T) {
 	h.UnfocusSession(c, "sess-1")
 	h.FocusSession(c, "sess-1")
 
-	// Wait through and beyond the debounce window — no event should fire.
-	time.Sleep(downTransitionDebounce + 200*time.Millisecond)
+	// Wait through and beyond the test debounce window (50ms + 200ms margin).
+	time.Sleep(300 * time.Millisecond)
 
-	if got := len(rec.events); got != 2 {
+	rec.mu.Lock()
+	got := len(rec.events)
+	rec.mu.Unlock()
+	if got != 2 {
 		t.Errorf("expected refocus to suppress down-transition; got %d events: %+v", got, rec.events)
 	}
 }
@@ -175,8 +182,8 @@ func TestHub_UnsubscribeFromOnlySubscriberFiresPaused(t *testing.T) {
 	rec.waitForCount(1, time.Second)
 
 	h.UnsubscribeFromSession(c, "sess-1")
-	// Wait debounce window plus margin.
-	got := rec.waitForCount(2, downTransitionDebounce+1*time.Second)
+	// Wait test debounce (50ms) plus margin.
+	got := rec.waitForCount(2, 1*time.Second)
 
 	if len(got) < 2 {
 		t.Fatalf("expected paused event after debounce, got %+v", got)
@@ -230,15 +237,20 @@ func TestHub_MultipleClientsKeepWorkspaceFast(t *testing.T) {
 	h.FocusSession(c2, "sess-1")
 
 	rec.waitForCount(2, time.Second) // slow then fast
+	rec.mu.Lock()
 	startCount := len(rec.events)
+	rec.mu.Unlock()
 
 	// One client unfocuses — the other still has focus, so mode should stay fast.
 	h.UnfocusSession(c1, "sess-1")
 
-	// Wait through debounce. No new event should fire because mode didn't change.
-	time.Sleep(downTransitionDebounce + 200*time.Millisecond)
+	// Wait through test debounce (50ms + margin). No new event should fire.
+	time.Sleep(300 * time.Millisecond)
 
-	if got := len(rec.events); got != startCount {
+	rec.mu.Lock()
+	got := len(rec.events)
+	rec.mu.Unlock()
+	if got != startCount {
 		t.Errorf("expected no new events while another client still focused; got %d new (events: %+v)", got-startCount, rec.events)
 	}
 }

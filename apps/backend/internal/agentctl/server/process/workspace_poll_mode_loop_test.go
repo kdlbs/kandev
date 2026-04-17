@@ -4,11 +4,22 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
+
+// waitForMonitorIdle spins until the monitorRunning CAS flag is 0, meaning no
+// tick is in progress. More reliable than time.Sleep for synchronization after
+// a mode change — avoids racing a slow git command on CI.
+func waitForMonitorIdle(wt *WorkspaceTracker) {
+	for atomic.LoadInt32(&wt.monitorRunning) != 0 {
+		runtime.Gosched()
+	}
+}
 
 // drainStream consumes everything currently buffered in a workspace stream subscription
 // without blocking. Used to clear the initial snapshot before the test starts asserting.
@@ -101,12 +112,10 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 	sub := wt.SubscribeWorkspaceStream()
 	defer wt.UnsubscribeWorkspaceStream(sub)
 
-	// Wait long enough for the monitorLoop goroutine to complete its initial
-	// scan (updateGitStatus, updateFiles, getWorkspaceState) and enter its
-	// select. Without this, the file we write below could land before the
-	// initial state is captured, and the immediate-scan tick would not see
-	// any state change.
-	time.Sleep(300 * time.Millisecond)
+	// Wait for monitorLoop's initial scan to complete and enter its select.
+	// Without this, the file we write below could land before lastState is
+	// captured, and the immediate-scan tick would not see any state change.
+	<-wt.initialScanDone
 	drainStream(sub)
 
 	// Create a change so the immediate scan finds something to notify about.
@@ -141,9 +150,8 @@ func TestMonitorLoop_FastPolls(t *testing.T) {
 	sub := wt.SubscribeWorkspaceStream()
 	defer wt.UnsubscribeWorkspaceStream(sub)
 
-	// Wait for the loop's initial state capture before writing — otherwise the
-	// file write can race the initial scan and the diff is missed.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for monitorLoop's initial state capture before writing.
+	<-wt.initialScanDone
 	drainStream(sub)
 
 	if err := os.WriteFile(filepath.Join(repoDir, "tick.txt"), []byte("x"), 0o644); err != nil {
@@ -173,10 +181,8 @@ func TestMonitorLoop_FastToPausedStopsPolling(t *testing.T) {
 	sub := wt.SubscribeWorkspaceStream()
 	defer wt.UnsubscribeWorkspaceStream(sub)
 
-	// Wait for monitorLoop's initial scan to capture lastState before we start
-	// writing files. Otherwise the file we write below could land before the
-	// initial state is captured, and the first tick would not see a state change.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for monitorLoop's initial state capture.
+	<-wt.initialScanDone
 	drainStream(sub)
 
 	// Confirm fast mode works first.
@@ -187,10 +193,9 @@ func TestMonitorLoop_FastToPausedStopsPolling(t *testing.T) {
 		t.Fatal("setup: expected fast mode to emit notification before pausing")
 	}
 
-	// Pause and drain any in-flight notifications.
+	// Pause and wait for any in-flight tick to complete before draining.
 	wt.SetPollMode(PollModePaused)
-	// Give any pending tick time to complete and drain.
-	time.Sleep(150 * time.Millisecond)
+	waitForMonitorIdle(wt)
 	drainStream(sub)
 
 	// New change should NOT generate a notification in paused mode.

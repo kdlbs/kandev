@@ -72,12 +72,13 @@ type WorkspaceTracker struct {
 	updateMu sync.Mutex
 
 	// Control
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
-	started    bool
-	stopOnce   sync.Once
-	cancelCtx  context.Context    // Cancellable context for killing in-flight git commands on Stop
-	cancelFunc context.CancelFunc // Cancel function called during Stop
+	stopCh          chan struct{}
+	wg              sync.WaitGroup
+	started         bool
+	stopOnce        sync.Once
+	initialScanDone chan struct{}      // closed after monitorLoop's first getWorkspaceState; tests wait on it
+	cancelCtx       context.Context    // Cancellable context for killing in-flight git commands on Stop
+	cancelFunc      context.CancelFunc // Cancel function called during Stop
 }
 
 // NewWorkspaceTracker creates a new workspace tracker
@@ -103,6 +104,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		monitorModeChanged: make(chan struct{}, 1),
 		gitPollModeChanged: make(chan struct{}, 1),
 		stopCh:             make(chan struct{}),
+		initialScanDone:    make(chan struct{}),
 		cancelCtx:          ctx,
 		cancelFunc:         cancel,
 	}

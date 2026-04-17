@@ -111,6 +111,8 @@ func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode Works
 // doesn't grow unbounded over a long-running gateway. Same for lastPushed
 // when the workspace itself becomes paused.
 func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode WorkspacePollMode, workspacePath string) (string, WorkspacePollMode, bool) {
+	// Lock order: a.mu -> executionStore.mu (via GetExecutionBySessionID).
+	// Do not acquire a.mu while holding executionStore.mu.
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

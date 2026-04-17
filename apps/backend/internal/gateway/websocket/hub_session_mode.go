@@ -31,12 +31,15 @@ type SessionModeListener func(sessionID string, mode SessionMode)
 // common "open / close / reopen" pattern without leaving CPU on for too long.
 const downTransitionDebounce = 5 * time.Second
 
-// sessionMode holds the focus map and pending debounce timers. The hub embeds
-// this and exposes Focus/Unfocus methods.
+// sessionModeTracker holds the focus map, debounce timers, and listener list.
+//
+// Locking: focusByClient is protected by Hub.mu (for consistency with
+// sessionSubscribers). All other fields are protected by sessionModeTracker.mu.
 type sessionModeTracker struct {
 	// One client set per session that has currently focused it. Separate from
 	// sessionSubscribers so a client can be "subscribed but not focused" (the
 	// sidebar case) — the sets evolve independently.
+	// Protected by Hub.mu, NOT by sessionModeTracker.mu.
 	focusByClient map[string]map[*Client]bool
 
 	// Last known mode per session, used to suppress redundant listener calls.
@@ -50,6 +53,11 @@ type sessionModeTracker struct {
 	// in practice there's one (lifecycle manager).
 	listeners []SessionModeListener
 
+	// debounce is the delay for down-transitions (fast→slow, slow→paused).
+	// Defaults to downTransitionDebounce (5s). Tests can shorten it via
+	// setDebounceForTest to avoid 5+ seconds of wall-clock sleep.
+	debounce time.Duration
+
 	mu sync.Mutex
 }
 
@@ -58,7 +66,16 @@ func newSessionModeTracker() *sessionModeTracker {
 		focusByClient:          make(map[string]map[*Client]bool),
 		lastMode:               make(map[string]SessionMode),
 		pendingDownTransitions: make(map[string]*time.Timer),
+		debounce:               downTransitionDebounce,
 	}
+}
+
+// setDebounceForTest allows tests to use a short debounce duration instead of
+// waiting 5+ real seconds per test.
+func (h *Hub) setDebounceForTest(d time.Duration) {
+	h.sessionMode.mu.Lock()
+	h.sessionMode.debounce = d
+	h.sessionMode.mu.Unlock()
 }
 
 // AddSessionModeListener registers a callback for session mode transitions.
@@ -167,7 +184,7 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 	}
 
 	// Down-transition: debounce so quick tab churn doesn't tear down + restart.
-	h.sessionMode.pendingDownTransitions[sessionID] = time.AfterFunc(downTransitionDebounce, func() {
+	h.sessionMode.pendingDownTransitions[sessionID] = time.AfterFunc(h.sessionMode.debounce, func() {
 		h.fireDebouncedDownTransition(sessionID)
 	})
 	h.sessionMode.mu.Unlock()
