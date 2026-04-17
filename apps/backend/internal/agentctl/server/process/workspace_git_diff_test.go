@@ -213,7 +213,7 @@ func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
 	if fi.DiffSkipReason != "" {
 		t.Errorf("expected empty DiffSkipReason, got %q", fi.DiffSkipReason)
 	}
-	if fi.Additions != 2 {
-		t.Errorf("Additions = %d, want 2", fi.Additions)
+	if fi.Additions != 1 {
+		t.Errorf("Additions = %d, want 1", fi.Additions)
 	}
 }

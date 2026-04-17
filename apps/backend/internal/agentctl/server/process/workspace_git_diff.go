@@ -303,6 +303,10 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 
 		content := buf.String()
 		lines := strings.Split(content, "\n")
+		// Trim trailing empty element from final newline so line count is accurate.
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
 		fileInfo.Additions = len(lines)
 		fileInfo.Deletions = 0
 
