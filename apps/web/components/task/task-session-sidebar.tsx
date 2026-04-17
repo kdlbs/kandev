@@ -459,7 +459,7 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
+      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
