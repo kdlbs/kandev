@@ -38,8 +38,18 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const workflows = useAppStore((state) => state.workflows.items);
   const lastFetchedRef = useRef<string>("");
+  const lastWorkspaceIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Drop snapshots from the previous workspace so cross-workspace tasks
+    // don't bleed into the sidebar (they'd otherwise render under "Unassigned"
+    // because their repositoryId isn't in the current workspace's repo map).
+    if (lastWorkspaceIdRef.current !== workspaceId) {
+      store.getState().clearKanbanMulti();
+      lastFetchedRef.current = "";
+      lastWorkspaceIdRef.current = workspaceId;
+    }
+
     if (!workspaceId) {
       return;
     }

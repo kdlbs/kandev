@@ -41,12 +41,16 @@ function WorkspaceSection({
         value={activeWorkspaceId ?? ""}
         onValueChange={(value) => onWorkspaceChange(value || null)}
       >
-        <SelectTrigger className="w-full border-border">
+        <SelectTrigger className="w-full border-border" data-testid="workspace-select-trigger">
           <SelectValue placeholder="Select workspace" />
         </SelectTrigger>
         <SelectContent>
           {workspaces.map((workspace: Workspace) => (
-            <SelectItem key={workspace.id} value={workspace.id}>
+            <SelectItem
+              key={workspace.id}
+              value={workspace.id}
+              data-testid={`workspace-select-item-${workspace.id}`}
+            >
               {workspace.name}
             </SelectItem>
           ))}
