@@ -105,7 +105,6 @@ function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
-
           </div>
         </div>
         {task.isRemoteExecutor && (
@@ -114,7 +113,6 @@ function KanbanCardBody({
             sessionId={task.primarySessionId ?? null}
             fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
           />
-
         )}
         {actions}
       </div>
@@ -124,9 +122,7 @@ function KanbanCardBody({
         </p>
       )}
       <KanbanCardBadges task={task} />
-
     </>
-
   );
 }
 
@@ -149,7 +145,6 @@ function KanbanCardBadges({ task }: { task: Task }) {
       {task.parentTaskId && (
         <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px]">
           <IconSubtask className="h-3 w-3 shrink-0" />
-
           <span className="truncate">{parentTitle ?? "Subtask"}</span>
         </Badge>
       )}
@@ -161,7 +156,6 @@ function KanbanCardBadges({ task }: { task: Task }) {
       {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
         <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
           <IconAlertCircle className="h-3.5 w-3.5" />
-
           <span className="text-[10px] font-medium">Approval Required</span>
         </div>
       )}
@@ -186,7 +180,6 @@ function KanbanCardLayout({
     <Card size="sm" className={cn("w-full py-0", className)}>
       <CardContent className="px-2 py-1">
         <KanbanCardBody task={task} repoName={repositoryName ?? null} />
-
       </CardContent>
     </Card>
   );
@@ -238,7 +231,6 @@ function KanbanCardActions({
           title="Open full page"
         >
           <IconArrowsMaximize className="h-4 w-4" />
-
         </button>
       )}
       <KanbanCardMenu
@@ -253,11 +245,9 @@ function KanbanCardActions({
         onMove={onMove}
         steps={steps}
       />
-
     </div>
   );
 }
-
 
 function MoveToSubmenu({
   task,
