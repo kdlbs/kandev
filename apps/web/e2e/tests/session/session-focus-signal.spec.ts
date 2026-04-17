@@ -15,11 +15,7 @@ import { SessionPage } from "../../pages/session-page";
  * navigation that tears down the WS before React effects clean up.
  */
 test.describe("Session focus signal", () => {
-  test("task details page sends subscribe and focus", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("task details page sends subscribe and focus", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
 
     // Capture sent WS frames from the moment the page opens.

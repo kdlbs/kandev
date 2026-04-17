@@ -46,6 +46,13 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	if wt.gitIndexPath == "" {
 		wt.logger.Warn("no valid git repository found, file monitor not polling",
 			zap.String("workDir", wt.workDir))
+		// Close the initialScanDone channel even on early exit so callers
+		// waiting on <-wt.initialScanDone don't block forever.
+		select {
+		case <-wt.initialScanDone:
+		default:
+			close(wt.initialScanDone)
+		}
 		return
 	}
 
