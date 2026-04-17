@@ -216,6 +216,11 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	m.mu.Unlock()
 
 	caps := m.probe(ctx, inst, ia)
+	if ctx.Err() != nil {
+		// Parent context canceled (e.g. shutdown). Don't overwrite the cache
+		// with a spurious "context canceled" error — leave prior state intact.
+		return
+	}
 	m.cache.set(caps)
 	log.Info("host utility bootstrap completed",
 		zap.String("status", string(caps.Status)),
@@ -377,7 +382,7 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
-		status, msg := classifyProbeError(err, probeCtx.Err())
+		status, msg := classifyProbeError(err, ctx.Err(), probeCtx.Err())
 		return AgentCapabilities{
 			AgentType:     inst.agentType,
 			Status:        status,
@@ -439,12 +444,15 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 // classifyProbeError turns a probe transport error into a cache status.
 // Deadline exceeded on probeCtx (but not on the parent ctx) indicates a
 // hung subprocess — surface it as a timeout so the UI stops spinning.
+// When the parent ctx already carries a shorter deadline, don't misattribute
+// that to our 45s probe budget.
 // Missing-binary errors from acp_executor's cmd.Start() arrive as strings
 // like `start: exec: "<name>": executable file not found in $PATH` — we
 // map them to StatusNotInstalled so the user sees the correct remediation
 // instead of a generic error badge.
-func classifyProbeError(err error, probeCtxErr error) (Status, string) {
-	if errors.Is(probeCtxErr, context.DeadlineExceeded) {
+func classifyProbeError(err error, parentCtxErr error, probeCtxErr error) (Status, string) {
+	if errors.Is(probeCtxErr, context.DeadlineExceeded) &&
+		!errors.Is(parentCtxErr, context.DeadlineExceeded) {
 		return StatusFailed, fmt.Sprintf("probe timed out after %s", probeTimeout)
 	}
 	msg := err.Error()

@@ -28,6 +28,12 @@ func (c *cache) get(agentType string) (AgentCapabilities, bool) {
 	return caps, ok
 }
 
+func (c *cache) clear(agentType string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byType, agentType)
+}
+
 func (c *cache) all() []AgentCapabilities {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

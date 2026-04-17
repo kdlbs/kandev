@@ -70,22 +70,38 @@ function withErrorTooltip(node: ReactElement, errorMessage?: string) {
 }
 
 function StatusPill({ status, errorMessage }: { status: string; errorMessage?: string }) {
+  // tabIndex is applied when the pill gets a tooltip so keyboard users can
+  // focus the span and read the error detail (asChild passes children through
+  // as the trigger, and a bare <span> isn't focusable by default).
+  const focusableIfTooltip = errorMessage ? { tabIndex: 0 } : {};
   switch (status) {
     case "auth_required":
       return withErrorTooltip(
-        <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+        <span
+          {...focusableIfTooltip}
+          className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        >
           <IconLock className="h-3.5 w-3.5" />
           No auth
         </span>,
         errorMessage,
       );
     case "not_installed":
-      return (
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">Not installed</span>
+      return withErrorTooltip(
+        <span
+          {...focusableIfTooltip}
+          className="flex items-center gap-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        >
+          Not installed
+        </span>,
+        errorMessage,
       );
     case "failed":
       return withErrorTooltip(
-        <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+        <span
+          {...focusableIfTooltip}
+          className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        >
           <IconAlertTriangle className="h-3.5 w-3.5" />
           Error
         </span>,

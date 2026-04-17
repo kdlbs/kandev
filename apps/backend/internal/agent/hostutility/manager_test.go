@@ -8,7 +8,11 @@ import (
 )
 
 func TestClassifyProbeError_Timeout(t *testing.T) {
-	status, msg := classifyProbeError(errors.New("probe: context deadline exceeded"), context.DeadlineExceeded)
+	status, msg := classifyProbeError(
+		errors.New("probe: context deadline exceeded"),
+		nil,
+		context.DeadlineExceeded,
+	)
 	if status != StatusFailed {
 		t.Errorf("expected StatusFailed for timeout, got %s", status)
 	}
@@ -17,11 +21,25 @@ func TestClassifyProbeError_Timeout(t *testing.T) {
 	}
 }
 
+func TestClassifyProbeError_ParentDeadlineNotAttributed(t *testing.T) {
+	// Parent context already has its own deadline that fires first; the
+	// probe shouldn't claim "timed out after 45s" when the root cause is
+	// the caller's context deadline.
+	err := errors.New("probe: context deadline exceeded")
+	status, msg := classifyProbeError(err, context.DeadlineExceeded, context.DeadlineExceeded)
+	if status != StatusFailed {
+		t.Errorf("expected StatusFailed, got %s", status)
+	}
+	if strings.Contains(msg, "timed out after") {
+		t.Errorf("expected generic failure message when parent deadline fires, got %q", msg)
+	}
+}
+
 func TestClassifyProbeError_ExecutableNotFound(t *testing.T) {
 	// Mirrors the string format from acp_executor's cmd.Start() wrap:
 	// `start: exec: "<name>": executable file not found in $PATH`.
 	err := errors.New(`start: exec: "mock-agent": executable file not found in $PATH`)
-	status, msg := classifyProbeError(err, nil)
+	status, msg := classifyProbeError(err, nil, nil)
 	if status != StatusNotInstalled {
 		t.Errorf("expected StatusNotInstalled for missing binary, got %s", status)
 	}
@@ -32,7 +50,7 @@ func TestClassifyProbeError_ExecutableNotFound(t *testing.T) {
 
 func TestClassifyProbeError_Generic(t *testing.T) {
 	err := errors.New("rpc: connection refused")
-	status, msg := classifyProbeError(err, nil)
+	status, msg := classifyProbeError(err, nil, nil)
 	if status != StatusFailed {
 		t.Errorf("expected StatusFailed for generic error, got %s", status)
 	}

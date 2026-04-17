@@ -30,6 +30,9 @@ func (m *Manager) Get(agentType string) (AgentCapabilities, bool) {
 // new capabilities. If the warm instance is missing (never bootstrapped or
 // crashed), it is lazily recreated.
 func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilities, error) {
+	// Snapshot the prior cache entry so we can restore it if the caller
+	// cancels mid-probe (see restorePriorOnCancel below).
+	prior, hadPrior := m.cache.get(agentType)
 	// Publish "probing" so callers polling the cache see in-flight state.
 	m.cache.set(AgentCapabilities{
 		AgentType:     agentType,
@@ -38,6 +41,10 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 	})
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
+		if ctx.Err() != nil {
+			m.restorePriorOnCancel(agentType, prior, hadPrior)
+			return AgentCapabilities{}, ctx.Err()
+		}
 		status := StatusFailed
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
@@ -51,8 +58,23 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 		return AgentCapabilities{}, err
 	}
 	caps := m.probe(ctx, inst, ia)
+	if ctx.Err() != nil {
+		m.restorePriorOnCancel(agentType, prior, hadPrior)
+		return caps, ctx.Err()
+	}
 	m.cache.set(caps)
 	return caps, nil
+}
+
+// restorePriorOnCancel rolls the cache back to the pre-Refresh entry when the
+// caller cancels (e.g. browser close). Without this we'd leave StatusProbing
+// stuck or cache a spurious "context canceled" error.
+func (m *Manager) restorePriorOnCancel(agentType string, prior AgentCapabilities, hadPrior bool) {
+	if hadPrior {
+		m.cache.set(prior)
+		return
+	}
+	m.cache.clear(agentType)
 }
 
 // ExecutePrompt runs a sessionless utility prompt against the warm instance
