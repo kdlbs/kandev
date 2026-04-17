@@ -87,14 +87,19 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     );
     await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
 
-    // New array reference with identical contents — dedup key should match.
+    // Same-workflow rerender — dedup key unchanged, must not refetch.
     mockState.workflows = { items: [...workflows] };
     rerender({ workspaceId: "ws-A" });
-    // Wait long enough that any queued effect would have run and issued a
-    // second fetch; then assert the count is unchanged.
-    await new Promise((r) => setTimeout(r, 50));
 
-    expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1);
+    // Positive signal: follow up with a DIFFERENT workflow set, which must
+    // trigger a fetch. If dedup worked, the total is 2 (initial + this one).
+    // If dedup failed, the same-key rerender would have fired a fetch before
+    // this one, making the total 3. Waiting for count==2 proves both:
+    // the dedup rerender was skipped AND the next real change still fetches.
+    mockState.workflows = { items: [{ id: "wf-A2", workspaceId: "ws-A", name: "A2" }] };
+    rerender({ workspaceId: "ws-A" });
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
+    expect(mockFetchWorkflowSnapshot.mock.calls[1][0]).toBe("wf-A2");
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
 
@@ -116,15 +121,20 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
       expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
     );
 
-    // Switch to workspace B before A's fetch resolves.
+    // Switch to workspace B before A's fetch resolves. Wait for B's fetch
+    // to settle (positive signal) so the new-gen effect is fully in place.
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({ steps: [], tasks: [] });
     mockState.workflows = { items: [{ id: "wf-B", workspaceId: "ws-B", name: "B" }] };
     rerender({ workspaceId: "ws-B" });
-    await waitFor(() => expect(mockClearKanbanMulti).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith("wf-B", expect.anything()),
+    );
 
-    // Now let workspace A's fetch finally resolve. Its write must be dropped.
+    // Resolve A's stale fetch and drain the microtask queue so its .then
+    // and .finally callbacks run. Flushing microtasks is deterministic —
+    // unlike setTimeout, it doesn't depend on CI wall-clock speed.
     resolveStale({ steps: [], tasks: [] });
-    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
 
     const writtenIds = mockSetWorkflowSnapshot.mock.calls.map((args) => args[0]);
     expect(writtenIds).not.toContain("wf-A");
