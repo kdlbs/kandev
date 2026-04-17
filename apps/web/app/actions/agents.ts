@@ -78,8 +78,12 @@ export async function deleteAgentAction(id: string) {
 
 export async function createAgentProfileAction(
   agentId: string,
-  payload: { name: string; model: string; mode?: string; cli_passthrough: boolean } &
-    ProfilePermissions,
+  payload: {
+    name: string;
+    model: string;
+    mode?: string;
+    cli_passthrough: boolean;
+  } & ProfilePermissions,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
     method: "POST",
