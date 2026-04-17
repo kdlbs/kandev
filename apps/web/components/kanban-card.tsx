@@ -338,18 +338,7 @@ function MoveToSubmenu({
   );
 }
 
-function KanbanCardMenu({
-  task,
-  effectiveMenuOpen,
-  setMenuOpen,
-  isDeleting,
-  isArchiving,
-  onEdit,
-  onDelete,
-  onArchive,
-  onMove,
-  steps,
-}: {
+type KanbanCardMenuProps = {
   task: Task;
   effectiveMenuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
@@ -360,7 +349,11 @@ function KanbanCardMenu({
   onArchive?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
-}) {
+};
+
+function KanbanCardMenu(props: KanbanCardMenuProps) {
+  const { task, effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving } = props;
+  const { onEdit, onDelete, onArchive, onMove, steps } = props;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const isProcessing = isDeleting || isArchiving;
@@ -378,34 +371,22 @@ function KanbanCardMenu({
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             aria-label="More options"
           >
             <IconDots className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            disabled={isProcessing}
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit?.(task);
-            }}
-          >
+          <DropdownMenuItem disabled={isProcessing} onClick={(e) => { e.stopPropagation(); onEdit?.(task); }}>
             Edit
           </DropdownMenuItem>
           {steps && steps.length > 1 && onMove && (
             <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
           )}
           {onArchive && (
-            <DropdownMenuItem
-              disabled={isProcessing}
-              onClick={(event) => {
-                event.stopPropagation();
-                setShowArchiveConfirm(true);
-              }}
-            >
+            <DropdownMenuItem disabled={isProcessing} onClick={(e) => { e.stopPropagation(); setShowArchiveConfirm(true); }}>
               {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
               Archive
             </DropdownMenuItem>
@@ -414,16 +395,12 @@ function KanbanCardMenu({
           <DropdownMenuItem
             disabled={isProcessing}
             className="text-destructive focus:text-destructive"
-            onClick={(event) => {
-              event.stopPropagation();
-              setShowDeleteConfirm(true);
-            }}
+            onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true); }}
           >
             Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
       <DeleteConfirmDialog
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
@@ -431,7 +408,6 @@ function KanbanCardMenu({
         isDeleting={isDeleting}
         onConfirm={() => onDelete?.(task)}
       />
-
       <ArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}

@@ -452,13 +452,41 @@ function useMoveToStep(store: StoreApi) {
   );
 }
 
+function useArchiveActions(store: StoreApi) {
+  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
+  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+
+  const handleArchiveTask = useCallback(
+    (taskId: string) => {
+      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
+      setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
+    },
+    [store],
+  );
+
+  const handleArchiveConfirm = useCallback(async () => {
+    if (!archivingTask) return;
+    setIsArchiving(true);
+    try {
+      await archiveAndSwitch(archivingTask.id);
+    } catch (error) {
+      console.error("Failed to archive task:", error);
+    } finally {
+      setIsArchiving(false);
+      setArchivingTask(null);
+    }
+  }, [archivingTask, archiveAndSwitch]);
+
+  return { archivingTask, setArchivingTask, isArchiving, handleArchiveTask, handleArchiveConfirm };
+}
+
 function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const { deleteTaskById, renameTaskById } = useTaskActions();
-  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
@@ -499,26 +527,7 @@ function useSidebarActions(store: StoreApi) {
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
   );
 
-  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
-  const [isArchiving, setIsArchiving] = useState(false);
-
-  const handleArchiveTask = useCallback((taskId: string) => {
-    const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
-    setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
-  }, [store]);
-
-  const handleArchiveConfirm = useCallback(async () => {
-    if (!archivingTask) return;
-    setIsArchiving(true);
-    try {
-      await archiveAndSwitch(archivingTask.id);
-    } catch (error) {
-      console.error("Failed to archive task:", error);
-    } finally {
-      setIsArchiving(false);
-      setArchivingTask(null);
-    }
-  }, [archivingTask, archiveAndSwitch]);
+  const archiveActions = useArchiveActions(store);
 
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
@@ -562,17 +571,13 @@ function useSidebarActions(store: StoreApi) {
     deletingTaskId,
     preparingTaskId,
     handleSelectTask,
-    handleArchiveTask,
     handleDeleteTask,
     handleMoveToStep,
     renamingTask,
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
-    archivingTask,
-    setArchivingTask,
-    isArchiving,
-    handleArchiveConfirm,
+    ...archiveActions,
   };
 }
 
