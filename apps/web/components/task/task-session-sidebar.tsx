@@ -8,7 +8,7 @@ import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { TaskSwitcher } from "./task-switcher";
 import type { TaskSwitcherItem } from "./task-switcher";
 import { TaskRenameDialog } from "./task-rename-dialog";
-import { ArchiveConfirmDialog } from "./archive-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { Button } from "@kandev/ui/button";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { IconPlus } from "@tabler/icons-react";
@@ -662,7 +662,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         currentTitle={renamingTask?.title ?? ""}
         onSubmit={handleRenameSubmit}
       />
-      <ArchiveConfirmDialog
+      <TaskArchiveConfirmDialog
         open={archivingTask !== null}
         onOpenChange={(open) => {
           if (!open) setArchivingTask(null);

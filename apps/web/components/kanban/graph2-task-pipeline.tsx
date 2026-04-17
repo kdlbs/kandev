@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { IconDots, IconTrash } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+import { IconArchive, IconDots, IconTrash } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +9,8 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { needsAction } from "@/lib/utils/needs-action";
 import { Graph2StepNode } from "./graph2-step-node";
 import { Graph2Connector } from "./graph2-connector";
@@ -40,8 +42,10 @@ export type Graph2TaskPipelineProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
+  isArchiving?: boolean;
 };
 
 function getStepPhase(index: number, currentStepIndex: number): "past" | "current" | "future" {
@@ -97,7 +101,9 @@ function PipelineStepNodes({
               onPreviewTask={onPreviewTask}
               isMoving={isMoving}
             />
-            {connectorType && <Graph2Connector type={connectorType} />}
+
+            {connectorType && <Graph2Connector type={connectorType} />
+}
           </div>
         );
       })}
@@ -112,9 +118,13 @@ export function Graph2TaskPipeline({
   onPreviewTask,
   onOpenTask,
   onDeleteTask,
+  onArchiveTask,
   isMoving,
   isDeleting,
+  isArchiving,
 }: Graph2TaskPipelineProps) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const currentStepIndex = useMemo(
     () => steps.findIndex((s) => s.id === task.workflowStepId),
     [steps, task.workflowStepId],
@@ -172,8 +182,18 @@ export function Graph2TaskPipeline({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[160px]">
+            {onArchiveTask && (
+              <DropdownMenuItem
+                onClick={() => setShowArchiveConfirm(true)}
+                disabled={isArchiving}
+                className="cursor-pointer"
+              >
+                <IconArchive className="h-3.5 w-3.5 mr-2" />
+                Archive task
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
-              onClick={() => onDeleteTask(task)}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={isDeleting}
               className="text-destructive focus:text-destructive cursor-pointer"
             >
@@ -182,6 +202,22 @@ export function Graph2TaskPipeline({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <TaskDeleteConfirmDialog
+          open={showDeleteConfirm}
+          onOpenChange={setShowDeleteConfirm}
+          taskTitle={task.title}
+          isDeleting={isDeleting}
+          onConfirm={() => onDeleteTask(task)}
+        />
+        <TaskArchiveConfirmDialog
+          open={showArchiveConfirm}
+          onOpenChange={setShowArchiveConfirm}
+          taskTitle={task.title}
+          isArchiving={isArchiving}
+          onConfirm={() => onArchiveTask?.(task)}
+        />
+
       </div>
     </div>
   );

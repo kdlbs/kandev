@@ -13,16 +13,7 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,7 +32,7 @@ import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
-import { ArchiveConfirmDialog } from "@/components/task/archive-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 
 export interface Task {
   id: string;
@@ -114,6 +105,7 @@ function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
+
           </div>
         </div>
         {task.isRemoteExecutor && (
@@ -122,6 +114,7 @@ function KanbanCardBody({
             sessionId={task.primarySessionId ?? null}
             fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
           />
+
         )}
         {actions}
       </div>
@@ -131,7 +124,9 @@ function KanbanCardBody({
         </p>
       )}
       <KanbanCardBadges task={task} />
+
     </>
+
   );
 }
 
@@ -154,6 +149,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
       {task.parentTaskId && (
         <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px]">
           <IconSubtask className="h-3 w-3 shrink-0" />
+
           <span className="truncate">{parentTitle ?? "Subtask"}</span>
         </Badge>
       )}
@@ -165,6 +161,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
       {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
         <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
           <IconAlertCircle className="h-3.5 w-3.5" />
+
           <span className="text-[10px] font-medium">Approval Required</span>
         </div>
       )}
@@ -189,6 +186,7 @@ function KanbanCardLayout({
     <Card size="sm" className={cn("w-full py-0", className)}>
       <CardContent className="px-2 py-1">
         <KanbanCardBody task={task} repoName={repositoryName ?? null} />
+
       </CardContent>
     </Card>
   );
@@ -240,6 +238,7 @@ function KanbanCardActions({
           title="Open full page"
         >
           <IconArrowsMaximize className="h-4 w-4" />
+
         </button>
       )}
       <KanbanCardMenu
@@ -254,51 +253,11 @@ function KanbanCardActions({
         onMove={onMove}
         steps={steps}
       />
+
     </div>
   );
 }
 
-function DeleteConfirmDialog({
-  open,
-  onOpenChange,
-  taskTitle,
-  isDeleting,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  taskTitle: string;
-  isDeleting?: boolean;
-  onConfirm: () => void;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete task</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to delete &quot;{taskTitle}&quot;? This action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={isDeleting}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={() => {
-              if (isDeleting) return;
-              onConfirm();
-              onOpenChange(false);
-            }}
-          >
-            {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
 
 function MoveToSubmenu({
   task,
@@ -403,7 +362,8 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
                 setShowArchiveConfirm(true);
               }}
             >
-              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+ : null}
               Archive
             </DropdownMenuItem>
           )}
@@ -420,14 +380,14 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DeleteConfirmDialog
+      <TaskDeleteConfirmDialog
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
         isDeleting={isDeleting}
         onConfirm={() => onDelete?.(task)}
       />
-      <ArchiveConfirmDialog
+      <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}

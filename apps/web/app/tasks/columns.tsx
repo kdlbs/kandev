@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Row, ColumnDef } from "@tanstack/react-table";
 import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import Link from "next/link";
@@ -8,6 +9,8 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 
 type TaskWithResolution = Task & {
   workflowName?: string;
@@ -66,6 +69,8 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
   const task = row.original;
   const isDeleting = ctx.deletingTaskId === task.id;
   const isArchived = !!task.archived_at;
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   return (
     <div className="flex items-center justify-end gap-0.5">
       {!isArchived && (
@@ -77,7 +82,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
               className="cursor-pointer h-7 w-7 p-0"
               onClick={(e) => {
                 e.stopPropagation();
-                ctx.onArchive(task.id);
+                setShowArchiveConfirm(true);
               }}
             >
               <IconArchive className="h-3.5 w-3.5 text-muted-foreground" />
@@ -95,7 +100,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
             disabled={isDeleting}
             onClick={(e) => {
               e.stopPropagation();
-              ctx.onDelete(task.id);
+              setShowDeleteConfirm(true);
             }}
           >
             {isDeleting ? (
@@ -107,6 +112,19 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         </TooltipTrigger>
         <TooltipContent>Delete</TooltipContent>
       </Tooltip>
+      <TaskDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        taskTitle={task.title}
+        isDeleting={isDeleting}
+        onConfirm={() => ctx.onDelete(task.id)}
+      />
+      <TaskArchiveConfirmDialog
+        open={showArchiveConfirm}
+        onOpenChange={setShowArchiveConfirm}
+        taskTitle={task.title}
+        onConfirm={() => ctx.onArchive(task.id)}
+      />
     </div>
   );
 }

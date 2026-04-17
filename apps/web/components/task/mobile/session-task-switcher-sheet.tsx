@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { ArchiveConfirmDialog } from "../archive-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
@@ -467,7 +467,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         onSuccess={handleTaskCreated}
       />
 
-      <ArchiveConfirmDialog
+      <TaskArchiveConfirmDialog
         open={archivingTask !== null}
         onOpenChange={(open) => {
           if (!open) setArchivingTask(null);

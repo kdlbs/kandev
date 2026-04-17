@@ -100,7 +100,6 @@ function useTaskOperations({
       setDeletingTaskId(taskId);
       try {
         await deleteTask(taskId);
-        toast({ title: "Task deleted", description: "The task has been deleted successfully." });
         fetchTasks();
       } catch (err) {
         toast({

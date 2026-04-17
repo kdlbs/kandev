@@ -12,29 +12,39 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 
-type ArchiveConfirmDialogProps = {
+type TaskArchiveConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  taskTitle: string;
+  taskTitle?: string;
+  isBulkOperation?: boolean;
+  count?: number;
   isArchiving?: boolean;
   onConfirm: () => void;
 };
 
-export function ArchiveConfirmDialog({
+export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
   taskTitle,
+  isBulkOperation,
+  count,
   isArchiving,
   onConfirm,
-}: ArchiveConfirmDialogProps) {
+}: TaskArchiveConfirmDialogProps) {
+  const label = isBulkOperation ? `task${(count ?? 0) !== 1 ? "s" : ""}` : "task";
+  const title = isBulkOperation ? `Archive ${count} ${label}?` : "Archive task?";
+  const firstLine = isBulkOperation
+    ? `Are you sure you want to archive ${count} ${label}?`
+    : `Are you sure you want to archive "${taskTitle}"?`;
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent onClick={(e) => e.stopPropagation()}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Archive task?</AlertDialogTitle>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>Are you sure you want to archive &quot;{taskTitle}&quot;?</p>
+              <p>{firstLine}</p>
               <p className="mt-2">
                 This will delete the task&apos;s worktree and stop any running agent sessions.
               </p>

@@ -1,18 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { IconLoader, IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
+import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +23,42 @@ interface TaskMultiSelectToolbarProps {
   onBulkDelete: () => Promise<void>;
   onBulkArchive: () => Promise<void>;
   onBulkMove: (targetStepId: string) => Promise<void>;
+}
+
+function BulkArchiveDialog({
+  count,
+  isProcessing,
+  onConfirm,
+}: {
+  count: number;
+  isProcessing: boolean;
+  onConfirm: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="cursor-pointer gap-1.5"
+        disabled={isProcessing}
+        onClick={() => setOpen(true)}
+        data-testid="bulk-archive-button"
+      >
+        <IconArchive className="h-4 w-4" />
+        Archive {count}
+      </Button>
+      <TaskArchiveConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        isBulkOperation
+        count={count}
+        isArchiving={isProcessing}
+        onConfirm={onConfirm}
+      />
+    </>
+  );
 }
 
 function BulkDeleteDialog({
@@ -57,32 +85,15 @@ function BulkDeleteDialog({
         <IconTrash className="h-4 w-4" />
         Delete {count}
       </Button>
-      <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {count} tasks</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {count} task{count !== 1 ? "s" : ""}? This action
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={isProcessing}
-              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                onConfirm();
-                setOpen(false);
-              }}
-              data-testid="bulk-delete-confirm"
-            >
-              {isProcessing ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TaskDeleteConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        isBulkOperation
+        count={count}
+        isDeleting={isProcessing}
+        onConfirm={onConfirm}
+        confirmTestId="bulk-delete-confirm"
+      />
     </>
   );
 }
@@ -143,17 +154,11 @@ export function TaskMultiSelectToolbar({
         </DropdownMenu>
       )}
 
-      <Button
-        size="sm"
-        variant="outline"
-        className="cursor-pointer gap-1.5"
-        disabled={isProcessing}
-        onClick={() => onBulkArchive()}
-        data-testid="bulk-archive-button"
-      >
-        <IconArchive className="h-4 w-4" />
-        Archive {count}
-      </Button>
+      <BulkArchiveDialog
+        count={count}
+        isProcessing={isProcessing}
+        onConfirm={() => onBulkArchive()}
+      />
 
       <BulkDeleteDialog
         count={count}

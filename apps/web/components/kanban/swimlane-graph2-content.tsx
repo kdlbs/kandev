@@ -12,8 +12,10 @@ export function SwimlaneGraph2Content({
   onPreviewTask,
   onOpenTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveError,
   deletingTaskId,
+  archivingTaskId,
 }: ViewContentProps) {
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
@@ -60,8 +62,10 @@ export function SwimlaneGraph2Content({
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}
             onDeleteTask={onDeleteTask}
+            onArchiveTask={onArchiveTask}
             isMoving={movingTaskId === task.id}
             isDeleting={deletingTaskId === task.id}
+            isArchiving={archivingTaskId === task.id}
           />
         ))}
       </div>
