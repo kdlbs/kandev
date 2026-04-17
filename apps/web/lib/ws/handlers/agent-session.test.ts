@@ -298,7 +298,6 @@ describe("session.state_changed → active session switching", () => {
 
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
-
 });
 
 describe("session.state_changed → active session handoff on terminal", () => {
