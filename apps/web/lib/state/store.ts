@@ -16,6 +16,7 @@ import type {
   ReviewWatch as GitHubReviewWatch,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
+import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -62,6 +63,7 @@ import type {
   SessionModelEntry,
   ConfigOptionEntry,
   PromptUsageEntry,
+  SessionPollMode,
   TodoEntry,
   UserShellInfo,
 } from "./slices/session-runtime/types";
@@ -187,6 +189,7 @@ export type AppState = {
   agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
+  sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -407,151 +410,10 @@ export type AppState = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
+  setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
-
-const defaultState = {
-  kanban: defaultKanbanState.kanban,
-  kanbanMulti: defaultKanbanState.kanbanMulti,
-  workflows: defaultKanbanState.workflows,
-  tasks: defaultKanbanState.tasks,
-  workspaces: defaultWorkspaceState.workspaces,
-  repositories: defaultWorkspaceState.repositories,
-  repositoryBranches: defaultWorkspaceState.repositoryBranches,
-  repositoryScripts: defaultWorkspaceState.repositoryScripts,
-  executors: defaultSettingsState.executors,
-  settingsAgents: defaultSettingsState.settingsAgents,
-  agentDiscovery: defaultSettingsState.agentDiscovery,
-  availableAgents: defaultSettingsState.availableAgents,
-  agentProfiles: defaultSettingsState.agentProfiles,
-  editors: defaultSettingsState.editors,
-  prompts: defaultSettingsState.prompts,
-  secrets: defaultSettingsState.secrets,
-  notificationProviders: defaultSettingsState.notificationProviders,
-  settingsData: defaultSettingsState.settingsData,
-  userSettings: defaultSettingsState.userSettings,
-  messages: defaultSessionState.messages,
-  turns: defaultSessionState.turns,
-  taskSessions: defaultSessionState.taskSessions,
-  taskSessionsByTask: defaultSessionState.taskSessionsByTask,
-  sessionAgentctl: defaultSessionState.sessionAgentctl,
-  worktrees: defaultSessionState.worktrees,
-  sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
-  pendingModel: defaultSessionState.pendingModel,
-  activeModel: defaultSessionState.activeModel,
-  taskPlans: defaultSessionState.taskPlans,
-  queue: defaultSessionState.queue,
-  terminal: defaultSessionRuntimeState.terminal,
-  shell: defaultSessionRuntimeState.shell,
-  processes: defaultSessionRuntimeState.processes,
-  gitStatus: defaultSessionRuntimeState.gitStatus,
-  environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
-  sessionCommits: defaultSessionRuntimeState.sessionCommits,
-  contextWindow: defaultSessionRuntimeState.contextWindow,
-  agents: defaultSessionRuntimeState.agents,
-  availableCommands: defaultSessionRuntimeState.availableCommands,
-  sessionMode: defaultSessionRuntimeState.sessionMode,
-  userShells: defaultSessionRuntimeState.userShells,
-  prepareProgress: defaultSessionRuntimeState.prepareProgress,
-  sessionTodos: defaultSessionRuntimeState.sessionTodos,
-  agentCapabilities: defaultSessionRuntimeState.agentCapabilities,
-  sessionModels: defaultSessionRuntimeState.sessionModels,
-  promptUsage: defaultSessionRuntimeState.promptUsage,
-  githubStatus: defaultGitHubState.githubStatus,
-  taskPRs: defaultGitHubState.taskPRs,
-  prWatches: defaultGitHubState.prWatches,
-  reviewWatches: defaultGitHubState.reviewWatches,
-  previewPanel: defaultUIState.previewPanel,
-  rightPanel: defaultUIState.rightPanel,
-  diffs: defaultUIState.diffs,
-  connection: defaultUIState.connection,
-  mobileKanban: defaultUIState.mobileKanban,
-  mobileSession: defaultUIState.mobileSession,
-  chatInput: defaultUIState.chatInput,
-  documentPanel: defaultUIState.documentPanel,
-  systemHealth: defaultUIState.systemHealth,
-  quickChat: defaultUIState.quickChat,
-  sessionFailureNotification: defaultUIState.sessionFailureNotification,
-  bottomTerminal: defaultUIState.bottomTerminal,
-};
-
-function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
-  if (!initialState) return defaultState;
-
-  return {
-    ...defaultState,
-    ...initialState,
-    // Ensure nested objects are properly merged
-    kanban: { ...defaultState.kanban, ...initialState.kanban },
-    kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
-    workflows: { ...defaultState.workflows, ...initialState.workflows },
-    tasks: { ...defaultState.tasks, ...initialState.tasks },
-    workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
-    repositories: { ...defaultState.repositories, ...initialState.repositories },
-    repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
-    repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
-    executors: { ...defaultState.executors, ...initialState.executors },
-    settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
-    agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
-    availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
-    agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
-    editors: { ...defaultState.editors, ...initialState.editors },
-    prompts: { ...defaultState.prompts, ...initialState.prompts },
-    secrets: { ...defaultState.secrets, ...initialState.secrets },
-    notificationProviders: {
-      ...defaultState.notificationProviders,
-      ...initialState.notificationProviders,
-    },
-    settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
-    userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
-    messages: { ...defaultState.messages, ...initialState.messages },
-    turns: { ...defaultState.turns, ...initialState.turns },
-    taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
-    taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
-    sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
-    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
-    sessionWorktreesBySessionId: {
-      ...defaultState.sessionWorktreesBySessionId,
-      ...initialState.sessionWorktreesBySessionId,
-    },
-    pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
-    activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
-    taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
-    queue: { ...defaultState.queue, ...initialState.queue },
-    terminal: { ...defaultState.terminal, ...initialState.terminal },
-    shell: { ...defaultState.shell, ...initialState.shell },
-    processes: { ...defaultState.processes, ...initialState.processes },
-    gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
-    sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
-    contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
-    agents: { ...defaultState.agents, ...initialState.agents },
-    sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
-    userShells: { ...defaultState.userShells, ...initialState.userShells },
-    prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
-    sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },
-    agentCapabilities: { ...defaultState.agentCapabilities, ...initialState.agentCapabilities },
-    sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
-    promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
-    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
-    taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
-    prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
-    reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
-    previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
-    rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
-    diffs: { ...defaultState.diffs, ...initialState.diffs },
-    connection: { ...defaultState.connection, ...initialState.connection },
-    mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
-    mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
-    chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
-    documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
-    systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
-    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
-    sessionFailureNotification:
-      initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
-    bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
-  };
-}
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
@@ -617,6 +479,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       agentCapabilities: merged.agentCapabilities,
       sessionModels: merged.sessionModels,
       promptUsage: merged.promptUsage,
+      sessionPollMode: merged.sessionPollMode,
       githubStatus: merged.githubStatus,
       taskPRs: merged.taskPRs,
       prWatches: merged.prWatches,

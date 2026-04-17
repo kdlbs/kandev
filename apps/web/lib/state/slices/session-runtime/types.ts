@@ -255,6 +255,12 @@ export type SessionTodosState = {
   bySessionId: Record<string, TodoEntry[]>;
 };
 
+export type SessionPollMode = "fast" | "slow" | "paused";
+
+export type SessionPollModeState = {
+  bySessionId: Record<string, SessionPollMode>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -273,6 +279,7 @@ export type SessionRuntimeSliceState = {
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
+  sessionPollMode: SessionPollModeState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -322,6 +329,7 @@ export type SessionRuntimeSliceActions = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
+  setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

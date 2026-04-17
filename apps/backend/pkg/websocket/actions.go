@@ -185,6 +185,7 @@ const (
 	ActionSessionSetMode           = "session.set_mode"
 	ActionSessionTodosUpdated      = "session.todos_updated"
 	ActionSessionPromptUsage       = "session.prompt_usage"
+	ActionSessionPollModeChanged   = "session.poll_mode_changed"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"

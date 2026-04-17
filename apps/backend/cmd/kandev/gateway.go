@@ -25,6 +25,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // scriptServiceAdapter adapts the task service to scripts.ScriptService.
@@ -205,6 +206,19 @@ func provideGateway(
 		// gateway events fired before the execution was registered.
 		lifecycleMgr.SetSessionModeQuerier(&hubModeQuerierAdapter{hub: gateway.Hub})
 	}
+
+	// Broadcast session poll mode transitions to subscribed WS clients so the
+	// frontend debug overlay can show the current mode per session.
+	gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
+		msg, err := ws.NewNotification(ws.ActionSessionPollModeChanged, map[string]interface{}{
+			"session_id": sessionID,
+			"poll_mode":  string(mode),
+		})
+		if err != nil {
+			return
+		}
+		gateway.Hub.BroadcastToSession(sessionID, msg)
+	})
 
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)

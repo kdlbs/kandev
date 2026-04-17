@@ -2,6 +2,7 @@ import type { StateCreator } from "zustand";
 import type {
   SessionRuntimeSlice,
   SessionRuntimeSliceState,
+  SessionPollMode,
   GitStatusEntry,
   FileInfo,
 } from "./types";
@@ -89,6 +90,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
+  sessionPollMode: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -181,6 +183,10 @@ function buildUserShellActions(set: ImmerSet) {
         draft.userShells.byEnvironmentId[envKey] = existing.filter(
           (s) => s.terminalId !== terminalId,
         );
+      }),
+    setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
+      set((draft) => {
+        draft.sessionPollMode.bySessionId[sessionId] = mode;
       }),
   };
 }

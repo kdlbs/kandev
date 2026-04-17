@@ -37,6 +37,7 @@ export type BackendMessageType =
   | "session.models_updated"
   | "session.todos_updated"
   | "session.prompt_usage"
+  | "session.poll_mode_changed"
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
@@ -539,6 +540,10 @@ export type BackendMessageMap = {
   "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
+  "session.poll_mode_changed": BackendMessage<
+    "session.poll_mode_changed",
+    { session_id: string; poll_mode: string }
+  >;
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
