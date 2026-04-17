@@ -112,6 +112,34 @@ func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode Works
 	a.pushAsync(execution, workspacePath, effective)
 }
 
+// setSessionModeLocked updates sessionModes and the workspaceSessions reverse
+// index for a single session. Caller must hold a.mu.
+func (a *workspacePollAggregator) setSessionModeLocked(sessionID string, mode WorkspacePollMode, workspacePath string) {
+	if mode == WorkspacePollModePaused {
+		delete(a.sessionModes, sessionID)
+		a.removeFromWorkspaceIndex(sessionID, workspacePath)
+		return
+	}
+	a.sessionModes[sessionID] = mode
+	if a.workspaceSessions[workspacePath] == nil {
+		a.workspaceSessions[workspacePath] = make(map[string]bool)
+	}
+	a.workspaceSessions[workspacePath][sessionID] = true
+}
+
+// removeFromWorkspaceIndex drops a session from the reverse index, cleaning up
+// the workspace key if empty. Caller must hold a.mu.
+func (a *workspacePollAggregator) removeFromWorkspaceIndex(sessionID, workspacePath string) {
+	sessions := a.workspaceSessions[workspacePath]
+	if sessions == nil {
+		return
+	}
+	delete(sessions, sessionID)
+	if len(sessions) == 0 {
+		delete(a.workspaceSessions, workspacePath)
+	}
+}
+
 // recordAndCompute updates the per-session mode for the given workspace and
 // returns the new workspace-effective mode, plus whether it changed since the
 // last push. We compute this under a single lock so concurrent transitions in
@@ -124,22 +152,7 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Update per-session mode and the reverse index.
-	if mode == WorkspacePollModePaused {
-		delete(a.sessionModes, sessionID)
-		if sessions := a.workspaceSessions[workspacePath]; sessions != nil {
-			delete(sessions, sessionID)
-			if len(sessions) == 0 {
-				delete(a.workspaceSessions, workspacePath)
-			}
-		}
-	} else {
-		a.sessionModes[sessionID] = mode
-		if a.workspaceSessions[workspacePath] == nil {
-			a.workspaceSessions[workspacePath] = make(map[string]bool)
-		}
-		a.workspaceSessions[workspacePath][sessionID] = true
-	}
+	a.setSessionModeLocked(sessionID, mode, workspacePath)
 
 	// Compute effective mode using only sessions in this workspace (O(k)
 	// where k = sessions in workspace, not O(N) total sessions).
@@ -238,23 +251,9 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 	a.mu.Lock()
 	// Merge the queried mode with whatever we had cached, then recompute
 	// the workspace-level effective mode across all sessions in this
-	// workspace. Maintain the reverse index alongside sessionModes.
+	// workspace.
 	wp := execution.WorkspacePath
-	if sessionMode == WorkspacePollModePaused {
-		delete(a.sessionModes, sessionID)
-		if sessions := a.workspaceSessions[wp]; sessions != nil {
-			delete(sessions, sessionID)
-			if len(sessions) == 0 {
-				delete(a.workspaceSessions, wp)
-			}
-		}
-	} else {
-		a.sessionModes[sessionID] = sessionMode
-		if a.workspaceSessions[wp] == nil {
-			a.workspaceSessions[wp] = make(map[string]bool)
-		}
-		a.workspaceSessions[wp][sessionID] = true
-	}
+	a.setSessionModeLocked(sessionID, sessionMode, wp)
 	effective := WorkspacePollModePaused
 	for sid := range a.workspaceSessions[wp] {
 		if m, ok := a.sessionModes[sid]; ok && m.rank() > effective.rank() {
