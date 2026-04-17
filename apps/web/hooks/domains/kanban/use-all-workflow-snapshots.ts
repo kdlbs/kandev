@@ -39,15 +39,20 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const workflows = useAppStore((state) => state.workflows.items);
   const lastFetchedRef = useRef<string>("");
   const lastWorkspaceIdRef = useRef<string | null>(null);
+  const fetchGenRef = useRef(0);
 
   useEffect(() => {
     // Drop snapshots from the previous workspace so cross-workspace tasks
     // don't bleed into the sidebar (they'd otherwise render under "Unassigned"
     // because their repositoryId isn't in the current workspace's repo map).
+    // Bumping the generation counter invalidates any fetches still in flight
+    // from the previous workspace, so their late writes can't re-pollute the
+    // store after clearKanbanMulti runs.
     if (lastWorkspaceIdRef.current !== workspaceId) {
       store.getState().clearKanbanMulti();
       lastFetchedRef.current = "";
       lastWorkspaceIdRef.current = workspaceId;
+      fetchGenRef.current += 1;
     }
 
     if (!workspaceId) {
@@ -72,6 +77,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     }
     lastFetchedRef.current = key;
 
+    const myGen = fetchGenRef.current;
     const { setKanbanMultiLoading, setWorkflowSnapshot } = store.getState();
     setKanbanMultiLoading(true);
 
@@ -79,6 +85,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
       workspaceWorkflows.map(async (wf) => {
         try {
           const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
+          if (fetchGenRef.current !== myGen) return;
 
           const steps = snapshot.steps.map((step) => ({
             id: step.id,
@@ -129,6 +136,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
         }
       }),
     ).finally(() => {
+      if (fetchGenRef.current !== myGen) return;
       store.getState().setKanbanMultiLoading(false);
     });
   }, [workspaceId, workflows, connectionStatus, store]);
