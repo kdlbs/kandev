@@ -16,15 +16,21 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc              func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc        func(ctx context.Context, agentExecutionID string) error
-	stopAgentFunc                func(ctx context.Context, agentExecutionID string, force bool) error
-	resolveAgentProfileFunc      func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-	setExecutionDescriptionFunc  func(ctx context.Context, agentExecutionID string, description string) error
-	getExecutionIDForSessionFunc func(ctx context.Context, sessionID string) (string, error)
+	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
+	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
+	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
+	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
+	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
+	launchAgentCallCount             int
+	cleanupStaleExecutionCallCount   int
+	isAgentRunningForSessionCallArgs []string
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+	m.launchAgentCallCount++
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
 	}
@@ -88,6 +94,10 @@ func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessi
 }
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
+	if m.isAgentRunningForSessionFunc != nil {
+		return m.isAgentRunningForSessionFunc(ctx, sessionID)
+	}
 	return false
 }
 
@@ -111,6 +121,10 @@ func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, 
 func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest) {
 }
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	m.cleanupStaleExecutionCallCount++
+	if m.cleanupStaleExecutionFunc != nil {
+		return m.cleanupStaleExecutionFunc(ctx, sessionID)
+	}
 	return nil
 }
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {

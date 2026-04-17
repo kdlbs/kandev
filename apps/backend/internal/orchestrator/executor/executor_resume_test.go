@@ -3,11 +3,13 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestResumeSession_RejectsArchivedTask(t *testing.T) {
@@ -186,4 +188,105 @@ func TestBuildExecutorRunning(t *testing.T) {
 			t.Errorf("ResumeToken = %q, want empty", running.ResumeToken)
 		}
 	})
+}
+
+// setupLiveResumeTestFixture seeds a repo + task + session + executor-running
+// record suitable for exercising the ResumeSession launch path.
+func setupLiveResumeTestFixture(repo *mockRepository) {
+	now := time.Now().UTC()
+	repo.tasks["task-1"] = &models.Task{
+		ID:        "task-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	repo.sessions["sess-1"] = &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         "task-1",
+		AgentProfileID: "profile-1",
+		State:          models.TaskSessionStateWaitingForInput,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID:          "sess-1",
+		SessionID:   "sess-1",
+		TaskID:      "task-1",
+		ResumeToken: "token-abc",
+	}
+}
+
+// TestResumeSession_LiveAgentReturnsAlreadyRunning ensures that when LaunchAgent
+// reports "already has an agent running" and the lifecycle manager confirms the
+// agent is actually alive (via IsAgentRunningForSession), ResumeSession returns
+// ErrExecutionAlreadyRunning instead of killing the live subprocess.
+// Regression test for the resume race that killed active agents mid-stream.
+func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-live")
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+			return true
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+
+	if !errors.Is(err, ErrExecutionAlreadyRunning) {
+		t.Fatalf("expected ErrExecutionAlreadyRunning, got: %v", err)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 0 {
+		t.Errorf("expected no stale-cleanup call on live agent, got %d", agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if agentMgr.launchAgentCallCount != 1 {
+		t.Errorf("expected LaunchAgent called once, got %d", agentMgr.launchAgentCallCount)
+	}
+	if len(agentMgr.isAgentRunningForSessionCallArgs) != 1 || agentMgr.isAgentRunningForSessionCallArgs[0] != "sess-1" {
+		t.Errorf("expected IsAgentRunningForSession called once with sess-1, got %v", agentMgr.isAgentRunningForSessionCallArgs)
+	}
+}
+
+// TestResumeSession_StaleExecutionCleansUpAndRetries ensures the pre-existing
+// stale-cleanup path still works when LaunchAgent reports "already has an agent
+// running" but the lifecycle manager confirms no live agent exists.
+func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+
+	var launchCalls int
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchCalls++
+			if launchCalls == 1 {
+				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+			}
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+			return false
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	execution, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("expected success after stale cleanup + retry, got: %v", err)
+	}
+	if execution == nil {
+		t.Fatal("expected a non-nil execution after retry")
+	}
+	if execution.AgentExecutionID != "exec-new" {
+		t.Errorf("expected AgentExecutionID=exec-new, got %q", execution.AgentExecutionID)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 1 {
+		t.Errorf("expected stale-cleanup called once, got %d", agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if agentMgr.launchAgentCallCount != 2 {
+		t.Errorf("expected LaunchAgent called twice, got %d", agentMgr.launchAgentCallCount)
+	}
 }

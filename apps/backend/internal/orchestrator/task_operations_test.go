@@ -10,7 +10,9 @@ import (
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -114,6 +116,72 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 	}
 	if updated.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+}
+
+// TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts ensures that when
+// Prompt returns executor.ErrExecutionNotFound, PromptTask reverts the session
+// state via the broadcasting wrapper (not a direct repo write), so the WS
+// subscribers receive session.state_changed and the UI can unstick the
+// "Agent is running" composer/pause button.
+// Regression test for the stuck-UI bug after a prompt failure.
+func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptErr:      fmt.Errorf("wrapped: %w", lifecycle.ErrExecutionNotFound),
+	}
+	eb := &recordingEventBus{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.eventBus = eb
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	if err == nil {
+		t.Fatal("expected error from prompt, got nil")
+	}
+	if !errors.Is(err, executor.ErrExecutionNotFound) {
+		t.Fatalf("expected ErrExecutionNotFound bubbled up, got: %v", err)
+	}
+
+	updated, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state WAITING_FOR_INPUT after revert, got %q", updated.State)
+	}
+
+	var sawRevert bool
+	for _, evt := range eb.events {
+		if evt.subject != events.TaskSessionStateChanged {
+			continue
+		}
+		payload, ok := evt.event.Data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		oldState, _ := payload["old_state"].(string)
+		newState, _ := payload["new_state"].(string)
+		sessID, _ := payload["session_id"].(string)
+		if sessID == "session1" && oldState == string(models.TaskSessionStateRunning) && newState == string(models.TaskSessionStateWaitingForInput) {
+			sawRevert = true
+			break
+		}
+	}
+	if !sawRevert {
+		t.Fatalf("expected TaskSessionStateChanged RUNNING→WAITING_FOR_INPUT broadcast after prompt failure, got events: %+v", eb.events)
 	}
 }
 

@@ -11,11 +11,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// isStaleExecutionError checks if an error from LaunchAgent indicates a stale
-// execution in the lifecycle manager's in-memory store. This happens when
-// PrepareTaskSession registered an execution but the agent was never started,
-// or the agent exited without proper cleanup.
-func isStaleExecutionError(err error) bool {
+// isAgentAlreadyRunningError checks whether LaunchAgent refused because the
+// lifecycle manager's in-memory store already has an execution for this session.
+// The error is ambiguous on its own — it fires both when the execution is live
+// (a concurrent resume raced us) and when it is stale (PrepareTaskSession
+// registered an execution but the agent was never started, or the agent exited
+// without proper cleanup). Callers must probe IsAgentRunningForSession to
+// distinguish live from stale before deciding to clean up.
+func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "already has an agent running")
 }
 
@@ -232,11 +235,17 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
-	if err != nil && isStaleExecutionError(err) {
-		// The lifecycle manager's in-memory store has a stale execution (agent not actually
-		// running). This happens when PrepareTaskSession registered an execution but the
-		// agent was never started, or the agent exited without cleanup. Clean up the stale
-		// entry and retry.
+	if err != nil && isAgentAlreadyRunningError(err) {
+		// "already has an agent running" fires both for live executions (a concurrent
+		// resume raced us) and stale ones (agent never started or exited without
+		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
+		// healthy agent mid-prompt.
+		if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID))
+			return nil, ErrExecutionAlreadyRunning
+		}
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
