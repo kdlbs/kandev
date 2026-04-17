@@ -1495,7 +1495,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// want to overwrite that with previousSessionState. Do NOT pass the preloaded
 		// `session` — the wrapper must re-read the row to see any such concurrent
 		// terminal transition; the stale pre-RUNNING snapshot would defeat the guard.
-		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", true)
+		// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
+		// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
+		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
 		if !isTransientPromptError(err) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 		}
