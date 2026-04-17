@@ -49,6 +49,11 @@ temp/
 # Agent session files (local development)
 .augment/
 
+# Isolated kandev home used by `make dev` (see apps/cli/src/dev.ts).
+# Keeps dev backend state (db, tasks, worktrees, repos) out of the user's
+# production ~/.kandev when developing kandev using kandev.
+/.kandev-dev/
+
 # Build artifacts
 dist/
 build/

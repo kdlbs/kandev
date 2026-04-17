@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-import { HEALTH_TIMEOUT_MS_DEV } from "./constants";
+import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
+import { isInsideKandevTask } from "./kandev-env";
 import { createProcessSupervisor } from "./process";
 import {
   attachBackendExitHandler,
@@ -21,14 +22,7 @@ export type DevOptions = {
 
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
-  const dbPath =
-    process.env.KANDEV_DATABASE_PATH || path.join(repoRoot, "apps", "backend", "kandev.db");
-
-  const extra: Record<string, string> = {
-    KANDEV_DATABASE_PATH: dbPath,
-    KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
-    KANDEV_DEBUG_PPROF_ENABLED: "true",
-  };
+  const { dbPath, extra } = resolveDevBackendEnv(repoRoot);
   const backendEnv = buildBackendEnv({ ports, extra });
   const webEnv = buildWebEnv({ ports, debug: true });
   const logLevel =
@@ -71,4 +65,45 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log(`[kandev] web ready at ${webUrl}`);
   openBrowser(webUrl);
+}
+
+type DevBackendEnv = {
+  dbPath: string;
+  extra: Record<string, string>;
+};
+
+// Computes the dev-mode backend env. When invoked from inside a kandev task
+// workspace, force-relocates the entire kandev root to <repo>/.kandev-dev so
+// dev state is isolated from the user's production ~/.kandev. In a normal
+// shell, preserves the existing override-friendly behavior (honor an
+// explicit KANDEV_DATABASE_PATH, otherwise default to a repo-local db).
+function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
+  const baseExtra: Record<string, string> = {
+    KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
+    KANDEV_DEBUG_PPROF_ENABLED: "true",
+  };
+
+  if (isInsideKandevTask(repoRoot)) {
+    const devHome = devKandevHome(repoRoot);
+    const dbPath = path.join(devHome, "data", "kandev.db");
+    console.log("[kandev] task workspace detected → using local dev state");
+    return {
+      dbPath,
+      extra: {
+        ...baseExtra,
+        KANDEV_HOME_DIR: devHome,
+        // Clear any parent-leaked values so the backend uses the derived
+        // HomeDir-based defaults instead.
+        KANDEV_DATA_DIR: "",
+        KANDEV_DATABASE_PATH: "",
+      },
+    };
+  }
+
+  const dbPath =
+    process.env.KANDEV_DATABASE_PATH || path.join(repoRoot, "apps", "backend", "kandev.db");
+  return {
+    dbPath,
+    extra: { ...baseExtra, KANDEV_DATABASE_PATH: dbPath },
+  };
 }
