@@ -77,6 +77,7 @@ type WorkspaceTracker struct {
 	started         bool
 	stopOnce        sync.Once
 	initialScanDone chan struct{}      // closed after monitorLoop's first getWorkspaceState; tests wait on it
+	tickDone        chan struct{}      // buffered(1); signalled after each monitorTick completes; tests wait on it
 	cancelCtx       context.Context    // Cancellable context for killing in-flight git commands on Stop
 	cancelFunc      context.CancelFunc // Cancel function called during Stop
 }
@@ -110,6 +111,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		gitPollModeChanged: make(chan struct{}, 1),
 		stopCh:             make(chan struct{}),
 		initialScanDone:    make(chan struct{}),
+		tickDone:           make(chan struct{}, 1),
 		cancelCtx:          ctx,
 		cancelFunc:         cancel,
 	}

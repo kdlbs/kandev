@@ -3,6 +3,7 @@ package websocket
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -123,51 +124,73 @@ func TestHub_FocusFiresFastImmediately(t *testing.T) {
 }
 
 func TestHub_UnfocusDebouncesDownTransition(t *testing.T) {
-	h := newTestHub(t)
-	rec := newModeRecorder()
-	h.AddSessionModeListener(rec.listener())
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		rec := newModeRecorder()
+		h.AddSessionModeListener(rec.listener())
 
-	c := newTestClient("c1")
-	h.SubscribeToSession(c, "sess-1")
-	h.FocusSession(c, "sess-1")
-	rec.waitForCount(2, time.Second)
+		c := newTestClient("c1")
+		h.SubscribeToSession(c, "sess-1")
+		h.FocusSession(c, "sess-1")
 
-	// Unfocus — should NOT immediately fire slow (debounced). Check the count
-	// synchronously — the debounce timer (50ms in tests) cannot have fired yet
-	// because it runs asynchronously via time.AfterFunc.
-	h.UnfocusSession(c, "sess-1")
-	rec.mu.Lock()
-	gotCount := len(rec.events)
-	rec.mu.Unlock()
-	if gotCount != 2 {
-		t.Errorf("down-transition fired immediately; expected 2 events, got %d (%+v)", gotCount, rec.events)
-	}
+		// Let all goroutines settle so the two synchronous listener calls complete.
+		synctest.Wait()
+
+		rec.mu.Lock()
+		if len(rec.events) != 2 {
+			t.Fatalf("setup: expected 2 events, got %d", len(rec.events))
+		}
+		rec.mu.Unlock()
+
+		// Unfocus — schedules a debounced down-transition timer. synctest's fake
+		// clock doesn't advance until we ask, so the timer cannot fire.
+		h.UnfocusSession(c, "sess-1")
+		synctest.Wait()
+
+		rec.mu.Lock()
+		gotCount := len(rec.events)
+		rec.mu.Unlock()
+		if gotCount != 2 {
+			t.Errorf("down-transition fired immediately; expected 2 events, got %d (%+v)", gotCount, rec.events)
+		}
+	})
 }
 
 func TestHub_RefocusWithinDebounceCancelsDownTransition(t *testing.T) {
-	h := newTestHub(t)
-	rec := newModeRecorder()
-	h.AddSessionModeListener(rec.listener())
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		rec := newModeRecorder()
+		h.AddSessionModeListener(rec.listener())
 
-	c := newTestClient("c1")
-	h.SubscribeToSession(c, "sess-1")
-	h.FocusSession(c, "sess-1")
-	rec.waitForCount(2, time.Second)
+		c := newTestClient("c1")
+		h.SubscribeToSession(c, "sess-1")
+		h.FocusSession(c, "sess-1")
+		synctest.Wait()
 
-	// Unfocus then re-focus quickly — net effect should be zero new events
-	// (we stayed in fast).
-	h.UnfocusSession(c, "sess-1")
-	h.FocusSession(c, "sess-1")
+		rec.mu.Lock()
+		if len(rec.events) != 2 {
+			t.Fatalf("setup: expected 2 events, got %d", len(rec.events))
+		}
+		rec.mu.Unlock()
 
-	// Wait through and beyond the test debounce window (50ms + 200ms margin).
-	time.Sleep(300 * time.Millisecond)
+		// Unfocus then re-focus quickly — net effect should be zero new events
+		// (we stayed in fast). The debounce timer is cancelled by the re-focus.
+		h.UnfocusSession(c, "sess-1")
+		h.FocusSession(c, "sess-1")
+		synctest.Wait()
 
-	rec.mu.Lock()
-	got := len(rec.events)
-	rec.mu.Unlock()
-	if got != 2 {
-		t.Errorf("expected refocus to suppress down-transition; got %d events: %+v", got, rec.events)
-	}
+		// Advance fake clock past the debounce window to prove the timer was
+		// cancelled and won't fire.
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+
+		rec.mu.Lock()
+		got := len(rec.events)
+		rec.mu.Unlock()
+		if got != 2 {
+			t.Errorf("expected refocus to suppress down-transition; got %d events: %+v", got, rec.events)
+		}
+	})
 }
 
 func TestHub_UnsubscribeFromOnlySubscriberFiresPaused(t *testing.T) {
@@ -224,35 +247,39 @@ func TestHub_DisconnectCleansBothMaps(t *testing.T) {
 }
 
 func TestHub_MultipleClientsKeepWorkspaceFast(t *testing.T) {
-	h := newTestHub(t)
-	rec := newModeRecorder()
-	h.AddSessionModeListener(rec.listener())
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHub(t)
+		rec := newModeRecorder()
+		h.AddSessionModeListener(rec.listener())
 
-	c1 := newTestClient("c1")
-	c2 := newTestClient("c2")
+		c1 := newTestClient("c1")
+		c2 := newTestClient("c2")
 
-	h.SubscribeToSession(c1, "sess-1")
-	h.FocusSession(c1, "sess-1")
-	h.SubscribeToSession(c2, "sess-1")
-	h.FocusSession(c2, "sess-1")
+		h.SubscribeToSession(c1, "sess-1")
+		h.FocusSession(c1, "sess-1")
+		h.SubscribeToSession(c2, "sess-1")
+		h.FocusSession(c2, "sess-1")
+		synctest.Wait()
 
-	rec.waitForCount(2, time.Second) // slow then fast
-	rec.mu.Lock()
-	startCount := len(rec.events)
-	rec.mu.Unlock()
+		rec.mu.Lock()
+		startCount := len(rec.events)
+		rec.mu.Unlock()
 
-	// One client unfocuses — the other still has focus, so mode should stay fast.
-	h.UnfocusSession(c1, "sess-1")
+		// One client unfocuses — the other still has focus, so mode should stay fast.
+		h.UnfocusSession(c1, "sess-1")
+		synctest.Wait()
 
-	// Wait through test debounce (50ms + margin). No new event should fire.
-	time.Sleep(300 * time.Millisecond)
+		// Advance fake clock past the debounce window.
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	rec.mu.Lock()
-	got := len(rec.events)
-	rec.mu.Unlock()
-	if got != startCount {
-		t.Errorf("expected no new events while another client still focused; got %d new (events: %+v)", got-startCount, rec.events)
-	}
+		rec.mu.Lock()
+		got := len(rec.events)
+		rec.mu.Unlock()
+		if got != startCount {
+			t.Errorf("expected no new events while another client still focused; got %d new (events: %+v)", got-startCount, rec.events)
+		}
+	})
 }
 
 func TestIsUpTransition(t *testing.T) {

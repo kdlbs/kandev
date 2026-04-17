@@ -209,6 +209,51 @@ func TestAggregator_RedundantEventDoesNotRepush(t *testing.T) {
 	}
 }
 
+// mockSessionModeQuerier is a test double for SessionModeQuerier that returns
+// a fixed mode for any session ID.
+type mockSessionModeQuerier struct {
+	mode WorkspacePollMode
+}
+
+func (m *mockSessionModeQuerier) GetSessionMode(_ string) WorkspacePollMode {
+	return m.mode
+}
+
+func TestAggregator_FlushSessionMode_QueriesHubWhenWired(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+
+	// Wire a mock hub that always reports fast.
+	mock := &mockSessionModeQuerier{mode: WorkspacePollModeFast}
+	mgr.SetSessionModeQuerier(mock)
+
+	// Gateway sends focus BEFORE execution exists — cached but not pushed.
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeSlow)
+
+	mgr.pollAggregator.mu.Lock()
+	_, pushedBeforeReady := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if pushedBeforeReady {
+		t.Fatal("expected no lastPushed entry before execution exists")
+	}
+
+	// Execution becomes ready — FlushSessionMode should query the hub (fast),
+	// not use the cached value (slow).
+	addExecution(mgr, "s1", "/tmp/ws1")
+	mgr.pollAggregator.FlushSessionMode("s1")
+
+	mgr.pollAggregator.mu.Lock()
+	got := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	cachedMode := mgr.pollAggregator.sessionModes["s1"]
+	mgr.pollAggregator.mu.Unlock()
+
+	if got != WorkspacePollModeFast {
+		t.Errorf("FlushSessionMode should use hub-queried mode; lastPushed = %q, want fast", got)
+	}
+	if cachedMode != WorkspacePollModeFast {
+		t.Errorf("FlushSessionMode should update sessionModes to hub-queried mode; got %q, want fast", cachedMode)
+	}
+}
+
 // TestAggregator_ConcurrentEvents asserts no races. We don't assert ordering
 // — only that the aggregator survives concurrent calls without data races
 // (run with -race).

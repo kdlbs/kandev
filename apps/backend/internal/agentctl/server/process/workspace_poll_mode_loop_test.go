@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,19 +11,25 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
-// waitForMonitorIdle waits until the monitorRunning CAS flag is 0 (no tick in
-// progress), with a 5-second deadline. Fails the test if the tick is still
-// running at the deadline — avoids infinite spin if git blocks.
+// waitForMonitorIdle waits for the current monitorTick to complete by reading
+// the tickDone channel. Falls back to checking the atomic flag if no tick is
+// in progress. Fails the test after 5 seconds to avoid hanging on stuck git.
 func waitForMonitorIdle(t *testing.T, wt *WorkspaceTracker) {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for atomic.LoadInt32(&wt.monitorRunning) != 0 {
-		select {
-		case <-deadline:
-			t.Fatal("waitForMonitorIdle: monitorRunning still 1 after 5s — tick may be stuck")
-		default:
-			runtime.Gosched()
-		}
+	// Drain any stale signal from a previous tick so we don't return early
+	// on a buffered value that doesn't correspond to the current tick.
+	select {
+	case <-wt.tickDone:
+	default:
+	}
+	// Re-check: if no tick is in progress, we're done.
+	if atomic.LoadInt32(&wt.monitorRunning) == 0 {
+		return
+	}
+	select {
+	case <-wt.tickDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForMonitorIdle: tick did not complete within 5s")
 	}
 }
 

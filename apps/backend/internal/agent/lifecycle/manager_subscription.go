@@ -57,14 +57,19 @@ type workspacePollAggregator struct {
 	// lastPushed maps workspacePath -> last mode we sent to agentctl. Used to
 	// suppress duplicate pushes when workspace-level mode is unchanged.
 	lastPushed map[string]WorkspacePollMode
+	// workspaceSessions is a reverse index: workspacePath -> set of sessionIDs
+	// known to belong to that workspace. Lets recordAndCompute iterate only
+	// sessions in the affected workspace instead of scanning all sessionModes.
+	workspaceSessions map[string]map[string]bool
 }
 
 // newWorkspacePollAggregator wires an aggregator to the lifecycle manager.
 func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 	return &workspacePollAggregator{
-		mgr:          mgr,
-		sessionModes: make(map[string]WorkspacePollMode),
-		lastPushed:   make(map[string]WorkspacePollMode),
+		mgr:               mgr,
+		sessionModes:      make(map[string]WorkspacePollMode),
+		lastPushed:        make(map[string]WorkspacePollMode),
+		workspaceSessions: make(map[string]map[string]bool),
 	}
 }
 
@@ -116,28 +121,31 @@ func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode Works
 // doesn't grow unbounded over a long-running gateway. Same for lastPushed
 // when the workspace itself becomes paused.
 func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode WorkspacePollMode, workspacePath string) (string, WorkspacePollMode, bool) {
-	// Lock order: a.mu -> executionStore.mu (via GetExecutionBySessionID).
-	// Do not acquire a.mu while holding executionStore.mu.
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Update per-session mode and the reverse index.
 	if mode == WorkspacePollModePaused {
 		delete(a.sessionModes, sessionID)
+		if sessions := a.workspaceSessions[workspacePath]; sessions != nil {
+			delete(sessions, sessionID)
+			if len(sessions) == 0 {
+				delete(a.workspaceSessions, workspacePath)
+			}
+		}
 	} else {
 		a.sessionModes[sessionID] = mode
+		if a.workspaceSessions[workspacePath] == nil {
+			a.workspaceSessions[workspacePath] = make(map[string]bool)
+		}
+		a.workspaceSessions[workspacePath][sessionID] = true
 	}
 
+	// Compute effective mode using only sessions in this workspace (O(k)
+	// where k = sessions in workspace, not O(N) total sessions).
 	effective := WorkspacePollModePaused
-	for sid, m := range a.sessionModes {
-		// Filter by workspace: only sessions in this workspace count toward
-		// its effective mode. Sessions in other workspaces are tracked too
-		// (in case the gateway races ahead of execution creation), but they
-		// don't influence this workspace's polling rate.
-		exec, ok := a.mgr.GetExecutionBySessionID(sid)
-		if !ok || exec.WorkspacePath != workspacePath {
-			continue
-		}
-		if m.rank() > effective.rank() {
+	for sid := range a.workspaceSessions[workspacePath] {
+		if m, ok := a.sessionModes[sid]; ok && m.rank() > effective.rank() {
 			effective = m
 		}
 	}
@@ -204,9 +212,18 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 	// This closes the race where gateway events fired before the execution
 	// was registered (nothing cached) or while agentctl was still starting
 	// up (the RPC fired but connection-refused).
+	//
+	// Read hubQry under a.mu so the race detector doesn't flag the
+	// concurrent write in SetSessionModeQuerier. Copy to a local and
+	// release a.mu before calling into the hub (which acquires its own
+	// locks — holding a.mu across the call could invert lock order).
+	a.mu.Lock()
+	qry := a.hubQry
+	a.mu.Unlock()
+
 	var sessionMode WorkspacePollMode
-	if a.hubQry != nil {
-		sessionMode = a.hubQry.GetSessionMode(sessionID)
+	if qry != nil {
+		sessionMode = qry.GetSessionMode(sessionID)
 	} else {
 		// Fall back to cached value if no hub wired (e.g., tests).
 		a.mu.Lock()
@@ -221,26 +238,33 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 	a.mu.Lock()
 	// Merge the queried mode with whatever we had cached, then recompute
 	// the workspace-level effective mode across all sessions in this
-	// workspace.
+	// workspace. Maintain the reverse index alongside sessionModes.
+	wp := execution.WorkspacePath
 	if sessionMode == WorkspacePollModePaused {
 		delete(a.sessionModes, sessionID)
+		if sessions := a.workspaceSessions[wp]; sessions != nil {
+			delete(sessions, sessionID)
+			if len(sessions) == 0 {
+				delete(a.workspaceSessions, wp)
+			}
+		}
 	} else {
 		a.sessionModes[sessionID] = sessionMode
+		if a.workspaceSessions[wp] == nil {
+			a.workspaceSessions[wp] = make(map[string]bool)
+		}
+		a.workspaceSessions[wp][sessionID] = true
 	}
 	effective := WorkspacePollModePaused
-	for sid, m := range a.sessionModes {
-		exec, ok := a.mgr.GetExecutionBySessionID(sid)
-		if !ok || exec.WorkspacePath != execution.WorkspacePath {
-			continue
-		}
-		if m.rank() > effective.rank() {
+	for sid := range a.workspaceSessions[wp] {
+		if m, ok := a.sessionModes[sid]; ok && m.rank() > effective.rank() {
 			effective = m
 		}
 	}
 	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, execution.WorkspacePath)
+		delete(a.lastPushed, wp)
 	} else {
-		a.lastPushed[execution.WorkspacePath] = effective
+		a.lastPushed[wp] = effective
 	}
 	a.mu.Unlock()
 
@@ -253,6 +277,8 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 // query the hub's live session mode state.
 func (m *Manager) SetSessionModeQuerier(q SessionModeQuerier) {
 	if m.pollAggregator != nil {
+		m.pollAggregator.mu.Lock()
 		m.pollAggregator.hubQry = q
+		m.pollAggregator.mu.Unlock()
 	}
 }

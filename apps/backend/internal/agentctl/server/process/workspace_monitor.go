@@ -150,7 +150,15 @@ func (wt *WorkspaceTracker) handleMonitorTimerTick(ctx context.Context, lastStat
 // updates if changes are detected. Returns true if the loop should stop.
 // The deferred flag reset ensures monitorRunning is cleared even on panic.
 func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
-	defer atomic.StoreInt32(&wt.monitorRunning, 0)
+	defer func() {
+		atomic.StoreInt32(&wt.monitorRunning, 0)
+		// Signal that the tick completed — tests wait on this instead of
+		// spinning on the monitorRunning atomic flag.
+		select {
+		case wt.tickDone <- struct{}{}:
+		default:
+		}
+	}()
 
 	currentState, err := wt.getWorkspaceState(ctx)
 	if err != nil {
