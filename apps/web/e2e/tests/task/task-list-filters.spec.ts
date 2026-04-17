@@ -3,8 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import type { WorkflowStep } from "../../../lib/types/http";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
+
+function findStartStep(steps: WorkflowStep[]): WorkflowStep {
+  return steps.find((s) => s.is_start_step) ?? steps[0];
+}
 
 async function gotoTasksPage(page: Page): Promise<void> {
   await page.goto("/tasks");
@@ -85,13 +90,9 @@ test.describe("Task list display filters", () => {
     apiClient,
     seedData,
   }) => {
-    const workflowB = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Workflow B",
-      "simple",
-    );
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
-    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
+    const startB = findStartStep(stepsB);
 
     await apiClient.createTask(seedData.workspaceId, "Alpha task", {
       workflow_id: seedData.workflowId,
@@ -119,13 +120,9 @@ test.describe("Task list display filters", () => {
     apiClient,
     seedData,
   }) => {
-    const workflowB = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Workflow B",
-      "simple",
-    );
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
-    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
+    const startB = findStartStep(stepsB);
 
     await apiClient.createTask(seedData.workspaceId, "Alpha task", {
       workflow_id: seedData.workflowId,
@@ -240,13 +237,9 @@ test.describe("Task list display filters", () => {
     seedData,
     backend,
   }) => {
-    const workflowB = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Workflow B",
-      "simple",
-    );
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
-    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
+    const startB = findStartStep(stepsB);
     const repoName = "Repo Filter T5";
     const repoPath = await createLocalRepo(backend.tmpDir, "e2e-repo-filter-t5");
     const otherRepo = await apiClient.createRepository(seedData.workspaceId, repoPath, "main", {
