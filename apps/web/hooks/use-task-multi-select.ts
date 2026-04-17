@@ -194,14 +194,19 @@ type MultiSelectAction =
   | { type: "set_deleting"; value: boolean }
   | { type: "set_archiving"; value: boolean };
 
-const INITIAL_STATE: MultiSelectState = {
+/** @internal Exported for testing. */
+export const INITIAL_STATE: MultiSelectState = {
   selectedIds: new Set(),
   isMultiSelectEnabled: false,
   isDeleting: false,
   isArchiving: false,
 };
 
-function multiSelectReducer(state: MultiSelectState, action: MultiSelectAction): MultiSelectState {
+/** @internal Exported for testing. */
+export function multiSelectReducer(
+  state: MultiSelectState,
+  action: MultiSelectAction,
+): MultiSelectState {
   switch (action.type) {
     case "reset":
       return INITIAL_STATE;
