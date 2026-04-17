@@ -223,7 +223,8 @@ describe("addFileEditorPanel — preview behavior", () => {
 
     actions.addFileEditorPanel(PATH_A, NAME_A);
 
-    // Same preview panel, params identity preserved (no updateParameters call)
+    // Same preview panel — updateParameters mutates params in-place (Object.assign),
+    // so the reference is unchanged even after the call.
     expect(api.getPanel(PREVIEW_FILE_ID)).toBe(preview as unknown);
     expect(preview.params).toBe(originalParamsRef);
     expect(preview.isActive).toBe(true);
