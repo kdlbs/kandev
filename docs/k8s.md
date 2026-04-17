@@ -92,6 +92,8 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | auto | Log format: `json` (auto-detected in K8s) or `text` |
 
+> **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` / `KANDEV_WORKTREE_BASEPATH` are gone — point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. Either migrate the DB in place (exec into a pod with the PV mounted: `mkdir -p /data/data && mv /data/kandev.db /data/data/kandev.db`) or pin the DB to its old location via `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
+
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 
 | Env Var | Default | Description |
