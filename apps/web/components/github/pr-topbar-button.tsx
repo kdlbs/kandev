@@ -6,7 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { getPRStatusColor } from "@/components/github/pr-task-icon";
+import { getPRStatusColor, isPRReadyToMerge } from "@/components/github/pr-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -21,6 +21,9 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   // Review/check states only matter for open PRs
   if (pr.checks_state === "failure" || pr.review_state === "changes_requested") {
     return <IconX className="h-3 w-3 text-red-500" />;
+  }
+  if (isPRReadyToMerge(pr)) {
+    return <IconCheck className="h-3 w-3 text-emerald-400" />;
   }
   if (pr.checks_state === "success" && pr.review_state === "approved") {
     return <IconCheck className="h-3 w-3 text-green-500" />;
@@ -45,6 +48,8 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
       <TooltipTrigger asChild>
         <Button
           data-testid="pr-topbar-button"
+          data-pr-state={pr.state}
+          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           size="sm"
           variant="outline"
           className="cursor-pointer gap-1.5 px-2"

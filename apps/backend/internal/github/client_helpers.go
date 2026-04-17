@@ -93,6 +93,7 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 		PR:                 pr,
 		ReviewState:        reviewState,
 		ChecksState:        computeOverallCheckStatus(checks),
+		MergeableState:     pr.MergeableState,
 		ReviewCount:        len(reviews),
 		PendingReviewCount: pendingReviewCount,
 	}, nil

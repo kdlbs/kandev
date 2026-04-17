@@ -59,6 +59,7 @@ const createTablesSQL = `
 		state TEXT NOT NULL DEFAULT 'open',
 		review_state TEXT NOT NULL DEFAULT '',
 		checks_state TEXT NOT NULL DEFAULT '',
+		mergeable_state TEXT NOT NULL DEFAULT '',
 		review_count INTEGER DEFAULT 0,
 		pending_review_count INTEGER DEFAULT 0,
 		comment_count INTEGER DEFAULT 0,
@@ -109,6 +110,7 @@ func (s *Store) initSchema() error {
 	}
 	// Idempotent migrations for existing databases.
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -211,11 +213,11 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO github_task_prs (id, task_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, review_count, pending_review_count, comment_count, additions, deletions,
+			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.TaskID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt)
 	return err
 }
@@ -290,11 +292,11 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO github_task_prs (id, task_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, review_count, pending_review_count, comment_count, additions, deletions,
+			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.TaskID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
 		return err
 	}
@@ -305,12 +307,12 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?,
+		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
 			review_count = ?, pending_review_count = ?, comment_count = ?,
 			additions = ?, deletions = ?, pr_title = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
 		WHERE id = ?`,
-		tp.State, tp.ReviewState, tp.ChecksState,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount,
 		tp.Additions, tp.Deletions, tp.PRTitle,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)

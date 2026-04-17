@@ -89,24 +89,25 @@ type ghRequestedReviewer struct {
 
 // ghPR is the JSON shape returned by gh pr list/view.
 type ghPR struct {
-	Number         int                   `json:"number"`
-	Title          string                `json:"title"`
-	URL            string                `json:"url"`
-	State          string                `json:"state"`
-	Body           string                `json:"body"`
-	HeadRefName    string                `json:"headRefName"`
-	HeadRefOid     string                `json:"headRefOid"`
-	BaseRefName    string                `json:"baseRefName"`
-	IsDraft        bool                  `json:"isDraft"`
-	Mergeable      string                `json:"mergeable"`
-	Additions      int                   `json:"additions"`
-	Deletions      int                   `json:"deletions"`
-	CreatedAt      time.Time             `json:"createdAt"`
-	UpdatedAt      time.Time             `json:"updatedAt"`
-	MergedAt       string                `json:"mergedAt"`
-	ClosedAt       string                `json:"closedAt"`
-	ReviewRequests []ghRequestedReviewer `json:"reviewRequests"`
-	Author         struct {
+	Number           int                   `json:"number"`
+	Title            string                `json:"title"`
+	URL              string                `json:"url"`
+	State            string                `json:"state"`
+	Body             string                `json:"body"`
+	HeadRefName      string                `json:"headRefName"`
+	HeadRefOid       string                `json:"headRefOid"`
+	BaseRefName      string                `json:"baseRefName"`
+	IsDraft          bool                  `json:"isDraft"`
+	Mergeable        string                `json:"mergeable"`
+	MergeStateStatus string                `json:"mergeStateStatus"`
+	Additions        int                   `json:"additions"`
+	Deletions        int                   `json:"deletions"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
+	MergedAt         string                `json:"mergedAt"`
+	ClosedAt         string                `json:"closedAt"`
+	ReviewRequests   []ghRequestedReviewer `json:"reviewRequests"`
+	Author           struct {
 		Login string `json:"login"`
 	} `json:"author"`
 }
@@ -114,7 +115,7 @@ type ghPR struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
 	if err != nil {
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
@@ -130,7 +131,7 @@ func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch strin
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--head", branch,
 		"--state", "open",
-		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt",
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt",
 		"--limit", "1")
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
@@ -150,7 +151,7 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--author", "@me",
 		"--state", "open",
-		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt")
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt")
 	if err != nil {
 		return nil, fmt.Errorf("list authored PRs: %w", err)
 	}
@@ -511,6 +512,7 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		RepoName:           repo,
 		Draft:              raw.IsDraft,
 		Mergeable:          raw.Mergeable == "MERGEABLE",
+		MergeableState:     strings.ToLower(raw.MergeStateStatus),
 		Additions:          raw.Additions,
 		Deletions:          raw.Deletions,
 		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),

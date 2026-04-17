@@ -77,6 +77,11 @@ func (s *Service) TestStore() *Store {
 	return s.store
 }
 
+// TestEventBus returns the event bus for test/mock use only.
+func (s *Service) TestEventBus() bus.EventBus {
+	return s.eventBus
+}
+
 // IsAuthenticated returns whether the service has a working GitHub client.
 // Returns false when using the NoopClient fallback (authMethod == "none").
 func (s *Service) IsAuthenticated() bool {
@@ -475,6 +480,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.Deletions != status.PR.Deletions ||
 		tp.ReviewState != status.ReviewState ||
 		tp.ChecksState != status.ChecksState ||
+		tp.MergeableState != status.MergeableState ||
 		tp.ReviewCount != status.ReviewCount ||
 		tp.PendingReviewCount != status.PendingReviewCount ||
 		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
@@ -488,6 +494,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ClosedAt = status.PR.ClosedAt
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
+	tp.MergeableState = status.MergeableState
 	tp.ReviewCount = status.ReviewCount
 	tp.PendingReviewCount = status.PendingReviewCount
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
@@ -1152,23 +1159,38 @@ func findLatestCommentTime(comments []PRComment) *time.Time {
 	return latest
 }
 
+// computeOverallCheckStatus reduces per-check runs to a single PR-level status.
+// Mirrors GitHub's own UI: skipped/neutral conclusions are ignored; any failing
+// terminal state (failure, timed_out, cancelled, action_required) makes the PR
+// failed; non-completed checks keep the PR pending.
 func computeOverallCheckStatus(checks []CheckRun) string {
 	if len(checks) == 0 {
 		return ""
 	}
 	hasPending := false
+	hasPassing := false
 	for _, c := range checks {
-		if c.Status == checkStatusCompleted && c.Conclusion == checkConclusionFail {
-			return checkConclusionFail
-		}
 		if c.Status != checkStatusCompleted {
 			hasPending = true
+			continue
+		}
+		switch c.Conclusion {
+		case checkConclusionFail, checkConclusionTimedOut,
+			checkConclusionCancelled, checkConclusionActionRequired:
+			return checkConclusionFail
+		case checkConclusionSkipped, checkConclusionNeutral:
+			// ignore — GitHub's UI does
+		case checkConclusionSuccess:
+			hasPassing = true
 		}
 	}
 	if hasPending {
 		return checkStatusPending
 	}
-	return checkStatusSuccess
+	if hasPassing {
+		return checkStatusSuccess
+	}
+	return ""
 }
 
 func computeOverallReviewState(reviews []PRReview) string {

@@ -184,6 +184,37 @@ func TestConvertGHPR_NotMergeable(t *testing.T) {
 	}
 }
 
+func TestConvertGHPR_MergeStateStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		rawEnum string
+		want    string
+	}{
+		{"clean", "CLEAN", "clean"},
+		{"blocked", "BLOCKED", "blocked"},
+		{"dirty", "DIRTY", "dirty"},
+		{"behind", "BEHIND", "behind"},
+		{"unknown", "UNKNOWN", "unknown"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := &ghPR{
+				Number:           1,
+				State:            "OPEN",
+				MergeStateStatus: tt.rawEnum,
+				Author: struct {
+					Login string `json:"login"`
+				}{Login: "alice"},
+			}
+			pr := convertGHPR(raw, "owner", "repo")
+			if pr.MergeableState != tt.want {
+				t.Errorf("MergeableState = %q, want %q", pr.MergeableState, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertGHRequestedReviewers(t *testing.T) {
 	raw := []ghRequestedReviewer{
 		{TypeName: "User", Login: "alice"},

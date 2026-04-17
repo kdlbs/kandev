@@ -26,7 +26,14 @@ const (
 	checkStatusCompleted = "completed"
 	checkStatusPending   = "pending"
 	checkStatusSuccess   = "success"
-	checkConclusionFail  = "failure"
+
+	checkConclusionSuccess        = "success"
+	checkConclusionFail           = "failure"
+	checkConclusionSkipped        = "skipped"
+	checkConclusionNeutral        = "neutral"
+	checkConclusionCancelled      = "cancelled"
+	checkConclusionTimedOut       = "timed_out"
+	checkConclusionActionRequired = "action_required"
 )
 
 // Check source identifiers.

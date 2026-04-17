@@ -6,11 +6,23 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
+export function isPRReadyToMerge(pr: TaskPR): boolean {
+  return (
+    pr.state === "open" &&
+    pr.checks_state === "success" &&
+    pr.review_state === "approved" &&
+    pr.mergeable_state === "clean"
+  );
+}
+
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return "text-purple-500";
   if (pr.state === "closed") return "text-red-500";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return "text-red-500";
+  }
+  if (isPRReadyToMerge(pr)) {
+    return "text-emerald-400";
   }
   if (pr.review_state === "approved" && pr.checks_state === "success") {
     return "text-green-500";
@@ -21,11 +33,16 @@ export function getPRStatusColor(pr: TaskPR): string {
   return "text-muted-foreground";
 }
 
-function getPRTooltip(pr: TaskPR): string {
+export function getPRTooltip(pr: TaskPR): string {
   const parts = [`PR #${pr.pr_number}: ${pr.pr_title}`];
   if (pr.state !== "open") parts.push(`State: ${pr.state}`);
   if (pr.review_state) parts.push(`Review: ${pr.review_state}`);
   if (pr.checks_state) parts.push(`CI: ${pr.checks_state}`);
+  if (isPRReadyToMerge(pr)) {
+    parts.push("Ready to merge");
+  } else if (pr.mergeable_state && pr.mergeable_state !== "unknown" && pr.state === "open") {
+    parts.push(`Mergeable: ${pr.mergeable_state}`);
+  }
   return parts.join(" | ");
 }
 
@@ -40,6 +57,7 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
         <span
           data-testid={`pr-task-icon-${taskId}`}
           data-pr-state={pr.state}
+          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
         >
           <IconGitPullRequest className="h-3.5 w-3.5" />
