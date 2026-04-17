@@ -82,9 +82,27 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
           }));
           const stepIds = new Set(steps.map((s) => s.id));
 
+          // Preserve runtime fields (e.g., primarySessionId) from existing
+          // snapshot tasks when the fresh API response omits them. The backend
+          // uses omitempty for session fields, so a task whose session was just
+          // created may not have primary_session_id in the snapshot response
+          // yet, even though a WS task.updated event already delivered it.
+          const existingSnapshot = store.getState().kanbanMulti.snapshots[wf.id];
+          const existingById = new Map((existingSnapshot?.tasks ?? []).map((t) => [t.id, t]));
+
           const tasks: KanbanTask[] = snapshot.tasks
             .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
-            .map((task) => mapSnapshotTask(task, stepIds))
+            .map((task) => {
+              const mapped = mapSnapshotTask(task, stepIds);
+              if (!mapped) return null;
+              const existing = existingById.get(mapped.id);
+              if (existing) {
+                mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
+                mapped.primarySessionState =
+                  mapped.primarySessionState || existing.primarySessionState;
+              }
+              return mapped;
+            })
             .filter((t): t is KanbanTask => t !== null);
 
           setWorkflowSnapshot(wf.id, {

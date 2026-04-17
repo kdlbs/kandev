@@ -8,7 +8,7 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 type KanbanTask = KanbanState["tasks"][number];
 
 function withFallback<T>(value: T | null | undefined, fallback: T | undefined): T | undefined {
-  return value ?? fallback;
+  return value || fallback;
 }
 
 function buildNullableFields(
