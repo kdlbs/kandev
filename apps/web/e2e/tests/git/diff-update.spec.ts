@@ -212,11 +212,7 @@ test.describe("Diff update on file change", () => {
     apiClient,
     seedData,
   }) => {
-    // Regression: when a file has BOTH a committed version and an uncommitted
-    // diff, clicking the hunk-level Undo button reverts the unstaged change.
-    // The file must disappear from the right Changes panel AND the
-    // `Diff [filename]` center tab must auto-close, because the tab's reason
-    // for existence (an uncommitted diff for that file) is gone.
+    // Regression: Undo must close the diff tab even when PR/cumulative diffs keep the file visible.
     await seedDiffUpdateTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
@@ -224,17 +220,13 @@ test.describe("Diff update on file change", () => {
     const diffTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
     await expect(diffTab).toBeVisible({ timeout: 10_000 });
 
-    // Confirm the diff content loaded before interacting.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
 
-    // The Undo button lives inside `[data-undo-btn]` wrappers with
-    // `opacity: 0; pointer-events: none` until a change line is hovered.
-    // `dispatchEvent('click')` fires the React click handler without relying
-    // on the hover/pointer-events state.
+    // Button is CSS-hidden until hover; dispatchEvent bypasses pointer-events:none.
     const undoBtn = diffsContainer.locator("[data-undo-btn] button").first();
     await expect(undoBtn).toHaveCount(1, { timeout: 10_000 });
     await undoBtn.dispatchEvent("click");
