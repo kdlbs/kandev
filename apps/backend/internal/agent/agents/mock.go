@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"os/exec"
 	"time"
 
@@ -92,7 +93,14 @@ func (a *MockAgent) IsInstalled(_ context.Context) (*DiscoveryResult, error) {
 	}
 	path, err := exec.LookPath(binary)
 	if err != nil {
-		return &DiscoveryResult{Available: false}, nil
+		// Only "not found" is a normal state. Propagate other errors
+		// (permission denied, malformed PATH component) so bootstrapAgent
+		// surfaces them in the StatusNotInstalled Error field instead of
+		// silently masking the real cause.
+		if errors.Is(err, exec.ErrNotFound) {
+			return &DiscoveryResult{Available: false}, nil
+		}
+		return nil, err
 	}
 	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP, MatchedPath: path}, nil
 }
