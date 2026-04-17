@@ -32,7 +32,7 @@ test.describe("Agent profile mode propagates to new task", () => {
       .flatMap((a) => a.profiles)
       .find((p) => p.id === seedData.agentProfileId);
     if (!originalProfile) throw new Error("seed agent profile not found");
-    const originalMode = originalProfile.mode ?? "";
+    const originalMode = originalProfile.mode;
 
     try {
       // 1. Set the profile's default mode to a non-default advertised mode.
@@ -91,7 +91,12 @@ test.describe("Agent profile mode propagates to new task", () => {
         .toBe(targetMode);
     } finally {
       // Restore the seed profile so the worker-scoped fixture stays valid.
-      await apiClient.updateAgentProfile(seedData.agentProfileId, { mode: originalMode });
+      // Omit `mode` entirely if it wasn't set before, so the backend keeps
+      // its original (possibly absent) value rather than an explicit "".
+      await apiClient.updateAgentProfile(
+        seedData.agentProfileId,
+        originalMode !== undefined ? { mode: originalMode } : {},
+      );
     }
   });
 });
