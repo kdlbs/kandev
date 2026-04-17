@@ -106,6 +106,25 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
   }
 }
 
+/**
+ * Returns true when a file-mode diff panel should auto-close because its file
+ * no longer has an uncommitted diff. File-mode diff tabs are only opened from
+ * the Changes panel's uncommitted file list, so losing that entry means the
+ * tab's reason for existence is gone — even if the file still appears in
+ * cumulative or PR diffs.
+ *
+ * Returns false while `gitStatus` is undefined to avoid a false-close during
+ * initial load.
+ */
+export function shouldCloseFileDiffPanel(
+  gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
+  filePath: string,
+): boolean {
+  if (!gitStatus) return false;
+  const entry = gitStatus.files?.[filePath];
+  return !entry?.diff;
+}
+
 /** Merge PR + uncommitted + committed files into a single sorted list */
 function mergeReviewFiles(
   gitStatus: ReturnType<typeof useSessionGitStatus>,
@@ -208,6 +227,7 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
     totalCommentCount,
     fileRefs,
     cumulativeLoading,
+    gitStatus,
   };
 }
 
@@ -326,6 +346,40 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
   };
 }
 
+function useAutoCloseWhenEmpty(opts: {
+  mode: "all" | "file";
+  filePath: string | undefined;
+  gitStatus: { files?: Record<string, { diff?: string }> } | undefined;
+  visibleCount: number;
+  onBecameEmpty: (() => void) | undefined;
+}) {
+  const { mode, filePath, gitStatus, visibleCount, onBecameEmpty } = opts;
+  const prevVisibleCountRef = useRef<number | null>(null);
+  const prevFileSeenRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!onBecameEmpty) return;
+
+    if (mode === "file" && filePath) {
+      // File-mode: close when the file no longer has an uncommitted diff,
+      // regardless of whether it still appears in PR/cumulative diff sources.
+      const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
+      if (prevFileSeenRef.current && shouldClose) {
+        onBecameEmpty();
+        return;
+      }
+      if (!shouldClose) prevFileSeenRef.current = true;
+      return;
+    }
+
+    const prevCount = prevVisibleCountRef.current;
+    if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
+      onBecameEmpty();
+    }
+    prevVisibleCountRef.current = visibleCount;
+  }, [mode, filePath, gitStatus, onBecameEmpty, visibleCount]);
+}
+
 const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
@@ -346,6 +400,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     totalCommentCount,
     fileRefs,
     cumulativeLoading,
+    gitStatus,
   } = useChangesData(selectedDiff, onClearSelected);
   const visibleFiles = useMemo(() => {
     if (mode === "file" && filePath) {
@@ -382,16 +437,13 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   );
   const totalCount = visibleFiles.length;
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
-  const prevVisibleCountRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!onBecameEmpty) return;
-    const prevCount = prevVisibleCountRef.current;
-    if (prevCount !== null && prevCount > 0 && visibleFiles.length === 0) {
-      onBecameEmpty();
-    }
-    prevVisibleCountRef.current = visibleFiles.length;
-  }, [onBecameEmpty, visibleFiles.length]);
+  useAutoCloseWhenEmpty({
+    mode,
+    filePath,
+    gitStatus,
+    visibleCount: visibleFiles.length,
+    onBecameEmpty,
+  });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
