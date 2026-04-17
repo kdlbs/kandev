@@ -55,11 +55,12 @@ export function DiscardDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard changes?</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogDescription className="break-words">
             {description ?? (
               <>
                 This will permanently discard all changes to{" "}
-                <span className="font-semibold">{displayFile}</span>. This action cannot be undone.
+                <span className="font-semibold [overflow-wrap:anywhere]">{displayFile}</span>. This
+                action cannot be undone.
               </>
             )}
           </AlertDialogDescription>
