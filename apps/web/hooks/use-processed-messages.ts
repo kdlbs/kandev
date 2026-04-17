@@ -133,6 +133,27 @@ function deduplicateRecoveryMessages(messages: Message[]): Message[] {
   });
 }
 
+export function isAgentBootResumeMessage(message: Message): boolean {
+  if (message.type !== "script_execution") return false;
+  const meta = message.metadata as { script_type?: string; is_resuming?: boolean } | undefined;
+  return meta?.script_type === "agent_boot" && meta?.is_resuming === true;
+}
+
+/** A resumed session may produce many "Resumed agent …" boot messages over its
+ *  lifetime (every backend restart emits one). They all convey the same info;
+ *  keep only the most recent and drop the rest. */
+export function deduplicateAgentBootResumes(messages: Message[]): Message[] {
+  let lastResumeIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isAgentBootResumeMessage(messages[i])) {
+      lastResumeIdx = i;
+      break;
+    }
+  }
+  if (lastResumeIdx === -1) return messages;
+  return messages.filter((msg, i) => !isAgentBootResumeMessage(msg) || i === lastResumeIdx);
+}
+
 function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
@@ -154,7 +175,7 @@ function filterVisibleMessages(
     return false;
   });
 
-  return deduplicateRecoveryMessages(filtered);
+  return deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered));
 }
 
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {
