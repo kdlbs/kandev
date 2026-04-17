@@ -36,15 +36,42 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Run Claude Code Review
-        id: claude-review
+      - name: Run Claude Code Review (same-repo, App token for inline comments)
+        id: claude-review-app
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # No github_token: the action performs the OIDC -> installation-token
+          # exchange via the Claude GitHub App, which authors comments as
+          # claude[bot] and can post a real GitHub Review with inline threads.
+          track_progress: true
+          allowed_bots: "*"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Follow the instructions in `.agents/skills/code-review/SKILL.md` to review this PR.
+            The PR branch is already checked out in the current working directory.
+
+            Use `gh pr comment` for the findings report (step 4 output format).
+            Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for inline findings.
+            Only post GitHub comments - don't output review text as messages.
+
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      - name: Run Claude Code Review (fork fallback, GITHUB_TOKEN)
+        id: claude-review-fork
+        if: github.event.pull_request.head.repo.full_name != github.repository
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Skip the Claude GitHub App's OIDC -> installation-token exchange,
           # which 401s on pull_request_target from forks. GITHUB_TOKEN inherits
           # pull-requests: write from the permissions block above, which is
-          # enough for the action to post review comments.
+          # enough for the action to post review comments. Author will be
+          # github-actions[bot] on this path.
           github_token: ${{ secrets.GITHUB_TOKEN }}
           track_progress: true
           allowed_bots: "*"
