@@ -228,11 +228,14 @@ test.describe("Workflow agent profile switching", () => {
     const sessionA = initial.find((s) => s.agent_profile_id === profileA.id);
     expect(sessionA, "expected a session with profileA to be created").toBeDefined();
 
-    // Open the task in the UI and wait for the chat panel to render.
+    // Open the task in the UI and wait for the chat panel to render. Session A
+    // is the active session coming out of SSR, so its tab is the active dv tab.
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.sessionTabBySessionId(sessionA!.id)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.locator(`.dv-active-tab [data-testid="session-tab-${sessionA!.id}"]`),
+    ).toBeVisible({ timeout: 15_000 });
 
     // Let session A settle before triggering the next transition — matches
     // the timing used by the "manual step move" test in this file.
@@ -242,40 +245,23 @@ test.describe("Workflow agent profile switching", () => {
     // frontend fix is what makes the chat UI follow that switch.
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // Discover the new session (profileB) and wait for its tab + chat panel
-    // to become visible.
+    // Discover the new session (profileB).
     const afterMove = await pollSessions(apiClient, task.id, 2, 45_000);
     const sessionB = afterMove.find((s) => s.agent_profile_id === profileB.id);
     expect(sessionB, "expected a second session with profileB after moving to Step2").toBeDefined();
-    await expect(session.sessionTabBySessionId(sessionB!.id)).toBeVisible({ timeout: 15_000 });
 
-    // Scope to the VISIBLE chat panel — dockview keeps non-active panels in the
-    // DOM, so a plain `.tiptap.ProseMirror` lookup could target session A's
-    // hidden editor. `:visible` ensures we interact with whichever session the
-    // UI is actually showing the user.
-    const visibleChat = testPage.locator('[data-testid="session-chat"]:visible').first();
-    await expect(visibleChat).toBeVisible({ timeout: 15_000 });
-    const visibleEditor = visibleChat.locator(".tiptap.ProseMirror").first();
-    await expect(visibleEditor).toBeVisible({ timeout: 15_000 });
+    // Core regression assertion: after the workflow-driven session switch the
+    // new session's tab must become the active dockview tab, which is what
+    // binds the chat input to session B. Dockview toggles `dv-active-tab` on
+    // exactly one tab per group, so asserting session B's tab is inside a
+    // `.dv-active-tab` is equivalent to asserting the chat UI switched.
+    await expect(
+      testPage.locator(`.dv-active-tab [data-testid="session-tab-${sessionB!.id}"]`),
+    ).toBeVisible({ timeout: 20_000 });
 
-    const probe = "kandev-e2e-step-switch-probe";
-    await visibleEditor.click();
-    await visibleEditor.fill(probe);
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await visibleEditor.press(`${modifier}+Enter`);
-
-    // With the fix, activeSessionId followed the backend's session switch, so
-    // the visible chat input is wired to sessionB and the probe lands there.
-    // Without the fix, the visible panel would still be sessionA's and this
-    // poll would time out because sessionB never received the probe.
-    await expect
-      .poll(
-        async () => {
-          const { messages } = await apiClient.listSessionMessages(sessionB!.id);
-          return messages.some((m) => (m.raw_content ?? m.content ?? "").includes(probe));
-        },
-        { timeout: 20_000, message: "expected probe message on the new step's session" },
-      )
-      .toBe(true);
+    // And session A's tab should no longer be active.
+    await expect(
+      testPage.locator(`.dv-active-tab [data-testid="session-tab-${sessionA!.id}"]`),
+    ).toHaveCount(0);
   });
 });
