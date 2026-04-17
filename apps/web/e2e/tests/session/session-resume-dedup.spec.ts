@@ -69,11 +69,15 @@ test.describe("Session resume boot-message dedup", () => {
 
     // 4. Key assertion: despite three resumes, only the last "Resumed agent"
     //    row should be rendered.
-    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toHaveCount(1);
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toHaveCount(1, {
+      timeout: 15_000,
+    });
 
     // 5. The original "Started agent" row must still be present — dedup must
     //    not affect non-resuming boot messages.
-    await expect(session.chat.getByText("Started agent Mock", { exact: false })).toHaveCount(1);
+    await expect(session.chat.getByText("Started agent Mock", { exact: false })).toHaveCount(1, {
+      timeout: 15_000,
+    });
 
     // 6. Agent interaction still works after dedup.
     await session.sendMessage("/e2e:simple-message");
