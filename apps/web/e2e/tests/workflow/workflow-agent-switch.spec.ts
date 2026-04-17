@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 async function createProfiles(
@@ -184,5 +185,87 @@ test.describe("Workflow agent profile switching", () => {
       // Always clean up the seeded step to avoid leaking into other tests
       await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
     }
+  });
+
+  // Regression test for the frontend fix in agent-session.ts — when a
+  // workflow step transition creates a new session with a different agent
+  // profile, the chat UI must follow the switch. Without the fix, the chat
+  // input stays bound to the first session and messages go to the wrong
+  // agent even though the backend correctly spawned a new session.
+  test("chat input follows step transition to new session", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const { profileA, profileB } = await createProfiles(apiClient);
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent Switch UI");
+    const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 1);
+    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 2);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
+
+    await apiClient.updateWorkflowStep(step1.id, {
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.updateWorkflowStep(step2.id, {
+      agent_profile_id: profileB.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "UI Switch Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inbox.id,
+      agent_profile_id: profileA.id,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Move to Step1 — auto_start_agent creates first session with profileA.
+    await apiClient.moveTask(task.id, workflow.id, step1.id);
+    const initial = await pollSessions(apiClient, task.id, 1);
+    const sessionA = initial.find((s) => s.agent_profile_id === profileA.id);
+    expect(sessionA, "expected a session with profileA to be created").toBeDefined();
+
+    // Open the task in the UI and wait for the chat panel to render.
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(sessionA!.id)).toBeVisible({ timeout: 10_000 });
+
+    // Move to Step2 — backend creates a new session with profileB. Our fix
+    // is what makes the chat UI follow that switch.
+    await apiClient.moveTask(task.id, workflow.id, step2.id);
+
+    // Discover the new session (profileB) and wait for its tab to render.
+    const afterMove = await pollSessions(apiClient, task.id, 2, 45_000);
+    const sessionB = afterMove.find((s) => s.agent_profile_id === profileB.id);
+    expect(sessionB, "expected a second session with profileB after moving to Step2").toBeDefined();
+    await expect(session.sessionTabBySessionId(sessionB!.id)).toBeVisible({ timeout: 15_000 });
+
+    // Behavioral assertion: the chat input now targets sessionB. Sending a
+    // message should result in that message appearing on sessionB — and NOT
+    // on sessionA. Without the frontend fix, activeSessionId would still
+    // point at sessionA and the message would be delivered to the wrong
+    // session.
+    const probe = "kandev-e2e-step-switch-probe";
+    await session.sendMessage(probe);
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionB!.id);
+          return messages.some((m) => (m.raw_content ?? m.content ?? "").includes(probe));
+        },
+        { timeout: 15_000, message: "expected probe message on the new step's session" },
+      )
+      .toBe(true);
+
+    const messagesA = (await apiClient.listSessionMessages(sessionA!.id)).messages;
+    expect(
+      messagesA.some((m) => (m.raw_content ?? m.content ?? "").includes(probe)),
+      "probe message must NOT leak into the previous step's session",
+    ).toBe(false);
   });
 });
