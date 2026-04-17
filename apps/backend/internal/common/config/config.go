@@ -26,7 +26,6 @@ type Config struct {
 	// to ~/.kandev. All workspace artifacts (data, tasks, worktrees, repos)
 	// live under this root.
 	HomeDir             string                    `mapstructure:"homeDir"`
-	DataDir             string                    `mapstructure:"dataDir"`
 	Server              ServerConfig              `mapstructure:"server"`
 	Database            DatabaseConfig            `mapstructure:"database"`
 	NATS                NATSConfig                `mapstructure:"nats"`
@@ -58,15 +57,12 @@ func expandTilde(p string) string {
 // tasks, worktrees, repos, sessions, quick-chat and lsp-servers.
 //
 // Resolution order:
-//  1. KANDEV_HOME_DIR (explicit override — e.g. dev mode points at <repo>/.kandev-dev).
-//  2. KANDEV_DATA_DIR (legacy/Docker flat-layout override — home and data collapse).
-//  3. ~/.kandev (default).
+//  1. KANDEV_HOME_DIR (explicit override — e.g. /data in Docker, /kandev in K8s,
+//     or <repo>/.kandev-dev during local development).
+//  2. ~/.kandev (default).
 func (c *Config) ResolvedHomeDir() string {
 	if c.HomeDir != "" {
 		return expandTilde(c.HomeDir)
-	}
-	if c.DataDir != "" {
-		return expandTilde(c.DataDir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -76,14 +72,8 @@ func (c *Config) ResolvedHomeDir() string {
 }
 
 // ResolvedDataDir returns the base data directory (where the SQLite DB lives).
-//
-// Resolution order:
-//  1. KANDEV_DATA_DIR (explicit flat-layout override — e.g. /data in Docker).
-//  2. <ResolvedHomeDir>/data (natural layout derived from the Kandev root).
+// Always <ResolvedHomeDir>/data — relocate via KANDEV_HOME_DIR, not a separate knob.
 func (c *Config) ResolvedDataDir() string {
-	if c.DataDir != "" {
-		return expandTilde(c.DataDir)
-	}
 	return filepath.Join(c.ResolvedHomeDir(), "data")
 }
 
@@ -248,8 +238,6 @@ func setDefaults(v *viper.Viper) {
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")
-	// DataDir default — empty means derive from ResolvedHomeDir()
-	v.SetDefault("dataDir", "")
 
 	// Database defaults
 	v.SetDefault("database.driver", "sqlite")
@@ -367,7 +355,6 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
 	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
-	_ = v.BindEnv("dataDir", "KANDEV_DATA_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")

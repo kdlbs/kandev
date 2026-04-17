@@ -98,7 +98,7 @@ Each Playwright worker spawns an isolated `kandev` backend and a dedicated `next
 **Backend:**
 1. Creates a temp directory as `HOME` with its own `.gitconfig`, data dir, and SQLite DB
 2. Sets environment variables for isolation:
-   - `KANDEV_DATA_DIR` — temp data directory
+   - `KANDEV_HOME_DIR` — temp data directory
    - `KANDEV_SERVER_PORT` — unique port per worker (`18080 + workerIndex`)
    - `KANDEV_DATABASE_PATH` — temp SQLite path
    - `KANDEV_MOCK_AGENT=only` — only loads mock agent, skips agent discovery (use `"true"` in dev mode to enable mock alongside all agents)

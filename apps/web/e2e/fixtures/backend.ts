@@ -231,7 +231,7 @@ exec git "$@"
         KANDEV_E2E_ORIGINAL_PATH: originalPath,
         KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
         HOME: tmpDir,
-        KANDEV_DATA_DIR: dataDir,
+        KANDEV_HOME_DIR: dataDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
         KANDEV_MOCK_AGENT: "only",

@@ -5,14 +5,14 @@ metadata:
   labels:
     app: kandev
 data:
-  # Database — SQLite on the PV. Set KANDEV_DATABASE_DRIVER=postgres for production.
-  KANDEV_DATABASE_PATH: /data/kandev.db
+  # Kandev home directory on the PV. Everything kandev persists — the DB
+  # (under data/), tasks, worktrees, repos, sessions, and LSP servers — lives
+  # under this root. Mount the PV at /data. Set KANDEV_DATABASE_DRIVER=postgres
+  # for production to move the DB off the PV.
+  KANDEV_HOME_DIR: /data
 
   # Disable Docker runtime (no Docker-in-Docker in K8s)
   KANDEV_DOCKER_ENABLED: "false"
-
-  # Worktree storage on the PV
-  KANDEV_WORKTREE_BASEPATH: /data/worktrees
 
   # Logging — auto-detects K8s and uses JSON format
   KANDEV_LOG_LEVEL: info

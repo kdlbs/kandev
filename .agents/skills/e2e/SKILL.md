@@ -94,7 +94,7 @@ Start the backend:
 ```bash
 E2E_TMP=$(mktemp -d) && mkdir -p "$E2E_TMP/.kandev" && \
 printf '[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n' > "$E2E_TMP/.gitconfig" && \
-HOME="$E2E_TMP" KANDEV_DATA_DIR="$E2E_TMP/.kandev" KANDEV_SERVER_PORT=$BACKEND_PORT \
+HOME="$E2E_TMP" KANDEV_HOME_DIR="$E2E_TMP/.kandev" KANDEV_SERVER_PORT=$BACKEND_PORT \
 KANDEV_DATABASE_PATH="$E2E_TMP/kandev.db" KANDEV_MOCK_AGENT=only \
 KANDEV_MOCK_GITHUB=true KANDEV_DOCKER_ENABLED=false KANDEV_WORKTREE_ENABLED=false \
 KANDEV_LOG_LEVEL=warn apps/backend/bin/kandev &

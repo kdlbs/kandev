@@ -63,9 +63,9 @@ docker run -p 8080:8080 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KANDEV_DATA_DIR` | `/data` | Kandev home directory — contains DB, worktrees, sessions, repos, and LSP servers |
+| `KANDEV_HOME_DIR` | `/data` | Kandev home directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |

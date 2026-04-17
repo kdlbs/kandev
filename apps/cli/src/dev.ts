@@ -94,9 +94,7 @@ function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
       extra: {
         ...baseExtra,
         KANDEV_HOME_DIR: devHome,
-        // Clear any parent-leaked values so the backend uses the derived
-        // HomeDir-based defaults instead.
-        KANDEV_DATA_DIR: "",
+        // Clear a parent-leaked DB path so the backend uses the HomeDir-derived default.
         KANDEV_DATABASE_PATH: "",
       },
     };

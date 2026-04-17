@@ -100,7 +100,7 @@ VOLUME ["/data"]
 
 # Environment defaults for containerized operation
 ENV KANDEV_NO_BROWSER=1 \
-    KANDEV_DATA_DIR=/data \
+    KANDEV_HOME_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
     HOSTNAME=0.0.0.0 \
     NODE_ENV=production

@@ -10,17 +10,17 @@ SQLite requires no external services and works out of the box.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KANDEV_DATA_DIR` | `~/.kandev/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
+| `KANDEV_HOME_DIR` | `~/.kandev` | Kandev root directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver |
-| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | Path to the SQLite database file (override) |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | Path to the SQLite database file (override) |
 
 ### Config file (`config.yaml`)
 
 ```yaml
-dataDir: ""  # empty = resolve from KANDEV_DATA_DIR or ~/.kandev/data
+homeDir: ""  # empty = resolve from KANDEV_HOME_DIR or ~/.kandev
 database:
   driver: sqlite
-  path: ""   # empty = $dataDir/kandev.db
+  path: ""   # empty = $homeDir/data/kandev.db
 ```
 
 No additional setup is needed - the database file is created automatically on first run.
