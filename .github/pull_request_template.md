@@ -55,3 +55,4 @@ RULES
 - [ ] I have performed a self-review of my code.
 - [ ] I have manually tested my changes and they work as expected.
 - [ ] My changes have tests that cover the new functionality and edge cases.
+- [ ] If my change touches UI files (`apps/web/`), I have added or updated Playwright e2e tests in `apps/web/e2e/` and verified them with `make test-e2e`.
