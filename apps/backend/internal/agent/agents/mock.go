@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"os/exec"
 	"time"
 
 	"github.com/kandev/kandev/pkg/agent"
@@ -80,9 +81,20 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 	return mockLogoLight
 }
 
-func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Mock agent is always "available" when enabled (forced by settings controller).
-	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
+func (a *MockAgent) IsInstalled(_ context.Context) (*DiscoveryResult, error) {
+	// Mock-agent is only usable when its CLI is reachable on PATH (or the
+	// caller explicitly set a binary path, e.g. E2E harness). Outside those
+	// setups the binary won't exist — return Available=false so the UI shows
+	// "Not installed" rather than probing and failing with ENOENT.
+	binary := "mock-agent"
+	if a.binaryPath != "" {
+		binary = a.binaryPath
+	}
+	path, err := exec.LookPath(binary)
+	if err != nil {
+		return &DiscoveryResult{Available: false}, nil
+	}
+	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP, MatchedPath: path}, nil
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {

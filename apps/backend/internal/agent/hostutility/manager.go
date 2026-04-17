@@ -354,6 +354,12 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	return v.(*instance), ia, nil
 }
 
+// probeTimeout bounds a single probe attempt. Long enough to cover `npx`
+// cold-starts on moderately slow networks (Gemini / Copilot CLIs pull their
+// packages on first run), short enough that hangs surface within one
+// onboarding refresh cycle instead of leaving agents stuck in "Probing".
+const probeTimeout = 45 * time.Second
+
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.
 func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent) AgentCapabilities {
@@ -366,13 +372,16 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 			WorkDir:   inst.workDir,
 		},
 	}
-	resp, err := inst.client.Probe(ctx, req)
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
+		status, msg := classifyProbeError(err, probeCtx.Err())
 		return AgentCapabilities{
 			AgentType:     inst.agentType,
-			Status:        StatusFailed,
-			Error:         err.Error(),
+			Status:        status,
+			Error:         msg,
 			LastCheckedAt: now,
 		}
 	}
@@ -425,6 +434,24 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
+}
+
+// classifyProbeError turns a probe transport error into a cache status.
+// Deadline exceeded on probeCtx (but not on the parent ctx) indicates a
+// hung subprocess — surface it as a timeout so the UI stops spinning.
+// Missing-binary errors from acp_executor's cmd.Start() arrive as strings
+// like `start: exec: "<name>": executable file not found in $PATH` — we
+// map them to StatusNotInstalled so the user sees the correct remediation
+// instead of a generic error badge.
+func classifyProbeError(err error, probeCtxErr error) (Status, string) {
+	if errors.Is(probeCtxErr, context.DeadlineExceeded) {
+		return StatusFailed, fmt.Sprintf("probe timed out after %s", probeTimeout)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "executable file not found") {
+		return StatusNotInstalled, msg
+	}
+	return StatusFailed, msg
 }
 
 // isAuthError is a coarse heuristic — ACP auth failures bubble up as string

@@ -421,21 +421,9 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 	return []dto.ToolStatusDTO{ghTool}
 }
 
-// detectAgents runs discovery and forces mock-agent available when enabled.
+// detectAgents runs discovery. Mock-agent availability is driven by its own
+// IsInstalled() PATH check — no special override here, so a missing binary
+// shows as "Not installed" instead of a spurious error.
 func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
-	results, err := c.discovery.Detect(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Force mock-agent as available when enabled (skip file-presence discovery)
-	agentConfig, ok := c.agentRegistry.Get("mock-agent")
-	if ok && agentConfig.Enabled() {
-		for i := range results {
-			if results[i].Name == "mock-agent" {
-				results[i].Available = true
-				break
-			}
-		}
-	}
-	return results, nil
+	return c.discovery.Detect(ctx)
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -12,6 +12,7 @@ import {
   IconLock,
 } from "@tabler/icons-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
@@ -56,25 +57,39 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function withErrorTooltip(node: ReactElement, errorMessage?: string) {
+  if (!errorMessage) return node;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{node}</TooltipTrigger>
+      <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">
+        {errorMessage}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function StatusPill({ status, errorMessage }: { status: string; errorMessage?: string }) {
   switch (status) {
     case "auth_required":
-      return (
+      return withErrorTooltip(
         <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
           <IconLock className="h-3.5 w-3.5" />
           No auth
-        </span>
+        </span>,
+        errorMessage,
       );
     case "not_installed":
       return (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">Not installed</span>
       );
     case "failed":
-      return (
+      return withErrorTooltip(
         <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
           <IconAlertTriangle className="h-3.5 w-3.5" />
           Error
-        </span>
+        </span>,
+        errorMessage,
       );
     case "probing":
       return (
@@ -130,7 +145,7 @@ function InstalledAgentRow({
               {modelName}
             </span>
           )}
-          <StatusPill status={status} />
+          <StatusPill status={status} errorMessage={agent.model_config.error} />
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>

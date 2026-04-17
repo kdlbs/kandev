@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/agent"
@@ -57,6 +59,41 @@ func TestMockAgent_Runtime_NoResumeFlag(t *testing.T) {
 	// ACP agents handle resume via session/load, not CLI flags.
 	if !rt.SessionConfig.ResumeFlag.IsEmpty() {
 		t.Error("expected ResumeFlag to be empty for ACP agent")
+	}
+}
+
+func TestMockAgent_IsInstalled_MissingBinary(t *testing.T) {
+	// With no `mock-agent` on PATH, IsInstalled must report not-available so
+	// the host utility skips probing (avoiding ENOENT → StatusFailed) and the
+	// UI renders "Not installed" rather than an error badge.
+	t.Setenv("PATH", "")
+	a := NewMockAgent()
+	result, err := a.IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Available {
+		t.Errorf("expected Available=false with empty PATH, got true")
+	}
+	if result.MatchedPath != "" {
+		t.Errorf("expected empty MatchedPath, got %q", result.MatchedPath)
+	}
+}
+
+func TestMockAgent_IsInstalled_WithBinaryPath(t *testing.T) {
+	// A non-empty binary path that actually exists should make the mock
+	// report available with MatchedPath populated.
+	a := NewMockAgent()
+	a.SetBinaryPath(os.Args[0]) // Test binary is guaranteed to exist.
+	result, err := a.IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Available {
+		t.Errorf("expected Available=true for existing binary path")
+	}
+	if result.MatchedPath == "" {
+		t.Errorf("expected MatchedPath to be set")
 	}
 }
 
