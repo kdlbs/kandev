@@ -277,10 +277,16 @@ export class SessionPage {
 
   /**
    * Archive a task via the sidebar context menu.
-   * Hovers to reveal the menu trigger, opens it, and clicks "Archive".
+   * Hovers to reveal the menu trigger, opens it, clicks "Archive",
+   * and confirms the archive dialog.
    */
   async archiveTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
+    // Confirm the archive dialog
+    const confirmButton = this.page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Archive" });
+    await confirmButton.click();
   }
 
   /**
