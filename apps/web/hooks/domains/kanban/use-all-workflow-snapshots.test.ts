@@ -90,8 +90,9 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     // New array reference with identical contents — dedup key should match.
     mockState.workflows = { items: [...workflows] };
     rerender({ workspaceId: "ws-A" });
-    // Give any potential effect a chance to run.
-    await new Promise((r) => setTimeout(r, 0));
+    // Wait long enough that any queued effect would have run and issued a
+    // second fetch; then assert the count is unchanged.
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1);
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
@@ -123,7 +124,7 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
 
     // Now let workspace A's fetch finally resolve. Its write must be dropped.
     resolveStale({ steps: [], tasks: [] });
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 50));
 
     const writtenIds = mockSetWorkflowSnapshot.mock.calls.map((args) => args[0]);
     expect(writtenIds).not.toContain("wf-A");
