@@ -77,7 +77,7 @@ Mark task 3 as in_progress.
 
 Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
 
-**Bot usernames:**
+**Bot usernames** (`gh pr view --json comments` uses GraphQL and returns `author.login` **without** the `[bot]` suffix; `gh api /.../reviews` and `/.../issues/<n>/comments` use REST and return `user.login` **with** the suffix — filters below use whichever form the invoked endpoint returns):
 - CodeRabbit: `coderabbitai[bot]`
 - Greptile: `greptile-apps[bot]`
 - Claude: `claude[bot]` on same-repo PRs (posts a real review with inline comments via the Claude GitHub App), or `github-actions[bot]` on fork PRs (posts findings as issue comments via `GITHUB_TOKEN`; identify by body markers — tracker starts with `**Claude finished `, findings comment starts with `## Code Review`).
