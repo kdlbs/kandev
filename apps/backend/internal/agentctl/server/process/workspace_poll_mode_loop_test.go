@@ -12,12 +12,19 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
-// waitForMonitorIdle spins until the monitorRunning CAS flag is 0, meaning no
-// tick is in progress. More reliable than time.Sleep for synchronization after
-// a mode change — avoids racing a slow git command on CI.
-func waitForMonitorIdle(wt *WorkspaceTracker) {
+// waitForMonitorIdle waits until the monitorRunning CAS flag is 0 (no tick in
+// progress), with a 5-second deadline. Fails the test if the tick is still
+// running at the deadline — avoids infinite spin if git blocks.
+func waitForMonitorIdle(t *testing.T, wt *WorkspaceTracker) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
 	for atomic.LoadInt32(&wt.monitorRunning) != 0 {
-		runtime.Gosched()
+		select {
+		case <-deadline:
+			t.Fatal("waitForMonitorIdle: monitorRunning still 1 after 5s — tick may be stuck")
+		default:
+			runtime.Gosched()
+		}
 	}
 }
 
@@ -195,7 +202,7 @@ func TestMonitorLoop_FastToPausedStopsPolling(t *testing.T) {
 
 	// Pause and wait for any in-flight tick to complete before draining.
 	wt.SetPollMode(PollModePaused)
-	waitForMonitorIdle(wt)
+	waitForMonitorIdle(t, wt)
 	drainStream(sub)
 
 	// New change should NOT generate a notification in paused mode.

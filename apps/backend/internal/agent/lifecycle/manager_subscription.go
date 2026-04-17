@@ -141,6 +141,13 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	if hadPrev && prev == effective {
 		return workspacePath, effective, false
 	}
+	// Skip pushing paused when there's no prior entry — agentctl defaults to
+	// slow, so sending paused to a workspace we've never pushed to is a no-op
+	// RPC (and slightly misleading: agentctl would drop from slow to paused
+	// even though the gateway never told it to go slow in the first place).
+	if !hadPrev && effective == WorkspacePollModePaused {
+		return workspacePath, effective, false
+	}
 	if effective == WorkspacePollModePaused {
 		delete(a.lastPushed, workspacePath)
 	} else {
