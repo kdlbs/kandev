@@ -39,9 +39,9 @@ test.describe("Onboarding: AI Agents step", () => {
 
     await testPage.goto("/");
 
-    await expect(
-      testPage.getByRole("heading", { name: "AI Agents", exact: true }),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByRole("heading", { name: "AI Agents", exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     // All three agent rows are listed as installed (filtered by agent.available).
     await expect(testPage.getByText("Ok Agent")).toBeVisible();
