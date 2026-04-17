@@ -1,21 +1,39 @@
 name: Claude Code Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
   claude-review:
     runs-on: ubuntu-latest
+    # Run when any of:
+    #   - PR is from the same repo (trusted, secrets already available)
+    #   - PR author is OWNER/MEMBER/COLLABORATOR of this repo
+    #   - PR has the `safe-to-review` label (maintainer opt-in)
+    #   - PR author is on the CLAUDE_REVIEW_ALLOWLIST repo variable
+    #     (set in Settings -> Secrets and variables -> Actions -> Variables,
+    #      value is a JSON array string, e.g. ["alice","bob"])
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
+      contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
+      (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login))
     permissions:
       contents: read
       pull-requests: write
       id-token: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout PR head
         uses: actions/checkout@v4
         with:
+          # pull_request_target defaults to the base ref; explicitly check out
+          # the PR head so the review runs against the contributor's changes.
+          # Safe because the workflow never executes scripts from the PR;
+          # claude-code-action only reads files and posts comments.
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Run Claude Code Review
