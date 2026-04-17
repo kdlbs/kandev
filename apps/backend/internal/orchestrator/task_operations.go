@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -1603,6 +1604,12 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
+//
+// Idempotent w.r.t. missing executions: if the agent manager reports no live execution
+// for the session (ErrNoExecutionForSession), the method still reconciles the session's
+// DB state (transitions to WAITING_FOR_INPUT, records the cancel message, completes the
+// turn) so the user can unstick a session whose agent subprocess crashed. Other errors
+// still fail the cancel.
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 
@@ -1615,7 +1622,16 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		return fmt.Errorf("cancel agent: %w", err)
+		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			return fmt.Errorf("cancel agent: %w", err)
+		}
+		// The session was live but there is no execution to cancel — the agent process
+		// crashed, exited, or never re-registered after a backend restart. Log at error
+		// level so operators notice the stuck state; we still reconcile DB state below
+		// so the UI unsticks.
+		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt

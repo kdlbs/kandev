@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -387,11 +388,45 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Conte
 	return false
 }
 
-// CancelAgent cancels the current agent turn for a session
+// CancelAgent cancels the current agent turn for a session.
+// Returns lifecycle.ErrNoExecutionForSession when no live execution exists for the session
+// (for example, after CrashAgentForSession has been used to simulate a crash), matching the
+// real lifecycle adapter's behaviour.
 func (s *SimulatedAgentManagerClient) CancelAgent(ctx context.Context, sessionID string) error {
 	s.logger.Info("simulated: cancelling agent turn",
 		zap.String("session_id", sessionID))
-	return nil
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, inst := range s.instances {
+		if inst.sessionID == sessionID {
+			return nil
+		}
+	}
+	return fmt.Errorf("session %q: %w", sessionID, lifecycle.ErrNoExecutionForSession)
+}
+
+// CrashAgentForSession simulates an agent subprocess crashing mid-turn.
+// It stops the agent simulation goroutine and removes the instance from the tracking map,
+// so subsequent lookups (CancelAgent, IsAgentRunningForSession) behave as if the execution
+// is gone. The session's state in the DB is deliberately left untouched — this mirrors the
+// real-world stuck state where the session is still RUNNING but no execution exists.
+func (s *SimulatedAgentManagerClient) CrashAgentForSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for execID, inst := range s.instances {
+		if inst.sessionID != sessionID {
+			continue
+		}
+		select {
+		case <-inst.stopCh:
+			// already stopped
+		default:
+			close(inst.stopCh)
+		}
+		delete(s.instances, execID)
+		return
+	}
 }
 
 // ResolveAgentProfile resolves an agent profile ID to profile information
