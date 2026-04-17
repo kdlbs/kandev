@@ -1,6 +1,6 @@
 # Workflows
 
-Kandev ships with four workflow templates. Each defines a sequence of steps with automated transitions - agents start, stop, and move between steps based on events like entering a step, sending a message, or an agent completing its turn.
+Kandev ships with five workflow templates. Each defines a sequence of steps with automated transitions - agents start, stop, and move between steps based on events like entering a step, sending a message, or an agent completing its turn.
 
 You can use these as-is or **create custom workflows** tailored to you or your team.
 
@@ -66,6 +66,30 @@ Focused on design and architecture. The agent creates technical designs for you 
 - Evaluating approaches before committing to implementation
 - Cross-team architectural proposals
 - Breaking down large projects into implementable pieces
+
+---
+
+### Feature Dev
+
+Full development lifecycle with quality gates between phases - spec, implementation with TDD, automated review, QA, draft PR, and CI fixup. Each phase runs a fresh agent turn so context stays focused on the task at hand.
+
+**Steps:** Todo → Spec → Work → Review → QA → PR → CI Fixup → Done
+
+| Step | What happens |
+|:------:|-------------|
+| **Todo** | Tasks ready to be picked up. |
+| **Spec** | Agent analyzes the task, explores the codebase, proposes approaches, and saves a detailed plan via MCP tool. Runs in plan mode and stops for your review - you can edit the plan in the UI before moving on. |
+| **Work** | Agent retrieves the plan (including edits), acknowledges modifications, and implements using a TDD loop - failing test → minimum code → refactor → commit, one behavior at a time. |
+| **Review** | Agent context is reset, then a fresh review pass checks the diff for security, correctness, performance, and code quality. Fixes trivial issues directly; reports the rest with file:line. |
+| **QA** | Agent verifies the feature end-to-end - traces wiring, runs the happy path, tries to break it with boundary values and error paths, and checks test coverage. |
+| **PR** | Agent runs formatters/linters, commits and pushes remaining changes, picks up the repo's PR template if present, and creates a draft PR. |
+| **CI Fixup** | Agent polls CI, fetches failed logs, fixes lint/test/type errors, pushes, and re-polls until checks go green. |
+| **Done** | Final state. |
+
+**When to use it:**
+- Features that need quality gates between phases
+- Changes that warrant a dedicated review + QA pass before the PR goes up
+- When you want a single task to carry a feature from idea to mergeable PR
 
 ---
 
