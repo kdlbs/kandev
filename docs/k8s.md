@@ -110,7 +110,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 ### SQLite (default)
 
 - Zero-config, works out of the box
-- Database stored at `/data/kandev.db` on the PV
+- Database stored at `/data/data/kandev.db` on the PV (derived from `KANDEV_HOME_DIR=/data`)
 - **Single replica only** (SQLite is single-writer)
 - Deployment strategy is `Recreate` to prevent concurrent writes
 - Good for small teams / personal use
@@ -137,8 +137,8 @@ When using Postgres, the PVC is still needed for worktree storage but the databa
 
 The PVC at `/data` stores:
 
-- **SQLite database** (`/data/kandev.db`, `/data/kandev.db-wal`, `/data/kandev.db-shm`)
-- **Git worktrees** (`/data/worktrees/`) for workspace isolation
+- **SQLite database** (`/data/data/kandev.db`, `/data/data/kandev.db-wal`, `/data/data/kandev.db-shm`)
+- **Git worktrees** (`/data/worktrees/`), **tasks** (`/data/tasks/`), **repos** (`/data/repos/`), **sessions** (`/data/sessions/`), and **LSP servers** (`/data/lsp-servers/`)
 
 The PVC uses `ReadWriteOnce` access mode. If your cluster requires a specific StorageClass, add it to `k8s/pvc.yaml`:
 

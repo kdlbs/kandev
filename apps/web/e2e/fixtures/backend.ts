@@ -167,12 +167,12 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
-      const dataDir = path.join(tmpDir, ".kandev");
+      const homeDir = path.join(tmpDir, ".kandev");
       const dbPath = path.join(tmpDir, "kandev.db");
       const worktreeBase = path.join(tmpDir, "worktrees");
       const repoCloneBase = path.join(tmpDir, "repos");
 
-      fs.mkdirSync(dataDir, { recursive: true });
+      fs.mkdirSync(homeDir, { recursive: true });
       fs.mkdirSync(worktreeBase, { recursive: true });
       fs.mkdirSync(repoCloneBase, { recursive: true });
 
@@ -231,7 +231,7 @@ exec git "$@"
         KANDEV_E2E_ORIGINAL_PATH: originalPath,
         KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
         HOME: tmpDir,
-        KANDEV_HOME_DIR: dataDir,
+        KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
         KANDEV_MOCK_AGENT: "only",
