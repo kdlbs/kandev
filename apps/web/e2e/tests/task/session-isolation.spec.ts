@@ -116,7 +116,9 @@ test.describe("Session isolation", () => {
     await session.clickTaskInSidebar("Second Task B");
 
     // 6. Wait for navigation to complete
-    await expect(testPage).toHaveURL(new RegExp(`/t/${taskB.id}`), { timeout: 10_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(`/t/${taskB.id}`), {
+      timeout: 10_000,
+    });
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 

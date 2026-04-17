@@ -532,16 +532,16 @@ function useTaskPageData(
   initialRepositories: Repository[],
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
   const validatedActiveSessionId = useAppStore((state) => {
-    if (!activeSessionId || !activeTaskId) return null;
-    const session = state.taskSessions.items[activeSessionId];
-    return session?.task_id === activeTaskId ? activeSessionId : null;
+    const sid = state.tasks.activeSessionId;
+    if (!sid || !activeTaskId) return null;
+    const session = state.taskSessions.items[sid];
+    return session?.task_id === activeTaskId ? sid : null;
   });
 
   const { task } = useTaskDetails(activeTaskId, initialTask);
