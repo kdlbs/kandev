@@ -412,6 +412,7 @@ type patPR struct {
 	State              string    `json:"state"`
 	Draft              bool      `json:"draft"`
 	Mergeable          *bool     `json:"mergeable"`
+	MergeableState     string    `json:"mergeable_state"`
 	Additions          int       `json:"additions"`
 	Deletions          int       `json:"deletions"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -474,6 +475,7 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		RepoName:           repo,
 		Draft:              raw.Draft,
 		Mergeable:          mergeable,
+		MergeableState:     strings.ToLower(raw.MergeableState),
 		Additions:          raw.Additions,
 		Deletions:          raw.Deletions,
 		RequestedReviewers: convertPatRequestedReviewers(raw),

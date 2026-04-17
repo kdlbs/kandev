@@ -5,21 +5,26 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 const defaultPRState = "open"
 
 // MockController handles HTTP endpoints for controlling the MockClient in E2E tests.
 type MockController struct {
-	mock  *MockClient
-	store *Store
+	mock     *MockClient
+	store    *Store
+	eventBus bus.EventBus
+	logger   *logger.Logger
 }
 
 // NewMockController creates a new MockController.
-func NewMockController(mock *MockClient, store *Store, _ *logger.Logger) *MockController {
-	return &MockController{mock: mock, store: store}
+func NewMockController(mock *MockClient, store *Store, eventBus bus.EventBus, log *logger.Logger) *MockController {
+	return &MockController{mock: mock, store: store, eventBus: eventBus, logger: log}
 }
 
 // RegisterRoutes registers all mock control HTTP routes.
@@ -186,18 +191,21 @@ func (c *MockController) addBranches(ctx *gin.Context) {
 // associateTaskPR directly creates a github_task_prs record for E2E testing.
 func (c *MockController) associateTaskPR(ctx *gin.Context) {
 	var req struct {
-		TaskID      string `json:"task_id"`
-		Owner       string `json:"owner"`
-		Repo        string `json:"repo"`
-		PRNumber    int    `json:"pr_number"`
-		PRURL       string `json:"pr_url"`
-		PRTitle     string `json:"pr_title"`
-		HeadBranch  string `json:"head_branch"`
-		BaseBranch  string `json:"base_branch"`
-		AuthorLogin string `json:"author_login"`
-		State       string `json:"state"`
-		Additions   int    `json:"additions"`
-		Deletions   int    `json:"deletions"`
+		TaskID         string `json:"task_id"`
+		Owner          string `json:"owner"`
+		Repo           string `json:"repo"`
+		PRNumber       int    `json:"pr_number"`
+		PRURL          string `json:"pr_url"`
+		PRTitle        string `json:"pr_title"`
+		HeadBranch     string `json:"head_branch"`
+		BaseBranch     string `json:"base_branch"`
+		AuthorLogin    string `json:"author_login"`
+		State          string `json:"state"`
+		ReviewState    string `json:"review_state"`
+		ChecksState    string `json:"checks_state"`
+		MergeableState string `json:"mergeable_state"`
+		Additions      int    `json:"additions"`
+		Deletions      int    `json:"deletions"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -208,23 +216,34 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 	}
 	now := time.Now().UTC()
 	tp := &TaskPR{
-		TaskID:      req.TaskID,
-		Owner:       req.Owner,
-		Repo:        req.Repo,
-		PRNumber:    req.PRNumber,
-		PRURL:       req.PRURL,
-		PRTitle:     req.PRTitle,
-		HeadBranch:  req.HeadBranch,
-		BaseBranch:  req.BaseBranch,
-		AuthorLogin: req.AuthorLogin,
-		State:       req.State,
-		Additions:   req.Additions,
-		Deletions:   req.Deletions,
-		CreatedAt:   now,
+		TaskID:         req.TaskID,
+		Owner:          req.Owner,
+		Repo:           req.Repo,
+		PRNumber:       req.PRNumber,
+		PRURL:          req.PRURL,
+		PRTitle:        req.PRTitle,
+		HeadBranch:     req.HeadBranch,
+		BaseBranch:     req.BaseBranch,
+		AuthorLogin:    req.AuthorLogin,
+		State:          req.State,
+		ReviewState:    req.ReviewState,
+		ChecksState:    req.ChecksState,
+		MergeableState: req.MergeableState,
+		Additions:      req.Additions,
+		Deletions:      req.Deletions,
+		CreatedAt:      now,
 	}
 	if err := c.store.CreateTaskPR(ctx.Request.Context(), tp); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Publish the event so the frontend Zustand store picks up the new PR
+	// without requiring a page reload — mirrors real AssociatePRWithTask.
+	if c.eventBus != nil {
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
+		if err := c.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event); err != nil {
+			c.logger.Debug("mock: failed to publish task PR updated event", zap.Error(err))
+		}
 	}
 	ctx.JSON(http.StatusCreated, tp)
 }

@@ -20,6 +20,7 @@ type PR struct {
 	Body               string              `json:"body"`
 	Draft              bool                `json:"draft"`
 	Mergeable          bool                `json:"mergeable"`
+	MergeableState     string              `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
 	Additions          int                 `json:"additions"`
 	Deletions          int                 `json:"deletions"`
 	RequestedReviewers []RequestedReviewer `json:"requested_reviewers"`
@@ -86,8 +87,9 @@ type PRFeedback struct {
 // Unlike PRFeedback, it skips comments to reduce API calls.
 type PRStatus struct {
 	PR                 *PR    `json:"pr"`
-	ReviewState        string `json:"review_state"` // "approved", "changes_requested", "pending", ""
-	ChecksState        string `json:"checks_state"` // "success", "failure", "pending", ""
+	ReviewState        string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
+	ChecksState        string `json:"checks_state"`    // "success", "failure", "pending", ""
+	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
 	ReviewCount        int    `json:"review_count"`
 	PendingReviewCount int    `json:"pending_review_count"`
 }
@@ -121,9 +123,10 @@ type TaskPR struct {
 	HeadBranch         string     `json:"head_branch" db:"head_branch"`
 	BaseBranch         string     `json:"base_branch" db:"base_branch"`
 	AuthorLogin        string     `json:"author_login" db:"author_login"`
-	State              string     `json:"state" db:"state"`               // open, closed, merged
-	ReviewState        string     `json:"review_state" db:"review_state"` // approved, changes_requested, pending, ""
-	ChecksState        string     `json:"checks_state" db:"checks_state"` // success, failure, pending, ""
+	State              string     `json:"state" db:"state"`                     // open, closed, merged
+	ReviewState        string     `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
+	ChecksState        string     `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
+	MergeableState     string     `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
 	ReviewCount        int        `json:"review_count" db:"review_count"`
 	PendingReviewCount int        `json:"pending_review_count" db:"pending_review_count"`
 	CommentCount       int        `json:"comment_count" db:"comment_count"`

@@ -125,6 +125,29 @@ func TestConvertPatPR_Mergeable(t *testing.T) {
 	}
 }
 
+func TestConvertPatPR_MergeableState(t *testing.T) {
+	raw := &patPR{
+		Number:         2,
+		State:          "open",
+		MergeableState: "CLEAN", // GitHub REST uses lowercase but be defensive
+		User: struct {
+			Login string `json:"login"`
+		}{Login: "alice"},
+		Head: struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		}{Ref: "b"},
+		Base: struct {
+			Ref string `json:"ref"`
+		}{Ref: "main"},
+	}
+
+	pr := convertPatPR(raw, "o", "r")
+	if pr.MergeableState != "clean" {
+		t.Errorf("expected normalized mergeable_state=clean, got %q", pr.MergeableState)
+	}
+}
+
 func TestConvertPatRequestedReviewers(t *testing.T) {
 	raw := &patPR{
 		RequestedReviewers: []struct {

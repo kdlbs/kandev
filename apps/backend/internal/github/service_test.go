@@ -183,6 +183,83 @@ func TestComputeOverallCheckStatus(t *testing.T) {
 			},
 			"pending",
 		},
+		{
+			// Regression for the "CI pending" badge bug: GitHub shows
+			// "All checks have passed — 1 skipped, 20 successful" but
+			// we were returning pending because the skipped runs weren't
+			// treated as completed-successful.
+			"AllSkipped mixed with success returns success",
+			func() []CheckRun {
+				checks := make([]CheckRun, 21)
+				for i := 0; i < 20; i++ {
+					checks[i] = CheckRun{Status: "completed", Conclusion: "success"}
+				}
+				checks[20] = CheckRun{Status: "completed", Conclusion: "skipped"}
+				return checks
+			}(),
+			"success",
+		},
+		{
+			"only skipped returns empty (no signal)",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "skipped"},
+				{Status: "completed", Conclusion: "skipped"},
+			},
+			"",
+		},
+		{
+			"only neutral returns empty (no signal)",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "neutral"},
+				{Status: "completed", Conclusion: "neutral"},
+			},
+			"",
+		},
+		{
+			"unknown future conclusion treated as passing",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "stale"}, // hypothetical future enum
+			},
+			"success",
+		},
+		{
+			"neutral conclusion is ignored like skipped",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "success"},
+				{Status: "completed", Conclusion: "neutral"},
+			},
+			"success",
+		},
+		{
+			"cancelled conclusion counts as failure",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "success"},
+				{Status: "completed", Conclusion: "cancelled"},
+			},
+			"failure",
+		},
+		{
+			"timed_out conclusion counts as failure",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "timed_out"},
+			},
+			"failure",
+		},
+		{
+			"action_required conclusion counts as failure",
+			[]CheckRun{
+				{Status: "completed", Conclusion: "action_required"},
+			},
+			"failure",
+		},
+		{
+			"in_progress plus skipped returns pending (skipped ignored)",
+			[]CheckRun{
+				{Status: "in_progress"},
+				{Status: "completed", Conclusion: "skipped"},
+			},
+			"pending",
+		},
 	}
 
 	for _, tt := range tests {
@@ -616,6 +693,63 @@ func TestSyncTaskPR_SecondIdenticalSyncNoEvent(t *testing.T) {
 	}
 	if got := eb.publishedCount(); got != 1 {
 		t.Errorf("expected still 1 event after identical second sync, got %d", got)
+	}
+}
+
+func TestSyncTaskPR_PublishesEventOnMergeableStateChange(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:         "t1",
+		Owner:          "owner",
+		Repo:           "repo",
+		PRNumber:       1,
+		PRURL:          "https://github.com/owner/repo/pull/1",
+		PRTitle:        "Same",
+		HeadBranch:     "feat",
+		BaseBranch:     "main",
+		State:          "open",
+		Additions:      3,
+		Deletions:      1,
+		ReviewState:    "approved",
+		ChecksState:    "success",
+		MergeableState: "blocked",
+		ReviewCount:    1,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	// Only mergeable_state changes (blocked -> clean); everything else identical.
+	status := &PRStatus{
+		PR: &PR{
+			Number:    1,
+			Title:     "Same",
+			State:     "open",
+			Additions: 3,
+			Deletions: 1,
+			RepoOwner: "owner",
+			RepoName:  "repo",
+		},
+		ReviewState:    "approved",
+		ChecksState:    "success",
+		MergeableState: "clean",
+		ReviewCount:    1,
+	}
+
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Errorf("expected 1 event after mergeable_state change, got %d", got)
+	}
+
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task PR: %v", err)
+	}
+	if stored.MergeableState != "clean" {
+		t.Errorf("expected stored mergeable_state=clean, got %q", stored.MergeableState)
 	}
 }
 

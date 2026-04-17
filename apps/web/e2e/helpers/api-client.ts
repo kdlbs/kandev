@@ -23,6 +23,8 @@ export type MockPR = {
   url?: string;
   body?: string;
   draft?: boolean;
+  mergeable?: boolean;
+  mergeable_state?: string;
   additions?: number;
   deletions?: number;
   merged_at?: string;
@@ -622,6 +624,9 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    review_state?: string;
+    checks_state?: string;
+    mergeable_state?: string;
     additions?: number;
     deletions?: number;
   }): Promise<void> {

@@ -86,6 +86,17 @@ export type PRFeedback = {
   has_issues: boolean;
 };
 
+export type MergeableState =
+  | "clean"
+  | "blocked"
+  | "behind"
+  | "dirty"
+  | "has_hooks"
+  | "unstable"
+  | "draft"
+  | "unknown"
+  | "";
+
 export type TaskPR = {
   id: string;
   task_id: string;
@@ -100,6 +111,7 @@ export type TaskPR = {
   state: "open" | "closed" | "merged";
   review_state: "approved" | "changes_requested" | "pending" | "";
   checks_state: "success" | "failure" | "pending" | "";
+  mergeable_state: MergeableState;
   review_count: number;
   pending_review_count: number;
   comment_count: number;
