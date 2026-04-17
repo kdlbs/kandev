@@ -348,6 +348,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetOnPrimarySessionSet sets a callback on the executor for when the first session
+// of a task is marked primary. Used to publish a task.updated event so the frontend
+// receives the primary_session_id.
+func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
+	s.executor.SetOnPrimarySessionSet(fn)
+}
+
 // SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
 // cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
 // for local/worktree execution and have no local path yet.

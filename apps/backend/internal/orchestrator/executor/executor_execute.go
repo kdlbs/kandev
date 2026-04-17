@@ -282,6 +282,9 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+		if e.onPrimarySessionSet != nil {
+			e.onPrimarySessionSet(ctx, task.ID, sessionID)
+		}
 	}
 
 	e.logger.Info("session entry created",

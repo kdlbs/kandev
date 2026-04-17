@@ -69,6 +69,19 @@ func provideOrchestrator(
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
+	// Publish task.updated when the first session is marked primary so the
+	// frontend receives primary_session_id for newly created tasks.
+	orchestratorSvc.SetOnPrimarySessionSet(func(ctx context.Context, taskID, _ string) {
+		task, err := taskRepo.GetTask(ctx, taskID)
+		if err != nil {
+			log.Warn("failed to get task for primary session event",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return
+		}
+		taskSvc.PublishTaskUpdated(ctx, task)
+	})
+
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
