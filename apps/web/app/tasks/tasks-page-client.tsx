@@ -127,11 +127,11 @@ function useTaskOperations({
 }
 
 type TasksPageBodyProps = {
+  total: number;
   showArchived: boolean;
   setShowArchived: (show: boolean) => void;
   columns: ReturnType<typeof getColumns>;
   tasks: Task[];
-  total: number;
   pageCount: number;
   pagination: PaginationState;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -140,11 +140,11 @@ type TasksPageBodyProps = {
 };
 
 function TasksPageBody({
+  total,
   showArchived,
   setShowArchived,
   columns,
   tasks,
-  total,
   pageCount,
   pagination,
   setPagination,
