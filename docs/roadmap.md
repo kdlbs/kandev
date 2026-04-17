@@ -5,7 +5,6 @@ High-level direction for the project. This is not a commitment - priorities shif
 ## Now
 
 - Stability and bug fixes across all agent integrations - current primary focus
-- Improved plan mode - richer plan editing, version history, plan diffs
 
 ## Next
 
