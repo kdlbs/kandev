@@ -10,7 +10,7 @@ High-level direction for the project. This is not a commitment - priorities shif
 
 - Multi-repo task support - a single task can span multiple repositories
 - Coordinator mode - have an agent coordinate sub-tasks executed by other agents
-- Mobile-friendly UI - orchestrate and review from your phone
+- Improved mobile UI - polish the existing mobile view for orchestrating and reviewing from your phone
 
 ## Later
 
