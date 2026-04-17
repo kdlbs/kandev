@@ -42,13 +42,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const fetchGenRef = useRef(0);
 
   useEffect(() => {
-    // Drop snapshots from the previous workspace so cross-workspace tasks
-    // don't bleed into the sidebar (they'd otherwise render under "Unassigned"
-    // because their repositoryId isn't in the current workspace's repo map).
-    // Bumping the generation counter invalidates any fetches still in flight
-    // from the previous workspace, so their late writes can't re-pollute the
-    // store after clearKanbanMulti runs.
-    // Skip the clear on initial mount so SSR-hydrated snapshots survive.
+    // Skip clear on initial mount to preserve SSR-hydrated snapshots.
     if (lastWorkspaceIdRef.current !== workspaceId) {
       if (lastWorkspaceIdRef.current !== null) {
         store.getState().clearKanbanMulti();
