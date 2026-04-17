@@ -150,6 +150,48 @@ func TestAggregator_DifferentWorkspacesAreIndependent(t *testing.T) {
 	}
 }
 
+func TestAggregator_FlushSessionMode_AppliesCachedModeAfterExecutionReady(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+
+	// Gateway sends focus BEFORE execution is registered — mode is cached,
+	// not pushed.
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeFast)
+
+	mgr.pollAggregator.mu.Lock()
+	_, pushedBeforeReady := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if pushedBeforeReady {
+		t.Fatal("expected no lastPushed entry before execution exists")
+	}
+
+	// Execution is created (simulates waitForAgentctlReady completing).
+	addExecution(mgr, "s1", "/tmp/ws1")
+	mgr.pollAggregator.FlushSessionMode("s1")
+
+	mgr.pollAggregator.mu.Lock()
+	got := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+
+	if got != WorkspacePollModeFast {
+		t.Errorf("after FlushSessionMode, workspace mode = %q, want fast", got)
+	}
+}
+
+func TestAggregator_FlushSessionMode_NoOpWhenNothingCached(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+	addExecution(mgr, "s1", "/tmp/ws1")
+
+	// No prior HandleSessionMode call — nothing cached.
+	mgr.pollAggregator.FlushSessionMode("s1")
+
+	mgr.pollAggregator.mu.Lock()
+	_, pushed := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if pushed {
+		t.Error("FlushSessionMode should not push anything when nothing cached")
+	}
+}
+
 func TestAggregator_RedundantEventDoesNotRepush(t *testing.T) {
 	mgr := newTestManagerForAggregator(t)
 	addExecution(mgr, "s1", "/tmp/ws1")

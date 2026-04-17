@@ -183,6 +183,17 @@ func (m *Manager) HandleSessionMode(sessionID string, mode WorkspacePollMode) {
 	m.pollAggregator.HandleSessionMode(sessionID, mode)
 }
 
+// flushCachedPollMode pushes any session mode the gateway cached before this
+// execution was ready. Closes the pre-execution-focus race where the frontend
+// sent session.focus during execution startup and the cached mode never
+// reached agentctl. No-op when nothing was cached.
+func (m *Manager) flushCachedPollMode(sessionID string) {
+	if m.pollAggregator == nil {
+		return
+	}
+	m.pollAggregator.FlushSessionMode(sessionID)
+}
+
 // SetWorktreeManager sets the worktree manager for Git worktree isolation.
 //
 // This must be called before launching agents if Git worktree support is enabled in the runtime.

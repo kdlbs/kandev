@@ -141,6 +141,17 @@ func (h *Hub) computeSessionModeLocked(sessionID string) SessionMode {
 	return SessionModePaused
 }
 
+// GetSessionMode returns the current effective mode for a session (fast if any
+// client focused, slow if any subscribed, paused otherwise). Used by the
+// lifecycle manager when an execution becomes ready — it queries the hub's
+// live state and pushes to agentctl, closing the race where the hub's mode
+// transitions fired before the execution was registered.
+func (h *Hub) GetSessionMode(sessionID string) SessionMode {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.computeSessionModeLocked(sessionID)
+}
+
 // recomputeSessionMode is called after any state change that could affect a
 // session's mode (subscribe, unsubscribe, focus, unfocus, client disconnect).
 // Up-transitions notify immediately; down-transitions are debounced.

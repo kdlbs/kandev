@@ -44,6 +44,16 @@ func (a *scriptServiceAdapter) GetRepositoryScript(ctx context.Context, id strin
 	}, nil
 }
 
+// hubModeQuerierAdapter converts the hub's SessionMode enum to lifecycle's
+// WorkspacePollMode (same string values) so lifecycle doesn't import websocket.
+type hubModeQuerierAdapter struct {
+	hub *gateways.Hub
+}
+
+func (a *hubModeQuerierAdapter) GetSessionMode(sessionID string) lifecycle.WorkspacePollMode {
+	return lifecycle.WorkspacePollMode(a.hub.GetSessionMode(sessionID))
+}
+
 // sessionReaderAdapter implements agenthandlers.SessionReader using the task repository.
 // This allows git handlers to look up session metadata (like base commit SHA) from the database.
 type sessionReaderAdapter struct {
@@ -190,6 +200,10 @@ func provideGateway(
 		gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
 			lifecycleMgr.HandleSessionMode(sessionID, lifecycle.WorkspacePollMode(mode))
 		})
+		// Expose hub's live mode state to lifecycle so it can query on
+		// execution-ready and proactively push the right mode even when
+		// gateway events fired before the execution was registered.
+		lifecycleMgr.SetSessionModeQuerier(&hubModeQuerierAdapter{hub: gateway.Hub})
 	}
 
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)

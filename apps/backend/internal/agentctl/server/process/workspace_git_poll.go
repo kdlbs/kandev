@@ -166,8 +166,7 @@ func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
 // already handled by monitorLoop via git ls-files. This avoids the expensive
 // directory traversal that --untracked-files=all performs on large repos.
 func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=no")
-	cmd.Dir = wt.workDir
+	cmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=no")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

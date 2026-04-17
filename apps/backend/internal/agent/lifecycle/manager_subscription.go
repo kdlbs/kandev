@@ -38,11 +38,20 @@ func (m WorkspacePollMode) rank() int {
 // agentctl is unreachable.
 const pushPollModeTimeout = 5 * time.Second
 
+// SessionModeQuerier is implemented by the gateway hub. It lets the lifecycle
+// manager look up the current effective mode for a session, so when an
+// execution becomes ready we can proactively push the right mode even when
+// the gateway's subscribe/focus events fired before the execution existed.
+type SessionModeQuerier interface {
+	GetSessionMode(sessionID string) WorkspacePollMode
+}
+
 // workspacePollAggregator tracks the per-session mode contributions for each
 // workspace and pushes the effective workspace mode to agentctl when it changes.
 type workspacePollAggregator struct {
-	mgr *Manager
-	mu  sync.Mutex
+	mgr    *Manager
+	hubQry SessionModeQuerier // nil until gateway wires it in
+	mu     sync.Mutex
 	// sessionModes maps sessionID -> latest mode reported by the gateway.
 	sessionModes map[string]WorkspacePollMode
 	// lastPushed maps workspacePath -> last mode we sent to agentctl. Used to
@@ -68,13 +77,9 @@ func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 // this (the call is debounced + computed off the hub critical path already).
 //
 // Pre-execution focus race: if a session.focus arrives before the lifecycle
-// has created its execution, we cache the mode in sessionModes but cannot push
-// to agentctl yet (no client). The session stays at agentctl's default (slow)
-// until the next mode change actually reaches the running agentctl. To avoid
-// drifting permanently in that case, callers that create executions should
-// invoke RefreshWorkspacePollMode once the execution is registered (TODO).
-// In practice the user re-focusing or any subscribe/unsubscribe re-triggers
-// the push, so the window self-heals quickly.
+// has created its execution, we cache the mode in sessionModes and return. The
+// lifecycle manager calls FlushSessionMode once agentctl is ready, which
+// resolves the race by pushing the cached mode retroactively.
 func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode WorkspacePollMode) {
 	execution, exists := a.mgr.GetExecutionBySessionID(sessionID)
 	if !exists {
@@ -173,4 +178,81 @@ func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspace
 				zap.Error(err))
 		}
 	}()
+}
+
+// FlushSessionMode resolves two races that leave agentctl in the wrong mode:
+//
+//  1. Pre-execution focus: the gateway sent focus before the execution was
+//     in executionStore. HandleSessionMode cached the mode but short-circuited
+//     without pushing.
+//  2. Pre-ready push: the gateway sent focus after Add() but before agentctl's
+//     HTTP server was accepting connections. pushAsync fired the RPC, it
+//     failed (connection refused), but lastPushed was already updated so
+//     nothing retries.
+//
+// This is called from the lifecycle manager's waitForAgentctlReady success
+// path — once we know agentctl is accepting RPCs, force-resend whatever
+// workspace-effective mode we currently believe is correct. No-op if nothing
+// was cached (no gateway events reached us before flush).
+func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
+	execution, exists := a.mgr.GetExecutionBySessionID(sessionID)
+	if !exists || execution.WorkspacePath == "" {
+		return
+	}
+
+	// Authoritative source: query the hub for the session's current mode.
+	// This closes the race where gateway events fired before the execution
+	// was registered (nothing cached) or while agentctl was still starting
+	// up (the RPC fired but connection-refused).
+	var sessionMode WorkspacePollMode
+	if a.hubQry != nil {
+		sessionMode = a.hubQry.GetSessionMode(sessionID)
+	} else {
+		// Fall back to cached value if no hub wired (e.g., tests).
+		a.mu.Lock()
+		cached, hasCached := a.sessionModes[sessionID]
+		a.mu.Unlock()
+		if !hasCached {
+			return
+		}
+		sessionMode = cached
+	}
+
+	a.mu.Lock()
+	// Merge the queried mode with whatever we had cached, then recompute
+	// the workspace-level effective mode across all sessions in this
+	// workspace.
+	if sessionMode == WorkspacePollModePaused {
+		delete(a.sessionModes, sessionID)
+	} else {
+		a.sessionModes[sessionID] = sessionMode
+	}
+	effective := WorkspacePollModePaused
+	for sid, m := range a.sessionModes {
+		exec, ok := a.mgr.GetExecutionBySessionID(sid)
+		if !ok || exec.WorkspacePath != execution.WorkspacePath {
+			continue
+		}
+		if m.rank() > effective.rank() {
+			effective = m
+		}
+	}
+	if effective == WorkspacePollModePaused {
+		delete(a.lastPushed, execution.WorkspacePath)
+	} else {
+		a.lastPushed[execution.WorkspacePath] = effective
+	}
+	a.mu.Unlock()
+
+	if effective != WorkspacePollModePaused {
+		a.pushAsync(execution, execution.WorkspacePath, effective)
+	}
+}
+
+// SetSessionModeQuerier lets the gateway inject itself so the aggregator can
+// query the hub's live session mode state.
+func (m *Manager) SetSessionModeQuerier(q SessionModeQuerier) {
+	if m.pollAggregator != nil {
+		m.pollAggregator.hubQry = q
+	}
 }

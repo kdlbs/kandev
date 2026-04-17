@@ -97,10 +97,15 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
-		// Default to slow polling. The gateway lifts to fast on focus and drops
-		// to paused when no UI client is subscribed. Slow is the safe fallback
-		// if the gateway never pushes a mode (e.g., agentctl running headless).
-		pollMode:           PollModeSlow,
+		// Default to fast polling — matches pre-PR behavior so newly-created
+		// agentctl instances don't have a startup window where changes go
+		// undetected for up to 30s. The gateway pushes slow/paused once it
+		// knows no client is actively watching this workspace; until then,
+		// fast is the safe default (a freshly-spawned instance was always
+		// about to be used by someone, historically). Retained-task CPU
+		// savings still apply because those instances eventually receive a
+		// slow or paused mode push.
+		pollMode:           PollModeFast,
 		monitorModeChanged: make(chan struct{}, 1),
 		gitPollModeChanged: make(chan struct{}, 1),
 		stopCh:             make(chan struct{}),

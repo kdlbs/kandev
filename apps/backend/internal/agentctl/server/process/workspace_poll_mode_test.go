@@ -23,14 +23,18 @@ func TestPollMode_IsValid(t *testing.T) {
 	}
 }
 
-func TestNewWorkspaceTracker_DefaultsToSlow(t *testing.T) {
+func TestNewWorkspaceTracker_DefaultsToFast(t *testing.T) {
 	isolateTestGitEnv(t)
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
+	// Fresh agentctl instances start in fast mode — the gateway pushes
+	// slow/paused once it determines no client is actively watching.
+	// Defaulting to fast avoids a startup window where workspace changes
+	// would go undetected for up to 30s.
 	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	if got := wt.GetPollMode(); got != PollModeSlow {
-		t.Errorf("default poll mode = %q, want %q", got, PollModeSlow)
+	if got := wt.GetPollMode(); got != PollModeFast {
+		t.Errorf("default poll mode = %q, want %q", got, PollModeFast)
 	}
 }
 
@@ -49,8 +53,8 @@ func TestSetPollMode_NoOpOnSameMode(t *testing.T) {
 		}
 	}
 
-	// Setting the same mode should not push a signal to either channel
-	wt.SetPollMode(PollModeSlow)
+	// Setting the same mode (fast — the default) should not push a signal to either channel
+	wt.SetPollMode(PollModeFast)
 	for name, ch := range map[string]chan struct{}{
 		"monitor": wt.monitorModeChanged,
 		"gitPoll": wt.gitPollModeChanged,
@@ -78,6 +82,14 @@ func TestSetPollMode_SignalsOnTransition(t *testing.T) {
 		}
 	}
 
+	// Start at slow so fast is a real transition (default is fast).
+	wt.SetPollMode(PollModeSlow)
+	for _, ch := range []chan struct{}{wt.monitorModeChanged, wt.gitPollModeChanged} {
+		select {
+		case <-ch:
+		default:
+		}
+	}
 	wt.SetPollMode(PollModeFast)
 	// Both loops must wake — each channel should receive a signal
 	for name, ch := range map[string]chan struct{}{
@@ -104,8 +116,9 @@ func TestSetPollMode_RejectsInvalidMode(t *testing.T) {
 
 	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	wt.SetPollMode(PollMode("nonsense"))
-	if got := wt.GetPollMode(); got != PollModeSlow {
-		t.Errorf("invalid mode mutated state: GetPollMode = %q, want unchanged %q", got, PollModeSlow)
+	// Default is fast; invalid mode should not mutate.
+	if got := wt.GetPollMode(); got != PollModeFast {
+		t.Errorf("invalid mode mutated state: GetPollMode = %q, want unchanged %q", got, PollModeFast)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -220,8 +219,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// again because the index blob hash stays constant and the worktree hash
 	// is always shown as 0000000 (not computed). To detect subsequent changes
 	// to dirty files, we also include the mtime of each dirty file.
-	cmd := exec.CommandContext(gitCtx, "git", "diff-files", "--name-only")
-	cmd.Dir = wt.workDir
+	cmd := wt.pollingGitCommand(gitCtx, "diff-files", "--name-only")
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
@@ -274,8 +272,7 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 // Returns an error if the git command fails (e.g., timeout, index lock).
 func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, error) {
 	// Get list of untracked files (excluding ignored)
-	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
-	cmd.Dir = wt.workDir
+	cmd := wt.pollingGitCommand(ctx, "ls-files", "--others", "--exclude-standard")
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
