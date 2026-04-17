@@ -41,6 +41,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Skip the Claude GitHub App's OIDC -> installation-token exchange,
+          # which 401s on pull_request_target from forks. GITHUB_TOKEN inherits
+          # pull-requests: write from the permissions block above, which is
+          # enough for the action to post review comments.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           track_progress: true
           allowed_bots: "*"
           prompt: |
