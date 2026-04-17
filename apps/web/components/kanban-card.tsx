@@ -428,7 +428,10 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         isArchiving={isArchiving}
-        onConfirm={() => onArchive?.(task)}
+        onConfirm={() => {
+          onArchive?.(task);
+          setShowArchiveConfirm(false);
+        }}
       />
     </>
   );
