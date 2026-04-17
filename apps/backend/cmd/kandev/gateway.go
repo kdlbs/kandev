@@ -209,10 +209,12 @@ func provideGateway(
 
 	// Broadcast session poll mode transitions to subscribed WS clients so the
 	// frontend debug overlay can show the current mode per session.
+	// Broadcast session poll mode transitions to all WS clients. Uses Broadcast
+	// (not BroadcastToSession) because focus events fire before subscribe events
+	// on page load, so BroadcastToSession misses the focused-but-not-yet-
+	// subscribed client. Volume is low (debounced down-transitions) and clients
+	// filter by session_id in the payload.
 	gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
-		log.Debug("broadcasting session poll mode change",
-			zap.String("session_id", sessionID),
-			zap.String("poll_mode", string(mode)))
 		msg, err := ws.NewNotification(ws.ActionSessionPollModeChanged, map[string]interface{}{
 			"session_id": sessionID,
 			"poll_mode":  string(mode),
@@ -220,7 +222,7 @@ func provideGateway(
 		if err != nil {
 			return
 		}
-		gateway.Hub.BroadcastToSession(sessionID, msg)
+		gateway.Hub.Broadcast(msg)
 	})
 
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)

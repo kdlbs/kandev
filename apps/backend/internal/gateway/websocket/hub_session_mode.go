@@ -169,18 +169,36 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 
 	prev, hadPrev := h.sessionMode.lastMode[sessionID]
 
+	h.logger.Info("recomputeSessionMode",
+		zap.String("session_id", sessionID),
+		zap.String("current", string(current)),
+		zap.String("prev", string(prev)),
+		zap.Bool("had_prev", hadPrev),
+		zap.Int("listener_count", len(h.sessionMode.listeners)))
+
 	// Always cancel any pending debounced down-transition — either we're
 	// transitioning to a new mode (it's stale), or we're back at the same mode
 	// it was scheduled to drop us to (it's redundant). If we kept the old
 	// timer alive, a slow→fast→slow→fast within the debounce window would
 	// leave the original slow timer pending and fire after the user had
 	// already re-focused.
+	//
+	// When we cancel a pending timer, also clear lastMode so the cancelled
+	// transition doesn't leave stale state. Without this, a page refresh
+	// (disconnect → paused debounce → reconnect within 5s) would see
+	// prev=fast, current=fast → "no change", and never broadcast the mode
+	// to the new client.
 	if t, ok := h.sessionMode.pendingDownTransitions[sessionID]; ok {
 		t.Stop()
 		delete(h.sessionMode.pendingDownTransitions, sessionID)
+		delete(h.sessionMode.lastMode, sessionID)
+		prev = ""
+		hadPrev = false
 	}
 
 	if hadPrev && prev == current {
+		h.logger.Info("recomputeSessionMode: no change, skipping",
+			zap.String("session_id", sessionID))
 		h.sessionMode.mu.Unlock()
 		return
 	}
@@ -189,12 +207,21 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 		// Up-transitions fire immediately so the user sees fresh data right away.
 		h.sessionMode.lastMode[sessionID] = current
 		listeners := h.snapshotListenersLocked()
+		h.logger.Info("recomputeSessionMode: up-transition, firing listeners",
+			zap.String("session_id", sessionID),
+			zap.String("from", string(prev)),
+			zap.String("to", string(current)),
+			zap.Int("listener_count", len(listeners)))
 		h.sessionMode.mu.Unlock()
 		h.fireListeners(listeners, sessionID, current)
 		return
 	}
 
 	// Down-transition: debounce so quick tab churn doesn't tear down + restart.
+	h.logger.Info("recomputeSessionMode: down-transition, scheduling debounce",
+		zap.String("session_id", sessionID),
+		zap.String("from", string(prev)),
+		zap.String("to", string(current)))
 	h.sessionMode.pendingDownTransitions[sessionID] = time.AfterFunc(h.sessionMode.debounce, func() {
 		h.fireDebouncedDownTransition(sessionID)
 	})

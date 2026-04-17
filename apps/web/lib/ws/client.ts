@@ -294,7 +294,13 @@ export class WebSocketClient {
 
     const action = (message as { action?: string })?.action as BackendMessageType | undefined;
     if (!action) return;
+    if (action === "session.poll_mode_changed") {
+      console.log("[poll-mode] raw WS notification received", message);
+    }
     const handlers = this.handlers.get(action);
+    if (!handlers && action === "session.poll_mode_changed") {
+      console.warn("[poll-mode] no handler registered for session.poll_mode_changed!");
+    }
     if (handlers) {
       handlers.forEach((handler) => handler(message));
     }

@@ -173,22 +173,27 @@ func TestHub_RefocusWithinDebounceCancelsDownTransition(t *testing.T) {
 		}
 		rec.mu.Unlock()
 
-		// Unfocus then re-focus quickly — net effect should be zero new events
-		// (we stayed in fast). The debounce timer is cancelled by the re-focus.
+		// Unfocus then re-focus quickly — cancelling the pending down-transition
+		// timer clears lastMode, so the re-focus fires a fresh up-transition
+		// (3rd event: fast). This is intentional: it ensures new clients after a
+		// page refresh receive the current mode immediately.
 		h.UnfocusSession(c, "sess-1")
 		h.FocusSession(c, "sess-1")
 		synctest.Wait()
 
 		// Advance fake clock past the debounce window to prove the timer was
-		// cancelled and won't fire.
+		// cancelled and won't fire a down-transition.
 		time.Sleep(100 * time.Millisecond)
 		synctest.Wait()
 
 		rec.mu.Lock()
-		got := len(rec.events)
+		got := rec.events
 		rec.mu.Unlock()
-		if got != 2 {
-			t.Errorf("expected refocus to suppress down-transition; got %d events: %+v", got, rec.events)
+		if len(got) != 3 {
+			t.Errorf("expected 3 events (slow, fast, fast); got %d: %+v", len(got), got)
+		}
+		if len(got) == 3 && got[2].mode != SessionModeFast {
+			t.Errorf("expected 3rd event to be fast (re-focus); got %v", got[2].mode)
 		}
 	})
 }
