@@ -33,10 +33,11 @@ export function TaskArchiveConfirmDialog({
   onConfirm,
   confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
-  const label = isBulkOperation ? `task${(count ?? 0) !== 1 ? "s" : ""}` : "task";
-  const title = isBulkOperation ? `Archive ${count} ${label}?` : "Archive task?";
+  const safeCount = count ?? 0;
+  const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
+  const title = isBulkOperation ? `Archive ${safeCount} ${label}?` : "Archive task?";
   const firstLine = isBulkOperation
-    ? `Are you sure you want to archive ${count} ${label}?`
+    ? `Are you sure you want to archive ${safeCount} ${label}?`
     : `Are you sure you want to archive "${taskTitle}"?`;
 
   return (
@@ -59,10 +60,10 @@ export function TaskArchiveConfirmDialog({
             disabled={isArchiving}
             className="cursor-pointer"
             data-testid={confirmTestId}
-            onClick={(e) => {
-              e.preventDefault();
+            onClick={() => {
               if (isArchiving) return;
               onConfirm();
+              onOpenChange(false);
             }}
           >
             {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
