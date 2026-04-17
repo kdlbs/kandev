@@ -13,7 +13,9 @@ function findStartStep(steps: WorkflowStep[]): WorkflowStep {
 
 async function gotoTasksPage(page: Page): Promise<void> {
   await page.goto("/tasks");
-  await page.waitForLoadState("networkidle");
+  // Wait for a header landmark instead of networkidle — persistent WebSocket
+  // connections can keep the network "active" and make networkidle unreliable.
+  await page.getByTestId("display-button").waitFor();
 }
 
 async function pickListboxOption(page: Page, optionLabel: string): Promise<void> {
