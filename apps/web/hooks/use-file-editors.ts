@@ -69,8 +69,8 @@ function buildPersistedTabs(
   openFiles: Map<string, FileEditorState>,
 ) {
   const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
-  const previewPath = ((preview?.params as Record<string, unknown> | undefined)
-    ?.previewItemId ?? null) as string | null;
+  const previewPath = ((preview?.params as Record<string, unknown> | undefined)?.previewItemId ??
+    null) as string | null;
   return Array.from(openFiles.values()).flatMap(({ path, name, markdownPreview }) => {
     const isPinned = !!api?.getPanel(`file:${path}`);
     const isPreview = !isPinned && path === previewPath;
