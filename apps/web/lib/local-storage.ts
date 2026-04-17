@@ -433,18 +433,23 @@ const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";
 
 /**
- * Minimal tab info stored in sessionStorage (no content - reloaded on restore)
+ * Minimal tab info stored in sessionStorage (no content - reloaded on restore).
+ * `pinned` distinguishes user-pinned tabs (restored always) from the single
+ * preview tab (restored as preview).
  */
 export interface StoredFileTab {
   path: string;
   name: string;
   markdownPreview?: boolean;
+  pinned?: boolean;
 }
 
 /**
- * Get the saved open file tabs for a session
- * @param sessionId - The session ID
- * @returns Array of stored file tabs (path and name only)
+ * Get the saved open file tabs for a session.
+ *
+ * Legacy records (written before the preview-tab feature) have no `pinned`
+ * field. We treat them as pinned so the user's previously-open files don't
+ * suddenly collapse to a single preview after upgrading.
  */
 export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
   if (typeof window === "undefined") return [];
@@ -452,17 +457,30 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return [];
-    return JSON.parse(raw) as StoredFileTab[];
+    const parsed = JSON.parse(raw) as StoredFileTab[];
+    if (!Array.isArray(parsed)) return [];
+    // At most one tab can be the preview; keep the last one flagged preview and
+    // treat every other record as pinned. Records with `pinned: undefined` are
+    // legacy → pin them so we don't lose them.
+    let previewSeen = false;
+    const normalized: StoredFileTab[] = [];
+    for (let i = parsed.length - 1; i >= 0; i--) {
+      const t = parsed[i];
+      if (!t) continue;
+      const isPinned = t.pinned === true || t.pinned === undefined;
+      if (isPinned) {
+        normalized.unshift({ ...t, pinned: true });
+      } else if (!previewSeen) {
+        previewSeen = true;
+        normalized.unshift({ ...t, pinned: false });
+      }
+    }
+    return normalized;
   } catch {
     return [];
   }
 }
 
-/**
- * Save the open file tabs for a session
- * @param sessionId - The session ID
- * @param tabs - Array of tabs (only path and name are stored)
- */
 export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void {
   if (typeof window === "undefined") return;
   try {

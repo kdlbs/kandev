@@ -29,14 +29,22 @@ type PanelPortalHostProps = {
  * dockview tree.  Mount this as a sibling to `<DockviewReact>`.
  */
 export function PanelPortalHost({ renderPanel }: PanelPortalHostProps) {
-  // Re-render when the set of registered panels changes.
-  const ids = useSyncExternalStore(
+  // Re-render when the set of registered panels changes OR when any panel's
+  // params change. The version counter bumps on both, so we track it as part
+  // of the snapshot to force re-render on in-place param updates (preview tabs).
+  const snapshot = useSyncExternalStore(
     useCallback((cb) => panelPortalManager.subscribe(cb), []),
-    useCallback(() => panelPortalManager.ids().join(","), []),
-    useCallback(() => panelPortalManager.ids().join(","), []),
+    useCallback(
+      () => `${panelPortalManager.getVersion()}|${panelPortalManager.ids().join(",")}`,
+      [],
+    ),
+    useCallback(
+      () => `${panelPortalManager.getVersion()}|${panelPortalManager.ids().join(",")}`,
+      [],
+    ),
   );
 
-  const panelIds = ids ? ids.split(",") : [];
+  const panelIds = snapshot ? (snapshot.split("|")[1] ?? "").split(",").filter(Boolean) : [];
 
   return (
     <>
@@ -97,6 +105,16 @@ export function usePortalSlot(
     // Global panels pass sessionId=undefined so this is a no-op for them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId, sessionId]);
+
+  // Forward dockview's param updates into the portal manager so preview-tab
+  // content (file-editor, diff-viewer, commit-detail) re-renders when the
+  // single preview panel switches to a different file/diff/commit.
+  useEffect(() => {
+    const disposable = props.api.onDidParametersChange((next) => {
+      panelPortalManager.updateParams(panelId, next as Record<string, unknown>);
+    });
+    return () => disposable.dispose();
+  }, [panelId, props.api]);
 
   return containerRef;
 }

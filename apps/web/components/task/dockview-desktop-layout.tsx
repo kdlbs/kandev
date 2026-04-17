@@ -38,6 +38,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
+import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
 import {
   setupSessionTabSync,
@@ -152,6 +153,10 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
   sessionTab: SessionTab,
+  previewFileTab: PreviewFileTab,
+  previewDiffTab: PreviewDiffTab,
+  previewCommitTab: PreviewCommitTab,
+  pinnedDefaultTab: PinnedDefaultTab,
 };
 
 // ---------------------------------------------------------------------------

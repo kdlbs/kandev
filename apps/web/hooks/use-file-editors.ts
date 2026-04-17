@@ -150,10 +150,14 @@ async function syncOpenFileFromWorkspace({
 
 type RestoreTabsParams = {
   activeSessionId: string;
-  savedTabs: Array<{ path: string; name: string; markdownPreview?: boolean }>;
+  savedTabs: Array<{ path: string; name: string; markdownPreview?: boolean; pinned?: boolean }>;
   savedActiveTab: string;
   setFileState: (path: string, state: FileEditorState) => void;
-  addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
+  addFileEditorPanel: (
+    path: string,
+    name: string,
+    opts?: { quiet?: boolean; pin?: boolean },
+  ) => void;
 };
 
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
@@ -185,7 +189,10 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         isBinary: response.is_binary,
         markdownPreview: savedTab.markdownPreview,
       });
-      addFileEditorPanel(savedTab.path, savedTab.name, true);
+      addFileEditorPanel(savedTab.path, savedTab.name, {
+        quiet: true,
+        pin: savedTab.pinned,
+      });
     } catch {
       /* Failed to restore tab, skip */
     }
@@ -202,7 +209,11 @@ type FileEditorEffectsParams = {
   activeSessionId: string | null;
   activeSessionIdRef: React.MutableRefObject<string | null>;
   setFileState: (path: string, state: FileEditorState) => void;
-  addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
+  addFileEditorPanel: (
+    path: string,
+    name: string,
+    opts?: { quiet?: boolean; pin?: boolean },
+  ) => void;
   clearFileStates: () => void;
   removeFileState: (path: string) => void;
   api: ReturnType<typeof useDockviewStore.getState>["api"];
@@ -241,14 +252,29 @@ function useFileEditorEffects({
       if (state.openFiles === prevState.openFiles) return;
       const sessionId = activeSessionIdRef.current;
       if (!sessionId || _restorationInProgress || state.isRestoringLayout) return;
-      saveOpenFileTabs(
-        sessionId,
-        Array.from(state.openFiles.values()).map(({ path, name, markdownPreview }) => ({
-          path,
-          name,
-          ...(markdownPreview ? { markdownPreview } : {}),
-        })),
+      const dockApi = state.api;
+      const previewParams = (dockApi?.getPanel("preview:file-editor")?.params ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const previewPath = (previewParams.previewItemId as string | undefined) ?? null;
+      const tabs = Array.from(state.openFiles.values()).flatMap(
+        ({ path, name, markdownPreview }) => {
+          const isPinned = !!dockApi?.getPanel(`file:${path}`);
+          const isPreview = !isPinned && path === previewPath;
+          // Only persist files that are actually represented by a dockview tab.
+          if (!isPinned && !isPreview) return [];
+          return [
+            {
+              path,
+              name,
+              ...(markdownPreview ? { markdownPreview } : {}),
+              pinned: isPinned,
+            },
+          ];
+        },
       );
+      saveOpenFileTabs(sessionId, tabs);
     });
     return unsub;
   }, [activeSessionIdRef]);
@@ -265,7 +291,16 @@ function useFileEditorEffects({
   useEffect(() => {
     if (!api) return;
     const disposable = api.onDidRemovePanel((event) => {
-      if (event.id.startsWith("file:")) removeFileState(event.id.replace("file:", ""));
+      if (event.id.startsWith("file:")) {
+        removeFileState(event.id.replace("file:", ""));
+        return;
+      }
+      // Preview panel closed: drop whichever file it was showing.
+      if (event.id === "preview:file-editor") {
+        const params = (event.api as unknown as { params?: Record<string, unknown> }).params;
+        const path = (params?.previewItemId as string | undefined) ?? null;
+        if (path) removeFileState(path);
+      }
     });
     return () => disposable.dispose();
   }, [api, removeFileState]);
@@ -322,7 +357,12 @@ type FileEditorActionsParams = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
-  addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
+  addFileEditorPanel: (
+    path: string,
+    name: string,
+    opts?: { quiet?: boolean; pin?: boolean },
+  ) => void;
+  promotePreviewToPinned: (type: "file-editor") => string | null;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   toast: ReturnType<typeof useToast>["toast"];
 };
@@ -450,6 +490,7 @@ function useFileEditorActions({
   setFileState,
   updateFileState,
   addFileEditorPanel,
+  promotePreviewToPinned,
   setSavingFiles,
   toast,
 }: FileEditorActionsParams) {
@@ -487,9 +528,21 @@ function useFileEditorActions({
     (path: string, newContent: string) => {
       const file = getOpenFiles().get(path);
       if (!file) return;
-      updateFileState(path, { content: newContent, isDirty: newContent !== file.originalContent });
+      const nextIsDirty = newContent !== file.originalContent;
+      updateFileState(path, { content: newContent, isDirty: nextIsDirty });
+      // VSCode-style: editing a preview file auto-promotes its tab so the
+      // user's unsaved changes aren't silently discarded when they open
+      // another file. Only promote when this file is the current preview.
+      if (nextIsDirty && !file.isDirty) {
+        const api = useDockviewStore.getState().api;
+        const preview = api?.getPanel("preview:file-editor");
+        const previewParams = (preview?.params ?? {}) as Record<string, unknown>;
+        if (previewParams.previewItemId === path) {
+          promotePreviewToPinned("file-editor");
+        }
+      }
     },
-    [updateFileState],
+    [updateFileState, promotePreviewToPinned],
   );
 
   const { saveFile, deleteFileAction, applyRemoteUpdate } = useSaveDeleteActions({
@@ -551,6 +604,7 @@ export function useFileEditors() {
   const removeFileState = useDockviewStore((s) => s.removeFileState);
   const clearFileStates = useDockviewStore((s) => s.clearFileStates);
   const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
+  const promotePreviewToPinned = useDockviewStore((s) => s.promotePreviewToPinned);
   const openFiles = useDockviewStore((s) => s.openFiles);
   const api = useDockviewStore((s) => s.api);
   const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
@@ -588,6 +642,7 @@ export function useFileEditors() {
     setFileState,
     updateFileState,
     addFileEditorPanel,
+    promotePreviewToPinned,
     setSavingFiles,
     toast,
   });

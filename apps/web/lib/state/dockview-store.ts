@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- zustand god-store; splitting is a separate refactor. */
 import { create } from "zustand";
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from "dockview-react";
 import {
@@ -28,7 +29,12 @@ import {
   resolveNamedIntent,
 } from "./layout-manager";
 import { buildFileStateActions } from "./dockview-file-state";
-import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
+import {
+  buildPanelActions,
+  buildExtraPanelActions,
+  type OpenPanelOpts,
+  type PreviewType,
+} from "./dockview-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
@@ -93,9 +99,13 @@ type DockviewStore = {
   addChangesPanel: (groupId?: string) => void;
   addFilesPanel: (groupId?: string) => void;
   addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => void;
-  addFileDiffPanel: (path: string, content?: string, groupId?: string) => void;
-  addCommitDetailPanel: (sha: string, groupId?: string) => void;
-  addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
+  addFileDiffPanel: (
+    path: string,
+    opts?: OpenPanelOpts & { content?: string; groupId?: string },
+  ) => void;
+  addCommitDetailPanel: (sha: string, opts?: OpenPanelOpts & { groupId?: string }) => void;
+  addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
+  promotePreviewToPinned: (type: PreviewType) => string | null;
   addBrowserPanel: (url?: string, groupId?: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
