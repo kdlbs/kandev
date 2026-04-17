@@ -49,7 +49,6 @@ export function ArchiveConfirmDialog({
             onClick={() => {
               if (isArchiving) return;
               onConfirm();
-              onOpenChange(false);
             }}
           >
             {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}

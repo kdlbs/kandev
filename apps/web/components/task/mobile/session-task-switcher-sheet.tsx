@@ -14,7 +14,7 @@ import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useTasks } from "@/hooks/use-tasks";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import type {
@@ -274,7 +274,8 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { deleteTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
 
   const handleSelectTask = useCallback(
@@ -328,20 +329,15 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
   const handleArchiveConfirm = useCallback(async () => {
     if (!archivingTask) return;
     setIsArchiving(true);
-    // Capture active state before the async API call — the WS "task.updated"
-    // handler removes the archived task from kanbans before removeTaskFromBoard runs.
-    const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-      store.getState().tasks;
     try {
-      await archiveTaskById(archivingTask.id);
-      await removeTaskFromBoard(archivingTask.id, { wasActiveTaskId, wasActiveSessionId });
+      await archiveAndSwitch(archivingTask.id);
     } catch (error) {
       console.error("Failed to archive task:", error);
     } finally {
       setIsArchiving(false);
       setArchivingTask(null);
     }
-  }, [archivingTask, archiveTaskById, removeTaskFromBoard, store]);
+  }, [archivingTask, archiveAndSwitch]);
 
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
