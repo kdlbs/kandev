@@ -207,8 +207,6 @@ func provideGateway(
 		lifecycleMgr.SetSessionModeQuerier(&hubModeQuerierAdapter{hub: gateway.Hub})
 	}
 
-	// Broadcast session poll mode transitions to subscribed WS clients so the
-	// frontend debug overlay can show the current mode per session.
 	// Broadcast session poll mode transitions to all WS clients. Uses Broadcast
 	// (not BroadcastToSession) because focus events fire before subscribe events
 	// on page load, so BroadcastToSession misses the focused-but-not-yet-

@@ -16,9 +16,9 @@ function makeCombinedStore() {
   return create<CombinedSlice>()(
     immer((set, get, api) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSessionSlice(set as any, get as any, api as any),
+      ...(createSessionSlice as any)(set),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSessionRuntimeSlice(set as any, get as any, api as any),
+      ...(createSessionRuntimeSlice as any)(set),
     })),
   );
 }
