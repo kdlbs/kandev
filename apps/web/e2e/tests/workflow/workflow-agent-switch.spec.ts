@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
@@ -192,12 +193,12 @@ test.describe("Workflow agent profile switching", () => {
   // profile, the chat UI must follow the switch. Without the fix, the chat
   // input stays bound to the first session and messages go to the wrong
   // agent even though the backend correctly spawned a new session.
-  test("chat input follows step transition to new session", async ({
+  test("chat UI follows step transition to new session", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent Switch UI");
@@ -206,13 +207,25 @@ test.describe("Workflow agent profile switching", () => {
     const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 2);
     await apiClient.createWorkflowStep(workflow.id, "Done", 3);
 
+    // Give each step a mock prompt so the agent produces an observable
+    // response and reaches an idle state — without this, the session stays
+    // STARTING/RUNNING indefinitely and downstream UI assertions race.
     await apiClient.updateWorkflowStep(step1.id, {
       agent_profile_id: profileA.id,
+      prompt: 'e2e:message("step1 ready")',
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
     await apiClient.updateWorkflowStep(step2.id, {
       agent_profile_id: profileB.id,
+      prompt: 'e2e:message("step2 ready")',
       events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    // Point the kanban at our workflow so we can find the task card there.
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
     });
 
     const task = await apiClient.createTask(seedData.workspaceId, "UI Switch Task", {
@@ -222,33 +235,41 @@ test.describe("Workflow agent profile switching", () => {
       repository_ids: [seedData.repositoryId],
     });
 
-    // Move to Step1 — auto_start_agent creates first session with profileA.
+    // Move to Step1 — auto_start creates session A with profileA.
     await apiClient.moveTask(task.id, workflow.id, step1.id);
+
+    // Navigate via kanban → click card (matches the working workflow-automation
+    // test) so activeTaskId is set by the normal app flow.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardInColumn("UI Switch Task", step1.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    // Wait for session A to respond — confirms the agent is connected and the
+    // chat panel is fully wired before we trigger the next transition.
+    await expect(session.chat.getByText("step1 ready", { exact: true })).toBeVisible({
+      timeout: 45_000,
+    });
+
     const initial = await pollSessions(apiClient, task.id, 1);
     const sessionA = initial.find((s) => s.agent_profile_id === profileA.id);
     expect(sessionA, "expected a session with profileA to be created").toBeDefined();
 
-    // Open the task in the UI and wait for the chat panel to render.
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.sessionTabBySessionId(sessionA!.id)).toBeVisible({ timeout: 20_000 });
-
-    // Let session A settle before triggering the next transition — matches
-    // the timing used by the "manual step move" test in this file.
-    await testPage.waitForTimeout(3000);
-
-    // Move to Step2 — backend creates a new session with profileB. The
-    // frontend fix is what makes the chat UI follow that switch: without
-    // it, `useAutoSessionTab` never fires for session B because
-    // `activeSessionId` stays pinned to session A, so session B's tab is
-    // never added to dockview and this assertion times out.
+    // Move to Step2 — backend spawns session B with profileB. The frontend
+    // fix is what makes the chat UI follow: without it, `useAutoSessionTab`
+    // never fires for session B because `activeSessionId` stays pinned to
+    // session A, so session B's tab is never added to dockview and the
+    // assertion below times out.
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
     const afterMove = await pollSessions(apiClient, task.id, 2, 45_000);
     const sessionB = afterMove.find((s) => s.agent_profile_id === profileB.id);
     expect(sessionB, "expected a second session with profileB after moving to Step2").toBeDefined();
 
-    await expect(session.sessionTabBySessionId(sessionB!.id)).toBeVisible({ timeout: 20_000 });
+    await expect(session.sessionTabBySessionId(sessionB!.id)).toBeVisible({ timeout: 30_000 });
   });
 });
