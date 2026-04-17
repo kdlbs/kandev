@@ -106,16 +106,7 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
   }
 }
 
-/**
- * Returns true when a file-mode diff panel should auto-close because its file
- * no longer has an uncommitted diff. File-mode diff tabs are only opened from
- * the Changes panel's uncommitted file list, so losing that entry means the
- * tab's reason for existence is gone — even if the file still appears in
- * cumulative or PR diffs.
- *
- * Returns false while `gitStatus` is undefined to avoid a false-close during
- * initial load.
- */
+// Returns true only after gitStatus loads and the file's uncommitted diff is gone.
 export function shouldCloseFileDiffPanel(
   gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
   filePath: string,
