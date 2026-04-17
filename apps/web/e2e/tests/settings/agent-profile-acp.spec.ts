@@ -8,8 +8,8 @@ import { test, expect } from "../../fixtures/test-base";
  *   moved to ACP session modes + per-tool-call permission_request prompts.
  * - Profile name edits persist across reload (exercises the new AgentProfile
  *   DTO shape with `mode` / `migrated_from` columns).
- * - Mode picker is hidden when the agent's capability cache has no modes —
- *   the mock agent in E2E isn't probed so no mode data flows through.
+ * - Mode picker renders when the agent's capability cache advertises modes.
+ *   The E2E mock agent advertises modes in NewSession so the picker appears.
  */
 test.describe("Agent profile — ACP-first", () => {
   test("profile editor loads with model picker and without legacy permission toggles", async ({
@@ -36,9 +36,8 @@ test.describe("Agent profile — ACP-first", () => {
     await expect(testPage.getByText(/Skip Permissions/i)).toHaveCount(0);
     await expect(testPage.getByText(/dangerously skip/i)).toHaveCount(0);
 
-    // The mock agent isn't an InferenceAgent, so the host utility cache has no
-    // modes for it and the mode picker is not rendered.
-    await expect(testPage.getByTestId("profile-mode-field")).toHaveCount(0);
+    // The mock agent advertises modes, so the mode picker is rendered.
+    await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });
   });
 
   test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
