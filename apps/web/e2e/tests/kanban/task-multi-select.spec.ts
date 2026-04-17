@@ -117,6 +117,74 @@ test.describe("Multi-select bulk actions", () => {
     await expect(kanban.multiSelectToolbar).not.toBeVisible();
   });
 
+  test("multi-select mode is disabled after bulk archive", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const [t1, t2] = await Promise.all([
+      apiClient.createTask(seedData.workspaceId, "MS Mode Reset 1", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      }),
+      apiClient.createTask(seedData.workspaceId, "MS Mode Reset 2", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      }),
+    ]);
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.selectTask(t1.id);
+    await kanban.selectTask(t2.id);
+
+    // Multi-select mode should be active
+    await expect(testPage.locator('[data-multi-select-active="true"]').first()).toBeVisible();
+
+    await kanban.bulkArchiveButton.click();
+    await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });
+    await expect(kanban.taskCard(t2.id)).not.toBeVisible();
+
+    // Multi-select mode itself should be disabled, not just the toolbar
+    await expect(kanban.multiSelectToolbar).not.toBeVisible();
+    await expect(testPage.locator('[data-multi-select-active="true"]')).not.toBeVisible();
+  });
+
+  test("multi-select mode is disabled after bulk delete", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const [t1, t2] = await Promise.all([
+      apiClient.createTask(seedData.workspaceId, "MS Mode Reset Del 1", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      }),
+      apiClient.createTask(seedData.workspaceId, "MS Mode Reset Del 2", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      }),
+    ]);
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.selectTask(t1.id);
+    await kanban.selectTask(t2.id);
+
+    await expect(testPage.locator('[data-multi-select-active="true"]').first()).toBeVisible();
+
+    await kanban.bulkDeleteButton.click();
+    await expect(kanban.bulkDeleteConfirm).toBeVisible();
+    await kanban.bulkDeleteConfirm.click();
+
+    await expect(kanban.taskCard(t1.id)).not.toBeVisible({ timeout: 10000 });
+    await expect(kanban.taskCard(t2.id)).not.toBeVisible();
+
+    // Multi-select mode itself should be disabled, not just the toolbar
+    await expect(kanban.multiSelectToolbar).not.toBeVisible();
+    await expect(testPage.locator('[data-multi-select-active="true"]')).not.toBeVisible();
+  });
+
   test("bulk move moves tasks to target step", async ({ testPage, apiClient, seedData }) => {
     // Pick a step that is not the start step as the move target
     const targetStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
