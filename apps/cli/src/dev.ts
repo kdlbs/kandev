@@ -85,6 +85,8 @@ function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
 
   if (isInsideKandevTask(repoRoot)) {
     const devHome = devKandevHome(repoRoot);
+    // Display only; the backend derives its own DB path from KANDEV_HOME_DIR
+    // via ResolvedDataDir(). Both resolve to the same location.
     const dbPath = path.join(devHome, "data", "kandev.db");
     console.log("[kandev] task workspace detected → using local dev state");
     return {
