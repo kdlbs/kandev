@@ -5,11 +5,11 @@ import {
   listUtilityAgents,
   listInferenceAgents,
   listAgentCapabilities,
+  mergeAgentsWithCapabilities,
   updateUtilityAgent,
   deleteUtilityAgent,
   type UtilityAgent,
   type InferenceAgent,
-  type AgentCapabilities,
 } from "@/lib/api/domains/utility-api";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
@@ -20,30 +20,6 @@ import {
   USE_DEFAULT,
 } from "@/components/settings/utility-sections";
 
-/**
- * Merges inference agents with capabilities to populate models.
- * Models come from the agent-capabilities cache, not from inference-agents.
- */
-function mergeAgentsWithCapabilities(
-  agents: InferenceAgent[],
-  capabilities: AgentCapabilities[],
-): InferenceAgent[] {
-  const capsMap = new Map(capabilities.map((c) => [c.agent_type, c]));
-  return agents.map((agent) => {
-    const caps = capsMap.get(agent.id);
-    if (!caps?.models) return agent;
-    return {
-      ...agent,
-      models: caps.models.map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description ?? "",
-        is_default: m.id === caps.current_model_id,
-      })),
-    };
-  });
-}
-
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
     (ia.models ?? []).map((m) => ({
@@ -53,6 +29,38 @@ function buildAllModels(inferenceAgents: InferenceAgent[]) {
       modelName: m.name,
     })),
   );
+}
+
+type FetchResult = {
+  agents: UtilityAgent[];
+  inferenceAgents: InferenceAgent[];
+  defaultAgentId: string;
+  defaultModel: string;
+};
+
+async function fetchPageData(): Promise<FetchResult> {
+  const [agentsRes, inferenceRes, settingsRes] = await Promise.all([
+    listUtilityAgents({ cache: "no-store" }),
+    listInferenceAgents(),
+    fetchUserSettings({ cache: "no-store" }),
+  ]);
+
+  // Fetch capabilities separately so a failure doesn't break the page
+  let mergedAgents: InferenceAgent[];
+  try {
+    const capsRes = await listAgentCapabilities();
+    mergedAgents = mergeAgentsWithCapabilities(inferenceRes.agents, capsRes.agents);
+  } catch {
+    // Capabilities unavailable; show agents without model details
+    mergedAgents = inferenceRes.agents;
+  }
+
+  return {
+    agents: agentsRes.agents,
+    inferenceAgents: mergedAgents,
+    defaultAgentId: settingsRes.settings.default_utility_agent_id || "",
+    defaultModel: settingsRes.settings.default_utility_model || "",
+  };
 }
 
 async function handleBuiltinChange(
@@ -83,18 +91,11 @@ export function UtilityAgentsSection() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [agentsRes, inferenceRes, capsRes, settingsRes] = await Promise.all([
-        listUtilityAgents({ cache: "no-store" }),
-        listInferenceAgents(),
-        listAgentCapabilities(),
-        fetchUserSettings({ cache: "no-store" }),
-      ]);
-      setAgents(agentsRes.agents);
-      // Merge inference agents with capabilities to get models
-      const mergedAgents = mergeAgentsWithCapabilities(inferenceRes.agents, capsRes.agents);
-      setInferenceAgents(mergedAgents);
-      setDefaultAgentId(settingsRes.settings.default_utility_agent_id || "");
-      setDefaultModel(settingsRes.settings.default_utility_model || "");
+      const data = await fetchPageData();
+      setAgents(data.agents);
+      setInferenceAgents(data.inferenceAgents);
+      setDefaultAgentId(data.defaultAgentId);
+      setDefaultModel(data.defaultModel);
     } catch {
       setAgents([]);
       setInferenceAgents([]);

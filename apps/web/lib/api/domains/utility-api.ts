@@ -68,6 +68,30 @@ export type AgentCapabilities = {
   last_checked_at: string;
 };
 
+/**
+ * Merges inference agents with capabilities to populate models.
+ * Models are read from the agent-capabilities cache, not from inference-agents.
+ */
+export function mergeAgentsWithCapabilities(
+  agents: InferenceAgent[],
+  capabilities: AgentCapabilities[],
+): InferenceAgent[] {
+  const capsMap = new Map(capabilities.map((c) => [c.agent_type, c]));
+  return agents.map((agent) => {
+    const caps = capsMap.get(agent.id);
+    if (!caps?.models) return agent;
+    return {
+      ...agent,
+      models: caps.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description ?? "",
+        is_default: m.id === caps.current_model_id,
+      })),
+    };
+  });
+}
+
 export type ExecutePromptRequest = {
   utility_agent_id: string;
   session_id?: string;

@@ -13,12 +13,26 @@ import {
   getTemplateVariables,
   listInferenceAgents,
   listAgentCapabilities,
+  mergeAgentsWithCapabilities,
   type TemplateVariable,
   type InferenceAgent,
   type InferenceModel,
 } from "@/lib/api/domains/utility-api";
 import { ScriptEditor } from "./profile-edit/script-editor";
 import type { ScriptPlaceholder } from "./profile-edit/script-editor-completions";
+
+/** Fetches inference agents and capabilities, merging models from capabilities. */
+async function fetchInferenceAgentsWithCapabilities(): Promise<InferenceAgent[]> {
+  // Fetch agents first; if capabilities fail, still return agents without models
+  const inferenceRes = await listInferenceAgents();
+  try {
+    const capsRes = await listAgentCapabilities();
+    return mergeAgentsWithCapabilities(inferenceRes.agents, capsRes.agents);
+  } catch {
+    // Capabilities unavailable; return agents as-is (models will be null)
+    return inferenceRes.agents;
+  }
+}
 
 type Props = {
   open: boolean;
@@ -184,25 +198,8 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
       .then(({ variables }) => setPlaceholders(toScriptPlaceholders(variables)))
       .catch(() => setPlaceholders([]));
 
-    // Fetch both inference agents and capabilities, then merge
-    Promise.all([listInferenceAgents(), listAgentCapabilities()])
-      .then(([inferenceRes, capsRes]) => {
-        const capsMap = new Map(capsRes.agents.map((c) => [c.agent_type, c]));
-        const merged = inferenceRes.agents.map((agent) => {
-          const caps = capsMap.get(agent.id);
-          if (!caps?.models) return agent;
-          return {
-            ...agent,
-            models: caps.models.map((m) => ({
-              id: m.id,
-              name: m.name,
-              description: m.description ?? "",
-              is_default: m.id === caps.current_model_id,
-            })),
-          };
-        });
-        setInferenceAgents(merged);
-      })
+    fetchInferenceAgentsWithCapabilities()
+      .then(setInferenceAgents)
       .catch(() => setInferenceAgents([]));
   }, []);
 
