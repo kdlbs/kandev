@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { mergeAgentsWithCapabilities, type InferenceAgent, type AgentCapabilities } from "./utility-api";
+import {
+  mergeAgentsWithCapabilities,
+  type InferenceAgent,
+  type AgentCapabilities,
+} from "./utility-api";
 
 const CLAUDE_CODE = "claude-code";
 const CLAUDE_CODE_DISPLAY = "Claude Code";
@@ -26,7 +30,14 @@ describe("mergeAgentsWithCapabilities", () => {
   it("populates models from capabilities", () => {
     const agents = [agent(CLAUDE_CODE, CLAUDE_CODE_DISPLAY)];
     const capabilities = [
-      caps(CLAUDE_CODE, [{ id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }], "sonnet"),
+      caps(
+        CLAUDE_CODE,
+        [
+          { id: "opus", name: "Opus" },
+          { id: "sonnet", name: "Sonnet" },
+        ],
+        "sonnet",
+      ),
     ];
 
     const result = mergeAgentsWithCapabilities(agents, capabilities);
@@ -72,9 +83,13 @@ describe("mergeAgentsWithCapabilities", () => {
     const result = mergeAgentsWithCapabilities(agents, capabilities);
 
     expect(result).toHaveLength(3);
-    expect(result[0].models).toEqual([{ id: "opus", name: "Opus", description: "", is_default: true }]);
+    expect(result[0].models).toEqual([
+      { id: "opus", name: "Opus", description: "", is_default: true },
+    ]);
     expect(result[1].models).toBeNull(); // no capabilities for codex
-    expect(result[2].models).toEqual([{ id: "gpt4o", name: "GPT-4o", description: "", is_default: false }]);
+    expect(result[2].models).toEqual([
+      { id: "gpt4o", name: "GPT-4o", description: "", is_default: false },
+    ]);
   });
 
   it("preserves model description from capabilities", () => {
@@ -93,7 +108,11 @@ describe("mergeAgentsWithCapabilities", () => {
     const capabilities = [
       caps(
         CLAUDE_CODE,
-        [{ id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }, { id: "haiku", name: "Haiku" }],
+        [
+          { id: "opus", name: "Opus" },
+          { id: "sonnet", name: "Sonnet" },
+          { id: "haiku", name: "Haiku" },
+        ],
         "haiku",
       ),
     ];
