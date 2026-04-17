@@ -29,10 +29,11 @@ export function TaskDeleteConfirmDialog({
   onConfirm: () => void;
   confirmTestId?: string;
 }) {
-  const label = isBulkOperation ? `task${(count ?? 0) !== 1 ? "s" : ""}` : "task";
-  const title = isBulkOperation ? `Delete ${count} ${label}` : "Delete task";
+  const safeCount = count ?? 0;
+  const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
+  const title = isBulkOperation ? `Delete ${safeCount} ${label}` : "Delete task";
   const description = isBulkOperation
-    ? `Are you sure you want to delete ${count} ${label}? This action cannot be undone.`
+    ? `Are you sure you want to delete ${safeCount} ${label}? This action cannot be undone.`
     : `Are you sure you want to delete "${taskTitle}"? This action cannot be undone.`;
 
   return (
