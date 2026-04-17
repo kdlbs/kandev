@@ -151,11 +151,11 @@ function maybeAdoptSessionOnTransition(
   taskId: string,
   sessionId: string,
   newState: TaskSessionState | undefined,
-  existed: boolean,
+  wasKnownToStore: boolean,
 ): void {
   const state = store.getState();
 
-  if (!existed && shouldAdoptNewSession(state, taskId, newState)) {
+  if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     state.setActiveSession(taskId, sessionId);
     return;
   }

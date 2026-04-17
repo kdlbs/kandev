@@ -299,6 +299,13 @@ describe("session.state_changed → active session switching", () => {
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 
+});
+
+describe("session.state_changed → active session handoff on terminal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("hands off when the current active session transitions to terminal", () => {
     const store = makeStore({
       tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
@@ -326,7 +333,11 @@ describe("session.state_changed → active session switching", () => {
     expect(store.getState().setActiveSession).toHaveBeenCalledWith("t-1", "s-new");
   });
 
-  it("does not hand off when no non-terminal replacement exists", () => {
+  // The per-task list here still shows s-old as RUNNING (pre-event state), so
+  // pickReplacementSessionId returns s-old itself. This exercises the
+  // `replacement !== sessionId` guard — without it, we'd set activeSessionId
+  // to the same session that just became terminal.
+  it("does not hand off when the only candidate is the terminating session itself", () => {
     const store = makeStore({
       tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
       taskSessions: {
@@ -335,6 +346,33 @@ describe("session.state_changed → active session switching", () => {
       taskSessionsByTask: {
         itemsByTaskId: {
           "t-1": [
+            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not hand off when all other sessions for the task are terminal", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
             { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
           ],
         },
