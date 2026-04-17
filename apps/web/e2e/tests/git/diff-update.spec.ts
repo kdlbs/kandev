@@ -231,12 +231,13 @@ test.describe("Diff update on file change", () => {
       timeout: 15_000,
     });
 
-    // The Undo button is rendered inside `[data-undo-btn]` wrappers with
-    // opacity/pointerEvents toggled on hover via JS. `force: true` bypasses
-    // the actionability checks so we don't depend on the hover timing.
+    // The Undo button lives inside `[data-undo-btn]` wrappers with
+    // `opacity: 0; pointer-events: none` until a change line is hovered.
+    // `dispatchEvent('click')` fires the React click handler without relying
+    // on the hover/pointer-events state.
     const undoBtn = diffsContainer.locator("[data-undo-btn] button").first();
     await expect(undoBtn).toHaveCount(1, { timeout: 10_000 });
-    await undoBtn.click({ force: true });
+    await undoBtn.dispatchEvent("click");
 
     // The Diff tab should close automatically.
     await expect(diffTab).toHaveCount(0, { timeout: 15_000 });
