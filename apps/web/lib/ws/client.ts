@@ -168,7 +168,6 @@ export class WebSocketClient {
     const currentCount = this.sessionFocusCounts.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionFocusCounts.set(sessionId, nextCount);
-
     if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
@@ -184,7 +183,6 @@ export class WebSocketClient {
     const currentCount = this.sessionFocusCounts.get(sessionId);
     if (!currentCount) return;
     const nextCount = currentCount - 1;
-
     if (nextCount <= 0) {
       this.sessionFocusCounts.delete(sessionId);
       if (this.status === "open") {
