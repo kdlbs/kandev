@@ -161,8 +161,8 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 
 		// Set plan_mode on the session to verify on_exit clears it
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"plan_mode": true})
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -350,8 +350,8 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		// Set agent execution ID on the session
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-123"
-		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp"}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"acp_session_id": "old-acp"})
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -387,7 +387,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		// Verify acp_session_id was cleared
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasACP := updated.Metadata["acp_session_id"]; hasACP {
+			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
 				t.Error("expected acp_session_id to be cleared from session metadata")
 			}
 		}
@@ -403,8 +403,8 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 
 		// Set plan_mode on session — on_exit should clear it
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"plan_mode": true})
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -426,7 +426,7 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be cleared by on_exit")
 			}
 		}

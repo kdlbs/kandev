@@ -109,6 +109,7 @@ type SessionRepository interface {
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
 // SessionWorktreeRepository handles the task session↔worktree association.

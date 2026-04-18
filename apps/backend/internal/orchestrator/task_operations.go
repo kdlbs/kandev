@@ -452,6 +452,17 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 				s.setSessionPlanMode(ctx, session, true)
 			}
 		}
+
+		// Persist prepare_result using SetSessionMetadataKey (json_set) which
+		// atomically sets ONE key without touching others. This avoids the
+		// read-modify-write race where UpdateSessionMetadata clobbers plan_mode.
+		if execution.PrepareResult != nil && execution.PrepareResult.Success {
+			pr := lifecycle.SerializePrepareResult(execution.PrepareResult)
+			if err := s.repo.SetSessionMetadataKey(ctx, execution.SessionID, "prepare_result", pr); err != nil {
+				s.logger.Warn("failed to persist prepare_result",
+					zap.String("session_id", execution.SessionID), zap.Error(err))
+			}
+		}
 	}
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 }

@@ -296,6 +296,8 @@ type TaskExecution struct {
 	// Worktree info for the agent
 	WorktreePath   string
 	WorktreeBranch string
+	// PrepareResult carries the env preparation result for deferred persistence
+	PrepareResult *lifecycle.EnvPrepareResult
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution

@@ -805,15 +805,11 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return false
 	}
 
-	// Clear the stored ACP session ID in the database so future resumes use session/new.
-	// Use targeted metadata update to avoid overwriting other fields.
-	if session.Metadata != nil {
-		delete(session.Metadata, "acp_session_id")
-		if updateErr := s.repo.UpdateSessionMetadata(ctx, sessionID, session.Metadata); updateErr != nil {
-			s.logger.Warn("failed to clear ACP session ID from session metadata",
-				zap.String("session_id", sessionID),
-				zap.Error(updateErr))
-		}
+	// Clear the stored ACP session ID using json_set to avoid clobbering other keys.
+	if updateErr := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp_session_id", ""); updateErr != nil {
+		s.logger.Warn("failed to clear ACP session ID from session metadata",
+			zap.String("session_id", sessionID),
+			zap.Error(updateErr))
 	}
 	return true
 }
@@ -866,17 +862,17 @@ func (s *Service) clearSessionPlanMode(ctx context.Context, session *models.Task
 // setSessionPlanMode sets or clears plan mode in session metadata.
 // Uses targeted metadata update to avoid overwriting other session fields.
 func (s *Service) setSessionPlanMode(ctx context.Context, session *models.TaskSession, enabled bool) {
+	// Update in-memory struct for callers that read session.Metadata.
 	if session.Metadata == nil {
 		session.Metadata = make(map[string]interface{})
 	}
-
 	if enabled {
 		session.Metadata["plan_mode"] = true
 	} else {
 		delete(session.Metadata, "plan_mode")
 	}
-
-	if err := s.repo.UpdateSessionMetadata(ctx, session.ID, session.Metadata); err != nil {
+	// Persist using json_set to atomically set one key without clobbering others.
+	if err := s.repo.SetSessionMetadataKey(ctx, session.ID, "plan_mode", enabled); err != nil {
 		s.logger.Warn("failed to update session plan mode",
 			zap.String("session_id", session.ID),
 			zap.Bool("enabled", enabled),

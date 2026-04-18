@@ -455,6 +455,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		SessionID:        sessionID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
+		PrepareResult:    resp.PrepareResult,
 	}
 
 	if startAgent {
