@@ -389,16 +389,23 @@ func getEnvBool(key string, defaultValue bool) bool {
 // injectKandevMcpServer prepends the local kandev MCP server to the list of MCP servers.
 // This replaces any existing kandev server to avoid duplicates.
 // The kandev MCP server provides tools like ask_user_question to the agent.
+// Both SSE and HTTP variants are injected - agent capability filtering will select the appropriate one.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	localKandevMcp := McpServerConfig{
+	portStr := strconv.Itoa(port)
+	kandevMcpSse := McpServerConfig{
 		Name: "kandev",
 		Type: "sse",
-		URL:  "http://localhost:" + strconv.Itoa(port) + "/sse",
+		URL:  "http://localhost:" + portStr + "/sse",
+	}
+	kandevMcpHttp := McpServerConfig{
+		Name: "kandev",
+		Type: "http",
+		URL:  "http://localhost:" + portStr + "/mcp",
 	}
 
-	// Filter out any existing kandev server and prepend the local one
-	result := make([]McpServerConfig, 0, len(servers)+1)
-	result = append(result, localKandevMcp)
+	// Filter out any existing kandev server and prepend the local ones
+	result := make([]McpServerConfig, 0, len(servers)+2)
+	result = append(result, kandevMcpSse, kandevMcpHttp)
 	for _, srv := range servers {
 		if srv.Name != "kandev" {
 			result = append(result, srv)
