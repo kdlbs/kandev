@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -101,7 +102,8 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 	for _, step := range result.Steps {
 		output := step.Output
 		if len(output) > MaxStepOutputBytes {
-			output = output[:MaxStepOutputBytes] + "\n... (truncated)"
+			// Truncate at a valid UTF-8 boundary to avoid splitting multi-byte runes.
+			output = strings.ToValidUTF8(output[:MaxStepOutputBytes], "") + "\n... (truncated)"
 		}
 		entry := map[string]interface{}{
 			"name": step.Name, "status": string(step.Status),

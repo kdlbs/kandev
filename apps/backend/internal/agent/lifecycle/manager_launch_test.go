@@ -122,28 +122,3 @@ func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
 	require.False(t, preparer.called, "preparer should be skipped when no repository path")
 	require.Nil(t, result)
 }
-
-// TestLaunch_SkipsPreparerOnResume verifies that Launch() does NOT run the
-// environment preparer when ACPSessionID is set (indicating a session resume).
-// This prevents setup scripts from re-running after backend restarts.
-func TestLaunch_SkipsPreparerOnResume(t *testing.T) {
-	// We can't call Launch() directly (requires full executor setup),
-	// but we verify the contract: ACPSessionID != "" means skip preparation.
-	// This guard lives in Launch() at the runEnvironmentPreparer call site.
-	tests := []struct {
-		name         string
-		acpSessionID string
-		wantPrepare  bool
-	}{
-		{"fresh launch runs preparer", "", true},
-		{"resume skips preparer", "acp-session-123", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			shouldPrepare := tt.acpSessionID == ""
-			require.Equal(t, tt.wantPrepare, shouldPrepare,
-				"ACPSessionID=%q: shouldPrepare=%v, want %v",
-				tt.acpSessionID, shouldPrepare, tt.wantPrepare)
-		})
-	}
-}

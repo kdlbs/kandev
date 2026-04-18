@@ -403,7 +403,9 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 
 // resolveStepPlanMode determines whether plan mode should be active for a step.
 // Returns false for passthrough sessions, steps without enable_plan_mode, or when the agent
-// doesn't support MCP. Also clears plan mode on the session when entering a non-plan-mode step.
+// doesn't support MCP. Plan mode is only cleared by explicit on_exit/on_turn_complete
+// disable_plan_mode actions, not automatically when entering a non-plan-mode step.
+// This preserves user-initiated plan mode across workflow transitions.
 func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskSession, step *wfmodels.WorkflowStep, isPassthrough bool) bool {
 	hasPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
@@ -415,10 +417,6 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 		hasPlanMode = false
 	}
 
-	// For ACP sessions, auto-disable plan mode when entering a step that doesn't explicitly enable it.
-	if !isPassthrough && !hasPlanMode {
-		s.clearSessionPlanMode(ctx, session)
-	}
 	return hasPlanMode
 }
 
@@ -543,7 +541,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	if len(step.Events.OnEnter) == 0 {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		return
 	}
 
@@ -552,7 +550,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	if step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext) {
 		if !s.resetAgentContext(ctx, taskID, session, step.Name) {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 			return
 		}
 	}
@@ -584,7 +582,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				zap.String("step_name", step.Name),
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		}
 
 	case hasAutoStart:
@@ -605,7 +603,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	default:
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 	}
 }
 
@@ -902,7 +900,9 @@ func (s *Service) processTurnCompleteActions(ctx context.Context, session *model
 }
 
 // publishSessionWaitingEvent publishes a session state change event for WAITING_FOR_INPUT.
-func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessionID, stepID string) {
+// An optional preloaded session avoids re-reading from DB (which can miss recent writes
+// on the read-only WAL connection).
+func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessionID, stepID string, preloadedSession ...*models.TaskSession) {
 	if s.eventBus == nil {
 		return
 	}
@@ -914,7 +914,13 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 	}
 	// Include agent_profile_id and session metadata so the frontend can
 	// identify the agent (e.g. MCP support) without waiting for SSR hydration.
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else if s, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
+		session = s
+	}
+	if session != nil {
 		if session.AgentProfileID != "" {
 			eventData["agent_profile_id"] = session.AgentProfileID
 		}

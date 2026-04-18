@@ -326,11 +326,11 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 	})
 
-	t.Run("no plan mode clears it", func(t *testing.T) {
+	t.Run("plan mode persists when entering step without enable_plan_mode", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 
-		// Set plan_mode in session metadata
+		// Set plan_mode in session metadata (simulates user-initiated plan mode)
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		_ = repo.UpdateTaskSession(ctx, session)
 		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"plan_mode": true})
@@ -346,11 +346,12 @@ func TestProcessOnEnter(t *testing.T) {
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		svc.processOnEnter(ctx, "t1", session, step, "test task")
 
+		// Plan mode should persist — only explicit on_exit/on_turn_complete
+		// disable_plan_mode actions should clear it.
 		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata != nil {
-			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
-				t.Error("expected plan_mode to be cleared from session metadata")
-			}
+		pm, _ := updated.Metadata["plan_mode"].(bool)
+		if !pm {
+			t.Error("expected plan_mode to persist in session metadata")
 		}
 	})
 
