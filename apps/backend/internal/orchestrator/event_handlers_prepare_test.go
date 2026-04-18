@@ -14,7 +14,7 @@ import (
 
 func makeCompletedEvent(payload interface{}) *bus.Event {
 	return &bus.Event{
-		Subject:   "executor.prepare.completed",
+		Type:      "executor.prepare.completed",
 		Data:      payload,
 		Timestamp: time.Now(),
 	}
