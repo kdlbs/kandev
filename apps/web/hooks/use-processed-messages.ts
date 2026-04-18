@@ -226,7 +226,10 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   return items;
 }
 
-function injectPrepareProgressItem(items: RenderItem[], resolvedSessionId: string | null): RenderItem[] {
+function injectPrepareProgressItem(
+  items: RenderItem[],
+  resolvedSessionId: string | null,
+): RenderItem[] {
   if (!resolvedSessionId) return items;
   const prepareItem: PrepareProgressItem = {
     type: "prepare_progress",
