@@ -51,9 +51,18 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 			zap.String("actual_type", fmt.Sprintf("%T", event.Data)))
 	}
 
-	// Build a metadata patch with just the prepare_result key.
-	// UpdateSessionMetadata uses json_patch to merge, so this won't clobber
-	// other keys (context_window, workflow_data, etc.) written concurrently.
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Error("failed to get session for prepare persistence",
+			zap.String("session_id", payload.SessionID), zap.Error(err))
+		return nil
+	}
+
+	metadata := session.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
 	status := "completed"
 	if !payload.Success {
 		status = agentEventFailed
@@ -89,7 +98,6 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 		steps = append(steps, entry)
 	}
 
-	metadata := map[string]interface{}{}
 	metadata["prepare_result"] = map[string]interface{}{
 		"status":        status,
 		"steps":         steps,
@@ -97,7 +105,7 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 		"duration_ms":   payload.DurationMs,
 	}
 
-	if err := s.repo.MergeSessionMetadata(ctx, payload.SessionID, metadata); err != nil {
+	if err := s.repo.UpdateSessionMetadata(ctx, payload.SessionID, metadata); err != nil {
 		s.logger.Error("failed to persist prepare result in session metadata",
 			zap.String("session_id", payload.SessionID), zap.Error(err))
 		return nil

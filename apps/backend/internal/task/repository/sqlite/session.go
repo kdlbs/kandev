@@ -328,12 +328,14 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))
 }
 
-// UpdateTaskSession updates an existing agent session.
-// Note: metadata is NOT updated here to prevent concurrent clobbering.
-// Use MergeSessionMetadata or UpdateSessionMetadata for metadata changes.
+// UpdateTaskSession updates an existing agent session
 func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
 
+	metadataJSON, err := json.Marshal(session.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
+	}
 	agentProfileSnapshotJSON, err := json.Marshal(session.AgentProfileSnapshot)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
@@ -356,13 +358,13 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
-			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
+			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?
 	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
-		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
+		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
 		session.ID)
@@ -411,32 +413,6 @@ func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET metadata = ?, updated_at = ? WHERE id = ?
 	`), string(metadataJSON), now, sessionID)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("agent session not found: %s", sessionID)
-	}
-	return nil
-}
-
-// MergeSessionMetadata atomically merges the given keys into the session's
-// existing metadata using SQLite's json_patch. Unlike UpdateSessionMetadata
-// (which does a full replacement), this is safe for concurrent callers —
-// each writer's keys merge without clobbering other keys.
-func (r *Repository) MergeSessionMetadata(ctx context.Context, sessionID string, patch map[string]interface{}) error {
-	patchJSON, err := json.Marshal(patch)
-	if err != nil {
-		return fmt.Errorf("failed to serialize metadata patch: %w", err)
-	}
-	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions
-		SET metadata = json_patch(COALESCE(metadata, '{}'), ?),
-		    updated_at = ?
-		WHERE id = ?
-	`), string(patchJSON), now, sessionID)
 	if err != nil {
 		return err
 	}

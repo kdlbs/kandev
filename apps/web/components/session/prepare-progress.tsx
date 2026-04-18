@@ -84,14 +84,36 @@ function StepDetails({ step, blockCommand }: { step: PrepareStepInfo; blockComma
   );
 }
 
+function StepWarning({ warning, warningDetail }: { warning: string; warningDetail?: string }) {
+  const [detailExpanded, setDetailExpanded] = useState(false);
+  return (
+    <div data-testid="prepare-warning-banner">
+      <span className="text-amber-500 mt-0.5 block text-xs">{warning}</span>
+      {warningDetail && (
+        <>
+          <button
+            type="button"
+            className="text-amber-500/70 hover:text-amber-500 mt-0.5 flex cursor-pointer items-center gap-0.5 text-xs"
+            onClick={() => setDetailExpanded(!detailExpanded)}
+          >
+            Details
+          </button>
+          {detailExpanded && (
+            <pre className="text-amber-500/60 mt-0.5 overflow-x-auto whitespace-pre text-xs">
+              {warningDetail}
+            </pre>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function StepMessages({ step }: { step: PrepareStepInfo }) {
   return (
     <>
       {step.warning && (
-        <pre className="text-amber-500 mt-0.5 overflow-x-auto whitespace-pre text-xs">
-          {step.warning}
-          {step.warningDetail ? `\n${step.warningDetail}` : ""}
-        </pre>
+        <StepWarning warning={step.warning} warningDetail={step.warningDetail} />
       )}
       {step.error && (
         <pre className="text-destructive mt-0.5 overflow-x-auto whitespace-pre text-xs">

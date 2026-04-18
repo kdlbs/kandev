@@ -62,11 +62,9 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 			t.Fatalf("failed to get session: %v", err)
 		}
 		session.AgentProfileID = "profile-auggie"
+		session.Metadata = map[string]any{"plan_mode": true}
 		if err := repo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("failed to update session: %v", err)
-		}
-		if err := repo.MergeSessionMetadata(ctx, "s1", map[string]any{"plan_mode": true}); err != nil {
-			t.Fatalf("failed to set metadata: %v", err)
 		}
 
 		eb := &mockEventBus{}

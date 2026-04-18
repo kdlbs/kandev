@@ -187,8 +187,8 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -217,7 +217,7 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		// Verify plan_mode was cleared
 		updatedSession, _ := repo.GetTaskSession(ctx, "s1")
 		if updatedSession.Metadata != nil {
-			if pm, _ := updatedSession.Metadata["plan_mode"].(bool); pm {
+			if _, hasPlanMode := updatedSession.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -332,8 +332,8 @@ func TestProcessOnEnter(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
@@ -348,7 +348,7 @@ func TestProcessOnEnter(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
+			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -422,8 +422,8 @@ func TestSetSessionPlanMode(t *testing.T) {
 
 		// First enable
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 		session, _ = repo.GetTaskSession(ctx, "s1")
@@ -431,7 +431,7 @@ func TestSetSessionPlanMode(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
+			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode to be removed from metadata")
 			}
 		}
@@ -480,8 +480,8 @@ func TestProcessOnExit(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
@@ -498,7 +498,7 @@ func TestProcessOnExit(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
+			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -510,8 +510,8 @@ func TestProcessOnExit(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
 
@@ -560,7 +560,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata != nil {
-			if pm, _ := session.Metadata["plan_mode"].(bool); pm {
+			if _, hasPlanMode := session.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode NOT to be set for passthrough session")
 			}
 		}
@@ -572,8 +572,8 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
 
@@ -606,8 +606,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Set agent execution ID on the session
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-123"
+		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp-id"}
 		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"acp_session_id": "old-acp-id"})
 
 		agentMgr := &mockAgentManager{}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
@@ -635,7 +635,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Verify acp_session_id was cleared from session metadata
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
+			if _, hasACP := updated.Metadata["acp_session_id"]; hasACP {
 				t.Error("expected acp_session_id to be cleared from session metadata")
 			}
 		}

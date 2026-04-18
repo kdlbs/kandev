@@ -134,7 +134,6 @@ type sessionExecutorStore interface {
 	ClearSessionExecutionID(ctx context.Context, id string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
-	MergeSessionMetadata(ctx context.Context, sessionID string, patch map[string]interface{}) error
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
@@ -543,9 +542,6 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()
-
-	// Subscribe to prepare events (persist result in session metadata)
-	s.subscribePrepareEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
