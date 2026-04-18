@@ -67,9 +67,29 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 	if !payload.Success {
 		status = agentEventFailed
 	}
+	metadata["prepare_result"] = map[string]interface{}{
+		"status":        status,
+		"steps":         serializePrepareSteps(payload.Steps),
+		"error_message": payload.ErrorMessage,
+		"duration_ms":   payload.DurationMs,
+	}
 
-	steps := make([]map[string]interface{}, 0, len(payload.Steps))
-	for _, step := range payload.Steps {
+	if err := s.repo.UpdateSessionMetadata(ctx, payload.SessionID, metadata); err != nil {
+		s.logger.Error("failed to persist prepare result in session metadata",
+			zap.String("session_id", payload.SessionID), zap.Error(err))
+		return nil
+	}
+
+	s.logger.Info("persisted prepare result in session metadata",
+		zap.String("session_id", payload.SessionID),
+		zap.String("status", status),
+		zap.Int("steps", len(payload.Steps)))
+	return nil
+}
+
+func serializePrepareSteps(steps []lifecycle.PrepareStep) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(steps))
+	for _, step := range steps {
 		output := step.Output
 		if len(output) > maxStepOutputBytes {
 			output = output[:maxStepOutputBytes] + "\n... (truncated)"
@@ -95,25 +115,7 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 		if step.EndedAt != nil {
 			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
 		}
-		steps = append(steps, entry)
+		result = append(result, entry)
 	}
-
-	metadata["prepare_result"] = map[string]interface{}{
-		"status":        status,
-		"steps":         steps,
-		"error_message": payload.ErrorMessage,
-		"duration_ms":   payload.DurationMs,
-	}
-
-	if err := s.repo.UpdateSessionMetadata(ctx, payload.SessionID, metadata); err != nil {
-		s.logger.Error("failed to persist prepare result in session metadata",
-			zap.String("session_id", payload.SessionID), zap.Error(err))
-		return nil
-	}
-
-	s.logger.Info("persisted prepare result in session metadata",
-		zap.String("session_id", payload.SessionID),
-		zap.String("status", status),
-		zap.Int("steps", len(payload.Steps)))
-	return nil
+	return result
 }
