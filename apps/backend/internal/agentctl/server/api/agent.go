@@ -19,6 +19,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// MCP server constants for kandev injection.
+const (
+	kandevMcpServerName = "kandev"
+	mcpTransportSSE     = "sse"
+	mcpTransportHTTP    = "http"
+	mcpPathSSE          = "/sse"
+	mcpPathHTTP         = "/mcp"
+)
+
 // InitializeRequest is a request to initialize the agent session.
 type InitializeRequest struct {
 	ClientName    string `json:"client_name"`
@@ -301,6 +310,35 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	return resp
 }
 
+// injectKandevMcpServers prepends the local kandev MCP server to the list of MCP servers.
+// Both SSE and HTTP variants are injected - the agent's capability filtering will select
+// the appropriate one based on what the agent supports (SSE for Claude Code, HTTP for Codex ACP).
+// Any existing kandev server in the list is filtered out to avoid duplicates.
+func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
+	kandevMcpSse := types.McpServer{
+		Name: kandevMcpServerName,
+		Type: mcpTransportSSE,
+		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathSSE),
+	}
+	kandevMcpHttp := types.McpServer{
+		Name: kandevMcpServerName,
+		Type: mcpTransportHTTP,
+		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
+	}
+	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
+	filtered = append(filtered, kandevMcpSse, kandevMcpHttp)
+	for _, srv := range mcpServers {
+		if srv.Name != kandevMcpServerName {
+			filtered = append(filtered, srv)
+		}
+	}
+	s.logger.Debug("injected local kandev MCP servers (sse+http)",
+		zap.String("sse_url", kandevMcpSse.URL),
+		zap.String("http_url", kandevMcpHttp.URL),
+		zap.Int("total_servers", len(filtered)))
+	return filtered
+}
+
 func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req NewSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -325,33 +363,9 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	// We inject both SSE and HTTP variants - the agent's capability filtering will
-	// select the appropriate one based on what the agent supports.
-	// SSE is supported by Claude Code, HTTP is supported by Codex ACP.
 	mcpServers := req.McpServers
 	if s.mcpServer != nil {
-		kandevMcpSse := types.McpServer{
-			Name: "kandev",
-			Type: "sse",
-			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
-		}
-		kandevMcpHttp := types.McpServer{
-			Name: "kandev",
-			Type: "http",
-			URL:  fmt.Sprintf("http://localhost:%d/mcp", s.cfg.Port),
-		}
-		filtered := make([]types.McpServer, 0, len(mcpServers)+2)
-		filtered = append(filtered, kandevMcpSse, kandevMcpHttp)
-		for _, srv := range mcpServers {
-			if srv.Name != "kandev" {
-				filtered = append(filtered, srv)
-			}
-		}
-		mcpServers = filtered
-		s.logger.Debug("injected local kandev MCP servers (sse+http)",
-			zap.String("sse_url", kandevMcpSse.URL),
-			zap.String("http_url", kandevMcpHttp.URL),
-			zap.Int("total_servers", len(mcpServers)))
+		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
 
 	sessionID, err := adapter.NewSession(ctx, mcpServers)
@@ -396,33 +410,9 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	}
 
 	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	// This mirrors handleWSNewSession to ensure MCP tools are available after resume.
-	// We inject both SSE and HTTP variants - the agent's capability filtering will
-	// select the appropriate one based on what the agent supports.
 	mcpServers := req.McpServers
 	if s.mcpServer != nil {
-		kandevMcpSse := types.McpServer{
-			Name: "kandev",
-			Type: "sse",
-			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
-		}
-		kandevMcpHttp := types.McpServer{
-			Name: "kandev",
-			Type: "http",
-			URL:  fmt.Sprintf("http://localhost:%d/mcp", s.cfg.Port),
-		}
-		filtered := make([]types.McpServer, 0, len(mcpServers)+2)
-		filtered = append(filtered, kandevMcpSse, kandevMcpHttp)
-		for _, srv := range mcpServers {
-			if srv.Name != "kandev" {
-				filtered = append(filtered, srv)
-			}
-		}
-		mcpServers = filtered
-		s.logger.Debug("injected local kandev MCP servers for loaded session (sse+http)",
-			zap.String("sse_url", kandevMcpSse.URL),
-			zap.String("http_url", kandevMcpHttp.URL),
-			zap.Int("total_servers", len(mcpServers)))
+		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
 
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {

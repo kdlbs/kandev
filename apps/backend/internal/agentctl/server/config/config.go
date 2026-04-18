@@ -386,6 +386,9 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
+// kandevMcpServerName is the name used for the local kandev MCP server.
+const kandevMcpServerName = "kandev"
+
 // injectKandevMcpServer prepends the local kandev MCP server to the list of MCP servers.
 // This replaces any existing kandev server to avoid duplicates.
 // The kandev MCP server provides tools like ask_user_question to the agent.
@@ -393,12 +396,12 @@ func getEnvBool(key string, defaultValue bool) bool {
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
 	portStr := strconv.Itoa(port)
 	kandevMcpSse := McpServerConfig{
-		Name: "kandev",
+		Name: kandevMcpServerName,
 		Type: "sse",
 		URL:  "http://localhost:" + portStr + "/sse",
 	}
 	kandevMcpHttp := McpServerConfig{
-		Name: "kandev",
+		Name: kandevMcpServerName,
 		Type: "http",
 		URL:  "http://localhost:" + portStr + "/mcp",
 	}
@@ -407,7 +410,7 @@ func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfi
 	result := make([]McpServerConfig, 0, len(servers)+2)
 	result = append(result, kandevMcpSse, kandevMcpHttp)
 	for _, srv := range servers {
-		if srv.Name != "kandev" {
+		if srv.Name != kandevMcpServerName {
 			result = append(result, srv)
 		}
 	}
