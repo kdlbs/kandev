@@ -226,6 +226,17 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   return items;
 }
 
+function injectPrepareProgressItem(items: RenderItem[], resolvedSessionId: string | null): RenderItem[] {
+  if (!resolvedSessionId) return items;
+  const prepareItem: PrepareProgressItem = {
+    type: "prepare_progress",
+    id: `prepare-progress-${resolvedSessionId}`,
+    sessionId: resolvedSessionId,
+  };
+  if (items.length === 0) return [prepareItem];
+  return [items[0], prepareItem, ...items.slice(1)];
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -305,18 +316,7 @@ export function useProcessedMessages(
   }, [allMessages]);
 
   const groupedItems = useMemo<RenderItem[]>(() => {
-    const items = groupActivityMessages(regularMessages);
-    if (!resolvedSessionId) return items;
-    // Inject the prepare-progress panel right after the first message (the
-    // initial user prompt or task-description). When no messages exist yet,
-    // render it as the sole item so the user sees prep start immediately.
-    const prepareItem: PrepareProgressItem = {
-      type: "prepare_progress",
-      id: `prepare-progress-${resolvedSessionId}`,
-      sessionId: resolvedSessionId,
-    };
-    if (items.length === 0) return [prepareItem];
-    return [items[0], prepareItem, ...items.slice(1)];
+    return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
   }, [regularMessages, resolvedSessionId]);
 
   return {

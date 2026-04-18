@@ -167,8 +167,7 @@ func newStreamingWriter(onFlush func(current string), minGap time.Duration) *str
 func (w *streamingWriter) Write(p []byte) (int, error) {
 	// Hold the lock through the flush so concurrent stdout+stderr writes
 	// can't both observe `now-lastFlush >= minGap` and race on the captured
-	// `step.Output` shared by the caller's callback. The flush itself is a
-	// non-blocking event-bus publish so this stays cheap.
+	// `step.Output` shared by the caller's callback.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n, err := w.buf.Write(p)

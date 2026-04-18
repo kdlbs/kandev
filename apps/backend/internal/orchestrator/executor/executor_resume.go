@@ -192,8 +192,6 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	}
 }
 
-// persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains
-// a new worktree not already tracked by the session.
 // buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
 func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]interface{} {
 	status := "completed"
