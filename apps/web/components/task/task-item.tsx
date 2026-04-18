@@ -129,7 +129,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
     <div
       className={cn(
         "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen ? "opacity-0" : "group-hover:opacity-0",
+        menuOpen && "opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -289,7 +289,9 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "absolute right-1 inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
+        "absolute right-0 top-0 bottom-0 flex items-center justify-end pr-1 pl-6 rounded-r-md",
+        "bg-gradient-to-r from-transparent via-background/60 to-background",
+        "transition-opacity duration-200",
         visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
       )}
     >
