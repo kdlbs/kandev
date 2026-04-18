@@ -112,9 +112,7 @@ function StepWarning({ warning, warningDetail }: { warning: string; warningDetai
 function StepMessages({ step }: { step: PrepareStepInfo }) {
   return (
     <>
-      {step.warning && (
-        <StepWarning warning={step.warning} warningDetail={step.warningDetail} />
-      )}
+      {step.warning && <StepWarning warning={step.warning} warningDetail={step.warningDetail} />}
       {step.error && (
         <pre className="text-destructive mt-0.5 overflow-x-auto whitespace-pre text-xs">
           {step.error}
