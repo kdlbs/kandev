@@ -133,6 +133,38 @@ function useSessionOptions(taskId: string) {
 
 const ENVIRONMENT_EXECUTOR_TYPES = new Set(["local_docker", "sprites"]);
 
+function FreshEnvironmentToggle({
+  executorType,
+  checked,
+  onChange,
+  disabled,
+}: {
+  executorType: string | null;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  disabled: boolean;
+}) {
+  if (executorType == null || !ENVIRONMENT_EXECUTOR_TYPES.has(executorType)) {
+    return null;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox
+        id="fresh-environment"
+        checked={checked}
+        onCheckedChange={(value) => onChange(value === true)}
+        disabled={disabled}
+      />
+      <label
+        htmlFor="fresh-environment"
+        className="text-xs text-muted-foreground cursor-pointer"
+      >
+        Fresh environment — create a new container instead of reusing the existing one
+      </label>
+    </div>
+  );
+}
+
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
@@ -167,7 +199,6 @@ function NewSessionForm({
   const [selectedProfileId, setSelectedProfileId] = useState(initialProfileId ?? defaultProfileId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const [freshEnvironment, setFreshEnvironment] = useState(false);
-  const showFreshToggle = executorType != null && ENVIRONMENT_EXECUTOR_TYPES.has(executorType);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
     attachments,
@@ -293,22 +324,12 @@ function NewSessionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      {showFreshToggle && (
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="fresh-environment"
-            checked={freshEnvironment}
-            onCheckedChange={(checked) => setFreshEnvironment(checked === true)}
-            disabled={isCreating}
-          />
-          <label
-            htmlFor="fresh-environment"
-            className="text-xs text-muted-foreground cursor-pointer"
-          >
-            Fresh environment — create a new container instead of reusing the existing one
-          </label>
-        </div>
-      )}
+      <FreshEnvironmentToggle
+        executorType={executorType}
+        checked={freshEnvironment}
+        onChange={setFreshEnvironment}
+        disabled={isCreating}
+      />
       {!hasProfiles && (
         <p className="text-xs text-center text-muted-foreground">
           No agent profiles configured. Add one in Settings → Agents first.

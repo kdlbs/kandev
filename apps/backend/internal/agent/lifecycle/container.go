@@ -82,57 +82,16 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 
 	// Create ControlClient to communicate with the container's control server
-	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
-
-	// Wait for agentctl to be healthy
-	if err := cm.waitForHealth(ctx, ctl); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", nil, fmt.Errorf("agentctl health check failed: %w", err)
-	}
-
-	// Create an instance via the control API (same flow as standalone mode)
-	agentType := ""
-	if config.AgentConfig != nil {
-		agentType = config.AgentConfig.ID()
-	}
-	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
-	assumeMcpSse := false
-	if config.AgentConfig != nil {
-		if rt := config.AgentConfig.Runtime(); rt != nil {
-			assumeMcpSse = rt.AssumeMcpSse
-		}
-	}
-
-	createReq := &agentctl.CreateInstanceRequest{
-		ID:                 config.InstanceID,
-		WorkspacePath:      "/workspace",
-		AgentCommand:       "", // Agent command set via Configure endpoint later
-		AgentType:          agentType,
-		Env:                config.Credentials,
-		AutoStart:          false,
-		McpServers:         config.McpServers,
-		SessionID:          config.SessionID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		McpMode:            config.McpMode,
-	}
-
-	resp, err := ctl.CreateInstance(ctx, createReq)
+	agentctlClient, err := cm.createAgentctlInstance(ctx, containerIP, config)
 	if err != nil {
 		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", nil, fmt.Errorf("failed to create instance in container: %w", err)
+		return "", nil, err
 	}
-
-	// Create agentctl client pointing to the instance port
-	agentctlClient := agentctl.NewClient(containerIP, resp.Port, cm.logger,
-		agentctl.WithExecutionID(config.InstanceID),
-		agentctl.WithSessionID(config.SessionID))
 
 	cm.logger.Info("docker container launched",
 		zap.String("container_id", containerID),
 		zap.String("container_ip", containerIP),
-		zap.String("instance_id", config.InstanceID),
-		zap.Int("instance_port", resp.Port))
+		zap.String("instance_id", config.InstanceID))
 
 	return containerID, agentctlClient, nil
 }
@@ -173,9 +132,14 @@ func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID 
 		return nil, err
 	}
 
-	// Re-fetch IP after potential restart (stopped containers lose their IP)
-	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
-	if err != nil {
+	containerIP := info.IP
+	if containerIP == "" {
+		// Container was stopped and just restarted — re-fetch the IP
+		if ip, err := cm.dockerClient.GetContainerIP(ctx, containerID); err == nil {
+			containerIP = ip
+		}
+	}
+	if containerIP == "" {
 		containerIP = "127.0.0.1"
 	}
 
