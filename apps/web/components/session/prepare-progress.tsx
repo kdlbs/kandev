@@ -69,18 +69,18 @@ function isInlineCommand(cmd: string): boolean {
 
 function StepDetails({ step, blockCommand }: { step: PrepareStepInfo; blockCommand?: string }) {
   return (
-    <>
+    <div className="border-muted-foreground/20 mt-1 ml-0.5 border-l pl-3">
       {blockCommand && (
-        <pre className="bg-muted/50 text-muted-foreground/60 mt-1 max-h-24 overflow-auto rounded px-2 py-1 font-mono text-[10px] whitespace-pre-wrap">
+        <pre className="bg-muted/50 text-muted-foreground/60 mb-1 max-h-24 overflow-auto rounded px-2 py-1 font-mono text-[10px] whitespace-pre-wrap">
           {blockCommand}
         </pre>
       )}
       {step.output && (
-        <pre className="text-muted-foreground/60 mt-0.5 max-h-48 overflow-auto whitespace-pre text-xs">
+        <pre className="text-muted-foreground/60 max-h-48 overflow-auto whitespace-pre text-xs">
           {stripAnsi(step.output)}
         </pre>
       )}
-    </>
+    </div>
   );
 }
 
@@ -117,27 +117,28 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
   );
 
   return (
-    <div className="flex items-start gap-2 text-xs">
-      <div className="mt-0.5 flex-shrink-0">
-        <StepIcon status={step.status} hasWarning={Boolean(step.warning)} />
-      </div>
-      <div className="min-w-0 flex-1">
+    <div className="text-xs">
+      <div className="flex items-center gap-2">
+        <div className="flex-shrink-0">
+          <StepIcon status={step.status} hasWarning={Boolean(step.warning)} />
+        </div>
         <span className={nameClass}>{step.name || "Preparing..."}</span>
         {inlineCommand && (
-          <code className="text-muted-foreground/50 ml-2 font-mono text-[10px]">
-            {inlineCommand}
-          </code>
+          <code className="text-muted-foreground/50 font-mono text-[10px]">{inlineCommand}</code>
         )}
-        {duration && <span className="text-muted-foreground/40 ml-2 text-[10px]">{duration}</span>}
+        {duration && <span className="text-muted-foreground/40 text-[10px]">{duration}</span>}
         {hasExpandable && (
           <button
             type="button"
-            className="text-muted-foreground/40 hover:text-muted-foreground/70 ml-1 cursor-pointer text-[10px]"
+            className="text-muted-foreground/40 hover:text-muted-foreground/70 cursor-pointer text-[10px]"
             onClick={() => setDetailsExpanded(!detailsExpanded)}
           >
             {detailsExpanded ? "[-]" : "[+]"}
           </button>
         )}
+      </div>
+      {/* Content below the step header, indented past the icon */}
+      <div className="ml-[22px]">
         {detailsExpanded && <StepDetails step={step} blockCommand={blockCommand} />}
         <StepMessages step={step} />
       </div>
@@ -157,8 +158,14 @@ type DeriveStatusInput = {
 };
 
 function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
-  const { prepareStatus, sessionState, agentctlStatus, hasFailedStep, hasWarnings, hasRunningStep } =
-    input;
+  const {
+    prepareStatus,
+    sessionState,
+    agentctlStatus,
+    hasFailedStep,
+    hasWarnings,
+    hasRunningStep,
+  } = input;
   if (prepareStatus === "failed") return "failed";
   if (prepareStatus === "completed") {
     if (hasFailedStep) return "completed_with_error";
@@ -332,10 +339,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   );
   const headerLabel = getHeaderLabel(status, prepareState);
   const isErrorStatus = status === "failed" || status === "completed_with_error";
-  const headerClass = cn(
-    "text-xs",
-    isErrorStatus ? "text-destructive" : "text-muted-foreground",
-  );
+  const headerClass = cn("text-xs", isErrorStatus ? "text-destructive" : "text-muted-foreground");
 
   return (
     <div data-testid="prepare-progress-panel" data-status={status} data-expanded={expanded}>

@@ -187,8 +187,8 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -332,8 +332,8 @@ func TestProcessOnEnter(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
@@ -422,8 +422,8 @@ func TestSetSessionPlanMode(t *testing.T) {
 
 		// First enable
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 		session, _ = repo.GetTaskSession(ctx, "s1")
@@ -480,8 +480,8 @@ func TestProcessOnExit(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
@@ -510,8 +510,8 @@ func TestProcessOnExit(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
 
@@ -572,8 +572,8 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 
 		// Set plan_mode in session metadata
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
 
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
 
@@ -606,8 +606,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Set agent execution ID on the session
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-123"
-		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp-id"}
 		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.MergeSessionMetadata(ctx, "s1", map[string]interface{}{"acp_session_id": "old-acp-id"})
 
 		agentMgr := &mockAgentManager{}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)

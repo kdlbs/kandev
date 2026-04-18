@@ -285,26 +285,16 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	// Persist to database asynchronously. Read the session inside the goroutine
 	// to get the latest metadata (avoids race with setSessionPlanMode etc.).
 	go func() {
-		session, err := s.repo.GetTaskSession(context.Background(), data.TaskSessionID)
-		if err != nil {
-			s.logger.Debug("no task session for context window update",
-				zap.String("session_id", data.TaskSessionID),
-				zap.Error(err))
-			return
-		}
-		if session.Metadata == nil {
-			session.Metadata = make(map[string]interface{})
-		}
-		session.Metadata["context_window"] = contextWindowData
-		if err := s.repo.UpdateSessionMetadata(context.Background(), session.ID, session.Metadata); err != nil {
+		patch := map[string]interface{}{"context_window": contextWindowData}
+		if err := s.repo.MergeSessionMetadata(context.Background(), data.TaskSessionID, patch); err != nil {
 			s.logger.Error("failed to update session with context window",
 				zap.String("task_id", data.TaskID),
-				zap.String("session_id", session.ID),
+				zap.String("session_id", data.TaskSessionID),
 				zap.Error(err))
 		} else {
 			s.logger.Debug("persisted context window to session",
 				zap.String("task_id", data.TaskID),
-				zap.String("session_id", session.ID))
+				zap.String("session_id", data.TaskSessionID))
 		}
 	}()
 
