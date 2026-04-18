@@ -885,6 +885,41 @@ func TestEmitInitialModeState(t *testing.T) {
 	}
 }
 
+func TestEmitInitialModeState_CachesAvailableModes(t *testing.T) {
+	a := newTestAdapter()
+	a.sessionID = "session-cache"
+
+	desc := "Architect mode"
+	modes := &acp.SessionModeState{
+		CurrentModeId: "architect",
+		AvailableModes: []acp.SessionMode{
+			{Id: "default", Name: "Default"},
+			{Id: "architect", Name: "Architect", Description: &desc},
+		},
+	}
+
+	a.emitInitialModeState(modes)
+	drainEvents(a) // consume the emitted event
+
+	// Verify modes were cached in the adapter
+	a.mu.RLock()
+	cached := a.availableModes
+	a.mu.RUnlock()
+
+	if len(cached) != 2 {
+		t.Fatalf("expected 2 cached modes, got %d", len(cached))
+	}
+	if cached[0].ID != "default" {
+		t.Errorf("cached[0].ID = %q, want %q", cached[0].ID, "default")
+	}
+	if cached[1].ID != "architect" {
+		t.Errorf("cached[1].ID = %q, want %q", cached[1].ID, "architect")
+	}
+	if cached[1].Description != "Architect mode" {
+		t.Errorf("cached[1].Description = %q, want %q", cached[1].Description, "Architect mode")
+	}
+}
+
 // --- sendUpdate ---
 
 func TestSendUpdate_NormalOperation(t *testing.T) {

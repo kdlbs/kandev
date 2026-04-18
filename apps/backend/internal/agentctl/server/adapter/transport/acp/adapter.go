@@ -108,6 +108,11 @@ type Adapter struct {
 	// Used by SetModel to validate the requested model exists.
 	availableModels []acp.UnstableModelInfo
 
+	// Available modes from the most recent session creation/load.
+	// Used by SetMode to include cached modes in the event so the
+	// frontend mode selector can render available options.
+	availableModes []streams.SessionModeInfo
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -1031,6 +1036,11 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 			Description: derefStr(m.Description),
 		})
 	}
+	// Cache available modes so SetMode can include them in subsequent events.
+	a.mu.Lock()
+	a.availableModes = availModes
+	a.mu.Unlock()
+
 	a.sendUpdate(AgentEvent{
 		Type:           streams.EventTypeSessionMode,
 		SessionID:      a.sessionID,
@@ -1103,10 +1113,15 @@ func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
 		return fmt.Errorf("set session mode failed: %w", err)
 	}
 
+	a.mu.RLock()
+	cachedModes := a.availableModes
+	a.mu.RUnlock()
+
 	a.sendUpdate(AgentEvent{
-		Type:          streams.EventTypeSessionMode,
-		SessionID:     sessionID,
-		CurrentModeID: modeID,
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      sessionID,
+		CurrentModeID:  modeID,
+		AvailableModes: cachedModes,
 	})
 	return nil
 }
