@@ -543,6 +543,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()
 
+	// Subscribe to prepare events (persist result in session metadata)
+	s.subscribePrepareEvents()
+
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }
