@@ -226,11 +226,14 @@ export type UserShellsState = {
 
 export type PrepareStepInfo = {
   name: string;
+  command?: string;
   status: string;
   output?: string;
   error?: string;
   warning?: string;
   warningDetail?: string;
+  startedAt?: string;
+  endedAt?: string;
 };
 
 export type SessionPrepareState = {

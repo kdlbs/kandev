@@ -63,66 +63,49 @@ type BuildSessionPageStateParams = {
 };
 
 function buildSessionPageState(p: BuildSessionPageStateParams) {
-  const {
-    task,
-    sessionId,
-    snapshot,
-    agents,
-    repositories,
-    allSessions,
-    workspaces,
-    workflows,
-    turns,
-    userSettingsResponse,
-    messagesResponse,
-  } = p;
-
-  const repositoryId = task.repositories?.[0]?.repository_id;
-  const repository = repositories.find((r) => r.id === repositoryId);
-  const scripts = repository?.scripts ?? [];
+  const { task, sessionId, snapshot, agents, allSessions, messagesResponse } = p;
   const messages = messagesResponse?.messages ? [...messagesResponse.messages].reverse() : [];
-
   const taskState = taskToState(task, sessionId, {
     items: messages,
     hasMore: messagesResponse?.has_more ?? false,
     oldestCursor: messages[0]?.id ?? null,
   });
 
-  const repositoryScripts = repositoryId
-    ? {
-        itemsByRepositoryId: { [repositoryId]: scripts },
-        loadingByRepositoryId: { [repositoryId]: false },
-        loadedByRepositoryId: { [repositoryId]: true },
-      }
-    : {
-        itemsByRepositoryId: {},
-        loadingByRepositoryId: {},
-        loadedByRepositoryId: {},
-      };
-
   return {
     ...snapshotToState(snapshot),
     ...taskState,
+    ...buildResourceState(p),
+    ...buildSessionState(p),
+    ...buildWorktreeState(allSessions),
+    ...buildPrepareProgressState(allSessions),
+    settingsAgents: { items: agents.agents },
+    settingsData: { agentsLoaded: true, executorsLoaded: false },
+    userSettings: mapUserSettingsResponse(p.userSettingsResponse),
+  };
+}
+
+function buildResourceState(p: BuildSessionPageStateParams) {
+  const { task, agents, repositories, workspaces, workflows } = p;
+  const repositoryId = task.repositories?.[0]?.repository_id;
+  const repository = repositories.find((r) => r.id === repositoryId);
+  const scripts = repository?.scripts ?? [];
+  return {
     workspaces: {
-      items: workspaces.map((workspace) => ({
-        id: workspace.id,
-        name: workspace.name,
-        description: workspace.description ?? null,
-        owner_id: workspace.owner_id,
-        default_executor_id: workspace.default_executor_id ?? null,
-        default_environment_id: workspace.default_environment_id ?? null,
-        default_agent_profile_id: workspace.default_agent_profile_id ?? null,
-        created_at: workspace.created_at,
-        updated_at: workspace.updated_at,
+      items: workspaces.map((w) => ({
+        id: w.id,
+        name: w.name,
+        description: w.description ?? null,
+        owner_id: w.owner_id,
+        default_executor_id: w.default_executor_id ?? null,
+        default_environment_id: w.default_environment_id ?? null,
+        default_agent_profile_id: w.default_agent_profile_id ?? null,
+        created_at: w.created_at,
+        updated_at: w.updated_at,
       })),
       activeId: task.workspace_id,
     },
     workflows: {
-      items: workflows.map((workflow) => ({
-        id: workflow.id,
-        workspaceId: workflow.workspace_id,
-        name: workflow.name,
-      })),
+      items: workflows.map((w) => ({ id: w.id, workspaceId: w.workspace_id, name: w.name })),
       activeId: task.workflow_id,
     },
     repositories: {
@@ -130,16 +113,26 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       loadingByWorkspaceId: { [task.workspace_id]: false },
       loadedByWorkspaceId: { [task.workspace_id]: true },
     },
-    repositoryScripts,
+    repositoryScripts: repositoryId
+      ? {
+          itemsByRepositoryId: { [repositoryId]: scripts },
+          loadingByRepositoryId: { [repositoryId]: false },
+          loadedByRepositoryId: { [repositoryId]: true },
+        }
+      : { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
     agentProfiles: {
       items: agents.agents.flatMap((agent) =>
         agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
       version: 0,
     },
-    taskSessions: {
-      items: Object.fromEntries(allSessions.map((s) => [s.id, s])),
-    },
+  };
+}
+
+function buildSessionState(p: BuildSessionPageStateParams) {
+  const { task, sessionId, allSessions, turns } = p;
+  return {
+    taskSessions: { items: Object.fromEntries(allSessions.map((s) => [s.id, s])) },
     taskSessionsByTask: {
       itemsByTaskId: { [task.id]: allSessions },
       loadingByTaskId: { [task.id]: false },
@@ -153,17 +146,76 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
           },
         }
       : { bySession: {}, activeBySession: {} },
-    ...buildWorktreeState(allSessions),
     environmentIdBySessionId: Object.fromEntries(
       allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
     ),
-    settingsAgents: { items: agents.agents },
-    settingsData: {
-      agentsLoaded: true,
-      executorsLoaded: false,
-    },
-    userSettings: mapUserSettingsResponse(userSettingsResponse),
   };
+}
+
+function buildPrepareProgressState(allSessions: TaskSession[]) {
+  const bySessionId: Record<
+    string,
+    {
+      sessionId: string;
+      status: string;
+      steps: Array<{
+        name: string;
+        command?: string;
+        status: string;
+        output?: string;
+        error?: string;
+        warning?: string;
+        warningDetail?: string;
+        startedAt?: string;
+        endedAt?: string;
+      }>;
+      errorMessage?: string;
+      durationMs?: number;
+    }
+  > = {};
+
+  for (const session of allSessions) {
+    const pr = session.metadata?.prepare_result as
+      | {
+          status?: string;
+          steps?: Array<{
+            name: string;
+            command?: string;
+            status: string;
+            output?: string;
+            error?: string;
+            warning?: string;
+            warning_detail?: string;
+            started_at?: string;
+            ended_at?: string;
+          }>;
+          error_message?: string;
+          duration_ms?: number;
+        }
+      | undefined;
+    if (!pr) continue;
+
+    bySessionId[session.id] = {
+      sessionId: session.id,
+      status: pr.status ?? "completed",
+      steps: (pr.steps ?? []).map((s) => ({
+        name: s.name,
+        command: s.command,
+        status: s.status,
+        output: s.output,
+        error: s.error,
+        warning: s.warning,
+        warningDetail: s.warning_detail,
+        startedAt: s.started_at,
+        endedAt: s.ended_at,
+      })),
+      errorMessage: pr.error_message,
+      durationMs: pr.duration_ms,
+    };
+  }
+
+  if (Object.keys(bySessionId).length === 0) return {};
+  return { prepareProgress: { bySessionId } };
 }
 
 export type FetchedSessionData = {

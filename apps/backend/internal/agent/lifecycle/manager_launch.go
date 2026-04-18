@@ -204,6 +204,7 @@ func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressC
 			TaskID:        taskID,
 			SessionID:     sessionID,
 			StepName:      step.Name,
+			StepCommand:   step.Command,
 			StepIndex:     stepIndex,
 			TotalSteps:    totalSteps,
 			Status:        string(step.Status),
@@ -211,6 +212,8 @@ func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressC
 			Error:         step.Error,
 			Warning:       step.Warning,
 			WarningDetail: step.WarningDetail,
+			StartedAt:     step.StartedAt,
+			EndedAt:       step.EndedAt,
 		})
 	}
 }
@@ -310,6 +313,7 @@ func (m *Manager) runEnvironmentPreparer(
 		return nil
 	}
 
+	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
@@ -321,6 +325,7 @@ func (m *Manager) runEnvironmentPreparer(
 		UseWorktree:          req.UseWorktree,
 		WorktreeID:           req.WorktreeID,
 		SetupScript:          req.SetupScript,
+		RepoSetupScript:      repoSetupScript,
 		BaseBranch:           req.BaseBranch,
 		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,

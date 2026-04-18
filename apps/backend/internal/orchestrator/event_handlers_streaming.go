@@ -311,7 +311,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 
 	// Handle all status updates (running, complete, error, cancelled, pending, in_progress)
 	switch payload.Data.ToolStatus {
-	case "running", agentEventComplete, agentEventCompleted, "success", agentEventError, "failed", "cancelled", "pending", "in_progress":
+	case "running", agentEventComplete, agentEventCompleted, "success", agentEventError, agentEventFailed, "cancelled", "pending", "in_progress":
 		if err := s.messageCreator.UpdateToolCallMessage(
 			ctx,
 			payload.TaskID,
@@ -334,7 +334,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		// Update session state for completion events
 		// Allow tool completions to wake session from WAITING_FOR_INPUT
 		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == agentEventCompleted ||
-			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == "failed" {
+			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == agentEventFailed {
 			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", true)
 		}
 	}

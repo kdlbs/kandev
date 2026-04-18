@@ -48,7 +48,13 @@ export type TurnGroup = {
   messages: Message[];
 };
 
-export type RenderItem = { type: "message"; message: Message } | TurnGroup;
+export type PrepareProgressItem = {
+  type: "prepare_progress";
+  id: string;
+  sessionId: string;
+};
+
+export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
 
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
@@ -298,10 +304,20 @@ export function useProcessedMessages(
     return { regularMessages: regular, footerActionMessages: footer };
   }, [allMessages]);
 
-  const groupedItems = useMemo<RenderItem[]>(
-    () => groupActivityMessages(regularMessages),
-    [regularMessages],
-  );
+  const groupedItems = useMemo<RenderItem[]>(() => {
+    const items = groupActivityMessages(regularMessages);
+    if (!resolvedSessionId) return items;
+    // Inject the prepare-progress panel right after the first message (the
+    // initial user prompt or task-description). When no messages exist yet,
+    // render it as the sole item so the user sees prep start immediately.
+    const prepareItem: PrepareProgressItem = {
+      type: "prepare_progress",
+      id: `prepare-progress-${resolvedSessionId}`,
+      sessionId: resolvedSessionId,
+    };
+    if (items.length === 0) return [prepareItem];
+    return [items[0], prepareItem, ...items.slice(1)];
+  }, [regularMessages, resolvedSessionId]);
 
   return {
     visibleMessages,

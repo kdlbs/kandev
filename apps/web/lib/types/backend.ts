@@ -317,6 +317,7 @@ export type PrepareProgressPayload = {
   session_id: string;
   execution_id: string;
   step_name: string;
+  step_command?: string;
   step_index: number;
   total_steps: number;
   status: string;
@@ -324,6 +325,8 @@ export type PrepareProgressPayload = {
   error?: string;
   warning?: string;
   warning_detail?: string;
+  started_at?: string;
+  ended_at?: string;
   timestamp: string;
 };
 
@@ -337,11 +340,14 @@ export type PrepareCompletedPayload = {
   workspace_path?: string;
   steps?: Array<{
     name: string;
+    command?: string;
     status: string;
     output?: string;
     error?: string;
     warning?: string;
     warning_detail?: string;
+    started_at?: string;
+    ended_at?: string;
   }>;
   timestamp: string;
 };

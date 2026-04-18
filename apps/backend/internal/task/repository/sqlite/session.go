@@ -423,6 +423,32 @@ func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string
 	return nil
 }
 
+// MergeSessionMetadata atomically merges the given keys into the session's
+// existing metadata using SQLite's json_patch. Unlike UpdateSessionMetadata
+// (which does a full replacement), this is safe for concurrent callers —
+// each writer's keys merge without clobbering other keys.
+func (r *Repository) MergeSessionMetadata(ctx context.Context, sessionID string, patch map[string]interface{}) error {
+	patchJSON, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata patch: %w", err)
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET metadata = json_patch(COALESCE(metadata, '{}'), ?),
+		    updated_at = ?
+		WHERE id = ?
+	`), string(patchJSON), now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // ClearSessionExecutionID clears the agent_execution_id for a session.
 // This is used when a stale execution ID needs to be removed (e.g., after a failed resume on startup).
 func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) error {

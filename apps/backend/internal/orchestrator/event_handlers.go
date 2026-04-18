@@ -18,6 +18,7 @@ const (
 	agentEventCompleted = "completed"
 	agentEventError     = "error"
 	agentEventToolCall  = "tool_call"
+	agentEventFailed    = "failed"
 )
 
 // buildTaskEventPayload builds the standard map payload for TaskUpdated events.

@@ -73,7 +73,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	}
 
 	if info.WorkspacePath == "" {
-		return nil, fmt.Errorf("no workspace path available for session %s", sessionID)
+		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
 
 	m.logger.Info("creating execution for task session",

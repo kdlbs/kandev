@@ -21,20 +21,21 @@ const (
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID         string
-	SessionID      string
-	TaskTitle      string
-	ExecutionID    string
-	ExecutorType   executor.Name
-	WorkspacePath  string
-	RepositoryPath string
-	RepositoryID   string
-	UseWorktree    bool
-	SetupScript    string
-	BaseBranch     string
-	CheckoutBranch string
-	WorktreeID     string
-	WorktreeBranch string
+	TaskID          string
+	SessionID       string
+	TaskTitle       string
+	ExecutionID     string
+	ExecutorType    executor.Name
+	WorkspacePath   string
+	RepositoryPath  string
+	RepositoryID    string
+	UseWorktree     bool
+	SetupScript     string
+	RepoSetupScript string // Repository-level setup script (e.g. "make install")
+	BaseBranch      string
+	CheckoutBranch  string
+	WorktreeID      string
+	WorktreeBranch  string
 
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
@@ -48,6 +49,7 @@ type EnvPrepareRequest struct {
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
 	Name          string            `json:"name"`
+	Command       string            `json:"command,omitempty"`
 	Status        PrepareStepStatus `json:"status"`
 	Output        string            `json:"output,omitempty"`
 	Error         string            `json:"error,omitempty"`
