@@ -387,7 +387,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		// Verify acp_session_id was cleared
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasACP := updated.Metadata["acp_session_id"]; hasACP {
+			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
 				t.Error("expected acp_session_id to be cleared from session metadata")
 			}
 		}
@@ -426,7 +426,7 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be cleared by on_exit")
 			}
 		}

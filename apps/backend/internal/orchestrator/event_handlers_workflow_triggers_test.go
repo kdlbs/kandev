@@ -217,7 +217,7 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		// Verify plan_mode was cleared
 		updatedSession, _ := repo.GetTaskSession(ctx, "s1")
 		if updatedSession.Metadata != nil {
-			if _, hasPlanMode := updatedSession.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updatedSession.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -348,7 +348,7 @@ func TestProcessOnEnter(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -431,7 +431,7 @@ func TestSetSessionPlanMode(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be removed from metadata")
 			}
 		}
@@ -498,7 +498,7 @@ func TestProcessOnExit(t *testing.T) {
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode to be cleared from session metadata")
 			}
 		}
@@ -560,7 +560,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata != nil {
-			if _, hasPlanMode := session.Metadata["plan_mode"]; hasPlanMode {
+			if pm, _ := session.Metadata["plan_mode"].(bool); pm {
 				t.Error("expected plan_mode NOT to be set for passthrough session")
 			}
 		}
@@ -635,7 +635,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Verify acp_session_id was cleared from session metadata
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
-			if _, hasACP := updated.Metadata["acp_session_id"]; hasACP {
+			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
 				t.Error("expected acp_session_id to be cleared from session metadata")
 			}
 		}
