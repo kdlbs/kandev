@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { IconX } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
+import { cn, generateUUID } from "@/lib/utils";
 
 export type ImageAttachment = {
   id: string;
@@ -121,7 +121,7 @@ export function processImageFile(file: File): Promise<ImageAttachment | null> {
       const img = new Image();
       img.onload = () => {
         resolve({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           data: base64,
           mimeType,
           preview: dataUrl,
