@@ -117,40 +117,48 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 // ReconnectContainer reconnects to an existing Docker container.
 // If the container is stopped/exited, it is restarted. A new agentctl
 // instance is created inside the running container.
-// Returns an error if the container no longer exists (caller should fall through to fresh creation).
-func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID string, config ContainerConfig) (*agentctl.Client, error) {
+// Returns the container IP and agentctl client on success, or an error if the
+// container no longer exists (caller should fall through to fresh creation).
+func (cm *ContainerManager) ReconnectContainer(ctx context.Context, containerID string, config ContainerConfig) (string, *agentctl.Client, error) {
 	info, err := cm.dockerClient.GetContainerInfo(ctx, containerID)
 	if err != nil {
-		return nil, fmt.Errorf("container not found or inaccessible: %w", err)
+		return "", nil, fmt.Errorf("container not found or inaccessible: %w", err)
 	}
 
 	if err := cm.validateContainerOwnership(info, containerID, config.TaskID); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	if err := cm.ensureContainerRunning(ctx, info, containerID); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	containerIP := info.IP
 	if containerIP == "" {
 		// Container was stopped and just restarted — re-fetch the IP
-		if ip, err := cm.dockerClient.GetContainerIP(ctx, containerID); err == nil {
-			containerIP = ip
+		ip, ipErr := cm.dockerClient.GetContainerIP(ctx, containerID)
+		if ipErr != nil {
+			return "", nil, fmt.Errorf("failed to get container IP: %w", ipErr)
 		}
-	}
-	if containerIP == "" {
-		containerIP = "127.0.0.1"
+		containerIP = ip
 	}
 
-	return cm.createAgentctlInstance(ctx, containerIP, config)
+	client, err := cm.createAgentctlInstance(ctx, containerIP, config)
+	if err != nil {
+		return "", nil, err
+	}
+	return containerIP, client, nil
 }
 
 func (cm *ContainerManager) validateContainerOwnership(info *docker.ContainerInfo, containerID, taskID string) error {
 	if info.Labels["kandev.managed"] != "true" {
 		return fmt.Errorf("container %s is not managed by kandev", containerID)
 	}
-	if ownerTask := info.Labels["kandev.task_id"]; ownerTask != "" && ownerTask != taskID {
+	ownerTask := info.Labels["kandev.task_id"]
+	if ownerTask == "" {
+		return fmt.Errorf("container %s is missing the kandev.task_id label", containerID)
+	}
+	if ownerTask != taskID {
 		return fmt.Errorf("container %s belongs to a different task", containerID)
 	}
 	return nil

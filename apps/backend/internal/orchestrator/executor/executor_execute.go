@@ -751,6 +751,12 @@ func (e *Executor) persistTaskEnvironment(
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
+		// Refresh worktree fields when a fresh worktree was created
+		if resp.WorktreeID != "" {
+			existingEnv.WorktreeID = resp.WorktreeID
+			existingEnv.WorktreePath = resp.WorktreePath
+			existingEnv.WorktreeBranch = resp.WorktreeBranch
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),

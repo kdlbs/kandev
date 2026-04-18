@@ -123,7 +123,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 
 	// Try to reconnect to an existing container if one was provided
 	if existingContainerID := getMetadataString(req.Metadata, "container_id"); existingContainerID != "" {
-		instance, reconnectErr := r.reconnectToContainer(ctx, req, existingContainerID, dockerClient, containerMgr)
+		instance, reconnectErr := r.reconnectToContainer(ctx, req, existingContainerID, containerMgr)
 		if reconnectErr == nil {
 			return instance, nil
 		}
@@ -190,7 +190,6 @@ func (r *DockerExecutor) reconnectToContainer(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
 	containerID string,
-	dockerClient *docker.Client,
 	containerMgr *ContainerManager,
 ) (*ExecutorInstance, error) {
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
@@ -206,7 +205,7 @@ func (r *DockerExecutor) reconnectToContainer(
 		McpMode:     req.McpMode,
 	}
 
-	client, err := containerMgr.ReconnectContainer(ctx, containerID, containerCfg)
+	containerIP, client, err := containerMgr.ReconnectContainer(ctx, containerID, containerCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +219,8 @@ func (r *DockerExecutor) reconnectToContainer(
 
 	r.logger.Info("docker instance reconnected to existing container",
 		zap.String("instance_id", req.InstanceID),
-		zap.String("container_id", containerID))
+		zap.String("container_id", containerID),
+		zap.String("container_ip", containerIP))
 
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
@@ -229,6 +229,7 @@ func (r *DockerExecutor) reconnectToContainer(
 		RuntimeName:   string(r.Name()),
 		Client:        client,
 		ContainerID:   containerID,
+		ContainerIP:   containerIP,
 		WorkspacePath: "/workspace",
 		Metadata:      metadata,
 	}, nil

@@ -155,10 +155,7 @@ function FreshEnvironmentToggle({
         onCheckedChange={(value) => onChange(value === true)}
         disabled={disabled}
       />
-      <label
-        htmlFor="fresh-environment"
-        className="text-xs text-muted-foreground cursor-pointer"
-      >
+      <label htmlFor="fresh-environment" className="text-xs text-muted-foreground cursor-pointer">
         Fresh environment — create a new container instead of reusing the existing one
       </label>
     </div>
