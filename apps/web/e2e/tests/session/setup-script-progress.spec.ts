@@ -212,7 +212,12 @@ test.describe("Setup script progress UX", () => {
       await expect(panel).toBeVisible({ timeout: 15_000 });
       await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
 
-      // Reload the page — the panel must survive the round-trip through SSR.
+      // Expand the panel (auto-collapsed on success) and verify step data.
+      await panel.getByTestId("prepare-progress-toggle").click();
+      await expect(panel).toContainText("Validate repository", { timeout: 5_000 });
+      await expect(panel).toContainText("Run setup script", { timeout: 5_000 });
+
+      // Reload the page — the panel AND step data must survive the round-trip through SSR.
       await testPage.reload();
       await session.waitForLoad();
 
@@ -220,6 +225,12 @@ test.describe("Setup script progress UX", () => {
       await expect(panelAfterReload).toBeVisible({ timeout: 10_000 });
       // Status should still be "completed" (not "preparing").
       await expect(panelAfterReload).toHaveAttribute("data-status", "completed");
+
+      // Step details must persist — not just the panel header.
+      // Expand the panel to see steps (auto-collapsed on success).
+      await panelAfterReload.getByTestId("prepare-progress-toggle").click();
+      await expect(panelAfterReload).toContainText("Validate repository");
+      await expect(panelAfterReload).toContainText("Run setup script");
     } finally {
       if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});

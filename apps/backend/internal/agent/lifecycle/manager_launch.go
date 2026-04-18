@@ -111,14 +111,41 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 // For tasks without repositories, creates a workspace directory in ~/.kandev/quick-chat/.
 // Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
 func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
-	if req.UseWorktree {
-		// Worktree executors: preparer handles worktree creation.
+	if req.UseWorktree && req.ACPSessionID == "" {
+		// Worktree executors on fresh launch: preparer handles worktree creation.
 		// Return empty path; it will be populated from preparer results.
+		return "", "", "", ""
+	}
+	// On resume (ACPSessionID set) for worktree executors, resolve workspace from
+	// the workspace info provider since the preparer is skipped.
+	if req.UseWorktree && req.ACPSessionID != "" {
+		if m.workspaceInfoProvider != nil {
+			if info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID); err == nil && info.WorkspacePath != "" {
+				m.logger.Debug("resolved workspace from provider for resume",
+					zap.String("session_id", req.SessionID),
+					zap.String("path", info.WorkspacePath))
+				if req.RepositoryPath != "" {
+					mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
+				}
+				return info.WorkspacePath, mainRepoGitDir, req.WorktreeID, ""
+			}
+		}
+		m.logger.Warn("could not resolve workspace path for worktree resume",
+			zap.String("session_id", req.SessionID))
 		return "", "", "", ""
 	}
 	workspacePath = req.WorkspacePath
 	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
+	}
+	// On resume without workspace path, resolve from provider.
+	if workspacePath == "" && req.ACPSessionID != "" && m.workspaceInfoProvider != nil {
+		if info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID); err == nil && info.WorkspacePath != "" {
+			m.logger.Debug("resolved workspace from provider for non-worktree resume",
+				zap.String("session_id", req.SessionID),
+				zap.String("path", info.WorkspacePath))
+			return info.WorkspacePath, "", "", ""
+		}
 	}
 	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
 	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
@@ -423,8 +450,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
-	// For worktree executors, the preparer creates the worktree and returns workspace metadata.
-	prepResult := m.runEnvironmentPreparer(ctx, req, workspacePath)
+	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
+	var prepResult *EnvPrepareResult
+	if req.ACPSessionID == "" {
+		prepResult = m.runEnvironmentPreparer(ctx, req, workspacePath)
+	} else {
+		m.logger.Debug("skipping environment preparation for resumed session",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID))
+	}
 	if prepResult != nil {
 		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
@@ -446,8 +480,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		return nil, err
 	}
 	// Publish PrepareCompleted for CreateInstance only if no preparer ran
-	// (preparers publish their own completion above).
-	if prepResult == nil {
+	// AND this is not a resume (resume already has persisted prepare_result).
+	if prepResult == nil && req.ACPSessionID == "" {
 		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
 			TaskID:     req.TaskID,
 			SessionID:  req.SessionID,
@@ -463,6 +497,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
+	// Carry prepare result back to caller for synchronous persistence.
+	execution.PrepareResult = prepResult
 	if req.PreviousExecutionID != "" {
 		execution.isResumedSession = true
 	}

@@ -166,6 +166,16 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
 
+	// Merge prepare result into session metadata synchronously so it survives
+	// the UpdateTaskSession write (which would otherwise clobber it if the async
+	// handlePrepareCompleted event handler hasn't run yet).
+	if resp.PrepareResult != nil && resp.PrepareResult.Success {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["prepare_result"] = buildPrepareResultMetadata(resp.PrepareResult)
+	}
+
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
@@ -184,6 +194,49 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 
 // persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains
 // a new worktree not already tracked by the session.
+// buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
+func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]interface{} {
+	status := "completed"
+	if !result.Success {
+		status = "failed"
+	}
+	steps := make([]map[string]interface{}, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		output := step.Output
+		if len(output) > 10*1024 {
+			output = output[:10*1024] + "\n... (truncated)"
+		}
+		entry := map[string]interface{}{
+			"name":    step.Name,
+			"status":  string(step.Status),
+			"output":  output,
+			"command": step.Command,
+		}
+		if step.Error != "" {
+			entry["error"] = step.Error
+		}
+		if step.Warning != "" {
+			entry["warning"] = step.Warning
+		}
+		if step.WarningDetail != "" {
+			entry["warning_detail"] = step.WarningDetail
+		}
+		if step.StartedAt != nil {
+			entry["started_at"] = step.StartedAt.Format(time.RFC3339Nano)
+		}
+		if step.EndedAt != nil {
+			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
+		}
+		steps = append(steps, entry)
+	}
+	return map[string]interface{}{
+		"status":        status,
+		"steps":         steps,
+		"error_message": result.ErrorMessage,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+}
+
 func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
 	if resp.WorktreeID == "" {
 		return
