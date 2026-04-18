@@ -14,7 +14,7 @@ type CombinedSlice = SessionRuntimeSlice & SessionSlice;
 
 function makeCombinedStore() {
   return create<CombinedSlice>()(
-    immer((set, get, api) => ({
+    immer((set) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(createSessionSlice as any)(set),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
