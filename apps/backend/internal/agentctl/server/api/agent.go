@@ -609,7 +609,13 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		return resp
 	}
 
-	sessionID, err := sr.ResetSession(ctx, req.McpServers)
+	// If MCP server is enabled, prepend the local kandev MCP server to the list.
+	mcpServers := req.McpServers
+	if s.mcpServer != nil {
+		mcpServers = s.injectKandevMcpServers(mcpServers)
+	}
+
+	sessionID, err := sr.ResetSession(ctx, mcpServers)
 	if err != nil {
 		s.logger.Error("session reset failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
