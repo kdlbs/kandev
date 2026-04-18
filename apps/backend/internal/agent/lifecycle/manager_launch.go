@@ -110,41 +110,50 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 // For worktree executors, workspace resolution is handled by the WorktreePreparer.
 // For tasks without repositories, creates a workspace directory in ~/.kandev/quick-chat/.
 // Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
-func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
-	if req.UseWorktree && req.ACPSessionID == "" {
-		// Worktree executors on fresh launch: preparer handles worktree creation.
-		// Return empty path; it will be populated from preparer results.
-		return "", "", "", ""
-	}
-	// On resume (ACPSessionID set) for worktree executors, resolve workspace from
-	// the workspace info provider since the preparer is skipped.
-	if req.UseWorktree && req.ACPSessionID != "" {
-		if m.workspaceInfoProvider != nil {
-			if info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID); err == nil && info.WorkspacePath != "" {
-				m.logger.Debug("resolved workspace from provider for resume",
-					zap.String("session_id", req.SessionID),
-					zap.String("path", info.WorkspacePath))
-				if req.RepositoryPath != "" {
-					mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
-				}
-				return info.WorkspacePath, mainRepoGitDir, req.WorktreeID, ""
-			}
-		}
+// resolveResumeWorktreePath resolves workspace path for worktree resume using the provider.
+func (m *Manager) resolveResumeWorktreePath(ctx context.Context, req *LaunchRequest) (string, string, string, string) {
+	ws := m.resolveWorkspaceFromProvider(ctx, req)
+	if ws == "" {
 		m.logger.Warn("could not resolve workspace path for worktree resume",
 			zap.String("session_id", req.SessionID))
 		return "", "", "", ""
+	}
+	var mainRepoGitDir string
+	if req.RepositoryPath != "" {
+		mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
+	}
+	return ws, mainRepoGitDir, req.WorktreeID, ""
+}
+
+// resolveWorkspaceFromProvider looks up the workspace path from the info provider.
+func (m *Manager) resolveWorkspaceFromProvider(ctx context.Context, req *LaunchRequest) string {
+	if m.workspaceInfoProvider == nil {
+		return ""
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID)
+	if err != nil || info.WorkspacePath == "" {
+		return ""
+	}
+	m.logger.Debug("resolved workspace from provider for resume",
+		zap.String("session_id", req.SessionID),
+		zap.String("path", info.WorkspacePath))
+	return info.WorkspacePath
+}
+
+func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	if req.UseWorktree && req.ACPSessionID == "" {
+		return "", "", "", ""
+	}
+	if req.UseWorktree && req.ACPSessionID != "" {
+		return m.resolveResumeWorktreePath(ctx, req)
 	}
 	workspacePath = req.WorkspacePath
 	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
-	// On resume without workspace path, resolve from provider.
-	if workspacePath == "" && req.ACPSessionID != "" && m.workspaceInfoProvider != nil {
-		if info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID); err == nil && info.WorkspacePath != "" {
-			m.logger.Debug("resolved workspace from provider for non-worktree resume",
-				zap.String("session_id", req.SessionID),
-				zap.String("path", info.WorkspacePath))
-			return info.WorkspacePath, "", "", ""
+	if workspacePath == "" && req.ACPSessionID != "" {
+		if resolved := m.resolveWorkspaceFromProvider(ctx, req); resolved != "" {
+			return resolved, "", "", ""
 		}
 	}
 	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
