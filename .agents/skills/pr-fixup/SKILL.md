@@ -77,7 +77,10 @@ Mark task 3 as in_progress.
 
 Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
 
-**Bot usernames:** `coderabbitai`, `greptile-apps[bot]`, `claude[bot]`
+**Bot usernames** (`gh pr view --json comments` uses GraphQL and returns `author.login` **without** the `[bot]` suffix; `gh api /.../reviews` and `/.../issues/<n>/comments` use REST and return `user.login` **with** the suffix — filters below use whichever form the invoked endpoint returns):
+- CodeRabbit: `coderabbitai[bot]`
+- Greptile: `greptile-apps[bot]`
+- Claude: `claude[bot]` on same-repo PRs (posts a real review with inline comments via the Claude GitHub App), or `github-actions[bot]` on fork PRs (posts findings as issue comments via `GITHUB_TOKEN`; identify by body markers — tracker starts with `**Claude finished `, findings comment starts with `## Code Review`).
 
 **CodeRabbit — stop waiting if:**
 - A comment contains `<!-- rate limited by coderabbit.ai -->` — rate-limited, won't review.
@@ -86,8 +89,9 @@ Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
 **Greptile — stop waiting if:**
 - A review from `greptile-apps[bot]` exists (posts via the GitHub review API, not issue comments).
 
-**Claude — stop waiting if:**
-- A review from `claude[bot]` exists (posts via the GitHub review API with inline review comments).
+**Claude — stop waiting if any of these holds:**
+- A review from `claude[bot]` exists (same-repo PR, App-authenticated path — has inline review comments).
+- An issue comment from `github-actions[bot]` whose body starts with `**Claude finished ` or `## Code Review` exists (fork PR, `GITHUB_TOKEN` fallback path — findings are issue comments, no GitHub Review object).
 - The `claude-review` check in `gh pr checks` has completed (regardless of conclusion).
 
 **Keep polling if:**
@@ -99,8 +103,10 @@ Poll every **30 seconds**, cap at **10 minutes**. Fetch both issue comments and 
 gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "coderabbitai") | {author: .author.login, body: .body}'
 # Greptile posts reviews (with inline review comments)
 gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "greptile-apps[bot]") | {user: .user.login, state: .state}'
-# Claude posts reviews (with inline review comments)
+# Claude — same-repo PRs: App-authenticated review + inline comments
 gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "claude[bot]") | {user: .user.login, state: .state}'
+# Claude — fork PRs: issue comments from github-actions[bot] (match by body marker)
+gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "github-actions" and ((.body | startswith("**Claude finished ")) or (.body | startswith("## Code Review")))) | {author: .author.login, body_start: (.body[0:80])}'
 ```
 
 Mark task 3 as completed.
