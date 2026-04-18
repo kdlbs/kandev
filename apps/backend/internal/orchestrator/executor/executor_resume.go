@@ -193,46 +193,9 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 }
 
 // buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
+// Uses lifecycle.SerializePrepareResult which is shared with the event handler.
 func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]interface{} {
-	status := "completed"
-	if !result.Success {
-		status = "failed"
-	}
-	steps := make([]map[string]interface{}, 0, len(result.Steps))
-	for _, step := range result.Steps {
-		output := step.Output
-		if len(output) > 10*1024 {
-			output = output[:10*1024] + "\n... (truncated)"
-		}
-		entry := map[string]interface{}{
-			"name":    step.Name,
-			"status":  string(step.Status),
-			"output":  output,
-			"command": step.Command,
-		}
-		if step.Error != "" {
-			entry["error"] = step.Error
-		}
-		if step.Warning != "" {
-			entry["warning"] = step.Warning
-		}
-		if step.WarningDetail != "" {
-			entry["warning_detail"] = step.WarningDetail
-		}
-		if step.StartedAt != nil {
-			entry["started_at"] = step.StartedAt.Format(time.RFC3339Nano)
-		}
-		if step.EndedAt != nil {
-			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
-		}
-		steps = append(steps, entry)
-	}
-	return map[string]interface{}{
-		"status":        status,
-		"steps":         steps,
-		"error_message": result.ErrorMessage,
-		"duration_ms":   result.Duration.Milliseconds(),
-	}
+	return lifecycle.SerializePrepareResult(result)
 }
 
 func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {

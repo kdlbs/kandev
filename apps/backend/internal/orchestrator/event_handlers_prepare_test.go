@@ -131,7 +131,7 @@ func TestHandlePrepareCompleted_TruncatesLargeOutput(t *testing.T) {
 
 	svc := &Service{logger: testLogger(), repo: repo}
 
-	largeOutput := strings.Repeat("x", maxStepOutputBytes+500)
+	largeOutput := strings.Repeat("x", lifecycle.MaxStepOutputBytes+500)
 	payload := &lifecycle.PrepareCompletedEventPayload{
 		TaskID:    "task-3",
 		SessionID: "sess-3",
@@ -154,7 +154,7 @@ func TestHandlePrepareCompleted_TruncatesLargeOutput(t *testing.T) {
 
 	require.True(t, strings.HasSuffix(output, "\n... (truncated)"), "truncated output must end with marker")
 	require.Less(t, len(output), len(largeOutput), "output must be shorter than original")
-	require.LessOrEqual(t, len(output), maxStepOutputBytes+len("\n... (truncated)"))
+	require.LessOrEqual(t, len(output), lifecycle.MaxStepOutputBytes+len("\n... (truncated)"))
 }
 
 func TestHandlePrepareCompleted_MissingSession(t *testing.T) {

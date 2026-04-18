@@ -85,6 +85,52 @@ type EnvironmentPreparer interface {
 	Prepare(ctx context.Context, req *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error)
 }
 
+// MaxStepOutputBytes is the maximum size of a single step's Output field
+// when persisting to session metadata.
+const MaxStepOutputBytes = 10 * 1024
+
+// SerializePrepareResult converts a prepare result into a map suitable for
+// storage in session metadata. Used by both the synchronous persistence path
+// (persistLaunchState) and the async event handler (handlePrepareCompleted).
+func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
+	status := "completed"
+	if !result.Success {
+		status = "failed"
+	}
+	steps := make([]map[string]interface{}, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		output := step.Output
+		if len(output) > MaxStepOutputBytes {
+			output = output[:MaxStepOutputBytes] + "\n... (truncated)"
+		}
+		entry := map[string]interface{}{
+			"name": step.Name, "status": string(step.Status),
+			"output": output, "command": step.Command,
+		}
+		if step.Error != "" {
+			entry["error"] = step.Error
+		}
+		if step.Warning != "" {
+			entry["warning"] = step.Warning
+		}
+		if step.WarningDetail != "" {
+			entry["warning_detail"] = step.WarningDetail
+		}
+		if step.StartedAt != nil {
+			entry["started_at"] = step.StartedAt.Format(time.RFC3339Nano)
+		}
+		if step.EndedAt != nil {
+			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
+		}
+		steps = append(steps, entry)
+	}
+	return map[string]interface{}{
+		"status": status, "steps": steps,
+		"error_message": result.ErrorMessage,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+}
+
 // PreparerRegistry maps executor types to environment preparers.
 type PreparerRegistry struct {
 	preparers map[executor.Name]EnvironmentPreparer

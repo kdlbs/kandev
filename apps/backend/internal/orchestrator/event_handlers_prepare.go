@@ -13,10 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
-// maxStepOutputBytes is the maximum size of a single step's Output field
-// when persisting to session metadata. Prevents large setup script output
-// (e.g. npm install) from bloating the metadata column.
-const maxStepOutputBytes = 10 * 1024
 
 // subscribePrepareEvents subscribes to environment preparation events.
 func (s *Service) subscribePrepareEvents() {
@@ -63,16 +59,12 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 		metadata = make(map[string]interface{})
 	}
 
-	status := "completed"
-	if !payload.Success {
-		status = agentEventFailed
-	}
-	metadata["prepare_result"] = map[string]interface{}{
-		"status":        status,
-		"steps":         serializePrepareSteps(payload.Steps),
-		"error_message": payload.ErrorMessage,
-		"duration_ms":   payload.DurationMs,
-	}
+	metadata["prepare_result"] = lifecycle.SerializePrepareResult(&lifecycle.EnvPrepareResult{
+		Success:      payload.Success,
+		Steps:        payload.Steps,
+		ErrorMessage: payload.ErrorMessage,
+		Duration:     time.Duration(payload.DurationMs) * time.Millisecond,
+	})
 
 	if err := s.repo.UpdateSessionMetadata(ctx, payload.SessionID, metadata); err != nil {
 		s.logger.Error("failed to persist prepare result in session metadata",
@@ -82,40 +74,7 @@ func (s *Service) handlePrepareCompleted(ctx context.Context, event *bus.Event) 
 
 	s.logger.Info("persisted prepare result in session metadata",
 		zap.String("session_id", payload.SessionID),
-		zap.String("status", status),
+		zap.Bool("success", payload.Success),
 		zap.Int("steps", len(payload.Steps)))
 	return nil
-}
-
-func serializePrepareSteps(steps []lifecycle.PrepareStep) []map[string]interface{} {
-	result := make([]map[string]interface{}, 0, len(steps))
-	for _, step := range steps {
-		output := step.Output
-		if len(output) > maxStepOutputBytes {
-			output = output[:maxStepOutputBytes] + "\n... (truncated)"
-		}
-		entry := map[string]interface{}{
-			"name":    step.Name,
-			"status":  string(step.Status),
-			"output":  output,
-			"command": step.Command,
-		}
-		if step.Error != "" {
-			entry["error"] = step.Error
-		}
-		if step.Warning != "" {
-			entry["warning"] = step.Warning
-		}
-		if step.WarningDetail != "" {
-			entry["warning_detail"] = step.WarningDetail
-		}
-		if step.StartedAt != nil {
-			entry["started_at"] = step.StartedAt.Format(time.RFC3339Nano)
-		}
-		if step.EndedAt != nil {
-			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
-		}
-		result = append(result, entry)
-	}
-	return result
 }
