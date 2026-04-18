@@ -1,24 +1,31 @@
 name: Claude Code Review
 
+# Dual triggers:
+#   - pull_request: used for same-repo PRs so the Claude App's OIDC ->
+#     installation-token exchange succeeds (it rejects OIDC tokens minted
+#     under pull_request_target with "Invalid OIDC token"). This path posts
+#     a real GitHub Review with inline comments authored by claude[bot].
+#   - pull_request_target: used for fork PRs, where secrets are not
+#     available on the pull_request trigger. This path uses GITHUB_TOKEN
+#     to bypass the OIDC exchange; findings are issue comments authored by
+#     github-actions[bot].
+# Each job gates on github.event_name AND head.repo so exactly one job runs
+# per PR push.
 on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
   pull_request_target:
     types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
-  claude-review:
+  claude-review-same-repo:
+    # Same-repo PRs only, via the pull_request trigger. Uses the Claude
+    # GitHub App (OIDC -> installation token) for claude[bot] authorship
+    # and inline review comments.
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # Run when any of:
-    #   - PR is from the same repo (trusted, secrets already available)
-    #   - PR author is OWNER/MEMBER/COLLABORATOR of this repo
-    #   - PR has the `safe-to-review` label (maintainer opt-in)
-    #   - PR author is on the CLAUDE_REVIEW_ALLOWLIST repo variable
-    #     (set in Settings -> Secrets and variables -> Actions -> Variables,
-    #      value is a JSON array string, e.g. ["alice","bob"])
-    if: |
-      github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-      contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
-      (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login))
     permissions:
       contents: read
       pull-requests: write
@@ -28,17 +35,10 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          # pull_request_target defaults to the base ref; explicitly check out
-          # the PR head so the review runs against the contributor's changes.
-          # Safe because the workflow never executes scripts from the PR;
-          # claude-code-action only reads files and posts comments.
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Run Claude Code Review (same-repo, App token for inline comments)
-        id: claude-review-app
-        if: github.event.pull_request.head.repo.full_name == github.repository
+      - name: Run Claude Code Review (App token, inline comments)
+        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -61,14 +61,43 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
-      - name: Run Claude Code Review (fork fallback, GITHUB_TOKEN)
-        id: claude-review-fork
-        if: github.event.pull_request.head.repo.full_name != github.repository
+  claude-review-fork:
+    # Fork PRs only, via pull_request_target so secrets are available.
+    # Gated by allowlist: OWNER/MEMBER/COLLABORATOR author, `safe-to-review`
+    # label (maintainer opt-in), or CLAUDE_REVIEW_ALLOWLIST repo variable
+    # (JSON array string, e.g. ["alice","bob"], in Settings -> Secrets and
+    # variables -> Actions -> Variables).
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
+       contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
+       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          # pull_request_target defaults to the base ref; explicitly check out
+          # the PR head so the review runs against the contributor's changes.
+          # Safe because the workflow never executes scripts from the PR;
+          # claude-code-action only reads files and posts comments.
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Run Claude Code Review (GITHUB_TOKEN fallback)
+        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Skip the Claude GitHub App's OIDC -> installation-token exchange,
-          # which 401s on pull_request_target from forks. GITHUB_TOKEN inherits
+          # which 401s on pull_request_target. GITHUB_TOKEN inherits
           # pull-requests: write from the permissions block above, which is
           # enough for the action to post review comments. Author will be
           # github-actions[bot] on this path.
