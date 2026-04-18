@@ -10,6 +10,7 @@ type Workflow = { id: string; workspaceId: string; name: string };
 type MockState = {
   connection: { status: string };
   workflows: { items: Workflow[] };
+  kanbanMulti: { snapshots: Record<string, unknown>; isLoading: boolean };
   clearKanbanMulti: typeof mockClearKanbanMulti;
   setKanbanMultiLoading: typeof mockSetKanbanMultiLoading;
   setWorkflowSnapshot: typeof mockSetWorkflowSnapshot;
@@ -18,6 +19,7 @@ type MockState = {
 let mockState: MockState = {
   connection: { status: "connected" },
   workflows: { items: [] },
+  kanbanMulti: { snapshots: {}, isLoading: false },
   clearKanbanMulti: mockClearKanbanMulti,
   setKanbanMultiLoading: mockSetKanbanMultiLoading,
   setWorkflowSnapshot: mockSetWorkflowSnapshot,
@@ -40,6 +42,7 @@ function resetMocks(workflows: Workflow[] = []) {
   mockState = {
     connection: { status: "connected" },
     workflows: { items: workflows },
+    kanbanMulti: { snapshots: {}, isLoading: false },
     clearKanbanMulti: mockClearKanbanMulti,
     setKanbanMultiLoading: mockSetKanbanMultiLoading,
     setWorkflowSnapshot: mockSetWorkflowSnapshot,
