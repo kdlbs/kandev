@@ -20,9 +20,7 @@ type ValueOption = { value: string; label: string; color?: string };
 function OptionLabel({ option }: { option: ValueOption }) {
   return (
     <span className="flex items-center gap-1.5">
-      {option.color && (
-        <span className={cn("block h-2 w-2 shrink-0 rounded-full", option.color)} />
-      )}
+      {option.color && <span className={cn("block h-2 w-2 shrink-0 rounded-full", option.color)} />}
       <span className="truncate">{option.label}</span>
     </span>
   );
@@ -40,8 +38,8 @@ function normaliseValueForDimension(
   op: FilterOp,
 ): FilterValue {
   if (meta.valueKind === "boolean") {
-    if (typeof value === "boolean") return value;
-    return meta.defaultValue as boolean;
+    // Boolean clauses use the operator ("is"/"is not") to express negation; value is always `true`.
+    return true;
   }
   if (meta.valueKind === "enum") {
     const multi = op === "in" || op === "not_in";
@@ -149,22 +147,8 @@ function ValueInput({
   const meta = getDimensionMeta(clause.dimension);
 
   if (meta.valueKind === "boolean") {
-    const current = clause.value === true ? "true" : "false";
-    return (
-      <Select value={current} onValueChange={(v) => onChange(v === "true")}>
-        <SelectTrigger size="sm" className="h-7 w-20 text-xs" data-testid="filter-value-select">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="true" className="text-xs">
-            true
-          </SelectItem>
-          <SelectItem value="false" className="text-xs">
-            false
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    );
+    // Value is implicit (always `true`); operator ("is"/"is not") expresses the predicate.
+    return null;
   }
 
   if (meta.valueKind === "text") {

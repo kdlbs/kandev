@@ -22,7 +22,7 @@ const STATE_OPTIONS = [
 export const DIMENSION_METAS: DimensionMeta[] = [
   {
     dimension: "isPRReview",
-    label: "Is PR review",
+    label: "PR review",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
