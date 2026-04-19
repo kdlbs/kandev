@@ -510,6 +510,12 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		}
 	}
 
+	// Promote the new session to primary so it's loaded when navigating back to this task.
+	if err := s.repo.SetSessionPrimary(ctx, newSession.ID); err != nil {
+		s.logger.Warn("failed to set new session as primary",
+			zap.String("session_id", newSession.ID), zap.Error(err))
+	}
+
 	// New session is ready — now safe to stop the old agent and complete the old session.
 	if currentSession.AgentExecutionID != "" {
 		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
