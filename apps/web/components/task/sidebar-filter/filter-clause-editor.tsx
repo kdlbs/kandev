@@ -4,6 +4,7 @@ import { IconX } from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import type {
   FilterClause,
   FilterDimension,
@@ -12,6 +13,19 @@ import type {
 } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DIMENSION_METAS, OP_LABELS, getDimensionMeta } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
+
+type ValueOption = { value: string; label: string; color?: string };
+
+function OptionLabel({ option }: { option: ValueOption }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      {option.color && (
+        <span className={cn("block h-2 w-2 shrink-0 rounded-full", option.color)} />
+      )}
+      <span className="truncate">{option.label}</span>
+    </span>
+  );
+}
 
 type Props = {
   clause: FilterClause;
@@ -128,7 +142,7 @@ function ValueInput({
   onChange,
 }: {
   clause: FilterClause;
-  options: Array<{ value: string; label: string }>;
+  options: ValueOption[];
   onChange: (v: FilterValue) => void;
 }) {
   const meta = getDimensionMeta(clause.dimension);
@@ -216,7 +230,7 @@ function ValueInput({
         )}
         {options.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="text-xs">
-            {opt.label}
+            <OptionLabel option={opt} />
           </SelectItem>
         ))}
       </SelectContent>

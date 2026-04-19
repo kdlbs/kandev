@@ -6,7 +6,7 @@ import type { AppState } from "@/lib/state/store";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
 import { getExecutorLabel } from "@/lib/executor-icons";
 
-type Option = { value: string; label: string };
+type Option = { value: string; label: string; color?: string };
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
 type ReposByWorkspace = AppState["repositories"]["itemsByWorkspaceId"];
 
@@ -18,13 +18,13 @@ function workflowOptions(snapshots: Snapshots): Option[] {
 }
 
 function workflowStepOptions(snapshots: Snapshots): Option[] {
-  const seen = new Map<string, string>();
+  const seen = new Map<string, { label: string; color: string }>();
   for (const snap of Object.values(snapshots)) {
     for (const step of snap.steps) {
-      if (!seen.has(step.id)) seen.set(step.id, step.title);
+      if (!seen.has(step.id)) seen.set(step.id, { label: step.title, color: step.color });
     }
   }
-  return [...seen.entries()].map(([value, label]) => ({ value, label }));
+  return [...seen.entries()].map(([value, { label, color }]) => ({ value, label, color }));
 }
 
 function executorTypeOptions(snapshots: Snapshots): Option[] {
