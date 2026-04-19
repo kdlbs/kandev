@@ -58,10 +58,7 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
     () => views.find((v) => v.id === activeViewId),
     [views, activeViewId],
   );
-  const current = useMemo(
-    () => resolveCurrent(activeView, storedDraft),
-    [storedDraft, activeView],
-  );
+  const current = useMemo(() => resolveCurrent(activeView, storedDraft), [storedDraft, activeView]);
   const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
 
   function handleAddFilter() {
@@ -88,12 +85,8 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        className="w-[22rem] p-0"
-        align="end"
-        data-testid="sidebar-filter-popover"
-      >
-        <div className="border-b p-2.5">
+      <PopoverContent className="w-[22rem] p-0" align="end" data-testid="sidebar-filter-popover">
+        <div className="border-b p-2">
           <ViewHeaderRow
             activeView={activeView}
             hasDraft={hasDraft}
@@ -113,12 +106,12 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
           onRemove={handleRemoveClause}
         />
 
-        <div className="border-b p-2.5">
+        <div className="border-b p-2">
           <SectionLabel>Sort</SectionLabel>
           <SortPicker value={current.sort} onChange={(sort) => updateDraft({ sort })} />
         </div>
 
-        <div className="p-2.5">
+        <div className="p-2">
           <SectionLabel>Group by</SectionLabel>
           <GroupPicker value={current.group} onChange={(group) => updateDraft({ group })} />
         </div>
@@ -127,11 +120,10 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
   );
 }
 
-const SECTION_LABEL_CLASS =
-  "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+const SECTION_LABEL_CLASS = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <span className={`mb-1.5 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
+  return <span className={`mb-1 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
 }
 
 function FilterSection({
@@ -146,8 +138,8 @@ function FilterSection({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="border-b p-2.5">
-      <div className="mb-1.5 flex items-center justify-between">
+    <div className="border-b p-2">
+      <div className="mb-1 flex items-center justify-between">
         <span className={SECTION_LABEL_CLASS}>Filters</span>
         <Button
           type="button"
@@ -176,4 +168,3 @@ function FilterSection({
     </div>
   );
 }
-
