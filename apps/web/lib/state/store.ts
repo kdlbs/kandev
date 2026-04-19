@@ -407,15 +407,7 @@ export type AppState = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
-  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
-  updateSidebarDraft: UIA["updateSidebarDraft"];
-  saveSidebarDraftAs: UIA["saveSidebarDraftAs"];
-  saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"];
-  discardSidebarDraft: UIA["discardSidebarDraft"];
-  deleteSidebarView: UIA["deleteSidebarView"];
-  renameSidebarView: UIA["renameSidebarView"];
-  duplicateSidebarView: UIA["duplicateSidebarView"];
-  toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
+  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"]; updateSidebarDraft: UIA["updateSidebarDraft"]; saveSidebarDraftAs: UIA["saveSidebarDraftAs"]; saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"]; discardSidebarDraft: UIA["discardSidebarDraft"]; deleteSidebarView: UIA["deleteSidebarView"]; renameSidebarView: UIA["renameSidebarView"]; duplicateSidebarView: UIA["duplicateSidebarView"]; toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -483,8 +475,7 @@ const defaultState = {
   quickChat: defaultUIState.quickChat,
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   // prettier-ignore
-  bottomTerminal: defaultUIState.bottomTerminal,
-  sidebarViews: defaultUIState.sidebarViews,
+  bottomTerminal: defaultUIState.bottomTerminal, sidebarViews: defaultUIState.sidebarViews,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
