@@ -107,7 +107,6 @@ describe("applyFilters — per-dimension", () => {
     const noDiff = applyFilters(tasks, [C({ dimension: "hasDiff", op: "is", value: false })]);
     expect(noDiff.map((t) => t.id).sort()).toEqual(["b", "c"]);
   });
-
 });
 
 describe("applyFilters — titleMatch + combos", () => {
@@ -238,6 +237,28 @@ describe("applyGroup", () => {
     const out = applyGroup(tasks, "workflow");
     const labels = out.groups.map((g) => g.label);
     expect(labels).toContain("Unassigned");
+  });
+
+  it("labels workflow groups with workflowName when available", () => {
+    const tasks = [
+      task({ id: "a", workflowId: "wf1", workflowName: "Kanban" }),
+      task({ id: "b", workflowId: "wf2", workflowName: "PR Reviews" }),
+    ];
+    const labels = applyGroup(tasks, "workflow")
+      .groups.map((g) => g.label)
+      .sort();
+    expect(labels).toEqual(["Kanban", "PR Reviews"]);
+  });
+
+  it("labels workflowStep groups with workflowStepTitle when available", () => {
+    const tasks = [
+      task({ id: "a", workflowStepId: "s1", workflowStepTitle: "Backlog" }),
+      task({ id: "b", workflowStepId: "s2", workflowStepTitle: "In Progress" }),
+    ];
+    const labels = applyGroup(tasks, "workflowStep")
+      .groups.map((g) => g.label)
+      .sort();
+    expect(labels).toEqual(["Backlog", "In Progress"]);
   });
 });
 

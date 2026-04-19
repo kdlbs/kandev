@@ -130,11 +130,13 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
   workflow: (t) => {
-    if (t.workflowId) return { key: t.workflowId, label: t.workflowId };
+    if (t.workflowId) return { key: t.workflowId, label: t.workflowName ?? t.workflowId };
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
   workflowStep: (t) => {
-    if (t.workflowStepId) return { key: t.workflowStepId, label: t.workflowStepId };
+    if (t.workflowStepId) {
+      return { key: t.workflowStepId, label: t.workflowStepTitle ?? t.workflowStepId };
+    }
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
   executorType: (t) => {

@@ -32,7 +32,9 @@ export type TaskSwitcherItem = {
   sessionState?: TaskSessionState;
   description?: string;
   workflowId?: string;
+  workflowName?: string;
   workflowStepId?: string;
+  workflowStepTitle?: string;
   repositoryPath?: string;
   repositories?: string[];
   diffStats?: { additions: number; deletions: number };

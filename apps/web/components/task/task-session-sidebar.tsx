@@ -82,6 +82,8 @@ function toSidebarItem(
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, TaskPR | undefined>;
     titleById: Map<string, string>;
+    workflowNameById: Map<string, string>;
+    stepTitleById: Map<string, string>;
   },
 ) {
   const sessionInfo = getSessionInfoForTask(
@@ -109,7 +111,11 @@ function toSidebarItem(
     sessionState: resolvedSessionState,
     description: task.description,
     workflowId: task._workflowId,
+    workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
+    workflowStepTitle: task.workflowStepId
+      ? ctx.stepTitleById.get(task.workflowStepId as string)
+      : undefined,
     repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
     diffStats,
     isRemoteExecutor: task.isRemoteExecutor,
@@ -142,7 +148,9 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     sessionState: undefined,
     description: undefined,
     workflowId: undefined,
+    workflowName: undefined,
     workflowStepId: undefined,
+    workflowStepTitle: undefined,
     repositoryPath: s.archivedTaskRepositoryPath,
     diffStats: undefined,
     isRemoteExecutor: false,
@@ -203,6 +211,10 @@ function useSidebarData(workspaceId: string | null) {
       ]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
+    const workflowNameById = new Map(
+      Object.entries(snapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
+    );
+    const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
       sessionsByTaskId,
       gitStatusByEnvId,
@@ -210,6 +222,8 @@ function useSidebarData(workspaceId: string | null) {
       repositorySlugById,
       taskPRsByTaskId: taskPRsByTaskId as Record<string, TaskPR | undefined>,
       titleById,
+      workflowNameById,
+      stepTitleById,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
@@ -223,6 +237,8 @@ function useSidebarData(workspaceId: string | null) {
   }, [
     repositoriesByWorkspace,
     allTasks,
+    allSteps,
+    snapshots,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
