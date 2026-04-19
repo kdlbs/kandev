@@ -156,6 +156,14 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
       if (message.payload.is_ephemeral) return;
 
+      const p = message.payload;
+      console.log("[task] task.updated", {
+        taskId: p.task_id?.slice(0, 8),
+        state: p.state,
+        stepId: p.workflow_step_id?.slice(0, 8),
+        title: p.title,
+      });
+
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
         const taskId = message.payload.task_id;

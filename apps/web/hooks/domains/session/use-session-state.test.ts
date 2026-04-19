@@ -116,6 +116,15 @@ describe("useSessionState", () => {
       expect(result.current.isWorking).toBe(true);
     });
 
+    it("sets isStarting when session state is CREATED", () => {
+      mockSession = createMockSession("session-1", "task-1", "CREATED");
+
+      const { result } = renderHook(() => useSessionState("session-1"));
+
+      expect(result.current.isStarting).toBe(true);
+      expect(result.current.isWorking).toBe(true);
+    });
+
     it("sets isAgentBusy when session state is RUNNING", () => {
       mockSession = createMockSession("session-1", "task-1", "RUNNING");
 

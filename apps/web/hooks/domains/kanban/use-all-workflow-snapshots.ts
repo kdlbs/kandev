@@ -28,6 +28,7 @@ async function fetchAndWriteSnapshot(
       allow_manual_move: step.allow_manual_move,
       prompt: step.prompt,
       is_start_step: step.is_start_step,
+      agent_profile_id: step.agent_profile_id,
     }));
     const stepIds = new Set(steps.map((s) => s.id));
 

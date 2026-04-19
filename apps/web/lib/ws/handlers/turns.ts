@@ -9,6 +9,11 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id) {
         return;
       }
+      console.log("[turn] started", {
+        turnId: payload.id?.slice(0, 8),
+        sessionId: payload.session_id?.slice(0, 8),
+        taskId: payload.task_id?.slice(0, 8),
+      });
       store.getState().addTurn({
         id: payload.id,
         session_id: payload.session_id,
@@ -27,6 +32,10 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id || !payload.id) {
         return;
       }
+      console.log("[turn] completed", {
+        turnId: payload.id?.slice(0, 8),
+        sessionId: payload.session_id?.slice(0, 8),
+      });
       store
         .getState()
         .completeTurn(

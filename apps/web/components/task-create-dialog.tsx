@@ -263,7 +263,7 @@ type DialogFormBodyProps = {
   hasRepositorySelection: boolean;
   isLocalExecutor: boolean;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
-  workflowAgentProfileId?: string;
+  workflowAgentLocked: boolean;
 };
 
 function DialogFormBody({
@@ -293,7 +293,7 @@ function DialogFormBody({
   hasRepositorySelection,
   isLocalExecutor,
   enhance,
-  workflowAgentProfileId,
+  workflowAgentLocked,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -328,7 +328,7 @@ function DialogFormBody({
           executorsLoading={executorsLoading}
           isLocalExecutor={isLocalExecutor}
           useGitHubUrl={fs.useGitHubUrl}
-          workflowAgentProfileId={workflowAgentProfileId}
+          workflowAgentLocked={workflowAgentLocked}
           BranchSelectorComponent={BranchSelector}
           AgentSelectorComponent={AgentSelector}
           ExecutorProfileSelectorComponent={ExecutorProfileSelector}
@@ -341,6 +341,7 @@ function DialogFormBody({
         snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
         effectiveWorkflowId={effectiveWorkflowId}
         onWorkflowChange={onWorkflowChange}
+        agentProfiles={agentProfiles}
       />
       {isSessionMode && (
         <SessionSelectors
@@ -540,7 +541,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             hasRepositorySelection={computed.hasRepositorySelection}
             isLocalExecutor={computed.isLocalExecutor}
             enhance={setup.enhance}
-            workflowAgentProfileId={fs.workflowAgentProfileId}
+            workflowAgentLocked={computed.workflowAgentLocked}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

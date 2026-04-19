@@ -175,8 +175,25 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		zap.Bool("plan_mode", planMode))
 
 	// Process on_turn_start before launching the agent.
+	// If the target step has a different agent profile, executeStepTransition will switch
+	// the session — so we need to pick up the new session afterwards.
 	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
 		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
+
+	// Re-read the session — on_turn_start may have switched it (agent profile change).
+	reloadedSession, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+	if reloadErr != nil {
+		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", reloadErr)
+	}
+	if reloadedSession.State == models.TaskSessionStateCompleted {
+		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+		if activeErr != nil || activeSession == nil {
+			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+		}
+		sessionID = activeSession.ID
+		agentProfileID = activeSession.AgentProfileID
+		executorID = activeSession.ExecutorID
 	}
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
@@ -275,12 +292,25 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Process on_turn_start before launching the agent, just like user-initiated messages.
 	// This allows workflow transitions (e.g. move_to_next) to fire on the initial prompt.
+	// If the target step has a different agent profile, executeStepTransition switches
+	// the session — so we need to pick up the new session afterwards.
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
 
-	// Re-read the session after on_turn_start may have changed the workflow step.
+	// Re-read the session after on_turn_start may have switched it (agent profile change).
+	// The original session may have been completed; use the active session for this task.
 	session, err = s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
+	}
+	if session.State == models.TaskSessionStateCompleted {
+		// on_turn_start switched the agent profile — find the new active session.
+		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+		if activeErr != nil || activeSession == nil {
+			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+		}
+		session = activeSession
+		sessionID = activeSession.ID
+		effectiveProfileID = activeSession.AgentProfileID
 	}
 
 	// Apply workflow step prompt wrapping and plan mode injection.

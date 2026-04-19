@@ -44,6 +44,12 @@ export function setupChatPanelSafetyNet(
   appStore: StoreApi<AppState>,
 ) {
   return api.onDidRemovePanel((panel) => {
+    console.log("[session-tab] onDidRemovePanel", {
+      panelId: panel.id,
+      isRestoring: useDockviewStore.getState().isRestoringLayout,
+      remainingPanels: api.panels.map((p) => p.id),
+      stack: new Error().stack?.split("\n").slice(1, 5).join(" | "),
+    });
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isChatPanel = panel.id === "chat" || panel.id.startsWith("session:");
     if (!isChatPanel) return;
@@ -174,6 +180,12 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     const api = useDockviewStore.getState().api;
     if (!api) return;
 
+    console.log("[session-tab] useAutoSessionTab fired", {
+      effectiveSessionId,
+      existingPanels: api.panels.map((p) => p.id),
+      alreadyCreated: sessionTabCreatedRef.current.has(effectiveSessionId),
+    });
+
     // Always remove the generic "chat" panel when a session is active —
     // it's replaced by per-session tabs. Must run before the early return
     // so restored layouts with both "chat" and session panels get cleaned up.
@@ -184,7 +196,11 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       api.removePanel(chatPanel);
     }
     if (api.getPanel(`session:${effectiveSessionId}`)) {
+      console.log("[session-tab] panel already exists, activating");
       sessionTabCreatedRef.current.add(effectiveSessionId);
+      // Activate the existing panel so it comes to focus
+      const existingPanel = api.getPanel(`session:${effectiveSessionId}`);
+      if (existingPanel) existingPanel.api.setActive();
       return;
     }
     // In maximized state the session panel is intentionally absent from the layout;
@@ -207,6 +223,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
         position = { direction: "right" as const, referencePanel: "sidebar" };
       }
     }
+    console.log("[session-tab] creating new panel for session", effectiveSessionId);
     api.addPanel({
       id: `session:${effectiveSessionId}`,
       component: "chat",
@@ -221,5 +238,6 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       useDockviewStore.setState({ centerGroupId: panel.group.id });
     }
     sessionTabCreatedRef.current.add(effectiveSessionId);
+    console.log("[session-tab] panels after creation:", api.panels.map((p) => p.id));
   }, [effectiveSessionId]);
 }

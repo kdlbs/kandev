@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 async function createProfiles(
@@ -136,6 +137,66 @@ test.describe("Workflow agent profile switching", () => {
 
     expect(finalSessions[0].agent_profile_id).toBe(profileA.id);
     expect(finalSessions[1].agent_profile_id).toBe(profileB.id);
+  });
+
+  test("manual step move updates chat UI to show new agent profile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const { profileA, profileB } = await createProfiles(apiClient);
+
+    // Create workflow: Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "UI Switch Test");
+    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
+      is_start_step: true,
+    });
+    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
+
+    await apiClient.updateWorkflowStep(step1.id, {
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.updateWorkflowStep(step2.id, {
+      agent_profile_id: profileB.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    // Create task in Step1 with profileA
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "UI Switch Task",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: step1.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    // Navigate to task and wait for the chat to load
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await expect(session.chat).toBeVisible({ timeout: 15_000 });
+
+    // Wait for the first session tab to appear with the correct profile name
+    const sessionTabs = testPage.locator('[data-testid^="session-tab-"]');
+    await expect(sessionTabs.first()).toBeVisible({ timeout: 30_000 });
+    await expect(sessionTabs.first()).toContainText("Profile A", { timeout: 10_000 });
+
+    // Wait for the agent to be ready (WAITING_FOR_INPUT) before moving
+    for (let i = 0; i < 20; i++) {
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    // Move task to Step2 — should create new session with profileB
+    await apiClient.moveTask(task.id, workflow.id, step2.id);
+
+    // The UI should switch to the new session. The active tab should show Profile B.
+    await expect(sessionTabs.first()).toContainText("Profile B", { timeout: 30_000 });
   });
 
   test("reset context checkbox is disabled when step has agent profile override", async ({
