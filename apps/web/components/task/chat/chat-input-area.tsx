@@ -360,13 +360,13 @@ export function ChatInputArea({
   const placeholder = isMoving
     ? "Switching agent..."
     : (placeholderOverride ??
-        resolveInputPlaceholder(
-          isAgentBusy,
-          activeDocument?.type,
-          planModeEnabled,
-          hasClarification,
-          needsRecovery,
-        ));
+      resolveInputPlaceholder(
+        isAgentBusy,
+        activeDocument?.type,
+        planModeEnabled,
+        hasClarification,
+        needsRecovery,
+      ));
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatStatusBar
