@@ -497,6 +497,19 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
 
+	// Inherit the task environment from the old session — the workspace is shared
+	// across sessions within the same task, so the new session can reuse the
+	// existing agentctl connection and workspace files.
+	if currentSession.TaskEnvironmentID != "" && newSession.TaskEnvironmentID == "" {
+		newSession.TaskEnvironmentID = currentSession.TaskEnvironmentID
+		newSession.UpdatedAt = time.Now().UTC()
+		if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
+			s.logger.Warn("failed to copy task_environment_id to new session",
+				zap.String("session_id", newSession.ID),
+				zap.Error(err))
+		}
+	}
+
 	// New session is ready — now safe to stop the old agent and complete the old session.
 	if currentSession.AgentExecutionID != "" {
 		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {

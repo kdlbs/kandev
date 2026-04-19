@@ -7,14 +7,17 @@ function deriveSessionFlags(
   state: TaskSession["state"] | undefined,
   errorMessage?: string,
   hasTurns?: boolean,
+  agentctlReady?: boolean,
 ) {
   // A session is "starting" if it hasn't completed any turns yet and is in
   // a pre-ready state. This avoids flicker when the session transitions
   // through CREATED → WAITING_FOR_INPUT → STARTING → RUNNING during launch.
+  // Exception: if agentctl is ready, the workspace is prepared and the session
+  // is genuinely waiting for user input (manual step move without auto_start).
   const isStarting =
     state === "STARTING" ||
     state === "CREATED" ||
-    (state === "WAITING_FOR_INPUT" && !hasTurns && !errorMessage);
+    (state === "WAITING_FOR_INPUT" && !hasTurns && !errorMessage && !agentctlReady);
   const isAgentBusy = state === "RUNNING";
   const isWorking = isStarting || isAgentBusy;
   const isFailed = state === "FAILED" || state === "CANCELLED";
@@ -44,10 +47,16 @@ export function useSessionState(sessionId: string | null) {
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
   );
 
+  const agentctlReady = useAppStore((state) =>
+    resolvedSessionId
+      ? state.sessionAgentctl.itemsBySessionId[resolvedSessionId]?.status === "ready"
+      : false,
+  );
+
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
   const hasTurns = Boolean(turns && turns.length > 0);
-  const flags = deriveSessionFlags(session?.state, session?.error_message, hasTurns);
+  const flags = deriveSessionFlags(session?.state, session?.error_message, hasTurns, agentctlReady);
 
   return {
     resolvedSessionId,
