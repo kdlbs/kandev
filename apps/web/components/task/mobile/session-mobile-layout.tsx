@@ -10,6 +10,7 @@ import { TaskChangesPanel } from "../task-changes-panel";
 import { TaskFilesPanel } from "../task-files-panel";
 import { ShellTerminal } from "../shell-terminal";
 import { PassthroughTerminal } from "../passthrough-terminal";
+import { MobileTerminalKeybar } from "./mobile-terminal-keybar";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -135,7 +136,10 @@ function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "terminal" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
+        <div
+          data-testid="terminal-panel"
+          className="flex-1 min-h-0 flex flex-col p-2 pb-12"
+        >
           <SessionPanelContent className="p-0 flex-1 min-h-0">
             <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
           </SessionPanelContent>
@@ -259,6 +263,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         handleOpenFile={handleOpenFile}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
+      />
+
+      {/* Terminal key-bar — docks above OS keyboard or bottom nav on the terminal panel */}
+      <MobileTerminalKeybar
+        sessionId={effectiveSessionId ?? null}
+        visible={currentMobilePanel === "terminal"}
+        baseBottomOffset={BOTTOM_NAV_HEIGHT}
       />
 
       {/* Fixed Bottom Navigation */}
