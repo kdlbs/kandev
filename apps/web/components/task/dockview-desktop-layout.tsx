@@ -383,7 +383,8 @@ const VALID_COMPONENTS = new Set(Object.keys(components));
 
 function useSessionSwitchCleanup(effectiveSessionId: string | null) {
   const prevSessionRef = useRef<string | null | undefined>(undefined);
-  const taskSessions = useAppStore((state) => state.taskSessions.items);
+  const prevTaskRef = useRef<string | null>(null);
+  const appStore = useAppStoreApi();
   useEffect(() => {
     if (prevSessionRef.current === undefined) {
       prevSessionRef.current = effectiveSessionId;
@@ -403,19 +404,25 @@ function useSessionSwitchCleanup(effectiveSessionId: string | null) {
       // transitions with different agent profiles). useAutoSessionTab already
       // handles creating the new panel — a full fromJSON rebuild would destroy
       // the old session tab and cause a visible layout flash.
-      const oldTask = oldSessionId ? taskSessions[oldSessionId]?.task_id : null;
-      const newTask = taskSessions[effectiveSessionId]?.task_id;
-      if (oldTask && newTask && oldTask === newTask) {
+      const state = appStore.getState();
+      const oldTask = oldSessionId ? state.taskSessions.items[oldSessionId]?.task_id : null;
+      const newTask = state.taskSessions.items[effectiveSessionId]?.task_id;
+      // Use activeTaskId as fallback when the old session has been cleaned from
+      // the store (e.g., after a COMPLETED state change removed it).
+      const effectiveOldTask = oldTask ?? prevTaskRef.current;
+      if (effectiveOldTask && newTask && effectiveOldTask === newTask) {
         console.log("[session-switch] same-task switch, skipping layout rebuild", {
           oldSessionId: oldSessionId?.slice(0, 8),
           newSessionId: effectiveSessionId.slice(0, 8),
           taskId: newTask.slice(0, 8),
         });
+        prevTaskRef.current = newTask;
         return;
       }
+      prevTaskRef.current = newTask ?? null;
       performLayoutSwitch(oldSessionId, effectiveSessionId);
     }
-  }, [effectiveSessionId, taskSessions]);
+  }, [effectiveSessionId, appStore]);
 }
 
 // ---------------------------------------------------------------------------

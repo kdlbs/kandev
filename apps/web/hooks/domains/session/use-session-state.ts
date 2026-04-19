@@ -3,8 +3,18 @@ import { useSession } from "@/hooks/domains/session/use-session";
 import { useTask } from "@/hooks/use-task";
 import type { TaskSession } from "@/lib/types/http";
 
-function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessage?: string) {
-  const isStarting = state === "STARTING" || state === "CREATED";
+function deriveSessionFlags(
+  state: TaskSession["state"] | undefined,
+  errorMessage?: string,
+  hasTurns?: boolean,
+) {
+  // A session is "starting" if it hasn't completed any turns yet and is in
+  // a pre-ready state. This avoids flicker when the session transitions
+  // through CREATED → WAITING_FOR_INPUT → STARTING → RUNNING during launch.
+  const isStarting =
+    state === "STARTING" ||
+    state === "CREATED" ||
+    (state === "WAITING_FOR_INPUT" && !hasTurns && !errorMessage);
   const isAgentBusy = state === "RUNNING";
   const isWorking = isStarting || isAgentBusy;
   const isFailed = state === "FAILED" || state === "CANCELLED";
@@ -30,10 +40,14 @@ export function useSessionState(sessionId: string | null) {
 
   const { session } = useSession(resolvedSessionId);
   const task = useTask(session?.task_id ?? null);
+  const turns = useAppStore((state) =>
+    resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
+  );
 
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
-  const flags = deriveSessionFlags(session?.state, session?.error_message);
+  const hasTurns = Boolean(turns && turns.length > 0);
+  const flags = deriveSessionFlags(session?.state, session?.error_message, hasTurns);
 
   return {
     resolvedSessionId,
