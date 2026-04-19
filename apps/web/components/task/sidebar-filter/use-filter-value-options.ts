@@ -41,9 +41,7 @@ function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Option[] 
   const repos = Object.values(repositoriesByWorkspace).flat();
   return repos.map((r) => {
     const slug =
-      r.provider_owner && r.provider_name
-        ? `${r.provider_owner}/${r.provider_name}`
-        : r.local_path;
+      r.provider_owner && r.provider_name ? `${r.provider_owner}/${r.provider_name}` : r.local_path;
     return { value: slug, label: slug };
   });
 }

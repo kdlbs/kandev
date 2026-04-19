@@ -134,7 +134,6 @@ test.describe("Sidebar filter — filtering", () => {
     await filters.close();
     await expect(session.sidebar.getByText("Drop me later")).toBeVisible();
   });
-
 });
 
 test.describe("Sidebar filter — group + sort", () => {

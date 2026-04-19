@@ -74,9 +74,7 @@ export function FilterMultiSelect({
                   data-active={checked}
                 >
                   {opt.color && (
-                    <span
-                      className={cn("mr-1 block h-2 w-2 shrink-0 rounded-full", opt.color)}
-                    />
+                    <span className={cn("mr-1 block h-2 w-2 shrink-0 rounded-full", opt.color)} />
                   )}
                   <span className="truncate">{opt.label}</span>
                 </CommandItem>
@@ -113,10 +111,5 @@ function MultiSelectSummary({
       </span>
     );
   }
-  return (
-    <span className="truncate">
-      {selected.length} selected
-    </span>
-  );
+  return <span className="truncate">{selected.length} selected</span>;
 }
-
