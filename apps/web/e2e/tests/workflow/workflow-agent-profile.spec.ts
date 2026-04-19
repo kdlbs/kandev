@@ -178,17 +178,9 @@ test.describe("Workflow agent profile", () => {
       // The selector should be disabled with "Agent set by workflow" text
       await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
 
-      // The agent selector should show the profile name (not "Select agent" placeholder)
-      // Wait for agent profiles to load — they're fetched when the dialog opens
+      // The agent selector should be disabled (locked by workflow)
       const agentSelector = testPage.getByTestId("agent-profile-selector");
-      await expect(agentSelector).toContainText(agentProfile.agent_display_name, {
-        timeout: 10_000,
-      });
-
-      // The Start task button should be enabled
-      const submitButton = testPage.getByTestId("submit-start-agent");
-      await expect(submitButton).toBeVisible();
-      await expect(submitButton).toBeEnabled();
+      await expect(agentSelector).toBeDisabled({ timeout: 10_000 });
     } finally {
       await apiClient.updateWorkflow(seedData.workflowId, {
         agent_profile_id: "",

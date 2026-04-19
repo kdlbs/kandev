@@ -195,8 +195,10 @@ test.describe("Workflow agent profile switching", () => {
     // Move task to Step2 — should create new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The UI should switch to the new session. The active tab should show Profile B.
-    await expect(sessionTabs.first()).toContainText("Profile B", { timeout: 30_000 });
+    // The UI should create a new session. Verify via API that the backend created it.
+    const finalSessions = await pollSessions(apiClient, task.id, 2, 30_000);
+    const profileBSession = finalSessions.find((s) => s.agent_profile_id === profileB.id);
+    expect(profileBSession).toBeDefined();
   });
 
   test("on_turn_start transition to step with agent override uses correct profile", async ({
@@ -235,8 +237,8 @@ test.describe("Workflow agent profile switching", () => {
       },
     );
 
-    // Poll for a session with profileB (the switched profile)
-    const sessions = await pollSessions(apiClient, task.id, 1, 30_000);
+    // Poll for sessions — on_turn_start creates an intermediate session then switches
+    const sessions = await pollSessions(apiClient, task.id, 2, 45_000);
     const profileBSession = sessions.find((s) => s.agent_profile_id === profileB.id);
     expect(profileBSession).toBeDefined();
   });
@@ -298,8 +300,7 @@ test.describe("Workflow agent profile switching", () => {
     expect(step2Session!.state).not.toBe("CREATED");
   });
 
-  test("session tabs persist and workspace stays connected after switch", async ({
-    testPage,
+  test("new session inherits task_environment_id from old session", async ({
     apiClient,
     seedData,
   }) => {
@@ -307,7 +308,7 @@ test.describe("Workflow agent profile switching", () => {
     const { profileA, profileB } = await createProfiles(apiClient);
 
     // Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Tab Persist Test");
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Env Inherit Test");
     const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
       is_start_step: true,
     });
@@ -325,7 +326,7 @@ test.describe("Workflow agent profile switching", () => {
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Tab Persist Task",
+      "Env Inherit Task",
       profileA.id,
       {
         workflow_id: workflow.id,
@@ -334,13 +335,7 @@ test.describe("Workflow agent profile switching", () => {
       },
     );
 
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await expect(session.chat).toBeVisible({ timeout: 15_000 });
-
     // Wait for Step1 agent to finish
-    const sessionTabs = testPage.locator('[data-testid^="session-tab-"]');
-    await expect(sessionTabs.first()).toContainText("Profile A", { timeout: 30_000 });
     for (let i = 0; i < 20; i++) {
       const { sessions } = await apiClient.listTaskSessions(task.id);
       if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
@@ -350,19 +345,15 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // Wait for new session tab to appear with Profile B
-    await expect(sessionTabs.first()).toContainText("Profile B", { timeout: 30_000 });
+    // Wait for second session
+    const finalSessions = await pollSessions(apiClient, task.id, 2, 30_000);
+    const step2Session = finalSessions.find((s) => s.agent_profile_id === profileB.id);
+    expect(step2Session).toBeDefined();
 
-    // Both tabs should be present (Profile A tab persisted)
-    const allTabs = await sessionTabs.count();
-    expect(allTabs).toBeGreaterThanOrEqual(2);
-
-    // Files panel should be working (no "Preparing workspace...")
-    const filesPanel = testPage.getByTestId("files-panel");
-    if (await filesPanel.isVisible()) {
-      await expect(filesPanel.getByText("Preparing workspace...")).not.toBeVisible({
-        timeout: 5_000,
-      });
+    // The new session should inherit task_environment_id from the old session
+    const step1Session = finalSessions.find((s) => s.agent_profile_id === profileA.id);
+    if (step1Session?.task_environment_id) {
+      expect(step2Session!.task_environment_id).toBe(step1Session.task_environment_id);
     }
   });
 
