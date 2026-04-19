@@ -88,8 +88,12 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className="w-96 p-0" align="end" data-testid="sidebar-filter-popover">
-        <div className="border-b p-3">
+      <PopoverContent
+        className="w-[22rem] p-0"
+        align="end"
+        data-testid="sidebar-filter-popover"
+      >
+        <div className="border-b p-2.5">
           <ViewHeaderRow
             activeView={activeView}
             hasDraft={hasDraft}
@@ -109,22 +113,25 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
           onRemove={handleRemoveClause}
         />
 
-        <div className="border-b p-3">
-          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Sort
-          </span>
+        <div className="border-b p-2.5">
+          <SectionLabel>Sort</SectionLabel>
           <SortPicker value={current.sort} onChange={(sort) => updateDraft({ sort })} />
         </div>
 
-        <div className="p-3">
-          <span className="mb-2 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Group by
-          </span>
+        <div className="p-2.5">
+          <SectionLabel>Group by</SectionLabel>
           <GroupPicker value={current.group} onChange={(group) => updateDraft({ group })} />
         </div>
       </PopoverContent>
     </Popover>
   );
+}
+
+const SECTION_LABEL_CLASS =
+  "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <span className={`mb-1.5 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
 }
 
 function FilterSection({
@@ -139,16 +146,14 @@ function FilterSection({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="border-b p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Filters
-        </span>
+    <div className="border-b p-2.5">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className={SECTION_LABEL_CLASS}>Filters</span>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="h-6 cursor-pointer text-xs"
+          className="-my-1 h-6 cursor-pointer text-xs"
           onClick={onAdd}
           data-testid="filter-add-button"
         >
@@ -156,9 +161,7 @@ function FilterSection({
           Add
         </Button>
       </div>
-      {filters.length === 0 ? (
-        <p className="py-1 text-xs text-muted-foreground">No filters applied.</p>
-      ) : (
+      {filters.length > 0 && (
         <div className="space-y-0.5">
           {filters.map((clause) => (
             <FilterClauseEditor
