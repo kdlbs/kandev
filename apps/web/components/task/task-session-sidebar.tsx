@@ -122,6 +122,7 @@ function toSidebarItem(
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     prInfo: toPrInfo(pr),
+    isPRReview: task.isPRReview ?? false,
   };
 }
 
@@ -154,6 +155,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     parentTaskTitle: undefined,
     parentTaskId: undefined,
     prInfo: undefined,
+    isPRReview: false,
   };
 }
 

@@ -22,21 +22,24 @@ describe("applyFilters — basics", () => {
 });
 
 describe("applyFilters — per-dimension", () => {
-  it("filters by hasPR is true", () => {
-    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
-    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is", value: true })]);
+  it("filters by isPRReview is true (watcher-created task)", () => {
+    const tasks = [task({ id: "a", isPRReview: true }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "isPRReview", op: "is", value: true })]);
     expect(out.map((t) => t.id)).toEqual(["a"]);
   });
 
-  it("filters by hasPR is false (no PR)", () => {
-    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
-    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is", value: false })]);
+  it("filters by isPRReview is false (regular task, even with linked PR)", () => {
+    const tasks = [
+      task({ id: "a", isPRReview: true }),
+      task({ id: "b", prInfo: { number: 1, state: "Open" } }),
+    ];
+    const out = applyFilters(tasks, [C({ dimension: "isPRReview", op: "is", value: false })]);
     expect(out.map((t) => t.id)).toEqual(["b"]);
   });
 
-  it("supports is_not negation on hasPR", () => {
-    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
-    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is_not", value: true })]);
+  it("supports is_not negation on isPRReview", () => {
+    const tasks = [task({ id: "a", isPRReview: true }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "isPRReview", op: "is_not", value: true })]);
     expect(out.map((t) => t.id)).toEqual(["b"]);
   });
 
@@ -131,13 +134,13 @@ describe("applyFilters — titleMatch + combos", () => {
 
   it("AND combines multiple clauses", () => {
     const tasks = [
-      task({ id: "a", sessionState: "RUNNING", prInfo: { number: 1, state: "Open" } }),
+      task({ id: "a", sessionState: "RUNNING", isPRReview: true }),
       task({ id: "b", sessionState: "RUNNING" }),
-      task({ id: "c", prInfo: { number: 2, state: "Open" } }),
+      task({ id: "c", isPRReview: true }),
     ];
     const out = applyFilters(tasks, [
       C({ dimension: "state", op: "is", value: "in_progress" }),
-      { id: "c2", dimension: "hasPR", op: "is", value: true },
+      { id: "c2", dimension: "isPRReview", op: "is", value: true },
     ]);
     expect(out.map((t) => t.id)).toEqual(["a"]);
   });
@@ -243,13 +246,13 @@ describe("applyView (integration)", () => {
     const view: SidebarView = {
       id: "v",
       name: "v",
-      filters: [{ id: "f1", dimension: "hasPR", op: "is", value: false }],
+      filters: [{ id: "f1", dimension: "isPRReview", op: "is", value: false }],
       sort: { key: "updatedAt", direction: "desc" },
       group: "none",
       collapsedGroups: [],
     };
     const tasks = [
-      task({ id: "a", prInfo: { number: 1, state: "Open" }, updatedAt: "2026-04-05" }),
+      task({ id: "a", isPRReview: true, updatedAt: "2026-04-05" }),
       task({ id: "b", updatedAt: "2026-04-01" }),
       task({ id: "c", updatedAt: "2026-04-10" }),
     ];

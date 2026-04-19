@@ -20,15 +20,36 @@ import type {
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
-  let views = getStoredSidebarUserViews<SidebarView[]>([]);
+  let views = getStoredSidebarUserViews<SidebarView[]>([]).map(migrateView);
   if (views.length === 0) {
     views = [DEFAULT_VIEW];
-    setStoredSidebarUserViews(views as unknown as SidebarView[]);
   }
+  setStoredSidebarUserViews(views as unknown as SidebarView[]);
   const storedActive = getStoredSidebarActiveViewId(DEFAULT_ACTIVE_VIEW_ID);
   const activeViewId = views.some((v) => v.id === storedActive) ? storedActive : views[0].id;
   const draft = getStoredSidebarDraft<SidebarViewDraft | null>(null);
   return { views, activeViewId, draft };
+}
+
+const KNOWN_DIMENSIONS = new Set<string>([
+  "archived",
+  "state",
+  "workflow",
+  "workflowStep",
+  "executorType",
+  "repository",
+  "hasDiff",
+  "isPRReview",
+  "titleMatch",
+]);
+
+// Drops clauses whose dimension is no longer known (e.g. renamed or removed in an upgrade),
+// so the popover does not crash when rendering stored views.
+function migrateView(view: SidebarView): SidebarView {
+  return {
+    ...view,
+    filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
+  };
 }
 
 function persistUserViews(views: SidebarView[]): void {

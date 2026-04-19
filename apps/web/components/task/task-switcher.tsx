@@ -46,6 +46,7 @@ export type TaskSwitcherItem = {
   parentTaskTitle?: string;
   parentTaskId?: string;
   prInfo?: { number: number; state: string };
+  isPRReview?: boolean;
 };
 
 type StepDef = { id: string; title: string; color?: string };
