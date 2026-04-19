@@ -125,14 +125,13 @@ describe("useSessionState", () => {
       expect(result.current.isWorking).toBe(true);
     });
 
-    it("sets isStarting when WAITING_FOR_INPUT with no turns", () => {
+    it("does not set isStarting when WAITING_FOR_INPUT", () => {
       mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
 
       const { result } = renderHook(() => useSessionState("session-1"));
 
-      // New session with no turns is still starting (prevents flicker)
-      expect(result.current.isStarting).toBe(true);
-      expect(result.current.isWorking).toBe(true);
+      expect(result.current.isStarting).toBe(false);
+      expect(result.current.isWorking).toBe(false);
     });
 
     it("sets isAgentBusy when session state is RUNNING", () => {
