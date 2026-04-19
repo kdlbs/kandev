@@ -4,7 +4,7 @@ import { useTask } from "@/hooks/use-task";
 import type { TaskSession } from "@/lib/types/http";
 
 function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessage?: string) {
-  const isStarting = state === "STARTING" || state === "CREATED";
+  const isStarting = state === "STARTING";
   const isAgentBusy = state === "RUNNING";
   const isWorking = isStarting || isAgentBusy;
   const isFailed = state === "FAILED" || state === "CANCELLED";

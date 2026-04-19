@@ -62,8 +62,8 @@ function getInputPlaceholder(
   hasAgentCommands: boolean,
   isStarting: boolean,
 ): string {
-  if (placeholder) return placeholder;
   if (isStarting) return "Preparing workspace...";
+  if (placeholder) return placeholder;
   if (isAgentBusy) return "Queue more instructions...";
   if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
   return "Ask to make changes, @mention files";

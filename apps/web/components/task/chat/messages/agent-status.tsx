@@ -17,7 +17,7 @@ const STATE_CONFIG: Record<
   TaskSessionState,
   { label: string; dynamicLabel?: boolean; icon: "spinner" | "error" | "warning" | null }
 > = {
-  CREATED: { label: "Starting agent", dynamicLabel: true, icon: "spinner" },
+  CREATED: { label: "", icon: null },
   STARTING: { label: "Agent is starting", dynamicLabel: true, icon: "spinner" },
   RUNNING: { label: "Agent is running", icon: "spinner" },
   WAITING_FOR_INPUT: { label: "", icon: null },
