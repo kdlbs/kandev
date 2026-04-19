@@ -144,12 +144,19 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
   });
 }
 
+/** Copy agentctl "ready" status from one session to another (same-task switch). */
+function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSessionId: string): void {
+  const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[fromSessionId];
+  if (oldAgentctl?.status === "ready") {
+    state.setSessionAgentctlStatus(toSessionId, oldAgentctl);
+  }
+}
+
 /**
  * After a `session.state_changed` event, decide whether the chat UI should
  * follow a workflow-driven session switch. Covers both event orderings:
  *   1. New non-terminal session appears for the active task before the old
- *      one is torn down — adopt immediately if the current active session is
- *      already terminal (or missing / cross-task).
+ *      one is torn down — adopt immediately.
  *   2. The current active session transitions to a terminal state — hand off
  *      to the newest non-terminal session for the same task, if any.
  */
@@ -163,15 +170,8 @@ function maybeAdoptSessionOnTransition(
   const state = store.getState();
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
-    // For same-task switches (workflow step transitions), inherit agentctl status
-    // from the old session — the workspace is the same, just the agent changed.
     const oldSessionId = state.tasks.activeSessionId;
-    if (oldSessionId) {
-      const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[oldSessionId];
-      if (oldAgentctl?.status === "ready") {
-        state.setSessionAgentctlStatus(sessionId, oldAgentctl);
-      }
-    }
+    if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
     state.setActiveSession(taskId, sessionId);
     return;
   }
@@ -180,11 +180,7 @@ function maybeAdoptSessionOnTransition(
   if (isActive && newState && isTerminalSessionState(newState)) {
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
-      // Inherit agentctl status for same-task replacements
-      const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
-      if (oldAgentctl?.status === "ready") {
-        state.setSessionAgentctlStatus(replacement, oldAgentctl);
-      }
+      inheritAgentctlStatus(state, sessionId, replacement);
       state.setActiveSession(taskId, replacement);
     }
   }
