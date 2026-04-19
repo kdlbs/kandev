@@ -74,7 +74,7 @@ func TestSerializePrepareResult(t *testing.T) {
 		require.True(t, strings.ToValidUTF8(output, "") == output, "output should be valid UTF-8")
 	})
 
-	t.Run("omits zero duration", func(t *testing.T) {
+	t.Run("omits timestamps when nil", func(t *testing.T) {
 		result := &EnvPrepareResult{
 			Success: true,
 			Steps:   []PrepareStep{{Name: "test", Status: PrepareStepCompleted}},
@@ -82,7 +82,9 @@ func TestSerializePrepareResult(t *testing.T) {
 
 		serialized := SerializePrepareResult(result)
 		steps := serialized["steps"].([]map[string]interface{})
-		_, hasDuration := steps[0]["duration_ms"]
-		require.False(t, hasDuration, "should not include duration_ms when zero")
+		_, hasStarted := steps[0]["started_at"]
+		_, hasEnded := steps[0]["ended_at"]
+		require.False(t, hasStarted, "should not include started_at when nil")
+		require.False(t, hasEnded, "should not include ended_at when nil")
 	})
 }
