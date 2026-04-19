@@ -93,14 +93,13 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
           <ViewHeaderRow
             activeView={activeView}
             hasDraft={hasDraft}
+            canDelete={views.length > 1}
             onSaveOverwrite={saveOverwrite}
             onDiscard={discard}
             onDelete={() => activeView && deleteView(activeView.id)}
           />
           <ViewSaveAsRow onSubmit={saveAs} />
-          {activeView && !activeView.isBuiltIn && (
-            <ViewRenameRow view={activeView} onRename={renameView} />
-          )}
+          {activeView && <ViewRenameRow view={activeView} onRename={renameView} />}
         </div>
 
         <FilterSection

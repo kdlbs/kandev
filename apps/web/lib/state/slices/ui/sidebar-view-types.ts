@@ -39,7 +39,6 @@ export type SidebarView = {
   sort: SortSpec;
   group: GroupKey;
   collapsedGroups: string[];
-  isBuiltIn?: boolean;
 };
 
 export type SidebarSliceState = {

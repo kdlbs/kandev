@@ -9,7 +9,7 @@ import {
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
 } from "@/lib/local-storage";
-import { BUILTIN_VIEWS, DEFAULT_ACTIVE_VIEW_ID } from "./sidebar-view-builtins";
+import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type {
   FilterClause,
   GroupKey,
@@ -20,18 +20,19 @@ import type {
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
-  const userViews = getStoredSidebarUserViews<SidebarView[]>([]);
-  const views = [...BUILTIN_VIEWS, ...userViews.filter((v) => !v.isBuiltIn)];
+  let views = getStoredSidebarUserViews<SidebarView[]>([]);
+  if (views.length === 0) {
+    views = [DEFAULT_VIEW];
+    setStoredSidebarUserViews(views as unknown as SidebarView[]);
+  }
   const storedActive = getStoredSidebarActiveViewId(DEFAULT_ACTIVE_VIEW_ID);
-  const activeViewId = views.some((v) => v.id === storedActive)
-    ? storedActive
-    : DEFAULT_ACTIVE_VIEW_ID;
+  const activeViewId = views.some((v) => v.id === storedActive) ? storedActive : views[0].id;
   const draft = getStoredSidebarDraft<SidebarViewDraft | null>(null);
   return { views, activeViewId, draft };
 }
 
 function persistUserViews(views: SidebarView[]): void {
-  setStoredSidebarUserViews(views.filter((v) => !v.isBuiltIn) as unknown as SidebarView[]);
+  setStoredSidebarUserViews(views as unknown as SidebarView[]);
 }
 
 function makeId(prefix: string): string {
@@ -223,7 +224,7 @@ function buildSidebarViewSaveActions(set: ImmerSet) {
         const d = draft.sidebarViews.draft;
         if (!d) return;
         const view = draft.sidebarViews.views.find((v) => v.id === d.baseViewId);
-        if (!view || view.isBuiltIn) return;
+        if (!view) return;
         view.filters = d.filters;
         view.sort = d.sort;
         view.group = d.group;
@@ -255,19 +256,21 @@ function buildSidebarViewEditActions(set: ImmerSet) {
   return {
     deleteSidebarView: (viewId: string) =>
       set((draft) => {
-        const view = draft.sidebarViews.views.find((v) => v.id === viewId);
-        if (!view || view.isBuiltIn) return;
-        draft.sidebarViews.views = draft.sidebarViews.views.filter((v) => v.id !== viewId);
+        const remaining = draft.sidebarViews.views.filter((v) => v.id !== viewId);
+        if (remaining.length === 0) return;
+        draft.sidebarViews.views = remaining;
         if (draft.sidebarViews.activeViewId === viewId) {
-          draft.sidebarViews.activeViewId = DEFAULT_ACTIVE_VIEW_ID;
-          setStoredSidebarActiveViewId(DEFAULT_ACTIVE_VIEW_ID);
+          draft.sidebarViews.activeViewId = remaining[0].id;
+          setStoredSidebarActiveViewId(remaining[0].id);
         }
+        draft.sidebarViews.draft = null;
+        removeStoredSidebarDraft();
         persistUserViews(draft.sidebarViews.views);
       }),
     renameSidebarView: (viewId: string, name: string) =>
       set((draft) => {
         const view = draft.sidebarViews.views.find((v) => v.id === viewId);
-        if (!view || view.isBuiltIn) return;
+        if (!view) return;
         view.name = name.trim() || view.name;
         persistUserViews(draft.sidebarViews.views);
       }),
@@ -278,7 +281,7 @@ function buildSidebarViewEditActions(set: ImmerSet) {
         const idx = view.collapsedGroups.indexOf(groupKey);
         if (idx === -1) view.collapsedGroups.push(groupKey);
         else view.collapsedGroups.splice(idx, 1);
-        if (!view.isBuiltIn) persistUserViews(draft.sidebarViews.views);
+        persistUserViews(draft.sidebarViews.views);
       }),
   };
 }

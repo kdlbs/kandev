@@ -23,7 +23,6 @@ export function SidebarViewChips() {
             data-testid="sidebar-view-chip"
             data-view-id={view.id}
             data-active={active}
-            data-builtin={view.isBuiltIn ? "true" : "false"}
             className={cn(
               "h-6 shrink-0 cursor-pointer rounded-md border px-2 text-[11px] transition-colors",
               active

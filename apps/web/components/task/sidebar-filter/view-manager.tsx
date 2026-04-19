@@ -8,17 +8,19 @@ import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 export function ViewHeaderRow({
   activeView,
   hasDraft,
+  canDelete,
   onSaveOverwrite,
   onDiscard,
   onDelete,
 }: {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
+  canDelete: boolean;
   onSaveOverwrite: () => void;
   onDiscard: () => void;
   onDelete: () => void;
 }) {
-  const canOverwrite = hasDraft && activeView && !activeView.isBuiltIn;
+  const canOverwrite = hasDraft && !!activeView;
   return (
     <div className="mb-2 flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 text-xs">
@@ -59,7 +61,7 @@ export function ViewHeaderRow({
             Discard
           </Button>
         )}
-        {activeView && !activeView.isBuiltIn && (
+        {activeView && canDelete && (
           <Button
             type="button"
             size="sm"

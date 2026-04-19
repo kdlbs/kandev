@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { applyFilters, applyGroup, applySort, applyView } from "./apply-view";
 import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
-import { BUILTIN_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
 
 function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
   return {
@@ -259,46 +259,20 @@ describe("applyView (integration)", () => {
   });
 });
 
-describe("built-in view semantics", () => {
-  const tasks = [
-    task({
-      id: "pr-open",
-      prInfo: { number: 1, state: "Open" },
-      state: "REVIEW",
-      repositoryPath: "org/r",
-    }),
-    task({ id: "plain", state: "IN_PROGRESS", repositoryPath: "org/r" }),
-    task({ id: "archived", isArchived: true }),
-  ];
-
-  it("All tasks shows everything", () => {
-    const view = BUILTIN_VIEWS.find((v) => v.name === "All tasks")!;
-    const out = applyView(tasks, view);
+describe("default view semantics", () => {
+  it("default view shows everything, grouped by repository", () => {
+    const tasks = [
+      task({
+        id: "pr-open",
+        prInfo: { number: 1, state: "Open" },
+        state: "REVIEW",
+        repositoryPath: "org/r",
+      }),
+      task({ id: "plain", state: "IN_PROGRESS", repositoryPath: "org/r" }),
+      task({ id: "archived", isArchived: true, repositoryPath: "org/r" }),
+    ];
+    const out = applyView(tasks, DEFAULT_VIEW);
     const ids = out.groups.flatMap((g) => g.tasks.map((t) => t.id));
     expect(ids.sort()).toEqual(["archived", "plain", "pr-open"]);
-  });
-
-  it("No PR reviews excludes PR-linked tasks", () => {
-    const view = BUILTIN_VIEWS.find((v) => v.name === "No PR reviews")!;
-    const out = applyView(tasks, view);
-    const ids = out.groups.flatMap((g) => g.tasks.map((t) => t.id));
-    expect(ids).not.toContain("pr-open");
-    expect(ids).toContain("plain");
-  });
-
-  it("Active shows review + in_progress buckets, excludes archived", () => {
-    const view = BUILTIN_VIEWS.find((v) => v.name === "Active")!;
-    const out = applyView(tasks, view);
-    const ids = out.groups.flatMap((g) => g.tasks.map((t) => t.id));
-    expect(ids).toContain("plain");
-    expect(ids).toContain("pr-open");
-    expect(ids).not.toContain("archived");
-  });
-
-  it("Archived shows only archived tasks", () => {
-    const view = BUILTIN_VIEWS.find((v) => v.name === "Archived")!;
-    const out = applyView(tasks, view);
-    const ids = out.groups.flatMap((g) => g.tasks.map((t) => t.id));
-    expect(ids).toEqual(["archived"]);
   });
 });

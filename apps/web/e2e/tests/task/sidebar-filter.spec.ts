@@ -3,14 +3,14 @@
  *
  * Coverage:
  *   - Gear popover open/close
- *   - Built-in views present (All, No PR reviews, Active, Archived)
+ *   - Default "All tasks" view is seeded for new users
  *   - Filter add/remove, negation, live list update
  *   - Sort + direction toggle
  *   - Group-by (repository, state, none)
  *   - Saved views CRUD (save-as, rename, delete)
  *   - Persistence across reload
  *   - Draft semantics + discard
- *   - PR-watcher regression: No PR reviews view hides PR-linked items
+ *   - Last-view deletion guard
  */
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -51,14 +51,15 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect(filters.popover).toBeHidden();
   });
 
-  test("all built-in view chips are present", async ({ testPage, apiClient, seedData }) => {
+  test("default 'All tasks' view is seeded for new users", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Chip Task"]);
     const chips = filters.chipRow.getByTestId("sidebar-view-chip");
-    await expect(chips).toHaveCount(4);
+    await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
-    await expect(chips.filter({ hasText: "No PR reviews" })).toBeVisible();
-    await expect(chips.filter({ hasText: "Active" })).toBeVisible();
-    await expect(chips.filter({ hasText: "Archived" })).toBeVisible();
   });
 
   test("switching chips updates active state and persists across reload", async ({
@@ -67,32 +68,21 @@ test.describe("Sidebar filter bar — popover basics", () => {
     seedData,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Persist Task"]);
-    await filters.selectViewByName("Active");
-    await filters.expectActiveViewChip("Active");
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Title");
+    await filters.setClauseTextValue(0, "persist");
+    await filters.saveAs("Persist View");
+    await filters.expectActiveViewChip("Persist View");
 
     await testPage.reload();
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const filters2 = new SidebarFilterPopoverPage(testPage);
-    await filters2.expectActiveViewChip("Active");
+    await filters2.expectActiveViewChip("Persist View");
   });
 });
 
 test.describe("Sidebar filter — filtering", () => {
-  test("archived built-in view hides non-archived tasks", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
-      "Alive One",
-      "Alive Two",
-    ]);
-    await filters.selectViewByName("Archived");
-    await expect(session.sidebar.getByText("Alive One")).toHaveCount(0);
-    await expect(session.sidebar.getByText("Alive Two")).toHaveCount(0);
-  });
-
   test("adding a title filter narrows the list live", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
       "Fix auth bug",
@@ -145,55 +135,6 @@ test.describe("Sidebar filter — filtering", () => {
     await expect(session.sidebar.getByText("Drop me later")).toBeVisible();
   });
 
-  test("No PR reviews built-in view hides PR-linked tasks", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await apiClient.mockGitHubReset();
-    await apiClient.mockGitHubSetUser("test-user");
-
-    const prTask = await apiClient.createTask(seedData.workspaceId, "PR Watcher Task", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
-    await apiClient.createTask(seedData.workspaceId, "Plain Task", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
-
-    await apiClient.mockGitHubAssociateTaskPR({
-      task_id: prTask.id,
-      owner: "testorg",
-      repo: "testrepo",
-      pr_number: 101,
-      pr_url: "https://github.com/testorg/testrepo/pull/101",
-      pr_title: "PR Watcher PR",
-      head_branch: "feat/pr-watcher",
-      base_branch: "main",
-      author_login: "test-user",
-    });
-
-    const navTask = await apiClient.createTask(seedData.workspaceId, "Sidebar Filter Nav", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-    await testPage.goto(`/t/${navTask.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
-    const filters = new SidebarFilterPopoverPage(testPage);
-
-    await expect(session.sidebar.getByText("PR Watcher Task")).toBeVisible();
-    await expect(session.sidebar.getByText("Plain Task")).toBeVisible();
-
-    await filters.selectViewByName("No PR reviews");
-
-    await expect(session.sidebar.getByText("Plain Task")).toBeVisible();
-    await expect(session.sidebar.getByText("PR Watcher Task")).toHaveCount(0);
-  });
 });
 
 test.describe("Sidebar filter — group + sort", () => {
@@ -241,7 +182,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     ).toBeVisible();
   });
 
-  test("delete custom view removes chip and falls back to built-in", async ({
+  test("delete custom view removes chip and falls back to remaining view", async ({
     testPage,
     apiClient,
     seedData,
@@ -258,15 +199,15 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect(
       filters.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
     ).toHaveCount(0);
+    await filters.expectActiveViewChip("All tasks");
   });
 
-  test("built-in views cannot be deleted (delete button absent)", async ({
+  test("last remaining view cannot be deleted (delete button hidden)", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["BuiltIn Task"]);
-    await filters.selectViewByName("All tasks");
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Last View Task"]);
     await filters.open();
     await expect(filters.popover.getByTestId("view-delete-button")).toHaveCount(0);
   });
