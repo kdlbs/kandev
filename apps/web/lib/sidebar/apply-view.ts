@@ -101,7 +101,6 @@ const SORT_COMPARATORS: Record<SortKey, (a: TaskSwitcherItem, b: TaskSwitcherIte
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
-  repository: (a, b) => (a.repositoryPath ?? "").localeCompare(b.repositoryPath ?? ""),
 };
 
 export function applySort(tasks: TaskSwitcherItem[], spec: SortSpec): TaskSwitcherItem[] {

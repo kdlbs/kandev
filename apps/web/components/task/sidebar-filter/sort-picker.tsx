@@ -6,11 +6,10 @@ import { Button } from "@kandev/ui/button";
 import type { SortKey, SortSpec } from "@/lib/state/slices/ui/sidebar-view-types";
 
 const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
-  { key: "state", label: "State" },
+  { key: "state", label: "Status" },
   { key: "updatedAt", label: "Updated" },
   { key: "createdAt", label: "Created" },
   { key: "title", label: "Title" },
-  { key: "repository", label: "Repository" },
 ];
 
 type Props = {
