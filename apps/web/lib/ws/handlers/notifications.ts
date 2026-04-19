@@ -31,14 +31,10 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
       const state = store.getState();
 
       const reason = shouldSuppressNotification(state, taskId, sessionId);
-      if (reason) {
-        console.log("[notification] suppressed —", reason);
-        return;
-      }
+      if (reason) return;
 
       const title = message.payload.title || "Task needs your input";
       const body = message.payload.body || "An agent is waiting for your input.";
-      console.log("[notification] firing browser notification:", title);
       new Notification(title, { body });
     },
   };

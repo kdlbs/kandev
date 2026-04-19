@@ -42,10 +42,6 @@ export type SessionSwitchParams = {
  * old task remain visible alongside the new task's tab.
  */
 function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
-  console.log("[session-switch] removeEphemeralPanels", {
-    keepSessionId: keepSessionId?.slice(0, 8),
-    panels: api.panels.map((p) => p.id),
-  });
   const toRemove = api.panels.filter((p) => {
     const comp = p.api.component;
     if (comp === "file-editor" || comp === "diff-viewer" || comp === "commit-detail") {
@@ -64,12 +60,6 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
     }
     return false;
   });
-  if (toRemove.length > 0) {
-    console.log(
-      "[session-switch] removing panels:",
-      toRemove.map((p) => p.id),
-    );
-  }
   for (const p of toRemove) {
     try {
       p.api.close();
@@ -152,16 +142,9 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
 export function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds {
   const { api, newSessionId, safeWidth, safeHeight, buildDefault } = params;
 
-  console.log("[session-switch] performSessionSwitch", {
-    oldSessionId: params.oldSessionId?.slice(0, 8),
-    newSessionId: newSessionId.slice(0, 8),
-    panels: api.panels.map((p) => p.id),
-  });
-
   // Try fast path: skip fromJSON when layout structure hasn't changed
   const fastResult = tryFastSessionSwitch(params);
   if (fastResult) {
-    console.log("[session-switch] fast path taken");
     return fastResult;
   }
 
