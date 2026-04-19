@@ -102,10 +102,12 @@ test.describe("Diff update on file change", () => {
     // The Pierre Diffs viewer should show the initial modification.
     // Playwright's getByText auto-pierces shadow DOM and auto-retries, so we use it
     // directly with a generous timeout to handle async web worker initialization.
+    // On cold CI runners (first test in shard, no V8 code cache), Pierre Diffs'
+    // createJavaScriptRegexEngine() can take 30-40s to JIT-compile.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
+      timeout: 60_000,
     });
   });
 
@@ -114,11 +116,12 @@ test.describe("Diff update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
-    // Verify initial diff content (scoped to diffs-container to avoid matching chat text)
+    // Verify initial diff content (scoped to diffs-container to avoid matching chat text).
+    // Allow up to 60s for Pierre Diffs engine JIT on cold CI runners.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
+      timeout: 60_000,
     });
 
     // Click on the session tab to make the chat input visible again
