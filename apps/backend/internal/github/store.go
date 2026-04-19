@@ -187,7 +187,10 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
 	return n, nil
 }
 

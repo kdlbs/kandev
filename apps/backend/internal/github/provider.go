@@ -32,6 +32,9 @@ func Provide(
 	svc := NewService(client, authMethod, secrets, store, eventBus, log)
 	svc.subscribeTaskEvents()
 
-	cleanup := func() error { return nil }
+	cleanup := func() error {
+		svc.unsubscribeTaskEvents()
+		return nil
+	}
 	return svc, cleanup, nil
 }

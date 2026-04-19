@@ -12,16 +12,33 @@ import (
 // subscribeTaskEvents wires the github service to task archive/delete events so
 // PR watches are pruned proactively. The ListActivePRWatches query already hides
 // archived-task watches from the poller, but pruning keeps the table bounded.
+// Subscriptions are tracked so they can be released via unsubscribeTaskEvents.
 func (s *Service) subscribeTaskEvents() {
 	if s.eventBus == nil {
 		return
 	}
-	if _, err := s.eventBus.Subscribe(events.TaskUpdated, s.handleTaskUpdated); err != nil {
+	if sub, err := s.eventBus.Subscribe(events.TaskUpdated, s.handleTaskUpdated); err != nil {
 		s.logger.Error("failed to subscribe to task.updated events", zap.Error(err))
+	} else {
+		s.taskEventSubs = append(s.taskEventSubs, sub)
 	}
-	if _, err := s.eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted); err != nil {
+	if sub, err := s.eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted); err != nil {
 		s.logger.Error("failed to subscribe to task.deleted events", zap.Error(err))
+	} else {
+		s.taskEventSubs = append(s.taskEventSubs, sub)
 	}
+}
+
+// unsubscribeTaskEvents releases the subscriptions created in subscribeTaskEvents.
+// Called from the provider cleanup so handlers don't accumulate if the service is
+// torn down and re-created while the event bus persists.
+func (s *Service) unsubscribeTaskEvents() {
+	for _, sub := range s.taskEventSubs {
+		if err := sub.Unsubscribe(); err != nil {
+			s.logger.Error("failed to unsubscribe from task event", zap.Error(err))
+		}
+	}
+	s.taskEventSubs = nil
 }
 
 // handleTaskUpdated deletes PR watches when a task is archived. Non-archive
@@ -64,7 +81,9 @@ func (s *Service) pruneWatchesForTask(ctx context.Context, taskID, reason string
 
 // taskIDAndArchivedFrom extracts task_id + archived flag from a task event
 // payload (task-service publishes a map[string]interface{} — see
-// internal/task/service/service_events.go publishTaskEvent).
+// internal/task/service/service_events.go publishTaskEvent). Archived is
+// detected from a non-empty string value so a future null/zero archived_at
+// in the payload doesn't silently prune watches on non-archive updates.
 func taskIDAndArchivedFrom(event *bus.Event) (taskID string, archived bool) {
 	if event == nil {
 		return "", false
@@ -74,6 +93,6 @@ func taskIDAndArchivedFrom(event *bus.Event) (taskID string, archived bool) {
 		return "", false
 	}
 	id, _ := data["task_id"].(string)
-	_, archived = data["archived_at"]
-	return id, archived
+	archivedStr, _ := data["archived_at"].(string)
+	return id, archivedStr != ""
 }
