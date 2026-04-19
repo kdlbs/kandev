@@ -635,6 +635,40 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
   }
 }
 
+// --- Sidebar filter views (localStorage, global) ---
+
+const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
+const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
+const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
+
+export function getStoredSidebarUserViews<T extends JsonValue>(fallback: T): T {
+  return getLocalStorage(SIDEBAR_VIEWS_KEY, fallback);
+}
+
+export function setStoredSidebarUserViews<T extends JsonValue>(views: T): void {
+  setLocalStorage(SIDEBAR_VIEWS_KEY, views);
+}
+
+export function getStoredSidebarActiveViewId(fallback: string): string {
+  return getLocalStorage(SIDEBAR_ACTIVE_VIEW_KEY, fallback);
+}
+
+export function setStoredSidebarActiveViewId(id: string): void {
+  setLocalStorage(SIDEBAR_ACTIVE_VIEW_KEY, id);
+}
+
+export function getStoredSidebarDraft<T extends JsonValue>(fallback: T): T {
+  return getLocalStorage(SIDEBAR_DRAFT_KEY, fallback);
+}
+
+export function setStoredSidebarDraft<T extends JsonValue>(draft: T): void {
+  setLocalStorage(SIDEBAR_DRAFT_KEY, draft);
+}
+
+export function removeStoredSidebarDraft(): void {
+  removeLocalStorage(SIDEBAR_DRAFT_KEY);
+}
+
 // --- Task creation draft persistence (sessionStorage, per workspace) ---
 
 const TASK_CREATE_DRAFT_KEY = "kandev.taskCreateDraft";

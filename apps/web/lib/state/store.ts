@@ -16,6 +16,7 @@ import type {
   ReviewWatch as GitHubReviewWatch,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
+import type { UISliceActions as UIA } from "./slices/ui/types";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -208,6 +209,7 @@ export type AppState = {
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
+  sidebarViews: (typeof defaultUIState)["sidebarViews"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -400,13 +402,12 @@ export type AppState = {
   ) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
-  // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
-  // User shells actions
   setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
+  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"]; updateSidebarDraft: UIA["updateSidebarDraft"]; saveSidebarDraftAs: UIA["saveSidebarDraftAs"]; saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"]; discardSidebarDraft: UIA["discardSidebarDraft"]; deleteSidebarView: UIA["deleteSidebarView"]; renameSidebarView: UIA["renameSidebarView"]; duplicateSidebarView: UIA["duplicateSidebarView"]; toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -473,7 +474,8 @@ const defaultState = {
   systemHealth: defaultUIState.systemHealth,
   quickChat: defaultUIState.quickChat,
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
-  bottomTerminal: defaultUIState.bottomTerminal,
+  // prettier-ignore
+  bottomTerminal: defaultUIState.bottomTerminal, sidebarViews: defaultUIState.sidebarViews,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
