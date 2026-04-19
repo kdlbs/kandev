@@ -4,18 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
+import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
   getOpenFileTabs,
   setOpenFileTabs as saveOpenFileTabs,
   getActiveTabForSession,
   setActiveTabForSession,
 } from "@/lib/local-storage";
-import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
+import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileContentResponse } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
+import { useSaveDeleteActions, updatePanelAfterSave } from "./use-file-save-delete";
 
 const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
 
@@ -69,24 +70,19 @@ function buildPersistedTabs(
   openFiles: Map<string, FileEditorState>,
 ) {
   const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
-  const previewPath = ((preview?.params as Record<string, unknown> | undefined)?.previewItemId ??
-    null) as string | null;
+  const previewParams = preview?.params as Record<string, unknown> | undefined;
+  const previewPath = (previewParams?.previewItemId ?? null) as string | null;
+  const isPromoted = previewParams?.promoted === true;
   return Array.from(openFiles.values()).flatMap(({ path, name, markdownPreview }) => {
     const isPinned = !!api?.getPanel(`file:${path}`);
     const isPreview = !isPinned && path === previewPath;
     if (!isPinned && !isPreview) return [];
-    return [{ path, name, ...(markdownPreview ? { markdownPreview } : {}), pinned: isPinned }];
+    // Promoted previews persist as pinned so edits survive refresh
+    const persistAsPinned = isPinned || (isPreview && isPromoted);
+    return [
+      { path, name, ...(markdownPreview ? { markdownPreview } : {}), pinned: persistAsPinned },
+    ];
   });
-}
-
-/** Update dockview panel dirty state after a successful save. */
-function updatePanelAfterSave(path: string, name: string) {
-  const dockApi = useDockviewStore.getState().api;
-  const panel = dockApi?.getPanel(`file:${path}`);
-  if (panel) {
-    panel.api.updateParameters({ isDirty: false });
-    panel.setTitle(name);
-  }
 }
 
 function buildGitFileSignature(file: FileInfo | undefined): string {
@@ -193,6 +189,15 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
     _restorationInProgress = false;
     return;
   }
+  // Create all panels immediately so tabs are visible right away.
+  // Content is fetched afterwards; if it fails, `useFileLoader` in
+  // FileEditorPanel retries when the executor becomes available.
+  for (const savedTab of savedTabs) {
+    addFileEditorPanel(savedTab.path, savedTab.name, {
+      quiet: true,
+      pin: savedTab.pinned,
+    });
+  }
   for (const savedTab of savedTabs) {
     try {
       const response = await requestFileContent(client, activeSessionId, savedTab.path);
@@ -207,12 +212,8 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         isBinary: response.is_binary,
         markdownPreview: savedTab.markdownPreview,
       });
-      addFileEditorPanel(savedTab.path, savedTab.name, {
-        quiet: true,
-        pin: savedTab.pinned,
-      });
     } catch {
-      /* Failed to restore tab, skip */
+      /* useFileLoader will retry when executor is ready */
     }
   }
   const dockApi = useDockviewStore.getState().api;
@@ -249,12 +250,16 @@ function useFileEditorEffects({
   useEffect(() => {
     if (!activeSessionId || _restoredSessionId === activeSessionId) return;
     _restoredSessionId = activeSessionId;
-    _restorationInProgress = false;
+    // Set the flag BEFORE clearing so the openFiles subscription doesn't
+    // overwrite saved tabs with an empty list during the clear.
+    _restorationInProgress = true;
     clearFileStates();
     const savedTabs = getOpenFileTabs(activeSessionId);
     const savedActiveTab = getActiveTabForSession(activeSessionId, "chat");
-    if (savedTabs.length === 0) return;
-    _restorationInProgress = true;
+    if (savedTabs.length === 0) {
+      _restorationInProgress = false;
+      return;
+    }
     void loadAndRestoreTabs({
       activeSessionId,
       savedTabs,
@@ -363,137 +368,10 @@ type FileEditorActionsParams = {
     name: string,
     opts?: { quiet?: boolean; pin?: boolean },
   ) => void;
-  promotePreviewToPinned: (type: "file-editor") => string | null;
+  promotePreviewToPinned: (type: "file-editor") => void;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   toast: ReturnType<typeof useToast>["toast"];
 };
-
-type SaveDeleteParams = {
-  activeSessionIdRef: React.MutableRefObject<string | null>;
-  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
-  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
-async function performSaveFile(path: string, params: SaveDeleteParams) {
-  const file = getOpenFiles().get(path);
-  if (!file || !file.isDirty) return;
-  const client = getWebSocketClient();
-  const currentSessionId = params.activeSessionIdRef.current;
-  if (!client || !currentSessionId) return;
-  params.setSavingFiles((prev) => new Set(prev).add(path));
-  try {
-    const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-    const response = await updateFileContent(client, currentSessionId, {
-      path,
-      diff,
-      originalHash: file.originalHash,
-      desiredContent: file.content,
-    });
-    if (response.success && response.new_hash) {
-      params.updateFileState(path, {
-        originalContent: file.content,
-        originalHash: response.new_hash,
-        isDirty: false,
-        hasRemoteUpdate: false,
-        remoteContent: undefined,
-        remoteOriginalHash: undefined,
-      });
-      updatePanelAfterSave(path, file.name);
-      if (response.resolution === "overwritten") {
-        params.toast({
-          title: "File saved (overwritten)",
-          description: "The file was modified externally. Your version was saved.",
-          variant: "default",
-        });
-      }
-    } else {
-      params.toast({
-        title: "Save failed",
-        description: response.error || "Failed to save file",
-        variant: "error",
-      });
-    }
-  } catch (error) {
-    params.toast({
-      title: "Save failed",
-      description:
-        error instanceof Error ? error.message : "An error occurred while saving the file",
-      variant: "error",
-    });
-  } finally {
-    params.setSavingFiles((prev) => {
-      const next = new Set(prev);
-      next.delete(path);
-      return next;
-    });
-  }
-}
-
-function useSaveDeleteActions(params: SaveDeleteParams) {
-  const { activeSessionIdRef, updateFileState, toast } = params;
-
-  const saveFile = useCallback((path: string) => performSaveFile(path, params), [params]);
-
-  const deleteFileAction = useCallback(
-    async (path: string) => {
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      const dockApi = useDockviewStore.getState().api;
-      // Close whichever panel is showing the file: the pinned per-item panel
-      // or, if it's currently in the preview slot, the preview panel itself.
-      const pinned = dockApi?.getPanel(`file:${path}`);
-      if (pinned) {
-        dockApi?.removePanel(pinned);
-      } else {
-        const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
-        if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
-          dockApi?.removePanel(preview);
-        }
-      }
-      try {
-        const response = await deleteFile(client, currentSessionId, path);
-        if (!response.success) {
-          toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
-            variant: "error",
-          });
-        }
-      } catch (error) {
-        toast({
-          title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionIdRef, toast],
-  );
-
-  const applyRemoteUpdate = useCallback(
-    async (path: string) => {
-      const file = getOpenFiles().get(path);
-      if (!file || !file.hasRemoteUpdate || file.remoteContent === undefined) return;
-      const remoteHash = file.remoteOriginalHash ?? (await calculateHash(file.remoteContent));
-      updateFileState(path, {
-        content: file.remoteContent,
-        originalContent: file.remoteContent,
-        originalHash: remoteHash,
-        isDirty: false,
-        hasRemoteUpdate: false,
-        remoteContent: undefined,
-        remoteOriginalHash: undefined,
-      });
-      updatePanelAfterSave(path, file.name);
-    },
-    [updateFileState],
-  );
-
-  return { saveFile, deleteFileAction, applyRemoteUpdate };
-}
 
 function useFileEditorActions({
   activeSessionIdRef,
@@ -521,8 +399,11 @@ function useFileEditorActions({
           filePath,
         );
         const state = await buildFileEditorState(filePath, response);
-        setFileState(filePath, state);
+        // Create the panel BEFORE setting file state. The openFiles subscription
+        // triggers tab persistence — it needs the dockview panel to already exist
+        // so buildPersistedTabs can detect whether the file is preview or pinned.
         addFileEditorPanel(filePath, state.name);
+        setFileState(filePath, state);
       } catch (error) {
         toast({
           title: "Failed to open file",
@@ -577,8 +458,8 @@ function useFileEditorActions({
           filePath,
         );
         const state = await buildFileEditorState(filePath, response);
-        setFileState(filePath, { ...state, markdownPreview: true });
         addFileEditorPanel(filePath, state.name);
+        setFileState(filePath, { ...state, markdownPreview: true });
       } catch (error) {
         toast({
           title: "Failed to open file",

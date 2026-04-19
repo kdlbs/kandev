@@ -304,14 +304,6 @@ export const createSessionRuntimeSlice: StateCreator<
     }),
   setSessionModels: (sessionId, data) =>
     set((draft) => {
-      console.log("[store] setSessionModels", {
-        sessionId,
-        modelsCount: data.models?.length ?? 0,
-        models: data.models?.map((m) => m.modelId),
-        currentModelId: data.currentModelId,
-        configOptionsCount: data.configOptions?.length ?? 0,
-        configOptions: data.configOptions?.map((o) => ({ id: o.id, category: o.category })),
-      });
       draft.sessionModels.bySessionId[sessionId] = data;
     }),
   setPromptUsage: (sessionId, usage) =>

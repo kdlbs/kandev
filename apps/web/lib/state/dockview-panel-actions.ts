@@ -86,6 +86,29 @@ type OpenPreviewArgs = {
   pinnedTabComponent?: string;
 };
 
+/** Update an existing preview panel with new content, materializing promoted items first. */
+function updateExistingPreview(
+  preview: ReturnType<DockviewApi["getPanel"]> & object,
+  args: OpenPreviewArgs,
+): void {
+  const { api, type, itemId, title, params, quiet, pinnedTabComponent } = args;
+  const currentItemId = preview.params?.previewItemId as string | undefined;
+  if (preview.params?.promoted && currentItemId && currentItemId !== itemId) {
+    materializePromotedPreview(api, type, pinnedTabComponent ?? PINNED_TAB);
+  }
+  // Preserve the promoted flag when re-opening the same item; clear it when
+  // switching to a different item (the old promoted file was already
+  // materialized above).
+  const keepPromoted = currentItemId === itemId && !!preview.params?.promoted;
+  preview.api.updateParameters({
+    ...params,
+    previewItemId: itemId,
+    promoted: keepPromoted || undefined,
+  });
+  preview.setTitle(title);
+  if (!quiet) preview.api.setActive();
+}
+
 /**
  * Open the single "preview" panel for a given content type, VSCode-style.
  *
@@ -127,12 +150,7 @@ function openOrReplacePreview(args: OpenPreviewArgs): void {
 
   const preview = api.getPanel(spec.previewId);
   if (preview) {
-    // Always push fresh params + title. Even when the preview already points
-    // at the same item, caller-provided fields like `content` may have changed
-    // (e.g. a new diff snapshot for the same file).
-    preview.api.updateParameters({ ...params, previewItemId: itemId });
-    preview.setTitle(title);
-    if (!quiet) preview.api.setActive();
+    updateExistingPreview(preview, args);
     return;
   }
 
@@ -151,47 +169,63 @@ function openOrReplacePreview(args: OpenPreviewArgs): void {
 }
 
 /**
- * Promote the current preview panel for a type into a pinned (per-item) panel.
- * Returns the new pinned panel id, or null when there is no preview to promote.
+ * Mark the current preview panel as "promoted" (VSCode-style keep-open).
+ *
+ * This does NOT swap panels — it sets a `promoted` flag on the preview's
+ * params so the tab renders as non-italic (pinned look) while the editor
+ * stays mounted (no remount, no focus loss).
+ *
+ * The actual panel swap (materialization) happens lazily when the user opens
+ * a different file via {@link openOrReplacePreview}.
  */
-export function promotePreviewToPinned(
+export function promotePreviewToPinned(api: DockviewApi, type: PreviewType): void {
+  const spec = PREVIEW_SPECS[type];
+  const preview = api.getPanel(spec.previewId);
+  if (!preview || preview.params?.promoted) return;
+  preview.api.updateParameters({ ...(preview.params ?? {}), promoted: true });
+}
+
+/**
+ * Materialize a promoted preview into a proper pinned panel.
+ *
+ * Called internally by {@link openOrReplacePreview} when the preview slot is
+ * needed for a new item and the current preview was promoted.  Also available
+ * for explicit "pin now" actions where an immediate panel swap is acceptable
+ * (e.g. the user is navigating away anyway).
+ */
+function materializePromotedPreview(
   api: DockviewApi,
   type: PreviewType,
   pinnedTabComponent?: string,
-): string | null {
+): void {
   const spec = PREVIEW_SPECS[type];
   const preview = api.getPanel(spec.previewId);
-  if (!preview) return null;
+  if (!preview) return;
 
   const itemId = preview.params?.previewItemId as string | undefined;
-  if (!itemId) return null;
+  if (!itemId) return;
 
   const pinnedId = spec.pinnedId(itemId);
-  if (api.getPanel(pinnedId)) {
-    // Pinned already exists for this item (unlikely). Just drop the preview.
-    api.removePanel(preview);
-    return pinnedId;
-  }
+  if (api.getPanel(pinnedId)) return; // Already materialized
 
   const groupId = preview.group?.id;
   const title = preview.title;
   const params = { ...(preview.params ?? {}) } as Record<string, unknown>;
   delete params.previewItemId;
+  delete params.promoted;
 
-  // Create the pinned panel first. Removing preview first would trigger
-  // onDidRemovePanel handlers that wipe file state before the pinned panel
-  // has a chance to adopt it (especially harmful for auto-promote-on-edit,
-  // which fires while the user has unsaved changes).
-  focusOrAddPanel(api, {
-    id: pinnedId,
-    component: spec.component,
-    title,
-    params,
-    ...(pinnedTabComponent ? { tabComponent: pinnedTabComponent } : {}),
-    ...(groupId ? { position: { referenceGroup: groupId } } : {}),
-  });
-  api.removePanel(preview);
-  return pinnedId;
+  focusOrAddPanel(
+    api,
+    {
+      id: pinnedId,
+      component: spec.component,
+      title,
+      params,
+      ...(pinnedTabComponent ? { tabComponent: pinnedTabComponent } : {}),
+      ...(groupId ? { position: { referenceGroup: groupId } } : {}),
+    },
+    true, // quiet — don't steal focus
+  );
 }
 
 export type OpenPanelOpts = {
@@ -314,10 +348,10 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         params: { url: url ?? "" },
       });
     },
-    promotePreviewToPinned: (type: PreviewType): string | null => {
+    promotePreviewToPinned: (type: PreviewType): void => {
       const { api } = get();
-      if (!api) return null;
-      return promotePreviewToPinned(api, type, PINNED_TAB);
+      if (!api) return;
+      promotePreviewToPinned(api, type);
     },
   };
 }

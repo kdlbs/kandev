@@ -129,6 +129,7 @@ const SHA_B = "fedcba0987654321";
 const DIFF_FILE_PREFIX = "diff:file:";
 const FILE_PREFIX_ID = "file:";
 const COMMIT_PREFIX_ID = "commit:";
+const TYPE_FILE_EDITOR = "file-editor" as const;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -189,31 +190,62 @@ describe("addFileEditorPanel — preview behavior", () => {
     expect(api.getPanel(PREVIEW_FILE_ID)).toBeUndefined();
   });
 
-  it("promotePreviewToPinned removes preview and creates pinned with per-item id", () => {
+  it("promotePreviewToPinned sets promoted flag without swapping panels", () => {
     actions.addFileEditorPanel(PATH_A, NAME_A);
-    const newId = actions.promotePreviewToPinned("file-editor");
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
 
-    expect(newId).toBe(PINNED_FILE_A_ID);
-    expect(api.getPanel(PREVIEW_FILE_ID)).toBeUndefined();
-    expect(api.getPanel(PINNED_FILE_A_ID)).toBeDefined();
-    const pinned = api.getPanel(PINNED_FILE_A_ID) as unknown as MockPanel;
-    expect(pinned.title).toBe(NAME_A);
+    // Preview panel still exists with promoted flag
+    const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.promoted).toBe(true);
+    expect(preview.title).toBe(NAME_A);
+    // No pinned panel created yet
+    expect(api.getPanel(PINNED_FILE_A_ID)).toBeUndefined();
   });
 
-  it("after promotion, a fresh preview is created for the next open", () => {
+  it("opening a new file materializes the promoted preview as a pinned panel", () => {
     actions.addFileEditorPanel(PATH_A, NAME_A);
-    actions.promotePreviewToPinned("file-editor");
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
     actions.addFileEditorPanel(PATH_B, NAME_B);
 
+    // Promoted file A was materialized as pinned
     expect(api.getPanel(PINNED_FILE_A_ID)).toBeDefined();
-    expect(api.getPanel(PREVIEW_FILE_ID)).toBeDefined();
+    const pinned = api.getPanel(PINNED_FILE_A_ID) as unknown as MockPanel;
+    expect(pinned.params.path).toBe(PATH_A);
+    expect(pinned.params.promoted).toBeUndefined();
+    expect(pinned.params.previewItemId).toBeUndefined();
+    // Preview now shows file B
     const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
     expect(preview.params.path).toBe(PATH_B);
+    expect(preview.params.promoted).toBeUndefined();
+  });
+
+  it("re-opening the same promoted preview just focuses without materializing", () => {
+    actions.addFileEditorPanel(PATH_A, NAME_A);
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
+    actions.addFileEditorPanel(PATH_A, NAME_A);
+
+    // No pinned panel created — same item, no materialization
+    expect(api.getPanel(PINNED_FILE_A_ID)).toBeUndefined();
+    const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
+    expect(preview.params.promoted).toBe(true);
+    expect(preview.isActive).toBe(true);
   });
 
   it("promotePreviewToPinned is a no-op when no preview exists", () => {
-    const newId = actions.promotePreviewToPinned("file-editor");
-    expect(newId).toBeNull();
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
+    expect(api.panels).toHaveLength(0);
+  });
+
+  it("promotePreviewToPinned is a no-op when already promoted", () => {
+    actions.addFileEditorPanel(PATH_A, NAME_A);
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
+    const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
+    const paramsRef = preview.params;
+
+    actions.promotePreviewToPinned(TYPE_FILE_EDITOR);
+    // params reference unchanged (no second updateParameters call)
+    expect(preview.params).toBe(paramsRef);
   });
 
   it("re-opening the same preview target just focuses without churning params", () => {
@@ -273,13 +305,25 @@ describe("addFileDiffPanel — preview behavior", () => {
     expect(preview.params.path).toBe(PATH_B);
   });
 
-  it("promotePreviewToPinned moves the preview diff to a per-item id", () => {
+  it("promotePreviewToPinned sets promoted flag on the preview diff", () => {
     actions.addFileDiffPanel(PATH_A);
-    const newId = actions.promotePreviewToPinned("file-diff");
+    actions.promotePreviewToPinned("file-diff");
 
-    expect(newId).toBe(`${DIFF_FILE_PREFIX}${PATH_A}`);
-    expect(api.getPanel(PREVIEW_DIFF_ID)).toBeUndefined();
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.promoted).toBe(true);
+    expect(api.getPanel(`${DIFF_FILE_PREFIX}${PATH_A}`)).toBeUndefined();
+  });
+
+  it("opening a new diff materializes the promoted diff as a pinned panel", () => {
+    actions.addFileDiffPanel(PATH_A);
+    actions.promotePreviewToPinned("file-diff");
+    actions.addFileDiffPanel(PATH_B);
+
     expect(api.getPanel(`${DIFF_FILE_PREFIX}${PATH_A}`)).toBeDefined();
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview.params.path).toBe(PATH_B);
+    expect(preview.params.promoted).toBeUndefined();
   });
 });
 
@@ -313,13 +357,25 @@ describe("addCommitDetailPanel — preview behavior", () => {
     expect(preview.params.commitSha).toBe(SHA_B);
   });
 
-  it("promotePreviewToPinned moves the preview commit to a per-item id", () => {
+  it("promotePreviewToPinned sets promoted flag on the preview commit", () => {
     actions.addCommitDetailPanel(SHA_A);
-    const newId = actions.promotePreviewToPinned("commit-detail");
+    actions.promotePreviewToPinned("commit-detail");
 
-    expect(newId).toBe(`${COMMIT_PREFIX_ID}${SHA_A}`);
-    expect(api.getPanel(PREVIEW_COMMIT_ID)).toBeUndefined();
+    const preview = api.getPanel(PREVIEW_COMMIT_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.promoted).toBe(true);
+    expect(api.getPanel(`${COMMIT_PREFIX_ID}${SHA_A}`)).toBeUndefined();
+  });
+
+  it("opening a new commit materializes the promoted commit as a pinned panel", () => {
+    actions.addCommitDetailPanel(SHA_A);
+    actions.promotePreviewToPinned("commit-detail");
+    actions.addCommitDetailPanel(SHA_B);
+
     expect(api.getPanel(`${COMMIT_PREFIX_ID}${SHA_A}`)).toBeDefined();
+    const preview = api.getPanel(PREVIEW_COMMIT_ID) as unknown as MockPanel;
+    expect(preview.params.commitSha).toBe(SHA_B);
+    expect(preview.params.promoted).toBeUndefined();
   });
 });
 

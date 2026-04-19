@@ -105,7 +105,7 @@ type DockviewStore = {
   ) => void;
   addCommitDetailPanel: (sha: string, opts?: OpenPanelOpts & { groupId?: string }) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
-  promotePreviewToPinned: (type: PreviewType) => string | null;
+  promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
@@ -611,7 +611,16 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     if (api) {
       api.onDidActivePanelChange((event) => {
         const id = event?.id;
-        set({ activeFilePath: id?.startsWith("file:") ? id.slice(5) : null });
+        if (id?.startsWith("file:")) {
+          set({ activeFilePath: id.slice(5) });
+        } else if (id === "preview:file-editor") {
+          const path = (api.getPanel(id)?.params as Record<string, unknown> | undefined)?.path as
+            | string
+            | undefined;
+          set({ activeFilePath: path ?? null });
+        } else {
+          set({ activeFilePath: null });
+        }
       });
     }
   },
