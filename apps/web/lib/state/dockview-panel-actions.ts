@@ -235,6 +235,7 @@ export type OpenPanelOpts = {
   pin?: boolean;
 };
 
+export const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
 const PINNED_TAB = "pinnedDefaultTab";
 
 function buildFileEditorAction(get: StoreGet) {

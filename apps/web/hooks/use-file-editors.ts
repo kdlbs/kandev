@@ -17,8 +17,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import type { FileContentResponse } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import { useSaveDeleteActions, updatePanelAfterSave } from "./use-file-save-delete";
-
-const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
+import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
@@ -420,15 +419,17 @@ function useFileEditorActions({
       const file = getOpenFiles().get(path);
       if (!file) return;
       const nextIsDirty = newContent !== file.originalContent;
-      updateFileState(path, { content: newContent, isDirty: nextIsDirty });
       // VSCode-style: editing a preview file auto-promotes its tab so the
       // user's unsaved changes aren't silently discarded when they open
-      // another file. Only promote when this file is the current preview.
-      if (!nextIsDirty || file.isDirty) return;
-      const preview = useDockviewStore.getState().api?.getPanel(PREVIEW_FILE_EDITOR_ID);
-      if ((preview?.params as Record<string, unknown> | undefined)?.previewItemId === path) {
-        promotePreviewToPinned("file-editor");
+      // another file. Promote BEFORE updating file state so the openFiles
+      // subscription sees the promoted flag when it fires from updateFileState.
+      if (nextIsDirty && !file.isDirty) {
+        const preview = useDockviewStore.getState().api?.getPanel(PREVIEW_FILE_EDITOR_ID);
+        if ((preview?.params as Record<string, unknown> | undefined)?.previewItemId === path) {
+          promotePreviewToPinned("file-editor");
+        }
       }
+      updateFileState(path, { content: newContent, isDirty: nextIsDirty });
     },
     [updateFileState, promotePreviewToPinned],
   );

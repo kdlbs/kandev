@@ -6,8 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import type { useToast } from "@/components/toast-provider";
-
-const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
+import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 
 /** Read openFiles from the store without subscribing to changes. */
 function getOpenFiles() {
@@ -54,15 +53,19 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
       desiredContent: file.content,
     });
     if (response.success && response.new_hash) {
+      // Re-read current state: user may have typed more while the save was
+      // in flight. Only mark clean if content still matches what was saved.
+      const current = getOpenFiles().get(path);
+      const stillClean = current?.content === file.content;
       params.updateFileState(path, {
         originalContent: file.content,
         originalHash: response.new_hash,
-        isDirty: false,
+        isDirty: !stillClean,
         hasRemoteUpdate: false,
         remoteContent: undefined,
         remoteOriginalHash: undefined,
       });
-      updatePanelAfterSave(path, file.name);
+      if (stillClean) updatePanelAfterSave(path, file.name);
       if (response.resolution === "overwritten") {
         params.toast({
           title: "File saved (overwritten)",
@@ -103,6 +106,26 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
       const client = getWebSocketClient();
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
+      try {
+        const response = await deleteFile(client, currentSessionId, path);
+        if (!response.success) {
+          toast({
+            title: "Delete failed",
+            description: response.error || "Failed to delete file",
+            variant: "error",
+          });
+          return;
+        }
+      } catch (error) {
+        toast({
+          title: "Delete failed",
+          description:
+            error instanceof Error ? error.message : "An error occurred while deleting the file",
+          variant: "error",
+        });
+        return;
+      }
+      // Close the panel only after the remote delete succeeds.
       const dockApi = useDockviewStore.getState().api;
       const pinned = dockApi?.getPanel(`file:${path}`);
       if (pinned) {
@@ -112,23 +135,6 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
           dockApi?.removePanel(preview);
         }
-      }
-      try {
-        const response = await deleteFile(client, currentSessionId, path);
-        if (!response.success) {
-          toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
-            variant: "error",
-          });
-        }
-      } catch (error) {
-        toast({
-          title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
-          variant: "error",
-        });
       }
     },
     [activeSessionIdRef, toast],
