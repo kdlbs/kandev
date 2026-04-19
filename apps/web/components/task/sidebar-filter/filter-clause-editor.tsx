@@ -13,6 +13,7 @@ import type {
 } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DIMENSION_METAS, OP_LABELS, getDimensionMeta } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
+import { FilterMultiSelect } from "./filter-multi-select";
 
 type ValueOption = { value: string; label: string; color?: string };
 
@@ -181,38 +182,9 @@ function ValueInput({
   const multi = clause.op === "in" || clause.op === "not_in";
 
   if (multi) {
-    const selected = new Set(Array.isArray(clause.value) ? clause.value.map(String) : []);
+    const selected = Array.isArray(clause.value) ? clause.value.map(String) : [];
     return (
-      <div
-        className="flex h-7 flex-1 flex-wrap items-center gap-0.5 overflow-hidden rounded-md border bg-transparent px-1"
-        data-testid="filter-value-multi"
-      >
-        {options.map((opt) => {
-          const active = selected.has(opt.value);
-          return (
-            <button
-              type="button"
-              key={opt.value}
-              onClick={() => {
-                const next = new Set(selected);
-                if (active) next.delete(opt.value);
-                else next.add(opt.value);
-                onChange([...next]);
-              }}
-              className={`cursor-pointer rounded px-1.5 text-[10px] ${
-                active
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              data-testid="filter-value-multi-option"
-              data-value={opt.value}
-              data-active={active}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
+      <FilterMultiSelect options={options} selected={selected} onChange={(v) => onChange(v)} />
     );
   }
 
