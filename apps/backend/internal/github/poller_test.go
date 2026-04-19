@@ -14,6 +14,8 @@ import (
 )
 
 // setupPollerTest creates a Poller backed by an in-memory SQLite store and MockClient.
+// The tasks table is created so the JOIN in ListActivePRWatches works; tests that
+// want a watch to appear in that listing must seed a matching task row via seedTask.
 func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	t.Helper()
 
@@ -25,6 +27,15 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	rawDB.SetMaxIdleConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	// Minimal tasks schema: ListActivePRWatches only joins on id and filters by archived_at.
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			archived_at DATETIME
+		)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
 
 	store, err := NewStore(sqlxDB, sqlxDB)
 	if err != nil {
@@ -39,6 +50,19 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	poller := NewPoller(svc, eventBus, log)
 
 	return poller, svc, mockClient, store
+}
+
+// seedTask inserts a minimal task row for JOIN-based queries. Pass archived=true
+// to seed an archived task (archived_at set to now).
+func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
+	t.Helper()
+	var archivedAt interface{}
+	if archived {
+		archivedAt = time.Now().UTC()
+	}
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, archived_at) VALUES (?, ?)`, taskID, archivedAt); err != nil {
+		t.Fatalf("seed task %s: %v", taskID, err)
+	}
 }
 
 func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
@@ -377,6 +401,7 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a watch with pr_number=0 on old branch.
+	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
 		SessionID: "s1",
 		TaskID:    "t1",
@@ -416,6 +441,7 @@ func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
+	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
 		SessionID: "s1",
 		TaskID:    "t1",
@@ -448,6 +474,7 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 	ctx := context.Background()
 
 	// Watch that already found a PR (pr_number > 0).
+	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
 		SessionID: "s1",
 		TaskID:    "t1",
@@ -480,6 +507,7 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
+	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
 		SessionID: "s1",
 		TaskID:    "t1",
