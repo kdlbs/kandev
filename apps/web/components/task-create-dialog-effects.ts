@@ -201,7 +201,14 @@ export function useDefaultSelectionsEffect(
     const workflowHasAgent = selectedWorkflowId
       ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
       : false;
-    if (!open || agentProfileId || workflowAgentProfileId || workflowHasAgent || agentProfiles.length === 0) return;
+    if (
+      !open ||
+      agentProfileId ||
+      workflowAgentProfileId ||
+      workflowHasAgent ||
+      agentProfiles.length === 0
+    )
+      return;
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
     if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
       void Promise.resolve().then(() => setAgentProfileId(lastId));

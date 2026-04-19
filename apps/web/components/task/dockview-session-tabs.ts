@@ -238,6 +238,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       useDockviewStore.setState({ centerGroupId: panel.group.id });
     }
     sessionTabCreatedRef.current.add(effectiveSessionId);
-    console.log("[session-tab] panels after creation:", api.panels.map((p) => p.id));
+    console.log(
+      "[session-tab] panels after creation:",
+      api.panels.map((p) => p.id),
+    );
   }, [effectiveSessionId]);
 }

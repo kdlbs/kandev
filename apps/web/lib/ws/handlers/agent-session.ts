@@ -166,6 +166,15 @@ function maybeAdoptSessionOnTransition(
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     console.log("[session-switch] adopting new session", sessionId);
+    // For same-task switches (workflow step transitions), inherit agentctl status
+    // from the old session — the workspace is the same, just the agent changed.
+    const oldSessionId = state.tasks.activeSessionId;
+    if (oldSessionId) {
+      const oldAgentctl = state.sessionAgentctl.itemsBySessionId[oldSessionId];
+      if (oldAgentctl?.status === "ready") {
+        state.setSessionAgentctlStatus(sessionId, oldAgentctl);
+      }
+    }
     state.setActiveSession(taskId, sessionId);
     return;
   }
@@ -175,6 +184,11 @@ function maybeAdoptSessionOnTransition(
     const replacement = pickReplacementSessionId(state, taskId);
     console.log("[session-switch] active session terminal, replacement:", replacement);
     if (replacement && replacement !== sessionId) {
+      // Inherit agentctl status for same-task replacements
+      const oldAgentctl = state.sessionAgentctl.itemsBySessionId[sessionId];
+      if (oldAgentctl?.status === "ready") {
+        state.setSessionAgentctlStatus(replacement, oldAgentctl);
+      }
       state.setActiveSession(taskId, replacement);
     }
   }

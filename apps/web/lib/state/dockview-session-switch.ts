@@ -65,7 +65,10 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
     return false;
   });
   if (toRemove.length > 0) {
-    console.log("[session-switch] removing panels:", toRemove.map((p) => p.id));
+    console.log(
+      "[session-switch] removing panels:",
+      toRemove.map((p) => p.id),
+    );
   }
   for (const p of toRemove) {
     try {

@@ -281,7 +281,10 @@ export const WorkflowSection = memo(function WorkflowSection({
       .filter((s) => s.profile);
     if (!workflowProfile && stepsWithOverrides.length === 0) return null;
     return (
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="workflow-override-info">
+      <div
+        className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        data-testid="workflow-override-info"
+      >
         {workflowProfile && (
           <span className="flex items-center gap-1">
             <AgentLogo agentName={workflowProfile.agent_name} size={14} className="shrink-0" />

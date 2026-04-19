@@ -181,7 +181,9 @@ test.describe("Workflow agent profile", () => {
       // The agent selector should show the profile name (not "Select agent" placeholder)
       // Wait for agent profiles to load — they're fetched when the dialog opens
       const agentSelector = testPage.getByTestId("agent-profile-selector");
-      await expect(agentSelector).toContainText(agentProfile.agent_display_name, { timeout: 10_000 });
+      await expect(agentSelector).toContainText(agentProfile.agent_display_name, {
+        timeout: 10_000,
+      });
 
       // The Start task button should be enabled
       const submitButton = testPage.getByTestId("submit-start-agent");

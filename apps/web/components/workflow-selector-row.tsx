@@ -18,7 +18,13 @@ type StepItem = {
   is_start_step?: boolean;
 };
 
-function InlineSteps({ steps, agentProfiles }: { steps: StepItem[]; agentProfiles: AgentProfileOption[] }) {
+function InlineSteps({
+  steps,
+  agentProfiles,
+}: {
+  steps: StepItem[];
+  agentProfiles: AgentProfileOption[];
+}) {
   if (steps.length === 0) return null;
   return (
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
@@ -50,7 +56,11 @@ function InlineSteps({ steps, agentProfiles }: { steps: StepItem[]; agentProfile
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span data-testid="step-agent-logo">
-                        <AgentLogo agentName={stepProfile.agent_name} size={12} className="shrink-0" />
+                        <AgentLogo
+                          agentName={stepProfile.agent_name}
+                          size={12}
+                          className="shrink-0"
+                        />
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>{stepProfile.label}</TooltipContent>
@@ -132,21 +142,26 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
               <div className="flex items-center gap-2">
                 <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-sm">{wf.name}</span>
-                {wf.agent_profile_id && (() => {
-                  const wfProfile = agentProfiles.find((p) => p.id === wf.agent_profile_id);
-                  return wfProfile ? (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span data-testid="workflow-agent-logo">
-                            <AgentLogo agentName={wfProfile.agent_name} size={14} className="shrink-0" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{wfProfile.label}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : null;
-                })()}
+                {wf.agent_profile_id &&
+                  (() => {
+                    const wfProfile = agentProfiles.find((p) => p.id === wf.agent_profile_id);
+                    return wfProfile ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span data-testid="workflow-agent-logo">
+                              <AgentLogo
+                                agentName={wfProfile.agent_name}
+                                size={14}
+                                className="shrink-0"
+                              />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>{wfProfile.label}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null;
+                  })()}
               </div>
               {steps.length > 0 && (
                 <div className="pl-[calc(0.875rem+0.5rem)]">

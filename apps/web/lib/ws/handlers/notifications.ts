@@ -15,26 +15,29 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
         activeTaskId: state.tasks.activeTaskId,
         activeSessionId: state.tasks.activeSessionId,
         visibility: document.visibilityState,
-        notificationPermission: typeof Notification !== "undefined" ? Notification.permission : "N/A",
-        sessionState: sessionId ? state.taskSessions.items[sessionId]?.state : "unknown",
       });
-      if (typeof Notification === "undefined") {
-        return;
+      if (typeof Notification === "undefined") return;
+      if (Notification.permission !== "granted") return;
+
+      // Only notify after the agent has completed at least one turn.
+      // During initial task creation the session reaches WAITING_FOR_INPUT
+      // before the agent starts — that's not a genuine "waiting for input".
+      if (sessionId) {
+        const turns = state.turns.bySession[sessionId];
+        if (!turns || turns.length === 0) {
+          console.log("[notification] suppressed — session has no completed turns yet");
+          return;
+        }
       }
-      if (Notification.permission !== "granted") {
-        return;
-      }
-      // Suppress notification when user is actively viewing the task
+
+      // Suppress when user is already viewing this task
       if (document.visibilityState === "visible") {
         if (taskId && state.tasks.activeTaskId === taskId) {
           console.log("[notification] suppressed — user is viewing this task");
           return;
         }
-        if (sessionId && state.tasks.activeSessionId === sessionId) {
-          console.log("[notification] suppressed — session is active");
-          return;
-        }
       }
+
       const title = message.payload.title || "Task needs your input";
       const body = message.payload.body || "An agent is waiting for your input.";
       console.log("[notification] firing browser notification:", title);

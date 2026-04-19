@@ -383,6 +383,7 @@ const VALID_COMPONENTS = new Set(Object.keys(components));
 
 function useSessionSwitchCleanup(effectiveSessionId: string | null) {
   const prevSessionRef = useRef<string | null | undefined>(undefined);
+  const taskSessions = useAppStore((state) => state.taskSessions.items);
   useEffect(() => {
     if (prevSessionRef.current === undefined) {
       prevSessionRef.current = effectiveSessionId;
@@ -398,9 +399,23 @@ function useSessionSwitchCleanup(effectiveSessionId: string | null) {
     // serves as a backup for external session changes (e.g. WS-driven)
     // that don't go through the sidebar/dropdown switch helpers.
     if (effectiveSessionId) {
+      // Skip full layout rebuild for same-task session switches (workflow step
+      // transitions with different agent profiles). useAutoSessionTab already
+      // handles creating the new panel — a full fromJSON rebuild would destroy
+      // the old session tab and cause a visible layout flash.
+      const oldTask = oldSessionId ? taskSessions[oldSessionId]?.task_id : null;
+      const newTask = taskSessions[effectiveSessionId]?.task_id;
+      if (oldTask && newTask && oldTask === newTask) {
+        console.log("[session-switch] same-task switch, skipping layout rebuild", {
+          oldSessionId: oldSessionId?.slice(0, 8),
+          newSessionId: effectiveSessionId.slice(0, 8),
+          taskId: newTask.slice(0, 8),
+        });
+        return;
+      }
       performLayoutSwitch(oldSessionId, effectiveSessionId);
     }
-  }, [effectiveSessionId]);
+  }, [effectiveSessionId, taskSessions]);
 }
 
 // ---------------------------------------------------------------------------
