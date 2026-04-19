@@ -183,7 +183,11 @@ function cleanupTerminalSessionPanels(
     if (sess.state === "COMPLETED" || sess.state === "CANCELLED" || sess.state === "FAILED") {
       const stalePanel = api.getPanel(`session:${panelId}`);
       if (stalePanel) {
-        try { stalePanel.api.close(); } catch { /* already gone */ }
+        try {
+          stalePanel.api.close();
+        } catch {
+          /* already gone */
+        }
       }
       createdSet.delete(panelId);
     }
@@ -264,7 +268,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // Clean up panels for completed intermediate sessions (e.g., sessions
     // created during on_turn_start profile switch that were immediately completed).
     cleanupTerminalSessionPanels(
-      api, sessionTabCreatedRef.current, effectiveSessionId,
+      api,
+      sessionTabCreatedRef.current,
+      effectiveSessionId,
       appStore.getState().taskSessions.items,
     );
 

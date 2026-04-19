@@ -564,15 +564,17 @@ func (s *Service) maybySwitchSessionForProfile(
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
 	// Switch session if this step requires a different agent profile.
 	var ok bool
+	prevSessionID := session.ID
 	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step); !ok {
 		return
 	}
+	sessionSwitched := session.ID != prevSessionID
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
-	if len(step.Events.OnEnter) == 0 {
+	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		return
@@ -635,6 +637,27 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 
 	default:
+		// When the session was just switched (agent profile change) but the step
+		// has no auto_start_agent, launch the agent anyway — the profile override
+		// implies the user wants this agent to run on this step.
+		if sessionSwitched && step.Prompt != "" {
+			effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
+			planMode := hasPlanMode
+			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name))
+			err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
+			if err != nil {
+				s.logger.Error("failed to launch agent after profile switch",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+				s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			}
+			return
+		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 	}
