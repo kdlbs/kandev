@@ -44,12 +44,12 @@ export function useSessionState(sessionId: string | null) {
   const { session } = useSession(resolvedSessionId);
   const task = useTask(session?.task_id ?? null);
   const turns = useAppStore((state) =>
-    resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
+    resolvedSessionId ? state.turns?.bySession?.[resolvedSessionId] : undefined,
   );
 
   const agentctlReady = useAppStore((state) =>
     resolvedSessionId
-      ? state.sessionAgentctl.itemsBySessionId[resolvedSessionId]?.status === "ready"
+      ? state.sessionAgentctl?.itemsBySessionId?.[resolvedSessionId]?.status === "ready"
       : false,
   );
 

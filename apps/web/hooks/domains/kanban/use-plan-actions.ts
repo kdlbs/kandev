@@ -60,13 +60,20 @@ function useNextWorkflowStep(taskId: string | null) {
 
   const proceed = useCallback(async () => {
     if (!taskId || !workflowId || !nextStep) return;
-    setMoveFromSessionId(activeSessionId);
+    const capturedSessionId = activeSessionId;
+    setMoveFromSessionId(capturedSessionId);
     try {
       await moveTask(taskId, {
         workflow_id: workflowId,
         workflow_step_id: nextStep.id,
         position: 0,
       });
+      // Safety: if the next step reuses the same session (no agent-profile
+      // override), activeSessionId never changes and isMoving would be stuck.
+      // Clear after 10 s if no session handoff occurred.
+      setTimeout(() => {
+        setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
+      }, 10_000);
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
       toast({ description: "Failed to proceed to next step", variant: "error" });

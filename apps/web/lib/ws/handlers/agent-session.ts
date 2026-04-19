@@ -20,10 +20,10 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
  * follow the switch. Returns true when the caller should adopt the new session
  * as the task's active session.
  *
- * Always adopts new backend-created sessions for the active task. The backend
- * only creates sessions during workflow step transitions, and the user wants to
- * see the new session immediately — even if the old session hasn't received its
- * terminal state event yet (the completion DB update doesn't always emit a WS event).
+ * Adopts only when the current active session is missing, cross-task, or
+ * already terminal — not while a live session for the same task is still
+ * running (the backend only creates sessions during workflow step transitions
+ * after stopping the previous one, but WS events may arrive out of order).
  */
 export function shouldAdoptNewSession(
   state: AppState,
@@ -32,6 +32,13 @@ export function shouldAdoptNewSession(
 ): boolean {
   if (!newState || isTerminalSessionState(newState)) return false;
   if (state.tasks.activeTaskId !== taskId) return false;
+  const activeSessionId = state.tasks.activeSessionId;
+  if (activeSessionId) {
+    const activeSession = state.taskSessions.items[activeSessionId];
+    if (activeSession?.task_id === taskId && !isTerminalSessionState(activeSession.state)) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -155,22 +162,12 @@ function maybeAdoptSessionOnTransition(
 ): void {
   const state = store.getState();
 
-  console.log("[session-switch] maybeAdoptSessionOnTransition", {
-    taskId,
-    sessionId,
-    newState,
-    wasKnownToStore,
-    activeTaskId: state.tasks.activeTaskId,
-    activeSessionId: state.tasks.activeSessionId,
-  });
-
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
-    console.log("[session-switch] adopting new session", sessionId);
     // For same-task switches (workflow step transitions), inherit agentctl status
     // from the old session — the workspace is the same, just the agent changed.
     const oldSessionId = state.tasks.activeSessionId;
     if (oldSessionId) {
-      const oldAgentctl = state.sessionAgentctl.itemsBySessionId[oldSessionId];
+      const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[oldSessionId];
       if (oldAgentctl?.status === "ready") {
         state.setSessionAgentctlStatus(sessionId, oldAgentctl);
       }
@@ -182,10 +179,9 @@ function maybeAdoptSessionOnTransition(
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
     const replacement = pickReplacementSessionId(state, taskId);
-    console.log("[session-switch] active session terminal, replacement:", replacement);
     if (replacement && replacement !== sessionId) {
       // Inherit agentctl status for same-task replacements
-      const oldAgentctl = state.sessionAgentctl.itemsBySessionId[sessionId];
+      const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
       if (oldAgentctl?.status === "ready") {
         state.setSessionAgentctlStatus(replacement, oldAgentctl);
       }
@@ -246,14 +242,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       if (!sessionId) return;
 
-      console.log("[session-state] session.state_changed", {
-        taskId,
-        sessionId: sessionId.slice(0, 8),
-        newState,
-        agentProfileId: payload.agent_profile_id,
-        wasKnown: !!store.getState().taskSessions.items[sessionId],
-      });
-
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
@@ -293,7 +281,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
-      console.log("[agent] agentctl_starting", { sessionId: payload.session_id?.slice(0, 8) });
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "starting",
         agentExecutionId: payload.agent_execution_id,
@@ -303,7 +290,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
-      console.log("[agent] agentctl_ready", { sessionId: payload.session_id?.slice(0, 8) });
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "ready",
         agentExecutionId: payload.agent_execution_id,
