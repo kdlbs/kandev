@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
+import { getExecutorLabel } from "@/lib/executor-icons";
 
 type Option = { value: string; label: string };
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
@@ -33,7 +34,7 @@ function executorTypeOptions(snapshots: Snapshots): Option[] {
       if (task.primaryExecutorType) seen.add(task.primaryExecutorType);
     }
   }
-  return [...seen].sort().map((v) => ({ value: v, label: v }));
+  return [...seen].sort().map((v) => ({ value: v, label: getExecutorLabel(v) }));
 }
 
 function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Option[] {

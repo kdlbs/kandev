@@ -1,5 +1,6 @@
 import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
+import { getExecutorLabel } from "@/lib/executor-icons";
 import type {
   FilterClause,
   FilterDimension,
@@ -138,7 +139,7 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
   },
   executorType: (t) => {
     if (t.remoteExecutorType) {
-      return { key: t.remoteExecutorType, label: t.remoteExecutorType };
+      return { key: t.remoteExecutorType, label: getExecutorLabel(t.remoteExecutorType) };
     }
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
