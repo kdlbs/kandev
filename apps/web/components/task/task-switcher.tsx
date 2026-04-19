@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, isValidElement, memo, useMemo, useState } from "react";
+import { cloneElement, isValidElement, memo, useState } from "react";
 import {
   IconChevronDown,
   IconArrowRight,
@@ -22,8 +22,8 @@ import {
 } from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
-import { classifyTask } from "./task-classify";
 import { TaskItem } from "./task-item";
+import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -51,11 +51,12 @@ export type TaskSwitcherItem = {
 type StepDef = { id: string; title: string; color?: string };
 
 type TaskSwitcherProps = {
-  tasks: TaskSwitcherItem[];
-  steps?: StepDef[];
+  grouped: GroupedSidebarList;
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
+  collapsedGroupKeys?: string[];
+  onToggleGroup?: (groupKey: string) => void;
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
@@ -63,28 +64,8 @@ type TaskSwitcherProps = {
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   deletingTaskId?: string | null;
   isLoading?: boolean;
+  totalTaskCount?: number;
 };
-
-type RepoGroup = {
-  key: string;
-  label: string;
-  isMultiRepo?: boolean;
-  tasks: TaskSwitcherItem[];
-};
-
-export function statePriority(task: TaskSwitcherItem): number {
-  const bucket = classifyTask(task.sessionState, task.state);
-  if (bucket === "review") return 0;
-  if (bucket === "in_progress") return 1;
-  return 2;
-}
-
-export function sortByStateThenCreated(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
-  // Review (turn finished) first, then in_progress, then backlog; newest createdAt within bucket
-  return (
-    statePriority(a) - statePriority(b) || (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
-  );
-}
 
 function TaskSwitcherSkeleton() {
   return (
@@ -97,13 +78,15 @@ function TaskSwitcherSkeleton() {
   );
 }
 
-function RepoGroupHeader({
+function GroupHeader({
   label,
+  groupKey,
   count,
   isCollapsed,
   onToggle,
 }: {
   label: string;
+  groupKey: string;
   count: number;
   isCollapsed: boolean;
   onToggle: () => void;
@@ -112,7 +95,9 @@ function RepoGroupHeader({
     <button
       type="button"
       onClick={onToggle}
-      data-testid={`sidebar-repo-group-${label}`}
+      data-testid="sidebar-group-header"
+      data-group-key={groupKey}
+      data-group-label={label}
       className="flex w-full items-center gap-2 bg-background px-3 py-1.5 cursor-pointer hover:bg-foreground/[0.03]"
     >
       <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/80">
@@ -129,12 +114,15 @@ function RepoGroupHeader({
   );
 }
 
-function RepoGroupSection({
+function GroupSection({
   group,
   subTasksByParentId,
   stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
+  isCollapsed,
+  onToggleCollapsed,
+  showHeader,
   onSelectTask,
   onRenameTask,
   onArchiveTask,
@@ -142,11 +130,14 @@ function RepoGroupSection({
   onMoveToStep,
   deletingTaskId,
 }: {
-  group: RepoGroup;
+  group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  showHeader: boolean;
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
@@ -154,7 +145,6 @@ function RepoGroupSection({
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   deletingTaskId?: string | null;
 }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const totalCount = group.tasks.reduce(
     (sum, t) => sum + 1 + (subTasksByParentId.get(t.id)?.length ?? 0),
     0,
@@ -199,12 +189,15 @@ function RepoGroupSection({
 
   return (
     <div>
-      <RepoGroupHeader
-        label={group.label}
-        count={totalCount}
-        isCollapsed={isCollapsed}
-        onToggle={() => setIsCollapsed((v) => !v)}
-      />
+      {showHeader && (
+        <GroupHeader
+          label={group.label}
+          groupKey={group.key}
+          count={totalCount}
+          isCollapsed={isCollapsed}
+          onToggle={onToggleCollapsed}
+        />
+      )}
       {!isCollapsed &&
         group.tasks.map((task) => (
           <div key={task.id}>
@@ -345,98 +338,13 @@ function cloneWithMenuOpen(
   return children;
 }
 
-/** Partition root tasks into multi-repo, per-repo, and unassigned buckets. */
-function partitionRootTasks(rootTasks: TaskSwitcherItem[]): {
-  multiRepoTasks: TaskSwitcherItem[];
-  byRepo: Map<string, TaskSwitcherItem[]>;
-  unassigned: TaskSwitcherItem[];
-} {
-  const multiRepoTasks: TaskSwitcherItem[] = [];
-  const byRepo = new Map<string, TaskSwitcherItem[]>();
-  const unassigned: TaskSwitcherItem[] = [];
-  for (const task of rootTasks) {
-    if (task.repositories && task.repositories.length > 1) {
-      multiRepoTasks.push(task);
-    } else if (task.repositoryPath) {
-      const arr = byRepo.get(task.repositoryPath) ?? [];
-      arr.push(task);
-      byRepo.set(task.repositoryPath, arr);
-    } else {
-      unassigned.push(task);
-    }
-  }
-  return { multiRepoTasks, byRepo, unassigned };
-}
-
-/** Build sorted repo groups from partitioned task buckets. */
-function buildRepoGroups(
-  multiRepoTasks: TaskSwitcherItem[],
-  byRepo: Map<string, TaskSwitcherItem[]>,
-  unassigned: TaskSwitcherItem[],
-): RepoGroup[] {
-  const result: RepoGroup[] = [];
-  if (multiRepoTasks.length > 0) {
-    result.push({
-      key: "multi-repo",
-      label: "Multi-repo",
-      isMultiRepo: true,
-      tasks: [...multiRepoTasks].sort(sortByStateThenCreated),
-    });
-  }
-  for (const [slug, groupTasks] of byRepo) {
-    result.push({ key: slug, label: slug, tasks: [...groupTasks].sort(sortByStateThenCreated) });
-  }
-  if (unassigned.length > 0) {
-    // In single-repo workspaces, merge unassigned tasks into the repo group
-    // so every task appears under a meaningful label instead of "Unassigned".
-    const singleRepoGroup =
-      byRepo.size === 1 && multiRepoTasks.length === 0
-        ? result.find((g) => g.key !== "multi-repo")
-        : undefined;
-    if (singleRepoGroup) {
-      singleRepoGroup.tasks = [...singleRepoGroup.tasks, ...unassigned].sort(
-        sortByStateThenCreated,
-      );
-    } else {
-      result.push({
-        key: "unassigned",
-        label: "Unassigned",
-        tasks: [...unassigned].sort(sortByStateThenCreated),
-      });
-    }
-  }
-  return result;
-}
-
-/** Group tasks by repository, separating sub-tasks from root tasks. */
-function groupTasksIntoRepos(tasks: TaskSwitcherItem[]): {
-  groups: RepoGroup[];
-  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
-} {
-  const allTaskIds = new Set(tasks.map((t) => t.id));
-  const subMap = new Map<string, TaskSwitcherItem[]>();
-  const rootTasks: TaskSwitcherItem[] = [];
-  for (const t of tasks) {
-    if (t.parentTaskId && allTaskIds.has(t.parentTaskId)) {
-      const arr = subMap.get(t.parentTaskId) ?? [];
-      arr.push(t);
-      subMap.set(t.parentTaskId, arr);
-    } else {
-      rootTasks.push(t);
-    }
-  }
-  const { multiRepoTasks, byRepo, unassigned } = partitionRootTasks(rootTasks);
-  return {
-    groups: buildRepoGroups(multiRepoTasks, byRepo, unassigned),
-    subTasksByParentId: subMap,
-  };
-}
-
 export const TaskSwitcher = memo(function TaskSwitcher({
-  tasks,
+  grouped,
   stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
+  collapsedGroupKeys = [],
+  onToggleGroup,
   onSelectTask,
   onRenameTask,
   onArchiveTask,
@@ -444,24 +352,32 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onMoveToStep,
   deletingTaskId,
   isLoading = false,
+  totalTaskCount,
 }: TaskSwitcherProps) {
-  const { groups, subTasksByParentId } = useMemo(() => groupTasksIntoRepos(tasks), [tasks]);
-
   if (isLoading) return <TaskSwitcherSkeleton />;
-  if (tasks.length === 0) {
+  const totalTasks = totalTaskCount ?? grouped.groups.reduce((sum, g) => sum + g.tasks.length, 0);
+  if (totalTasks === 0) {
     return <div className="px-3 py-3 text-xs text-muted-foreground">No tasks yet.</div>;
   }
 
+  const collapsedSet = new Set(collapsedGroupKeys);
+  const showHeaders =
+    grouped.groups.length > 1 ||
+    (grouped.groups.length === 1 && grouped.groups[0].key !== "__all__");
+
   return (
     <div>
-      {groups.map((group) => (
-        <RepoGroupSection
+      {grouped.groups.map((group) => (
+        <GroupSection
           key={group.key}
           group={group}
-          subTasksByParentId={subTasksByParentId}
+          subTasksByParentId={grouped.subTasksByParentId}
           stepsByWorkflowId={stepsByWorkflowId}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
+          isCollapsed={collapsedSet.has(group.key)}
+          onToggleCollapsed={() => onToggleGroup?.(group.key)}
+          showHeader={showHeaders}
           onSelectTask={onSelectTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
