@@ -140,6 +140,11 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest, agentConfig agents.Agent) ([]*models.AgentProfile, error) {
 	profiles := make([]*models.AgentProfile, 0, len(profileReqs))
 	for _, profileReq := range profileReqs {
+		if profileReq.CLIFlags != nil {
+			if err := validateCLIFlagDTOs(profileReq.CLIFlags); err != nil {
+				return nil, err
+			}
+		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
 		if profileReq.CLIFlags == nil {
 			cliFlags = seedCLIFlags(agentConfig)

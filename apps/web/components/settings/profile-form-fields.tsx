@@ -90,6 +90,7 @@ function PermissionToggles({
         {PERMISSION_KEYS.map((key) => {
           const setting = permissionSettings[key];
           if (!setting?.supported) return null;
+          if (setting.apply_method === "cli_flag") return null;
           return (
             <div key={key} className="flex items-center justify-between gap-2">
               <div className="space-y-0.5">
@@ -131,6 +132,7 @@ function PermissionToggles({
       {PERMISSION_KEYS.map((key) => {
         const setting = permissionSettings[key];
         if (!setting?.supported) return null;
+        if (setting.apply_method === "cli_flag") return null;
         return (
           <div key={key} className="flex items-center justify-between rounded-md border p-3">
             <div className="space-y-1">
