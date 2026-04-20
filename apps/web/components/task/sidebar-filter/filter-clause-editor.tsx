@@ -172,7 +172,7 @@ function ValueInput({
         value={String(clause.value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         placeholder={meta.placeholder ?? "Value"}
-        className="h-7 flex-1 text-xs"
+        className="h-7 min-w-0 flex-1 text-xs"
         data-testid="filter-value-input"
       />
     );
@@ -190,7 +190,11 @@ function ValueInput({
   const current = String(clause.value ?? "");
   return (
     <Select value={current} onValueChange={(v) => onChange(v)}>
-      <SelectTrigger size="sm" className="h-7 flex-1 text-xs" data-testid="filter-value-select">
+      <SelectTrigger
+        size="sm"
+        className="h-7 min-w-0 flex-1 text-xs"
+        data-testid="filter-value-select"
+      >
         <SelectValue placeholder="Select value" />
       </SelectTrigger>
       <SelectContent>
