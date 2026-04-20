@@ -21,6 +21,7 @@ import type {
   SortSpec,
 } from "./sidebar-view-types";
 import { toApiSidebarView } from "./sidebar-view-wire";
+import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
@@ -391,6 +392,25 @@ function cloneView(v: SidebarView): SidebarView {
   };
 }
 
+function buildSystemHealthActions(set: ImmerSet) {
+  return {
+    setSystemHealth: (response: SystemHealthResponse) =>
+      set((draft) => {
+        draft.systemHealth.issues = response.issues;
+        draft.systemHealth.healthy = response.healthy;
+        draft.systemHealth.loaded = true;
+      }),
+    setSystemHealthLoading: (loading: boolean) =>
+      set((draft) => {
+        draft.systemHealth.loading = loading;
+      }),
+    invalidateSystemHealth: () =>
+      set((draft) => {
+        draft.systemHealth.loaded = false;
+      }),
+  };
+}
+
 function buildCollapsedSubtaskActions(set: ImmerSet, get: () => UISlice) {
   return {
     // Tab-scoped collapse of a parent task's subtasks. Persisted via
@@ -474,6 +494,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildConfigChatActions(set),
   ...buildSidebarViewActions(set, get),
   ...buildCollapsedSubtaskActions(set, get),
+  ...buildSystemHealthActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -492,20 +513,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
       setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
-    }),
-  setSystemHealth: (response) =>
-    set((draft) => {
-      draft.systemHealth.issues = response.issues;
-      draft.systemHealth.healthy = response.healthy;
-      draft.systemHealth.loaded = true;
-    }),
-  setSystemHealthLoading: (loading) =>
-    set((draft) => {
-      draft.systemHealth.loading = loading;
-    }),
-  invalidateSystemHealth: () =>
-    set((draft) => {
-      draft.systemHealth.loaded = false;
     }),
   openQuickChat: (sessionId, workspaceId) =>
     set((draft) => {

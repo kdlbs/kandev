@@ -259,7 +259,7 @@ function GroupSection({
         group.tasks.map((task) => {
           const subs = subTasksByParentId.get(task.id);
           const hasSubs = !!subs?.length;
-          const subsHidden = hasSubs && collapsedSubs.has(task.id);
+          const subsHidden = hasSubs && !!onToggleSubtasks && collapsedSubs.has(task.id);
           const toggleInfo: SubtaskToggleInfo | undefined =
             hasSubs && onToggleSubtasks
               ? {

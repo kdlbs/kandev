@@ -699,7 +699,9 @@ const COLLAPSED_SUBTASKS_KEY = "kandev.sidebar.collapsedSubtasks";
  * Tab-scoped (sessionStorage) so it survives reload/task switches but not tab close.
  */
 export function getStoredCollapsedSubtaskParents(): string[] {
-  return getSessionStorage<string[]>(COLLAPSED_SUBTASKS_KEY, []);
+  const raw = getSessionStorage<string[]>(COLLAPSED_SUBTASKS_KEY, []) as unknown;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === "string");
 }
 
 /**
