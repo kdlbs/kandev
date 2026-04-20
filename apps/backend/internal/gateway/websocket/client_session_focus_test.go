@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -46,10 +45,12 @@ func TestHandleSessionFocus_PushesSessionDataSnapshot(t *testing.T) {
 		t.Fatal("session data provider was not invoked on focus")
 	}
 
-	// Expect two frames: the ACK response, then the snapshot notification.
+	// handleSessionFocus is synchronous and sendMessage writes to the buffered
+	// send channel without blocking, so both frames are already queued by the
+	// time we get here. A non-blocking select fails fast if the invariant
+	// breaks in the future.
 	var sawSnapshot bool
-	deadline := time.After(500 * time.Millisecond)
-	for range 2 {
+	for i := range 2 {
 		select {
 		case data := <-c.send:
 			var m ws.Message
@@ -59,8 +60,8 @@ func TestHandleSessionFocus_PushesSessionDataSnapshot(t *testing.T) {
 			if m.Type == ws.MessageTypeNotification && m.Action == "session.git.event" {
 				sawSnapshot = true
 			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for focus frames")
+		default:
+			t.Fatalf("expected focus frame %d, none in buffer", i+1)
 		}
 	}
 	if !sawSnapshot {
@@ -84,12 +85,12 @@ func TestHandleSessionFocus_NoProviderDoesNotCrash(t *testing.T) {
 	// Drain the ACK so it's clear exactly one frame was produced.
 	select {
 	case <-c.send:
-	case <-time.After(200 * time.Millisecond):
+	default:
 		t.Fatal("expected ACK frame after focus")
 	}
 	select {
 	case <-c.send:
 		t.Error("unexpected extra frame when provider is nil")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 }
