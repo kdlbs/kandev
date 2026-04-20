@@ -2,9 +2,12 @@
 
 import { useCallback, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
+import { AgentLogo } from "@/components/agent-logo";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
+import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
@@ -15,6 +18,8 @@ import {
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
+
+const LABEL_SEPARATOR = " \u2022 ";
 
 type PreviewSessionTabsProps = {
   taskId: string;
@@ -38,6 +43,10 @@ export function PreviewSessionTabs({
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
+  const profilesById = useMemo(
+    () => Object.fromEntries(agentProfiles.map((p) => [p.id, p])),
+    [agentProfiles],
+  );
 
   const activeSessionId = useMemo(
     () => pickActiveSessionId(sortedSessions, sessionId),
@@ -48,16 +57,28 @@ export function PreviewSessionTabs({
     [sortedSessions, activeSessionId],
   );
 
+  // Mirrors the full-page task view: ensure the backend execution for the
+  // active session is ready (resumes / restores workspace after a kandev
+  // restart where the session row is persisted but agentctl isn't alive).
+  useSessionResumption(taskId, activeSessionId);
+
   const tabs = useMemo<SessionTab[]>(
     () =>
-      sortedSessions.map((session) => ({
-        id: session.id,
-        label: resolveAgentLabelFor(session, agentLabelsById),
-        icon: isSessionActive(session.state) ? <RunningSpinner /> : undefined,
-        testId: `preview-session-tab-${session.id}`,
-        className: "bg-muted/50 data-[state=active]:bg-muted",
-      })),
-    [sortedSessions, agentLabelsById],
+      sortedSessions.map((session) => {
+        const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
+        return {
+          id: session.id,
+          label: resolveProfileSubLabel(session, profile, agentLabelsById),
+          icon: isSessionActive(session.state) ? (
+            <RunningSpinner />
+          ) : (
+            <SessionAgentLogo profile={profile} />
+          ),
+          testId: `preview-session-tab-${session.id}`,
+          className: "bg-muted/50 data-[state=active]:bg-muted",
+        };
+      }),
+    [sortedSessions, agentLabelsById, profilesById],
   );
 
   if (!isLoaded && sortedSessions.length === 0) {
@@ -91,6 +112,21 @@ export function PreviewSessionTabs({
       </div>
     </div>
   );
+}
+
+function resolveProfileSubLabel(
+  session: TaskSession,
+  profile: AgentProfileOption | null | undefined,
+  agentLabelsById: Record<string, string>,
+): string {
+  const fullLabel = profile?.label ?? resolveAgentLabelFor(session, agentLabelsById);
+  const parts = fullLabel.split(LABEL_SEPARATOR);
+  return parts[1] ?? parts[0] ?? fullLabel;
+}
+
+function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | undefined }) {
+  if (!profile?.agent_name) return null;
+  return <AgentLogo agentName={profile.agent_name} size={12} className="shrink-0" />;
 }
 
 function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
