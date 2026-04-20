@@ -371,3 +371,185 @@ func TestGetTaskStats_ExcludesEphemeralTasks(t *testing.T) {
 		t.Errorf("expected task-regular, got %s", results[0].TaskID)
 	}
 }
+
+func TestGetDailyActivity_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-regular', 'sess-regular', 'task-regular', ?, ?, ?, ?)`, nowStr, nowStr, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-ephemeral', 'sess-ephemeral', 'task-ephemeral', ?, ?, ?, ?)`, nowStr, nowStr, nowStr, nowStr)
+
+	results, err := repo.GetDailyActivity(ctx, "ws-1", 7)
+	if err != nil {
+		t.Fatalf("GetDailyActivity failed: %v", err)
+	}
+
+	totalTurns := 0
+	for _, r := range results {
+		totalTurns += r.TurnCount
+	}
+	if totalTurns != 1 {
+		t.Errorf("expected 1 total turn (ephemeral excluded), got %d", totalTurns)
+	}
+}
+
+func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-done', 'board-1', 'Done', 1, ?, ?)`, nowStr, nowStr)
+
+	// Regular completed task
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 0, ?, ?, ?)`, nowStr, nowStr, nowStr)
+	// Ephemeral completed task
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?, ?)`, nowStr, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, completed_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'COMPLETED', ?, ?, ?)`, nowStr, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, completed_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'COMPLETED', ?, ?, ?)`, nowStr, nowStr, nowStr)
+
+	results, err := repo.GetCompletedTaskActivity(ctx, "ws-1", 7)
+	if err != nil {
+		t.Fatalf("GetCompletedTaskActivity failed: %v", err)
+	}
+
+	totalCompleted := 0
+	for _, r := range results {
+		totalCompleted += r.CompletedTasks
+	}
+	if totalCompleted != 1 {
+		t.Errorf("expected 1 completed task (ephemeral excluded), got %d", totalCompleted)
+	}
+}
+
+func TestGetAgentUsage_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', '{"name":"Agent"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', '{"name":"Agent"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	results, err := repo.GetAgentUsage(ctx, "ws-1", 5, nil)
+	if err != nil {
+		t.Fatalf("GetAgentUsage failed: %v", err)
+	}
+
+	totalSessions := 0
+	for _, r := range results {
+		totalSessions += r.SessionCount
+	}
+	if totalSessions != 1 {
+		t.Errorf("expected 1 session (ephemeral excluded), got %d", totalSessions)
+	}
+}
+
+func TestGetGitStats_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_session_commits (id, session_id, commit_sha, committed_at, files_changed, insertions, deletions, created_at) VALUES ('c-regular', 'sess-regular', 'abc123', ?, 3, 10, 2, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_commits (id, session_id, commit_sha, committed_at, files_changed, insertions, deletions, created_at) VALUES ('c-ephemeral', 'sess-ephemeral', 'def456', ?, 5, 20, 8, ?)`, nowStr, nowStr)
+
+	stats, err := repo.GetGitStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGitStats failed: %v", err)
+	}
+	if stats.TotalCommits != 1 {
+		t.Errorf("expected 1 commit (ephemeral excluded), got %d", stats.TotalCommits)
+	}
+	if stats.TotalFilesChanged != 3 {
+		t.Errorf("expected 3 files changed, got %d", stats.TotalFilesChanged)
+	}
+}
+
+func TestGetRepositoryStats_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO repositories (id, workspace_id, name, created_at, updated_at) VALUES ('repo-1', 'ws-1', 'my-repo', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at) VALUES ('tr-1', 'task-regular', 'repo-1', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at) VALUES ('tr-2', 'task-ephemeral', 'repo-1', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, repository_id, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'repo-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, repository_id, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'repo-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	results, err := repo.GetRepositoryStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetRepositoryStats failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(results))
+	}
+	if results[0].TotalTasks != 1 {
+		t.Errorf("expected 1 task (ephemeral excluded), got %d", results[0].TotalTasks)
+	}
+	if results[0].SessionCount != 1 {
+		t.Errorf("expected 1 session (ephemeral excluded), got %d", results[0].SessionCount)
+	}
+}
