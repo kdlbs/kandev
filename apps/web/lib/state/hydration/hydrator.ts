@@ -1,5 +1,6 @@
 import type { Draft } from "immer";
 import type { AppState } from "../store";
+import { migrateView } from "../slices/ui/ui-slice";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -77,6 +78,20 @@ function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.userSettings && !draft.userSettings.loaded) {
     deepMerge(draft.userSettings, state.userSettings);
+    bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
+  }
+}
+
+function bridgeSidebarViewsFromUserSettings(
+  draft: Draft<AppState>,
+  userSettings: Partial<AppState["userSettings"]>,
+): void {
+  const serverViews = userSettings.sidebarViews;
+  if (!serverViews || serverViews.length === 0) return;
+  const normalized = serverViews.map(migrateView);
+  draft.sidebarViews.views = normalized;
+  if (!normalized.some((v) => v.id === draft.sidebarViews.activeViewId)) {
+    draft.sidebarViews.activeViewId = normalized[0].id;
   }
 }
 

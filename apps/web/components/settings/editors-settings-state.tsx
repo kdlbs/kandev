@@ -8,6 +8,7 @@ import { useRequest } from "@/lib/http/use-request";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import { parseTerminalLinkBehavior } from "@/lib/ssr/user-settings";
+import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
   type EditorFormState,
   buildConfig,
@@ -219,6 +220,7 @@ function mapEditorSettingsFields(
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
     lspServerConfigs: s.lsp_server_configs ?? {},
     savedLayouts: s.saved_layouts ?? [],
+    sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView),
     loaded: true as const,
   };
 }

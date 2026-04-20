@@ -37,6 +37,7 @@ export const defaultSettingsState: SettingsSliceState = {
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
     savedLayouts: [],
+    sidebarViews: [],
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalFontFamily: null,

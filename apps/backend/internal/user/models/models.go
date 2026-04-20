@@ -30,6 +30,7 @@ type UserSettings struct {
 	LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 	SavedLayouts                []SavedLayout                     `json:"saved_layouts"`
+	SidebarViews                []SidebarView                     `json:"sidebar_views"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
@@ -47,4 +48,28 @@ type SavedLayout struct {
 	IsDefault bool            `json:"is_default"`
 	Layout    json.RawMessage `json:"layout"`
 	CreatedAt string          `json:"created_at"`
+}
+
+// SidebarView represents a user-saved sidebar filter/sort/group preset.
+// The payload is stored and returned as-is; the server does not interpret
+// clause values beyond passing them through.
+type SidebarView struct {
+	ID              string              `json:"id"`
+	Name            string              `json:"name"`
+	Filters         []SidebarViewClause `json:"filters"`
+	Sort            SidebarViewSort     `json:"sort"`
+	Group           string              `json:"group"`
+	CollapsedGroups []string            `json:"collapsed_groups"`
+}
+
+type SidebarViewClause struct {
+	ID        string          `json:"id"`
+	Dimension string          `json:"dimension"`
+	Op        string          `json:"op"`
+	Value     json.RawMessage `json:"value"`
+}
+
+type SidebarViewSort struct {
+	Key       string `json:"key"`
+	Direction string `json:"direction"`
 }

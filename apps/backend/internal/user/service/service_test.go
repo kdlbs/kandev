@@ -282,3 +282,108 @@ func TestApplySavedLayouts(t *testing.T) {
 		})
 	}
 }
+
+func makeSidebarViews(n int) []models.SidebarView {
+	views := make([]models.SidebarView, n)
+	for i := range views {
+		views[i] = models.SidebarView{
+			ID:              fmt.Sprintf("view-%d", i),
+			Name:            fmt.Sprintf("View %d", i),
+			Filters:         []models.SidebarViewClause{},
+			Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+			Group:           "repository",
+			CollapsedGroups: []string{},
+		}
+	}
+	return views
+}
+
+func TestApplySidebarViews(t *testing.T) {
+	tests := []struct {
+		name        string
+		req         *UpdateUserSettingsRequest
+		wantErr     string
+		wantCount   int
+		wantApplied bool
+	}{
+		{
+			name:        "nil request is a no-op",
+			req:         &UpdateUserSettingsRequest{SidebarViews: nil},
+			wantApplied: false,
+		},
+		{
+			name:        "empty slice is accepted",
+			req:         &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{})},
+			wantCount:   0,
+			wantApplied: true,
+		},
+		{
+			name:        "valid single view is applied",
+			req:         &UpdateUserSettingsRequest{SidebarViews: ptr(makeSidebarViews(1))},
+			wantCount:   1,
+			wantApplied: true,
+		},
+		{
+			name:        "exactly max views is accepted",
+			req:         &UpdateUserSettingsRequest{SidebarViews: ptr(makeSidebarViews(maxSidebarViews))},
+			wantCount:   maxSidebarViews,
+			wantApplied: true,
+		},
+		{
+			name:    "exceeding max views returns error",
+			req:     &UpdateUserSettingsRequest{SidebarViews: ptr(makeSidebarViews(maxSidebarViews + 1))},
+			wantErr: fmt.Sprintf("sidebar_views: max %d views allowed", maxSidebarViews),
+		},
+		{
+			name: "empty id returns error",
+			req: &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{
+				{ID: "", Name: "X"},
+			})},
+			wantErr: "sidebar_views: view id must not be empty",
+		},
+		{
+			name: "empty name returns error",
+			req: &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{
+				{ID: "v1", Name: ""},
+			})},
+			wantErr: "sidebar_views: view name must not be empty",
+		},
+		{
+			name: "duplicate ids return error",
+			req: &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{
+				{ID: "v1", Name: "A"},
+				{ID: "v1", Name: "B"},
+			})},
+			wantErr: `sidebar_views: duplicate view id "v1"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{SidebarViews: makeSidebarViews(2)}
+			err := applySidebarViews(settings, tt.req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tt.wantApplied {
+				if len(settings.SidebarViews) != 2 {
+					t.Fatalf("expected settings unchanged (2 views), got %d", len(settings.SidebarViews))
+				}
+				return
+			}
+			if len(settings.SidebarViews) != tt.wantCount {
+				t.Fatalf("expected %d views, got %d", tt.wantCount, len(settings.SidebarViews))
+			}
+		})
+	}
+}

@@ -5,6 +5,8 @@ import { IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
+import type { TaskSwitcherItem } from "../task-switcher";
+import { applyView } from "@/lib/sidebar/apply-view";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
@@ -379,6 +381,46 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
   };
 }
 
+function MobileTaskList({
+  tasks,
+  activeTaskId,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+  onDeleteTask,
+  deletingTaskId,
+  isLoading,
+}: {
+  tasks: TaskSwitcherItem[];
+  activeTaskId: string | null;
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
+  onArchiveTask: (taskId: string) => void;
+  onDeleteTask: (taskId: string) => Promise<void> | void;
+  deletingTaskId: string | null;
+  isLoading?: boolean;
+}) {
+  const sidebarSlice = useAppStore((s) => s.sidebarViews);
+  const view = useMemo(() => {
+    const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
+    return active ?? sidebarSlice.views[0];
+  }, [sidebarSlice]);
+  const grouped = useMemo(() => applyView(tasks, view), [tasks, view]);
+  return (
+    <TaskSwitcher
+      grouped={grouped}
+      activeTaskId={activeTaskId}
+      selectedTaskId={selectedTaskId}
+      onSelectTask={onSelectTask}
+      onArchiveTask={onArchiveTask}
+      onDeleteTask={onDeleteTask}
+      deletingTaskId={deletingTaskId}
+      isLoading={isLoading}
+      totalTaskCount={tasks.length}
+    />
+  );
+}
+
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -389,7 +431,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const {
     activeTaskId,
     selectedTaskId,
-    steps,
     workspaces,
     kanbanIsLoading,
     tasksWithRepositories,
@@ -438,13 +479,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
-          <TaskSwitcher
+          <MobileTaskList
             tasks={tasksWithRepositories}
-            steps={steps.map((step: KanbanState["steps"][number]) => ({
-              id: step.id,
-              title: step.title,
-              color: step.color,
-            }))}
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={handleSelectTask}

@@ -12,6 +12,7 @@ import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
+import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 
 export const metadata: Metadata = {
   title: "KanDev - AI Kanban",
@@ -61,6 +62,7 @@ export default function RootLayout({
               <TooltipProvider>
                 <ToastProvider>
                   <SessionFailureToastBridge />
+                  <SidebarViewsSyncBridge />
                   <CommandRegistryProvider>
                     <WebSocketConnector />
                     <GlobalCommands />

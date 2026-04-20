@@ -1,22 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
-import type { TaskState, TaskSession, TaskSessionState, Repository, Task } from "@/lib/types/http";
+import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { TaskSwitcher } from "./task-switcher";
-import type { TaskSwitcherItem } from "./task-switcher";
+import { applyView } from "@/lib/sidebar/apply-view";
+import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
+import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
-import { Button } from "@kandev/ui/button";
 import { PanelRoot, PanelBody } from "./panel-primitives";
-import { IconPlus } from "@tabler/icons-react";
-import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useRegisterCommands } from "@/hooks/use-register-commands";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import type { CommandItem } from "@/lib/commands/types";
 import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
@@ -31,29 +27,6 @@ import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 
-// Set to true to render mock data covering all sidebar edge cases (prototype mode)
-const MOCK_SIDEBAR = false;
-
-const MOCK_REPO = "kdlbs/kandev";
-const n = Date.now();
-const mins = (m: number) => new Date(n - m * 60 * 1000).toISOString();
-const hrs = (h: number) => new Date(n - h * 60 * 60 * 1000).toISOString();
-const base = { primarySessionId: null as null, isArchived: false } as const;
-
-/* prettier-ignore */
-const MOCK_ITEMS: TaskSwitcherItem[] = [
-  { ...base, id: "mock-1", title: "Full stack authentication migration", state: "IN_PROGRESS", sessionState: "RUNNING", repositories: [MOCK_REPO, "kdlbs/kandev-web", "kdlbs/infra"], diffStats: { additions: 88, deletions: 12 }, updatedAt: mins(2), createdAt: hrs(3) },
-  { ...base, id: "mock-1a", title: "Migrate auth endpoints to new provider", state: "IN_PROGRESS", sessionState: "RUNNING", diffStats: { additions: 24, deletions: 8 }, parentTaskId: "mock-1", updatedAt: mins(1), createdAt: hrs(2) },
-  { ...base, id: "mock-1b", title: "Update frontend auth flows", parentTaskId: "mock-1", createdAt: hrs(1) },
-  { ...base, id: "mock-2", title: "Fix task sidebar layout", state: "IN_PROGRESS", sessionState: "WAITING_FOR_INPUT", repositoryPath: MOCK_REPO, diffStats: { additions: 3, deletions: 1 }, updatedAt: mins(5), createdAt: hrs(4), prInfo: { number: 547, state: "Open" } },
-  { ...base, id: "mock-2a", title: "Extract RepoGroupHeader component", sessionState: "WAITING_FOR_INPUT", repositoryPath: MOCK_REPO, parentTaskId: "mock-2", diffStats: { additions: 45, deletions: 3 }, updatedAt: mins(10), createdAt: hrs(3) },
-  { ...base, id: "mock-3", title: "Refactor token usage in CLI", repositoryPath: MOCK_REPO, createdAt: hrs(5) },
-  { ...base, id: "mock-4", title: "Update dependencies", state: "COMPLETED", sessionState: "COMPLETED", repositoryPath: MOCK_REPO, diffStats: { additions: 466, deletions: 124 }, updatedAt: hrs(2), createdAt: hrs(6), prInfo: { number: 138, state: "Merged" } },
-  { ...base, id: "mock-5", title: "Implement feature X with full test coverage", state: "IN_PROGRESS", sessionState: "RUNNING", repositoryPath: "myorg/other-repo", diffStats: { additions: 11, deletions: 3 }, updatedAt: mins(0.5), createdAt: hrs(1) },
-  { ...base, id: "mock-5a", title: "Add unit tests", repositoryPath: "myorg/other-repo", parentTaskId: "mock-5", createdAt: mins(30) },
-  { ...base, id: "mock-6", title: "Draft task — no repo assigned yet", createdAt: hrs(7) },
-];
-
 /** Find a task across all workflow snapshots */
 function findTaskInSnapshots(
   snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
@@ -65,78 +38,6 @@ function findTaskInSnapshots(
   }
   return undefined;
 }
-
-// Extracted component to isolate dialog state from sidebar
-type NewTaskButtonProps = {
-  workspaceId: string | null;
-  workflowId: string | null;
-  steps: Array<{
-    id: string;
-    title: string;
-    color?: string;
-    events?: {
-      on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-      on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-    };
-  }>;
-  onSuccess: (
-    task: Task,
-    mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
-  ) => void;
-};
-
-export const NewTaskButton = memo(function NewTaskButton({
-  workspaceId,
-  workflowId,
-  steps,
-  onSuccess,
-}: NewTaskButtonProps) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  const newTaskShortcut = getShortcut("NEW_TASK", keyboardShortcuts);
-  const commands = useMemo<CommandItem[]>(
-    () => [
-      {
-        id: "task-create",
-        label: "Create New Task",
-        group: "Tasks",
-        icon: <IconPlus className="size-3.5" />,
-        shortcut: newTaskShortcut,
-        keywords: ["new", "create", "task", "add"],
-        action: () => setDialogOpen(true),
-        priority: 0,
-      },
-    ],
-    [newTaskShortcut],
-  );
-  useRegisterCommands(commands);
-
-  return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-6 gap-1 cursor-pointer"
-        onClick={() => setDialogOpen(true)}
-      >
-        <IconPlus className="h-4 w-4" />
-        Task
-      </Button>
-      <TaskCreateDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        mode="create"
-        workspaceId={workspaceId}
-        workflowId={workflowId}
-        defaultStepId={steps[0]?.id ?? null}
-        steps={steps}
-        onSuccess={onSuccess}
-      />
-    </>
-  );
-});
 
 /** Look up git status directly via primarySessionId, bypassing the session list. */
 function getGitStatusForTask(
@@ -181,6 +82,8 @@ function toSidebarItem(
     repositorySlugById: Map<string, string | undefined>;
     taskPRsByTaskId: Record<string, TaskPR | undefined>;
     titleById: Map<string, string>;
+    workflowNameById: Map<string, string>;
+    stepTitleById: Map<string, string>;
   },
 ) {
   const sessionInfo = getSessionInfoForTask(
@@ -194,9 +97,6 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   const pr = ctx.taskPRsByTaskId[task.id];
 
-  // Diff stats: prefer session-based computation, fall back to direct git status lookup
-  // via primarySessionId. Sessions may not be loaded yet, but git status arrives via
-  // the bulk WS subscription using primarySessionId from the kanban task.
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
     task,
@@ -211,7 +111,11 @@ function toSidebarItem(
     sessionState: resolvedSessionState,
     description: task.description,
     workflowId: task._workflowId,
+    workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
+    workflowStepTitle: task.workflowStepId
+      ? ctx.stepTitleById.get(task.workflowStepId as string)
+      : undefined,
     repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
     diffStats,
     isRemoteExecutor: task.isRemoteExecutor,
@@ -224,6 +128,7 @@ function toSidebarItem(
     parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     prInfo: toPrInfo(pr),
+    isPRReview: task.isPRReview ?? false,
   };
 }
 
@@ -243,7 +148,9 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     sessionState: undefined,
     description: undefined,
     workflowId: undefined,
+    workflowName: undefined,
     workflowStepId: undefined,
+    workflowStepTitle: undefined,
     repositoryPath: s.archivedTaskRepositoryPath,
     diffStats: undefined,
     isRemoteExecutor: false,
@@ -256,6 +163,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     parentTaskTitle: undefined,
     parentTaskId: undefined,
     prInfo: undefined,
+    isPRReview: false,
   };
 }
 
@@ -303,6 +211,10 @@ function useSidebarData(workspaceId: string | null) {
       ]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
+    const workflowNameById = new Map(
+      Object.entries(snapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
+    );
+    const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
       sessionsByTaskId,
       gitStatusByEnvId,
@@ -310,6 +222,8 @@ function useSidebarData(workspaceId: string | null) {
       repositorySlugById,
       taskPRsByTaskId: taskPRsByTaskId as Record<string, TaskPR | undefined>,
       titleById,
+      workflowNameById,
+      stepTitleById,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
@@ -323,6 +237,8 @@ function useSidebarData(workspaceId: string | null) {
   }, [
     repositoriesByWorkspace,
     allTasks,
+    allSteps,
+    snapshots,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
@@ -532,8 +448,6 @@ function useSidebarActions(store: StoreApi) {
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
       setDeletingTaskId(taskId);
-      // Capture active state before the async API call — the WS "task.deleted"
-      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
       try {
@@ -581,6 +495,28 @@ function useSidebarActions(store: StoreApi) {
   };
 }
 
+function useBulkGitStatusSubscription(primarySessionIds: string[]) {
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  useEffect(() => {
+    if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const unsubscribes = primarySessionIds.map((id) => client.subscribeSession(id));
+    return () => unsubscribes.forEach((u) => u());
+  }, [primarySessionIds, connectionStatus]);
+}
+
+function useEffectiveSidebarView() {
+  const sidebarSlice = useAppStore((state) => state.sidebarViews);
+  return useMemo(() => {
+    const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
+    if (!active) return sidebarSlice.views[0];
+    const d = sidebarSlice.draft;
+    if (!d || d.baseViewId !== active.id) return active;
+    return { ...active, filters: d.filters, sort: d.sort, group: d.group };
+  }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);
+}
+
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
 }: TaskSessionSidebarProps) {
@@ -592,23 +528,13 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const {
     activeTaskId,
     selectedTaskId,
-    allSteps,
     stepsByWorkflowId,
     isLoadingWorkflow,
     tasksWithRepositories,
     primarySessionIds,
   } = useSidebarData(workspaceId);
 
-  // Subscribe to all primary sessions when connected so the backend sends an immediate
-  // git status snapshot for each — this makes diff stats visible without clicking into a task.
-  const connectionStatus = useAppStore((state) => state.connection.status);
-  useEffect(() => {
-    if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    const unsubscribes = primarySessionIds.map((id) => client.subscribeSession(id));
-    return () => unsubscribes.forEach((u) => u());
-  }, [primarySessionIds, connectionStatus]);
+  useBulkGitStatusSubscription(primarySessionIds);
 
   const {
     deletingTaskId,
@@ -636,15 +562,24 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
       : tasksWithRepositories;
   }, [tasksWithRepositories, preparingTaskId]);
 
+  const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
+  const effectiveView = useEffectiveSidebarView();
+  const grouped = useMemo(
+    () => applyView(displayTasks, effectiveView),
+    [displayTasks, effectiveView],
+  );
+
   return (
     <PanelRoot data-testid="task-sidebar">
+      <SidebarFilterBar />
       <PanelBody className="space-y-4 p-0">
         <TaskSwitcher
-          tasks={displayTasks}
-          steps={allSteps.map((step) => ({ id: step.id, title: step.title, color: step.color }))}
+          grouped={grouped}
           stepsByWorkflowId={stepsByWorkflowId}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
+          collapsedGroupKeys={effectiveView.collapsedGroups}
+          onToggleGroup={(groupKey) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey)}
           onSelectTask={handleSelectTask}
           onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}
@@ -652,6 +587,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           onMoveToStep={handleMoveToStep}
           deletingTaskId={deletingTaskId}
           isLoading={isLoadingWorkflow}
+          totalTaskCount={displayTasks.length}
         />
       </PanelBody>
       <TaskRenameDialog

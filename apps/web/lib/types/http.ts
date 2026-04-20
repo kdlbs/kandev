@@ -360,6 +360,15 @@ export type SavedLayout = {
   created_at: string;
 };
 
+export type SidebarViewApi = {
+  id: string;
+  name: string;
+  filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
+  sort: { key: string; direction: string };
+  group: string;
+  collapsed_groups: string[];
+};
+
 export type UserSettings = {
   user_id: string;
   workspace_id: string;
@@ -378,6 +387,7 @@ export type UserSettings = {
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   saved_layouts?: SavedLayout[];
+  sidebar_views?: SidebarViewApi[];
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;

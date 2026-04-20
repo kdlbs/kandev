@@ -44,7 +44,7 @@ test.describe("Sidebar layout — repo groups", () => {
     // At least one repo group header should be visible.
     // The group label for a local path repo will be its local_path — we can
     // match without knowing the exact slug by checking for any group header.
-    const anyGroupHeader = session.sidebar.locator("[data-testid^='sidebar-repo-group-']");
+    const anyGroupHeader = session.sidebar.locator("[data-testid='sidebar-group-header']");
     await expect(anyGroupHeader.first()).toBeVisible({ timeout: 10_000 });
 
     // A group header should contain a task count greater than zero
@@ -74,7 +74,7 @@ test.describe("Sidebar layout — repo groups", () => {
 
     // In single-repo workspaces, unassigned tasks merge into the repo group,
     // so both tasks should be in the same group.
-    const groupHeader = session.sidebar.locator("[data-testid^='sidebar-repo-group-']").first();
+    const groupHeader = session.sidebar.locator("[data-testid='sidebar-group-header']").first();
     await expect(groupHeader).toBeVisible({ timeout: 10_000 });
 
     // Both tasks should be visible before collapsing
@@ -129,7 +129,9 @@ test.describe("Sidebar layout — repo groups", () => {
     await session.waitForLoad();
 
     // In a single-repo workspace, no "Unassigned" group should appear
-    const unassignedGroup = session.sidebar.getByTestId("sidebar-repo-group-Unassigned");
+    const unassignedGroup = session.sidebar.locator(
+      "[data-testid='sidebar-group-header'][data-group-label='Unassigned']",
+    );
     await expect(unassignedGroup).not.toBeVisible({ timeout: 5_000 });
 
     // Both tasks should be visible in the sidebar (under the repo group)

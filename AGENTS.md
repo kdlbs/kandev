@@ -228,15 +228,16 @@ SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 lib/state/
 ├── store.ts                        # Root composition
+├── default-state.ts                # Default state + initial state merge
 ├── slices/                         # Domain slices
 │   ├── kanban/                    # boards, tasks, columns
 │   ├── session/                   # sessions, messages, turns, worktrees
 │   ├── session-runtime/           # shell, processes, git, context
 │   ├── workspace/                 # workspaces, repos, branches
-│   ├── settings/                  # executors, agents, editors, prompts
+│   ├── settings/                  # executors, agents, editors, prompts (incl. userSettings)
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
-│   └── ui/                        # preview, connection, active state
+│   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
 
 hooks/domains/{kanban,session,workspace,settings,comments,github}/  # Domain-organized hooks

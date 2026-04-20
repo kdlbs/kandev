@@ -11,6 +11,7 @@ import type {
   SavedLayout,
   ToolStatus,
 } from "@/lib/types/http";
+import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
@@ -126,6 +127,7 @@ export type UserSettingsState = {
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
   savedLayouts: SavedLayout[];
+  sidebarViews: SidebarView[];
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";

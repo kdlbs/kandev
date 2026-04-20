@@ -40,6 +40,7 @@ export type KanbanState = {
     parentTaskId?: string | null;
     updatedAt?: string;
     createdAt?: string;
+    isPRReview?: boolean;
   }>;
   isLoading?: boolean;
 };

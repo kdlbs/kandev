@@ -17,6 +17,7 @@ import type {
   CustomPrompt,
   PromptsResponse,
   SavedLayout,
+  SidebarViewApi,
   UserSettingsResponse,
   DynamicModelsResponse,
 } from "@/lib/types/http";
@@ -43,6 +44,7 @@ export async function updateUserSettings(
     lsp_auto_install_languages?: string[];
     lsp_server_configs?: Record<string, Record<string, unknown>>;
     saved_layouts?: SavedLayout[];
+    sidebar_views?: SidebarViewApi[];
     default_utility_agent_id?: string;
     default_utility_model?: string;
     keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;

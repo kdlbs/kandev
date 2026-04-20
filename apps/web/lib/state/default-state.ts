@@ -72,6 +72,7 @@ export const defaultState = {
   quickChat: defaultUIState.quickChat,
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   bottomTerminal: defaultUIState.bottomTerminal,
+  sidebarViews: defaultUIState.sidebarViews,
 };
 
 export type DefaultState = typeof defaultState;
@@ -151,5 +152,6 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
+    sidebarViews: { ...defaultState.sidebarViews, ...initialState.sidebarViews },
   };
 }

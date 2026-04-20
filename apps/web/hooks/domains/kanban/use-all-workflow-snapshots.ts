@@ -89,7 +89,14 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
     parentTaskId: task.parent_id ?? undefined,
     updatedAt: task.updated_at,
     createdAt: task.created_at,
+    isPRReview: isPRReviewFromMetadata(task.metadata),
   } as KanbanTask;
+}
+
+function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
+  return typeof watchId === "string" && watchId.length > 0;
 }
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {

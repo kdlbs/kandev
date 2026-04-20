@@ -16,6 +16,7 @@ import type {
   ReviewWatch as GitHubReviewWatch,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
+import type { UISliceActions as UIA } from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -211,6 +212,7 @@ export type AppState = {
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
+  sidebarViews: (typeof defaultUIState)["sidebarViews"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -411,6 +413,17 @@ export type AppState = {
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
+  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
+  updateSidebarDraft: UIA["updateSidebarDraft"];
+  saveSidebarDraftAs: UIA["saveSidebarDraftAs"];
+  saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"];
+  discardSidebarDraft: UIA["discardSidebarDraft"];
+  deleteSidebarView: UIA["deleteSidebarView"];
+  renameSidebarView: UIA["renameSidebarView"];
+  duplicateSidebarView: UIA["duplicateSidebarView"];
+  toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
+  clearSidebarSyncError: UIA["clearSidebarSyncError"];
+  migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
