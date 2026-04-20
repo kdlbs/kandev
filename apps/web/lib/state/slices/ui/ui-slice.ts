@@ -33,7 +33,7 @@ function loadSidebarState(): UISliceState["sidebarViews"] {
   return { views, activeViewId, draft, syncError: null };
 }
 
-const KNOWN_DIMENSIONS = new Set<string>([
+export const KNOWN_DIMENSIONS = new Set<string>([
   "archived",
   "state",
   "workflow",
@@ -45,11 +45,11 @@ const KNOWN_DIMENSIONS = new Set<string>([
   "titleMatch",
 ]);
 
-const KNOWN_SORT_KEYS = new Set<string>(["state", "updatedAt", "createdAt", "title"]);
+export const KNOWN_SORT_KEYS = new Set<string>(["state", "updatedAt", "createdAt", "title"]);
 
 // Drops clauses whose dimension is no longer known (e.g. renamed or removed in an upgrade),
 // and resets stale sort keys, so the popover does not crash when rendering stored views.
-function migrateView(view: SidebarView): SidebarView {
+export function migrateView(view: SidebarView): SidebarView {
   const sort: SortSpec = KNOWN_SORT_KEYS.has(view.sort.key)
     ? view.sort
     : { key: "state", direction: view.sort.direction };
