@@ -333,7 +333,7 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 
 	secret := &secrets.SecretWithValue{
 		Secret: secrets.Secret{
-			Name: fmt.Sprintf("agentctl-auth-%s", instance.InstanceID[:12]),
+			Name: fmt.Sprintf("agentctl-auth-%s", truncateID(instance.InstanceID, 12)),
 		},
 		Value: instance.AuthToken,
 	}
@@ -352,4 +352,13 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 	m.logger.Debug("persisted agentctl auth token in secret store",
 		zap.String("instance_id", instance.InstanceID),
 		zap.String("secret_id", secret.ID))
+}
+
+
+// truncateID safely truncates an ID string to maxLen characters.
+func truncateID(id string, maxLen int) string {
+	if len(id) <= maxLen {
+		return id
+	}
+	return id[:maxLen]
 }

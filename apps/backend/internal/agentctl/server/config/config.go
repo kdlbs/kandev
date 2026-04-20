@@ -12,6 +12,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"os"
 	"strconv"
@@ -236,7 +237,7 @@ func (c *Config) ConsumeNonce(nonce string) string {
 	if c.BootstrapNonce == "" || nonce == "" {
 		return ""
 	}
-	if c.BootstrapNonce != nonce {
+	if subtle.ConstantTimeCompare([]byte(c.BootstrapNonce), []byte(nonce)) != 1 {
 		return ""
 	}
 
