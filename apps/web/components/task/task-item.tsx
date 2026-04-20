@@ -330,7 +330,7 @@ export const TaskItem = memo(function TaskItem({
         />
       )}
       {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} />
+      <TaskMenuButton visible={effectiveMenuOpen} shiftLeft={showSubtaskToggle} />
     </div>
   );
 });
@@ -366,11 +366,14 @@ function SubtaskToggle({
   );
 }
 
-function TaskMenuButton({ visible }: { visible: boolean }) {
+function TaskMenuButton({ visible, shiftLeft }: { visible: boolean; shiftLeft?: boolean }) {
   return (
     <div
       className={cn(
-        "absolute right-1 inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
+        "absolute inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
+        // When a subtask toggle is present on the right, push the menu button
+        // left of it so the two controls don't overlap on hover.
+        shiftLeft ? "right-10" : "right-1",
         visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
       )}
     >
