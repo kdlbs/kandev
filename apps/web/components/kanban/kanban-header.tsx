@@ -198,21 +198,24 @@ function DesktopHeader({
   onOpenHealthDialog: () => void;
 }) {
   return (
-    <header className="relative flex items-center justify-between p-4 pb-3">
+    <header className="flex items-center gap-3 p-4 pb-3">
       <div className="flex items-center gap-3">
         <Link href="/" className="text-2xl font-bold hover:opacity-80">
           KanDev
         </Link>
       </div>
-      {onSearchChange && (
-        <div className="absolute left-1/2 -translate-x-1/2">
+      {onSearchChange ? (
+        <div className="flex-1 flex justify-center min-w-0 px-3">
           <TaskSearchInput
             value={searchQuery}
             onChange={onSearchChange}
             placeholder="Search tasks..."
             isLoading={isSearchLoading}
+            className="w-full min-w-32 max-w-64"
           />
         </div>
+      ) : (
+        <div className="flex-1" />
       )}
       <div className="flex items-center gap-3">
         <Button onClick={onCreateTask} className="cursor-pointer" data-testid="create-task-button">
