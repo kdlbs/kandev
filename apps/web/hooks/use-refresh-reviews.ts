@@ -1,9 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { listReviewWatches, triggerAllReviewWatches } from "@/lib/api/domains/github-api";
+
+// Module-scoped so concurrent hook instances share the in-flight guard and
+// only one listReviewWatches request fires on mount.
+let fetchInFlight = false;
 
 export function useRefreshReviews() {
   const [loading, setLoading] = useState(false);
@@ -12,14 +16,16 @@ export function useRefreshReviews() {
   const hasWatches = useAppStore((state) => state.reviewWatches.items.length > 0);
   const watchesLoaded = useAppStore((state) => state.reviewWatches.loaded);
   const setReviewWatches = useAppStore((state) => state.setReviewWatches);
-  const fetchedRef = useRef(false);
 
   useEffect(() => {
-    if (!workspaceId || watchesLoaded || fetchedRef.current) return;
-    fetchedRef.current = true;
+    if (!workspaceId || watchesLoaded || fetchInFlight) return;
+    fetchInFlight = true;
     listReviewWatches(workspaceId)
       .then((r) => setReviewWatches(r?.watches ?? []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        fetchInFlight = false;
+      });
   }, [workspaceId, watchesLoaded, setReviewWatches]);
 
   const trigger = useCallback(async () => {
