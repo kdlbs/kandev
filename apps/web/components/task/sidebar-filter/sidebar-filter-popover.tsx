@@ -106,12 +106,12 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
           onRemove={handleRemoveClause}
         />
 
-        <div className="border-b p-2">
+        <div className="border-b px-2 pt-0 pb-2">
           <SectionLabel>Sort</SectionLabel>
           <SortPicker value={current.sort} onChange={(sort) => updateDraft({ sort })} />
         </div>
 
-        <div className="p-2">
+        <div className="px-2 pt-0 pb-2">
           <SectionLabel>Group by</SectionLabel>
           <GroupPicker value={current.group} onChange={(group) => updateDraft({ group })} />
         </div>
@@ -120,10 +120,11 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
   );
 }
 
-const SECTION_LABEL_CLASS = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+const SECTION_LABEL_CLASS =
+  "text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <span className={`mb-1 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
+  return <span className={`-mt-1 mb-1 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
 }
 
 function FilterSection({
@@ -138,8 +139,8 @@ function FilterSection({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="border-b p-2">
-      <div className="mb-1 flex items-center justify-between">
+    <div className="border-b px-2 pt-0 pb-2">
+      <div className="-mt-1 mb-1 flex items-center justify-between">
         <span className={SECTION_LABEL_CLASS}>Filters</span>
         <Button
           type="button"
