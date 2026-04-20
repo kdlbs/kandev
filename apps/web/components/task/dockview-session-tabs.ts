@@ -266,9 +266,27 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   });
 
   useEffect(() => {
-    if (!effectiveSessionId) return;
     const api = useDockviewStore.getState().api;
     if (!api) return;
+
+    // Re-read the current session list straight from the store so we iterate
+    // the live array (sessionIdsKey change is what gets us here).
+    const tid = appStore.getState().tasks.activeTaskId;
+    const currentSessions = tid
+      ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
+      : [];
+    const currentSessionIds = currentSessions.map((s) => s.id);
+
+    // Always reconcile removed panels — even when effectiveSessionId is null
+    // (e.g. all sessions deleted) so orphaned tabs are closed.
+    reconcileRemovedSessionPanels(
+      api,
+      sessionTabCreatedRef.current,
+      currentSessionIds,
+      effectiveSessionId ?? "",
+    );
+
+    if (!effectiveSessionId) return;
 
     // Remove the generic "chat" placeholder as soon as a real session is
     // active — per-session tabs replace it. Skip in maximized state to
@@ -301,14 +319,6 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       useDockviewStore.setState({ centerGroupId: activePanel.group.id });
     }
 
-    // Re-read the current session list straight from the store so we iterate
-    // the live array (sessionIdsKey change is what gets us here).
-    const tid = appStore.getState().tasks.activeTaskId;
-    const currentSessions = tid
-      ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
-      : [];
-    const currentSessionIds = currentSessions.map((s) => s.id);
-
     const siblingAnchor: AddPanelOptions["position"] = activePanel
       ? { referenceGroup: activePanel.group.id }
       : initialPosition;
@@ -317,12 +327,5 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       if (sid === effectiveSessionId) continue;
       ensureSessionPanel(api, sid, siblingAnchor, true, sessionTabCreatedRef.current);
     }
-
-    reconcileRemovedSessionPanels(
-      api,
-      sessionTabCreatedRef.current,
-      currentSessionIds,
-      effectiveSessionId,
-    );
   }, [effectiveSessionId, sessionIdsKey, appStore]);
 }

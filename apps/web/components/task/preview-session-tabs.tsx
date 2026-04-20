@@ -5,6 +5,7 @@ import { IconLoader2 } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -130,6 +131,7 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
 }
 
 function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
+  const { toast } = useToast();
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
@@ -142,9 +144,10 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
         );
       } catch (error) {
         console.error("Failed to send message:", error);
+        toast({ title: "Failed to send message", variant: "error" });
       }
     },
-    [taskId, session.id],
+    [taskId, session.id, toast],
   );
 
   if (session.is_passthrough) {
