@@ -608,6 +608,11 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   activeFilePath: null,
   setApi: (api) => {
     set({ api, activeFilePath: null });
+    if (typeof window !== "undefined") {
+      // Exposed for E2E tests to assert on panel/group placement. Harmless in
+      // prod; the DockviewApi is already reachable via the store in devtools.
+      (window as unknown as { __dockviewApi__: DockviewApi | null }).__dockviewApi__ = api;
+    }
     if (api) {
       api.onDidActivePanelChange((event) => {
         const id = event?.id;

@@ -342,6 +342,48 @@ export class SessionPage {
     return this.page.getByTestId("pr-detail-panel");
   }
 
+  /**
+   * Read the dockview group ID for a given panel. Uses `window.__dockviewApi__`
+   * (exposed by the store in `setApi`). Returns null if the panel is missing.
+   */
+  async dockviewGroupIdForPanel(panelId: string): Promise<string | null> {
+    return this.page.evaluate((id) => {
+      type Api = { getPanel: (i: string) => { group?: { id?: string } } | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      return api?.getPanel(id)?.group?.id ?? null;
+    }, panelId);
+  }
+
+  /**
+   * Assert the `pr-detail` panel shares a dockview group with the active
+   * `session:{sessionId}` panel — i.e. it opened as a tab next to the session,
+   * not as a split in a separate group. Regression guard for the "PR opens in
+   * a split instead of the center tab" bug.
+   */
+  async expectPrPanelAndSessionShareGroup(): Promise<void> {
+    const result = await this.page.evaluate(() => {
+      type Panel = { id: string; group?: { id?: string } };
+      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const pr = api.getPanel("pr-detail");
+      if (!pr) return { error: "pr-detail panel missing" };
+      const session = api.panels.find((p) => p.id.startsWith("session:"));
+      if (!session) return { error: "no session panel" };
+      return {
+        prGroupId: pr.group?.id ?? null,
+        sessionGroupId: session.group?.id ?? null,
+        sessionPanelId: session.id,
+      };
+    });
+    expect(result.error, result.error).toBeUndefined();
+    expect(
+      result.prGroupId,
+      `PR panel landed in a different dockview group than the session panel. ` +
+        `PR group=${result.prGroupId} session=${result.sessionPanelId} group=${result.sessionGroupId}`,
+    ).toBe(result.sessionGroupId);
+  }
+
   /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
   prDetailTab(): Locator {
     return this.page.locator(".dv-default-tab").filter({ hasText: /^(Pull Request|PR #\d+)$/ });

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { DockviewReadyEvent, AddPanelOptions } from "dockview-react";
+import type { DockviewApi, DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -100,6 +100,23 @@ export function shouldAutoAddPRPanel(params: {
 }
 
 /**
+ * Resolve the group ID to anchor the PR detail panel to.
+ *
+ * Preference: the live session chat panel's group. It's the group the user is
+ * actively looking at, and reading it directly avoids the stale-id window the
+ * store's centerGroupId has across layout transitions (which caused the PR
+ * panel to land in a split instead of as a tab next to the session).
+ */
+export function resolvePRPanelTargetGroup(
+  api: DockviewApi,
+  sessionId: string,
+  centerGroupId: string,
+): string {
+  const sessionPanel = api.getPanel(`session:${sessionId}`);
+  return sessionPanel?.group?.id ?? centerGroupId;
+}
+
+/**
  * Auto-add the PR detail panel to the center group when the active task
  * has an associated pull request. The panel is added as a background tab
  * (the session/agent tab stays focused).
@@ -138,15 +155,16 @@ export function useAutoPRPanel() {
         }
 
         if (decision === "add") {
-          const { centerGroupId } = useDockviewStore.getState();
-          // Route through focusOrAddPanel so a stale centerGroupId falls back
-          // to another non-sidebar group rather than letting dockview place
-          // the panel in the active group (which may be the sidebar).
+          const targetGroupId = resolvePRPanelTargetGroup(
+            api,
+            sessionId,
+            useDockviewStore.getState().centerGroupId,
+          );
           focusOrAddPanel(api, {
             id: "pr-detail",
             component: "pr-detail",
             title: "Pull Request",
-            position: { referenceGroup: centerGroupId },
+            position: { referenceGroup: targetGroupId },
             inactive: true,
           });
           markPRPanelOffered(sessionId);
