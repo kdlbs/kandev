@@ -30,14 +30,6 @@ func (r *broadcastRecorder) count() int {
 	return len(r.messages)
 }
 
-func (r *broadcastRecorder) all() []*ws.Message {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	cp := make([]*ws.Message, len(r.messages))
-	copy(cp, r.messages)
-	return cp
-}
-
 func testLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	return log
@@ -56,18 +48,10 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	recorder := &broadcastRecorder{}
-
-	// Create a minimal Hub that records broadcasts instead of sending to real
-	// WebSocket connections. We only need the broadcast channel to be consumed.
+	// Create a minimal Hub. We only need the broadcast channel to be consumed.
 	hub := NewHub(nil, log)
 	go hub.Run(ctx)
 
-	// Override broadcast behaviour: intercept messages via a subscription on
-	// the hub's session subscriber map for our test session.
-	// Instead, we hook into the event bus directly alongside the broadcaster
-	// to count how many times the broadcaster fires.
-	//
 	// Strategy: register the broadcaster, then for each of the 4 previously-
 	// duplicated events, publish once and verify the event bus delivered to
 	// exactly one handler per event type.
@@ -108,7 +92,6 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 			_, err := eventBus.Subscribe(tc.eventSubject, func(_ context.Context, ev *bus.Event) error {
 				msg, _ := ws.NewNotification(tc.wsAction, ev.Data)
 				counter.record(msg)
-				recorder.record(msg)
 				return nil
 			})
 			if err != nil {
