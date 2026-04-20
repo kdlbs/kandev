@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { areCLIFlagsEqual } from "./cli-flags";
 import type { CLIFlag } from "@/lib/types/http";
 
-const flag = (f: string, enabled = true, description = ""): CLIFlag => ({ flag: f, enabled, description });
+const flag = (f: string, enabled = true, description = ""): CLIFlag => ({
+  flag: f,
+  enabled,
+  description,
+});
 
 describe("areCLIFlagsEqual", () => {
   it("two empty lists are equal", () => {
