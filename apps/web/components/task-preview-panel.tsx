@@ -57,7 +57,6 @@ export function TaskPreviewPanel({
         {task ? (
           <PreviewSessionTabs
             taskId={task.id}
-            taskTitle={task.title}
             sessionId={sessionId}
             onSessionChange={handleSessionChange}
           />

@@ -8,7 +8,9 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
  * Tests the session tabs on the kanban right-side preview panel:
  * - Every session of the task shows up as a tab
  * - Clicking a tab switches the rendered session body and updates the URL
- * - Closing a tab deletes the session and falls back to the next one
+ *
+ * Session creation and deletion are deliberately NOT exposed in the preview
+ * panel — those live on the full-page task view.
  */
 test.describe("Preview session tabs", () => {
   test("shows all sessions as tabs and switches between them", async ({
@@ -137,30 +139,9 @@ test.describe("Preview session tabs", () => {
     ).not.toBeVisible();
     await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 5_000 });
 
-    // 9. Close the (non-active) primary tab via its x button.
-    //    First switch back so the x is visible (alwaysShowClose only on the active tab),
-    //    then hover the primary tab to reveal the hover x, then click it.
-    //    Simpler: target the close testid directly — Playwright force-clicks through hover state.
-    const primaryClose = testPage.getByTestId(`preview-session-tab-close-${primaryId}`);
-    await primaryTab.hover();
-    await primaryClose.click();
-
-    // 10. Primary tab is gone; secondary remains and is active; content is secondary's.
-    await expect(primaryTab).toHaveCount(0, { timeout: 10_000 });
-    await expect(secondaryTab).toHaveAttribute("data-state", "active");
-    await expect(
-      previewPanel.getByText("secondary-session-response", { exact: false }).first(),
-    ).toBeVisible();
-
-    // 11. Backend reflects the deletion.
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.map((s) => s.id);
-        },
-        { timeout: 10_000, message: "Waiting for primary session to be deleted" },
-      )
-      .toEqual([secondaryId]);
+    // 9. Read-only tab bar: no close buttons and no add button are rendered.
+    await expect(testPage.getByTestId(`preview-session-tab-close-${primaryId}`)).toHaveCount(0);
+    await expect(testPage.getByTestId(`preview-session-tab-close-${secondaryId}`)).toHaveCount(0);
+    await expect(previewPanel.getByRole("button", { name: "+" })).toHaveCount(0);
   });
 });
