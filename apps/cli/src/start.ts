@@ -61,7 +61,7 @@ function findWebServerJs(dir: string): string | null {
       continue;
     }
     for (const entry of entries) {
-      if (entry.isDirectory()) {
+      if (entry.isDirectory() && entry.name !== "node_modules") {
         stack.push(path.join(current, entry.name));
       } else if (entry.isFile() && entry.name === "server.js" && path.basename(current) === "web") {
         return path.join(current, entry.name);

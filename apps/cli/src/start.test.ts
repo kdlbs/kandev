@@ -64,4 +64,11 @@ describe("resolveStandaloneServerPath", () => {
 
     expect(resolveStandaloneServerPath(repoRoot)).toBeNull();
   });
+
+  it("ignores server.js inside node_modules/web/", () => {
+    const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
+    writeFile(path.join(standaloneDir, "node_modules", "web", "server.js"));
+
+    expect(resolveStandaloneServerPath(repoRoot)).toBeNull();
+  });
 });
