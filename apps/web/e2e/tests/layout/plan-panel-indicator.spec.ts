@@ -100,7 +100,8 @@ test.describe("Plan panel auto-open + indicator", () => {
       "plan indicator acknowledge",
       CREATE_PLAN_SCRIPT,
     );
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expect(planTabIndicator(testPage)).toBeVisible();
 
     await session.clickTab("Plan");
 
@@ -124,7 +125,8 @@ test.describe("Plan panel auto-open + indicator", () => {
       "plan indicator update",
       CREATE_PLAN_SCRIPT,
     );
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expect(planTabIndicator(testPage)).toBeVisible();
 
     // Acknowledge then leave back to chat
     await session.clickTab("Plan");
