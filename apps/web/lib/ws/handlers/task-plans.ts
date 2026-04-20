@@ -2,7 +2,6 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type PlanMessage = BackendMessageMap["task.plan.created"] | BackendMessageMap["task.plan.updated"];
 
@@ -18,23 +17,12 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  // Mark user-authored writes as seen regardless of active task so the
-  // indicator never fires spuriously if the user switches tasks mid-save.
+  // User-authored writes: mark seen so the indicator doesn't fire. Panel
+  // reveal is handled reactively by usePlanPanelAutoOpen when an agent
+  // writes a new version the user hasn't seen.
   if (created_by === "user") {
     store.getState().markTaskPlanSeen(task_id);
-    return;
   }
-
-  if (task_id !== store.getState().tasks.activeTaskId) return;
-
-  // Agent-authored: reveal plan panel quietly in the center group so the user
-  // sees the indicator without losing focus. If the panel is already open the
-  // indicator on the tab drives the UI.
-  const dockview = useDockviewStore.getState();
-  if (dockview.isRestoringLayout) return;
-  if (dockview.api?.getPanel("plan")) return;
-
-  dockview.addPlanPanel({ quiet: true, inCenter: true });
 }
 
 export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers {
