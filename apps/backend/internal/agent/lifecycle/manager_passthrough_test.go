@@ -3,8 +3,11 @@ package lifecycle
 import (
 	"context"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // mockPassthroughProfileResolver is a mock for testing passthrough verification
@@ -216,6 +219,43 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestManager_HandlePassthroughExit_SkipsDuringShutdown verifies that the
+// detached goroutine spawned when a passthrough child exits bails out
+// immediately once graceful shutdown has begun, instead of racing the
+// teardown and logging a spurious "failed to auto-restart passthrough
+// session" error. Regression test for the Ctrl+C-in-terminal shutdown
+// noise.
+//
+// Uses testing/synctest so the assertion is "the function returned without
+// any time advancing" — i.e. it short-circuited before the cleanupDelay
+// sleep. Under fake time, a non-short-circuit path would advance by
+// cleanupDelay (and then take the nil-runner branch in the test rig).
+func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager()
+
+		if mgr.IsShuttingDown() {
+			t.Fatal("fresh manager reports IsShuttingDown() == true")
+		}
+
+		if err := mgr.StopAllAgents(context.Background()); err != nil {
+			t.Fatalf("StopAllAgents returned error: %v", err)
+		}
+		if !mgr.IsShuttingDown() {
+			t.Fatal("StopAllAgents did not set IsShuttingDown() = true")
+		}
+
+		execution := &AgentExecution{ID: "exec-1", SessionID: "sess-1"}
+		status := &agentctltypes.ProcessStatusUpdate{SessionID: "sess-1"}
+
+		start := time.Now()
+		mgr.handlePassthroughExit(execution, status)
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("handlePassthroughExit advanced fake time by %v — did not short-circuit during shutdown", elapsed)
+		}
+	})
 }
 
 func TestManager_VerifyPassthroughEnabled(t *testing.T) {

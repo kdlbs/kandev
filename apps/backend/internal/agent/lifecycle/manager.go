@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -82,6 +83,12 @@ type Manager struct {
 	remoteStatusBySession    map[string]*RemoteStatus
 	stopCh                   chan struct{}
 	wg                       sync.WaitGroup
+	// shuttingDown is flipped true when graceful shutdown begins (see
+	// StopAllAgents) so handlers running in detached goroutines can
+	// short-circuit work that would otherwise race the teardown and log
+	// confusing errors against children that already died from the same
+	// terminal-wide SIGINT.
+	shuttingDown atomic.Bool
 
 	// pollAggregator routes hub session-mode events to agentctl. See
 	// manager_subscription.go.
