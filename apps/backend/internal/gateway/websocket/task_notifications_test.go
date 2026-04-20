@@ -75,11 +75,10 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 			evt := bus.NewEvent(subject, "test", data)
 			_ = perEventBus.Publish(context.Background(), subject, evt)
 
-			// MemoryEventBus delivers synchronously. The broadcaster's
-			// handler fires once, our counter fires once → total 2
-			// handlers on the bus. If we only see our 1, fine. If
-			// the broadcaster subscribed twice, we'd see the bus
-			// invoke 3 handlers total.
+			// This verifies that publishing one event reaches our handler exactly
+			// once. Duplicate-subscription detection is handled by the
+			// len(b.subscriptions) guard above; these sub-tests cover event
+			// delivery correctness for the four previously-duplicated subjects.
 			if count != 1 {
 				t.Errorf("counter handler fired %d times, want 1", count)
 			}
@@ -87,9 +86,10 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	}
 }
 
-// TestTaskEventBroadcaster_PreservesAllFields verifies that the broadcaster
-// forwards the full event payload (including turn_id, raw_content, etc.)
-// rather than stripping fields like the old subscribeEventBusHandlers did.
+// TestTaskEventBroadcaster_PreservesAllFields verifies that event data passes through the
+// event bus unmodified — the broadcaster receives the same object that was published,
+// including fields like turn_id, raw_content, and updated_at that the old
+// subscribeEventBusHandlers used to strip before constructing a new payload manually.
 func TestTaskEventBroadcaster_PreservesAllFields(t *testing.T) {
 	log := testLogger()
 	eventBus := bus.NewMemoryEventBus(log)
