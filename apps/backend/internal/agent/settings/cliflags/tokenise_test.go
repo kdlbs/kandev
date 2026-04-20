@@ -82,6 +82,21 @@ func TestResolve_ErrorPointsToOffendingIndex(t *testing.T) {
 	}
 }
 
+// TestTokenise_ErrorsOmitRawInput confirms the error messages surface the
+// error kind and position without embedding the user-authored flag string.
+// Launch-time fallback logs these errors; raw flag content could carry
+// paths or tokens that shouldn't end up in structured logs.
+func TestTokenise_ErrorsOmitRawInput(t *testing.T) {
+	sensitive := `--config "/home/u/.secret/token`
+	_, err := Tokenise(sensitive)
+	if err == nil {
+		t.Fatal("expected error for unterminated quote")
+	}
+	if strings.Contains(err.Error(), "/home/u/.secret/token") {
+		t.Errorf("error should not echo raw flag contents, got: %v", err)
+	}
+}
+
 func TestResolve_AllDisabled_ReturnsNil(t *testing.T) {
 	flags := []models.CLIFlag{
 		{Flag: "--a", Enabled: false},

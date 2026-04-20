@@ -29,7 +29,7 @@ func Tokenise(raw string) ([]string, error) {
 		i = next
 	}
 	if st.quote != 0 {
-		return nil, fmt.Errorf("unterminated %c quote in flag %q", st.quote, raw)
+		return nil, fmt.Errorf("unterminated %c quote", st.quote)
 	}
 	st.flush()
 	return st.tokens, nil
@@ -56,7 +56,7 @@ func (s *tokeniseState) step(raw string, i int) (int, error) {
 		s.inToken = true
 	case '\\':
 		if i+1 >= len(raw) {
-			return i, fmt.Errorf("trailing backslash in flag %q", raw)
+			return i, fmt.Errorf("trailing backslash")
 		}
 		s.current.WriteByte(raw[i+1])
 		s.inToken = true
@@ -80,7 +80,7 @@ func (s *tokeniseState) stepInsideQuote(raw string, i int, ch byte) (int, error)
 	}
 	if ch == '\\' && s.quote == '"' {
 		if i+1 >= len(raw) {
-			return i, fmt.Errorf("trailing backslash inside quote in flag %q", raw)
+			return i, fmt.Errorf("trailing backslash inside %c quote", s.quote)
 		}
 		s.current.WriteByte(raw[i+1])
 		return i + 1, nil

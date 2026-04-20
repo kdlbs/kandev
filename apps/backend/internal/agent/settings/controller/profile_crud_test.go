@@ -71,6 +71,9 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 		{name: "whitespace flag rejected", flags: []dto.CLIFlagDTO{{Flag: "   "}}, wantErr: true},
 		{name: "unterminated quote rejected", flags: []dto.CLIFlagDTO{{Flag: `--msg "hi`}}, wantErr: true},
 		{name: "trailing backslash rejected", flags: []dto.CLIFlagDTO{{Flag: `--path foo\`}}, wantErr: true},
+		{name: "double-quoted empty flag rejected", flags: []dto.CLIFlagDTO{{Flag: `""`}}, wantErr: true},
+		{name: "single-quoted empty flag rejected", flags: []dto.CLIFlagDTO{{Flag: `''`}}, wantErr: true},
+		{name: "flag with empty quoted value accepted", flags: []dto.CLIFlagDTO{{Flag: `--empty ""`}}},
 		{name: "empty list accepted", flags: []dto.CLIFlagDTO{}},
 	}
 	for _, tc := range cases {

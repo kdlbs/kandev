@@ -5,7 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
 } from "../../lib/types/http";
-import type { Agent } from "../../lib/types/http-agents";
+import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 
 // --- GitHub Mock Types ---
 
@@ -261,22 +261,14 @@ export class ApiClient {
     });
   }
 
-  async getAgentProfile(profileId: string): Promise<{
-    id: string;
-    name: string;
-    cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
-  }> {
+  async getAgentProfile(profileId: string): Promise<AgentProfile> {
     // The profile does not have its own GET endpoint; fetch via listAgents
     // and find the matching row. Keeps the helper surface small.
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
         if (profile.id === profileId) {
-          return profile as unknown as {
-            id: string;
-            name: string;
-            cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
-          };
+          return profile;
         }
       }
     }

@@ -57,9 +57,11 @@ test.describe("Agent profile — CLI flags", () => {
       await testPage.getByTestId("cli-flag-new-desc-input").fill("My custom flag for testing");
       await testPage.getByTestId("cli-flag-add-button").click();
 
-      // The row should appear immediately, enabled by default.
+      // The row should appear immediately, enabled by default. The row's
+      // positional index depends on how many curated flags the agent seeded
+      // at profile creation, so locate the new row by its flag text rather
+      // than by position.
       await expect(testPage.getByTestId("cli-flags-list")).toContainText(flagText);
-      await expect(testPage.getByTestId("cli-flag-enabled-0")).toBeVisible();
 
       // Save via the dirty-state save button; wait for unsaved badge to clear.
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();

@@ -163,8 +163,17 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 		if strings.TrimSpace(f.Flag) == "" {
 			return fmt.Errorf("cli_flags[%d].flag is required", i)
 		}
-		if _, err := cliflags.Tokenise(f.Flag); err != nil {
+		tokens, err := cliflags.Tokenise(f.Flag)
+		if err != nil {
 			return fmt.Errorf("cli_flags[%d]: %w", i, err)
+		}
+		// Reject entries where the primary token (the flag name itself) is
+		// empty — e.g. `""` or `''` passes TrimSpace but tokenises to a
+		// single blank argv element, which would reach the subprocess
+		// argv and likely confuse the agent. Secondary tokens can still
+		// be empty (`--empty ""` legitimately passes an empty value).
+		if len(tokens) == 0 || tokens[0] == "" {
+			return fmt.Errorf("cli_flags[%d].flag is required", i)
 		}
 	}
 	return nil
