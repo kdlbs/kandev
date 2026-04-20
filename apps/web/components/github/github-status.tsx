@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { IconCheck, IconX, IconRefresh, IconKey, IconTrash, IconEye, IconEyeOff } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconX,
+  IconRefresh,
+  IconKey,
+  IconTrash,
+  IconEye,
+  IconEyeOff,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -41,23 +49,26 @@ function TokenConfigForm({ onSuccess }: { onSuccess: () => void }) {
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token.trim()) return;
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!token.trim()) return;
 
-    setSaving(true);
-    try {
-      await configureGitHubToken(token.trim());
-      toast({ description: "GitHub token configured successfully", variant: "success" });
-      setToken("");
-      onSuccess();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to configure token";
-      toast({ description: message, variant: "error" });
-    } finally {
-      setSaving(false);
-    }
-  }, [token, toast, onSuccess]);
+      setSaving(true);
+      try {
+        await configureGitHubToken(token.trim());
+        toast({ description: "GitHub token configured successfully", variant: "success" });
+        setToken("");
+        onSuccess();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to configure token";
+        toast({ description: message, variant: "error" });
+      } finally {
+        setSaving(false);
+      }
+    },
+    [token, toast, onSuccess],
+  );
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -77,10 +88,19 @@ function TokenConfigForm({ onSuccess }: { onSuccess: () => void }) {
             className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 cursor-pointer"
             onClick={() => setShowToken(!showToken)}
           >
-            {showToken ? <IconEyeOff className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
+            {showToken ? (
+              <IconEyeOff className="h-3.5 w-3.5" />
+            ) : (
+              <IconEye className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
-        <Button type="submit" size="sm" disabled={!token.trim() || saving} className="cursor-pointer">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!token.trim() || saving}
+          className="cursor-pointer"
+        >
           {saving ? <Spinner className="h-4 w-4" /> : <IconKey className="h-4 w-4 mr-1" />}
           Configure
         </Button>
