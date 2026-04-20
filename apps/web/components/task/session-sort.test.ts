@@ -40,19 +40,21 @@ describe("sortSessions", () => {
 });
 
 describe("resolveAgentLabelFor", () => {
-  it("prefers label from agent_profile_snapshot when present", () => {
+  it("prefers the current store label when the profile still exists", () => {
     const session = makeSession({
       agent_profile_id: "p1",
       agent_profile_snapshot: { label: "Snapshot Agent" },
     });
     const labels = buildAgentLabelsById([{ id: "p1", label: "Store Agent" } as never]);
-    expect(resolveAgentLabelFor(session, labels)).toBe("Snapshot Agent");
+    expect(resolveAgentLabelFor(session, labels)).toBe("Store Agent");
   });
 
-  it("falls back to store label when snapshot label is missing", () => {
-    const session = makeSession({ agent_profile_id: "p1" });
-    const labels = buildAgentLabelsById([{ id: "p1", label: "Store Agent" } as never]);
-    expect(resolveAgentLabelFor(session, labels)).toBe("Store Agent");
+  it("falls back to snapshot label when the profile is no longer in the store", () => {
+    const session = makeSession({
+      agent_profile_id: "deleted",
+      agent_profile_snapshot: { label: "Snapshot Agent" },
+    });
+    expect(resolveAgentLabelFor(session, {})).toBe("Snapshot Agent");
   });
 
   it("returns 'Unknown agent' when both are missing", () => {

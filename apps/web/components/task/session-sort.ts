@@ -24,13 +24,26 @@ export function buildAgentLabelsById(
   return Object.fromEntries(agentProfiles.map((p) => [p.id, p.label]));
 }
 
+/**
+ * Resolves the display label for a session's agent.
+ *
+ * Store first so that renaming an agent profile is reflected everywhere that
+ * calls this (matches the long-standing dropdown behavior). Falls back to the
+ * snapshot label only when the profile is no longer in the store — that keeps
+ * tabs/rows for sessions whose profile was deleted from rendering as
+ * "Unknown agent".
+ */
 export function resolveAgentLabelFor(
   session: TaskSession,
   agentLabelsById: Record<string, string>,
 ): string {
+  const storeLabel = session.agent_profile_id
+    ? (agentLabelsById[session.agent_profile_id] ?? null)
+    : null;
+  if (storeLabel) return storeLabel;
   const snapshotLabel = (session.agent_profile_snapshot?.label as string | undefined) ?? null;
   if (snapshotLabel) return snapshotLabel;
-  return (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) || "Unknown agent";
+  return "Unknown agent";
 }
 
 export function pickActiveSessionId(

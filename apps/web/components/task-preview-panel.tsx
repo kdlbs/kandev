@@ -10,7 +10,7 @@ interface TaskPreviewPanelProps {
   sessionId?: string | null;
   onClose: () => void;
   onMaximize?: (task: Task) => void;
-  onSessionChange?: (sessionId: string) => void;
+  onSessionChange?: (sessionId: string | null) => void;
 }
 
 export function TaskPreviewPanel({
@@ -20,7 +20,7 @@ export function TaskPreviewPanel({
   onMaximize,
   onSessionChange,
 }: TaskPreviewPanelProps) {
-  const handleSessionChange = (nextSessionId: string) => {
+  const handleSessionChange = (nextSessionId: string | null) => {
     onSessionChange?.(nextSessionId);
   };
 

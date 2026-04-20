@@ -21,7 +21,7 @@ type PreviewSessionTabsProps = {
   taskId: string;
   taskTitle: string;
   sessionId: string | null;
-  onSessionChange: (sessionId: string) => void;
+  onSessionChange: (sessionId: string | null) => void;
 };
 
 export function PreviewSessionTabs({
@@ -59,8 +59,10 @@ export function PreviewSessionTabs({
       }
       loadSessions(true);
       if (deletedId === activeSessionId) {
-        const next = pickActiveSessionId(remaining, null);
-        if (next) onSessionChange(next);
+        // Always propagate — when `remaining` is empty, `next` is null and the
+        // parent must clear its userSelectedSessionId so the URL doesn't keep
+        // the deleted id.
+        onSessionChange(pickActiveSessionId(remaining, null));
       }
     },
     [sortedSessions, activeSessionId, loadSessions, onSessionChange],

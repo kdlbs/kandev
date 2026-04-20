@@ -43,6 +43,10 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
 
     if (selectedTaskId && selectedTaskSessionId) {
       url.searchParams.set("sessionId", selectedTaskSessionId);
+    } else if (selectedTaskId) {
+      // Task still open but no active session (e.g. all sessions deleted) —
+      // drop any stale sessionId from the URL.
+      url.searchParams.delete("sessionId");
     }
 
     window.history.replaceState({}, "", url.toString());
@@ -269,7 +273,7 @@ type PreviewLayoutProps = {
   onPreviewTask: (task: Task) => void;
   onNavigateToTask: (task: Task) => void;
   onClose: () => void;
-  onSessionChange: (sessionId: string) => void;
+  onSessionChange: (sessionId: string | null) => void;
   onResizeMouseDown: (e: React.MouseEvent) => void;
 };
 
