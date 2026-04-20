@@ -1,12 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@kandev/ui/command";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@kandev/ui/command";
 import { cn } from "@/lib/utils";
 
-export type MultiSelectOption = { value: string; label: string; color?: string };
+export type MultiSelectOption = { value: string; label: string; color?: string; group?: string };
 
 type Props = {
   options: MultiSelectOption[];
@@ -61,29 +69,91 @@ export function FilterMultiSelect({
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
             <CommandEmpty>No options.</CommandEmpty>
-            {options.map((opt) => {
-              const checked = selectedSet.has(opt.value);
-              return (
-                <CommandItem
-                  key={opt.value}
-                  value={opt.label}
-                  onSelect={() => toggle(opt.value)}
-                  data-checked={checked}
-                  data-testid="filter-value-multi-option"
-                  data-value={opt.value}
-                  data-active={checked}
-                >
-                  {opt.color && (
-                    <span className={cn("mr-1 block h-2 w-2 shrink-0 rounded-full", opt.color)} />
-                  )}
-                  <span className="truncate">{opt.label}</span>
-                </CommandItem>
-              );
-            })}
+            <GroupedOptions options={options} selectedSet={selectedSet} onToggle={toggle} />
           </CommandList>
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function GroupedOptions({
+  options,
+  selectedSet,
+  onToggle,
+}: {
+  options: MultiSelectOption[];
+  selectedSet: Set<string>;
+  onToggle: (value: string) => void;
+}) {
+  const hasGroups = options.some((o) => o.group);
+  if (!hasGroups) {
+    return (
+      <>
+        {options.map((opt) => (
+          <OptionRow
+            key={opt.value}
+            option={opt}
+            checked={selectedSet.has(opt.value)}
+            onSelect={() => onToggle(opt.value)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  const groups: Array<{ heading: string; items: MultiSelectOption[] }> = [];
+  for (const opt of options) {
+    const heading = opt.group ?? "";
+    const last = groups[groups.length - 1];
+    if (last && last.heading === heading) last.items.push(opt);
+    else groups.push({ heading, items: [opt] });
+  }
+
+  return (
+    <>
+      {groups.map((g, idx) => (
+        <Fragment key={g.heading || `__ungrouped__${idx}`}>
+          {idx > 0 && <CommandSeparator />}
+          <CommandGroup heading={g.heading || undefined}>
+            {g.items.map((opt) => (
+              <OptionRow
+                key={opt.value}
+                option={opt}
+                checked={selectedSet.has(opt.value)}
+                onSelect={() => onToggle(opt.value)}
+              />
+            ))}
+          </CommandGroup>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function OptionRow({
+  option,
+  checked,
+  onSelect,
+}: {
+  option: MultiSelectOption;
+  checked: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <CommandItem
+      value={`${option.group ? `${option.group} ` : ""}${option.label}`}
+      onSelect={onSelect}
+      data-checked={checked}
+      data-testid="filter-value-multi-option"
+      data-value={option.value}
+      data-active={checked}
+    >
+      {option.color && (
+        <span className={cn("mr-1 block h-2 w-2 shrink-0 rounded-full", option.color)} />
+      )}
+      <span className="truncate">{option.label}</span>
+    </CommandItem>
   );
 }
 

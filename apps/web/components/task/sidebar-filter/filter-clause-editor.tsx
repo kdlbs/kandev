@@ -1,7 +1,17 @@
 "use client";
 
 import { IconX } from "@tabler/icons-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@kandev/ui/select";
+import { Fragment } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,7 +25,7 @@ import { DIMENSION_METAS, getDimensionMeta, getOpLabel } from "./filter-dimensio
 import { useFilterValueOptions } from "./use-filter-value-options";
 import { FilterMultiSelect } from "./filter-multi-select";
 
-type ValueOption = { value: string; label: string; color?: string };
+type ValueOption = { value: string; label: string; color?: string; group?: string };
 
 function OptionLabel({ option }: { option: ValueOption }) {
   return (
@@ -183,17 +193,55 @@ function ValueInput({
         <SelectValue placeholder="Select value" />
       </SelectTrigger>
       <SelectContent>
-        {options.length === 0 && (
+        {options.length === 0 ? (
           <SelectItem value="__empty__" disabled className="text-xs">
             No options
           </SelectItem>
+        ) : (
+          <GroupedSelectItems options={options} />
         )}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function GroupedSelectItems({ options }: { options: ValueOption[] }) {
+  const hasGroups = options.some((o) => o.group);
+  if (!hasGroups) {
+    return (
+      <>
         {options.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="text-xs">
             <OptionLabel option={opt} />
           </SelectItem>
         ))}
-      </SelectContent>
-    </Select>
+      </>
+    );
+  }
+
+  const groups: Array<{ heading: string; items: ValueOption[] }> = [];
+  for (const opt of options) {
+    const heading = opt.group ?? "";
+    const last = groups[groups.length - 1];
+    if (last && last.heading === heading) last.items.push(opt);
+    else groups.push({ heading, items: [opt] });
+  }
+
+  return (
+    <>
+      {groups.map((g, idx) => (
+        <Fragment key={g.heading || `__ungrouped__${idx}`}>
+          {idx > 0 && <SelectSeparator />}
+          <SelectGroup>
+            {g.heading && <SelectLabel>{g.heading}</SelectLabel>}
+            {g.items.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                <OptionLabel option={opt} />
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </Fragment>
+      ))}
+    </>
   );
 }
