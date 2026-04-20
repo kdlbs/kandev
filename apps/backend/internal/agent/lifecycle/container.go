@@ -349,10 +349,11 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 	)
 
 	// If GitHub token is provided, add credential helper
+	// Use ${GH_TOKEN:-${GITHUB_TOKEN}} to support either env var being set
 	if config.Credentials["GH_TOKEN"] != "" || config.Credentials["GITHUB_TOKEN"] != "" {
 		env = append(env,
 			"GIT_CONFIG_KEY_3=credential.https://github.com.helper",
-			`GIT_CONFIG_VALUE_3=!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f`,
+			`GIT_CONFIG_VALUE_3=!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-${GITHUB_TOKEN}}"; }; f`,
 		)
 		gitConfigCount = 4
 	}

@@ -189,10 +189,12 @@ gh config set git_protocol https --host github.com 2>/dev/null || true`
 		}
 
 		// Build auth setup script that configures both gh CLI and git
+		// Use /bin/sh (not /bin/bash) for Alpine compatibility
+		// Use ${GH_TOKEN:-${GITHUB_TOKEN}} to support either env var being set
 		lines := []string{
 			"# GitHub token authentication",
 			"# Configure git credential helper for GitHub HTTPS authentication",
-			"git config --global credential.https://github.com.helper '!/bin/bash -c \"echo username=x-access-token; echo password=$GH_TOKEN\"'",
+			`git config --global credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
 			"# Configure gh CLI to use HTTPS protocol",
 			"gh config set git_protocol https --host github.com 2>/dev/null || true",
 			"# Register gh as git credential helper (backup method)",

@@ -174,6 +174,16 @@ func TestResolveGHCLIToken(t *testing.T) {
 			expectSkip: true,
 		},
 		{
+			name: "skip if GH_TOKEN already set",
+			metadata: map[string]interface{}{
+				"remote_credentials": `["gh_cli_token"]`,
+			},
+			existingEnv: map[string]string{
+				envGHToken: "existing-gh-token",
+			},
+			expectSkip: true,
+		},
+		{
 			name: "invalid JSON ignored",
 			metadata: map[string]interface{}{
 				"remote_credentials": `{invalid}`,
@@ -190,13 +200,17 @@ func TestResolveGHCLIToken(t *testing.T) {
 			if req.Env == nil {
 				req.Env = make(map[string]string)
 			}
-			initialToken := req.Env[envGitHubToken]
+			initialGHToken := req.Env[envGitHubToken]
+			initialGH := req.Env[envGHToken]
 
 			executor.resolveGHCLIToken(req, tt.metadata)
 
 			if tt.expectSkip {
-				if req.Env[envGitHubToken] != initialToken {
-					t.Errorf("expected GITHUB_TOKEN to remain %q, got %q", initialToken, req.Env[envGitHubToken])
+				if req.Env[envGitHubToken] != initialGHToken {
+					t.Errorf("expected GITHUB_TOKEN to remain %q, got %q", initialGHToken, req.Env[envGitHubToken])
+				}
+				if req.Env[envGHToken] != initialGH {
+					t.Errorf("expected GH_TOKEN to remain %q, got %q", initialGH, req.Env[envGHToken])
 				}
 			}
 		})

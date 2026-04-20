@@ -56,6 +56,9 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
 
+# Strip embedded token from remote URL to avoid persisting credentials in .git/config
+git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
 `
@@ -92,6 +95,9 @@ npm install -g pnpm > /dev/null 2>&1
 echo "Cloning {{repository.clone_url}} (branch: {{repository.branch}})..."
 git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
+
+# Strip embedded token from remote URL to avoid persisting credentials in .git/config
+git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
 
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
