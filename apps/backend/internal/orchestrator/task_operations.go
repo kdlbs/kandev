@@ -1539,7 +1539,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
 		// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
 		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
-		if !isTransientPromptError(err) {
+		// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
+		// force-unblock a hung agent. That is not a "review this failure" condition —
+		// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
+		// complete turn) already.
+		if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 		}
 		s.completeTurnForSession(ctx, sessionID)
