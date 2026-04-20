@@ -20,8 +20,11 @@ export function HeaderOverflowMenu({
   showReleaseNotes,
   onOpenReleaseNotes,
 }: HeaderOverflowMenuProps) {
-  const { available: refreshAvailable, loading: refreshLoading, trigger: triggerRefresh } =
-    useRefreshReviews();
+  const {
+    available: refreshAvailable,
+    loading: refreshLoading,
+    trigger: triggerRefresh,
+  } = useRefreshReviews();
 
   return (
     <DropdownMenu>
