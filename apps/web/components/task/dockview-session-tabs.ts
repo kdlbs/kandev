@@ -181,101 +181,148 @@ export function useAutoPRPanel() {
   }, [taskId, hasPR, hasApi, sessionId]);
 }
 
-/** Remove panels for terminal sessions that are no longer active. */
-function cleanupTerminalSessionPanels(
-  api: DockviewReadyEvent["api"],
+function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+  const { centerGroupId } = useDockviewStore.getState();
+  const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+  if (centerGroupExists) return { referenceGroup: centerGroupId };
+  const sb = api.getPanel("sidebar");
+  if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
+  return undefined;
+}
+
+function ensureSessionPanel(
+  api: DockviewApi,
+  sessionId: string,
+  position: AddPanelOptions["position"],
+  inactive: boolean,
   createdSet: Set<string>,
-  activeSessionId: string,
-  sessions: Record<string, { state?: string }>,
 ): void {
-  for (const panelId of [...createdSet]) {
-    if (panelId === activeSessionId) continue;
-    const sess = sessions[panelId];
-    if (!sess) continue;
-    if (sess.state === "COMPLETED" || sess.state === "CANCELLED" || sess.state === "FAILED") {
-      const stalePanel = api.getPanel(`session:${panelId}`);
-      if (stalePanel) {
-        try {
-          stalePanel.api.close();
-        } catch {
-          /* already gone */
-        }
+  if (api.getPanel(`session:${sessionId}`)) {
+    createdSet.add(sessionId);
+    return;
+  }
+  api.addPanel({
+    id: `session:${sessionId}`,
+    component: "chat",
+    tabComponent: "sessionTab",
+    title: "Agent",
+    params: { sessionId },
+    position,
+    inactive,
+  });
+  createdSet.add(sessionId);
+}
+
+/** Close panels we previously created for sessions no longer in the task's list. */
+function reconcileRemovedSessionPanels(
+  api: DockviewApi,
+  createdSet: Set<string>,
+  currentSessionIds: string[],
+  keepSessionId: string,
+): void {
+  const currentIds = new Set(currentSessionIds);
+  for (const createdId of [...createdSet]) {
+    if (createdId === keepSessionId) continue;
+    if (currentIds.has(createdId)) continue;
+    const stalePanel = api.getPanel(`session:${createdId}`);
+    if (stalePanel) {
+      try {
+        stalePanel.api.close();
+      } catch {
+        /* already gone */
       }
-      createdSet.delete(panelId);
     }
+    createdSet.delete(createdId);
   }
 }
 
+const EMPTY_SESSION_IDS_KEY = "";
+
 /**
- * Auto-create a session tab when a session becomes active.
- * Replaces the generic "chat" panel with a per-session tab on first use.
+ * Open a dockview tab for every session of the active task and keep them in sync
+ * with the store.
+ *
+ * - On mount / session-list change: create a panel for each session if one does
+ *   not exist yet. Siblings are added adjacent to the active session's group so
+ *   they show up as tabs in the center area.
+ * - The panel for `effectiveSessionId` is the active tab; the rest are added
+ *   inactive so switching the active session doesn't blow focus out of the
+ *   already-open layout.
+ * - Deleted sessions have their panels closed.
  */
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
   const appStore = useAppStoreApi();
+
+  // Key-based dependency so the effect re-runs when the task's session list
+  // changes (add/remove). Inside the effect we re-read the real array from
+  // the store so we don't capture a stale reference.
+  const sessionIdsKey = useAppStore((s) => {
+    const tid = s.tasks.activeTaskId;
+    if (!tid) return EMPTY_SESSION_IDS_KEY;
+    const list = s.taskSessionsByTask.itemsByTaskId[tid];
+    if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
+    return list.map((ss) => ss.id).join(",");
+  });
+
   useEffect(() => {
     if (!effectiveSessionId) return;
     const api = useDockviewStore.getState().api;
     if (!api) return;
 
-    // Always remove the generic "chat" panel when a session is active —
-    // it's replaced by per-session tabs. Must run before the early return
-    // so restored layouts with both "chat" and session panels get cleaned up.
-    // Skip removal in maximized state to avoid triggering the safety net
-    // which could disrupt the saved maximize layout.
+    // Remove the generic "chat" placeholder as soon as a real session is
+    // active — per-session tabs replace it. Skip in maximized state to
+    // preserve the saved maximize layout.
     const chatPanel = api.getPanel("chat");
     if (chatPanel && !useDockviewStore.getState().preMaximizeLayout) {
       api.removePanel(chatPanel);
     }
-    if (api.getPanel(`session:${effectiveSessionId}`)) {
-      sessionTabCreatedRef.current.add(effectiveSessionId);
-      // Activate the existing panel so it comes to focus
-      const existingPanel = api.getPanel(`session:${effectiveSessionId}`);
-      if (existingPanel) existingPanel.api.setActive();
-      return;
-    }
-    // In maximized state the session panel is intentionally absent from the layout;
-    // it will be restored when the user exits maximize (via preMaximizeLayout).
-    // Adding it here would destroy the saved maximize layout.
+
+    // In maximized state, session panels are intentionally absent from the
+    // layout — they'll be restored when the user exits maximize.
     if (useDockviewStore.getState().preMaximizeLayout !== null) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
       return;
     }
-    // Resolve position: prefer centerGroupId if the group still exists,
-    // fall back to placing right of sidebar, or omit position entirely.
-    const { centerGroupId } = useDockviewStore.getState();
-    const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
-    let position: AddPanelOptions["position"];
-    if (centerGroupExists) {
-      position = { referenceGroup: centerGroupId };
-    } else {
-      const sb = api.getPanel("sidebar");
-      if (sb) {
-        position = { direction: "right" as const, referencePanel: "sidebar" };
-      }
-    }
-    api.addPanel({
-      id: `session:${effectiveSessionId}`,
-      component: "chat",
-      tabComponent: "sessionTab",
-      title: "Agent",
-      params: { sessionId: effectiveSessionId },
-      position,
-    });
-    const panel = api.getPanel(`session:${effectiveSessionId}`);
-    if (panel) {
-      panel.api.setActive();
-      useDockviewStore.setState({ centerGroupId: panel.group.id });
-    }
-    sessionTabCreatedRef.current.add(effectiveSessionId);
 
-    // Clean up panels for completed intermediate sessions (e.g., sessions
-    // created during on_turn_start profile switch that were immediately completed).
-    cleanupTerminalSessionPanels(
+    const initialPosition = resolveInitialPosition(api);
+
+    // Active panel first so its group becomes the anchor for siblings.
+    ensureSessionPanel(
+      api,
+      effectiveSessionId,
+      initialPosition,
+      false,
+      sessionTabCreatedRef.current,
+    );
+    const activePanel = api.getPanel(`session:${effectiveSessionId}`);
+    if (activePanel) {
+      activePanel.api.setActive();
+      useDockviewStore.setState({ centerGroupId: activePanel.group.id });
+    }
+
+    // Re-read the current session list straight from the store so we iterate
+    // the live array (sessionIdsKey change is what gets us here).
+    const tid = appStore.getState().tasks.activeTaskId;
+    const currentSessions = tid
+      ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
+      : [];
+    const currentSessionIds = currentSessions.map((s) => s.id);
+
+    const siblingAnchor: AddPanelOptions["position"] = activePanel
+      ? { referenceGroup: activePanel.group.id }
+      : initialPosition;
+
+    for (const sid of currentSessionIds) {
+      if (sid === effectiveSessionId) continue;
+      ensureSessionPanel(api, sid, siblingAnchor, true, sessionTabCreatedRef.current);
+    }
+
+    reconcileRemovedSessionPanels(
       api,
       sessionTabCreatedRef.current,
+      currentSessionIds,
       effectiveSessionId,
-      appStore.getState().taskSessions.items,
     );
-  }, [effectiveSessionId, appStore]);
+  }, [effectiveSessionId, sessionIdsKey, appStore]);
 }
