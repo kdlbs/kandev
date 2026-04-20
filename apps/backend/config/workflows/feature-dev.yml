@@ -151,6 +151,12 @@ steps:
       - Only report findings you're >=80% confident about.
 
       Do NOT report issues on code that was not modified in this branch.
+
+      STEP 4: COMMIT ANY FIXES YOU MADE
+      If you made direct fixes in STEP 3:
+      - Run `git status` to see what changed.
+      - Stage and commit the fixes with a descriptive message (e.g. `review: remove dead code` or `review: early returns in X`).
+      - Do not leave the tree dirty — QA runs next and must see a clean state.
     events:
       on_enter:
         - type: reset_agent_context
