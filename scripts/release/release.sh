@@ -341,7 +341,7 @@ ensure_prerequisites() {
   log_ok "Working tree is clean"
 
   log "Fetching tags from origin..."
-  run_cmd git -C "$ROOT_DIR" fetch --tags
+  run_cmd git -C "$ROOT_DIR" fetch --tags origin
   log_ok "Tags fetched"
 }
 

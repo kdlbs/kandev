@@ -127,6 +127,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreePath:     worktreePath,
 		WorktreeBranch:   worktreeBranch,
 		Metadata:         execution.Metadata,
+		PrepareResult:    execution.PrepareResult,
 	}, nil
 }
 

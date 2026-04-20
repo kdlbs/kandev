@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 
 /**
  * Verifies the ACP-first profile editor:
@@ -8,8 +9,10 @@ import { test, expect } from "../../fixtures/test-base";
  *   moved to ACP session modes + per-tool-call permission_request prompts.
  * - Profile name edits persist across reload (exercises the new AgentProfile
  *   DTO shape with `mode` / `migrated_from` columns).
- * - Mode picker is hidden when the agent's capability cache has no modes —
- *   the mock agent in E2E isn't probed so no mode data flows through.
+ * - Mode picker renders when the agent's capability cache advertises modes.
+ *   The E2E mock agent advertises modes in NewSession so the picker appears.
+ * - Profile mode propagates to the session UI: mode selector visible with the
+ *   correct active mode after launching a task with a non-default profile mode.
  */
 test.describe("Agent profile — ACP-first", () => {
   test("profile editor loads with model picker and without legacy permission toggles", async ({
@@ -36,9 +39,8 @@ test.describe("Agent profile — ACP-first", () => {
     await expect(testPage.getByText(/Skip Permissions/i)).toHaveCount(0);
     await expect(testPage.getByText(/dangerously skip/i)).toHaveCount(0);
 
-    // The mock agent isn't an InferenceAgent, so the host utility cache has no
-    // modes for it and the mode picker is not rendered.
-    await expect(testPage.getByTestId("profile-mode-field")).toHaveCount(0);
+    // The mock agent advertises modes, so the mode picker is rendered.
+    await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });
   });
 
   test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
@@ -83,6 +85,62 @@ test.describe("Agent profile — ACP-first", () => {
       // fixture stays valid for subsequent tests — even if an assertion
       // above failed.
       await apiClient.updateAgentProfile(profile.id, { name: originalName });
+    }
+  });
+
+  test("profile mode propagates to session mode selector", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT", "REVIEW"];
+
+    // 1. Get mock agent and create a profile with mode "plan-mock"
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Mode Test Profile", {
+      model: "mock-fast",
+      mode: "plan-mock",
+    });
+
+    try {
+      // 2. Create task using the profile with mode set
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Mode Selector Test",
+        profile.id,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+
+      // 3. Wait for session to finish its first turn
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(task.id);
+            return DONE_STATES.includes(sessions[0]?.state ?? "");
+          },
+          { timeout: 30_000, message: "Waiting for session to finish" },
+        )
+        .toBe(true);
+
+      // 4. Navigate to the task session
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      // 5. Assert the mode selector is visible and shows the profile mode
+      const modeSelector = testPage.getByTestId("session-mode-selector");
+      await expect(modeSelector).toBeVisible({ timeout: 15_000 });
+      await expect(modeSelector).toContainText("Plan Mock");
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
     }
   });
 });

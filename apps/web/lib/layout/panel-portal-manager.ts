@@ -55,6 +55,24 @@ type Listener = () => void;
 export class PanelPortalManager {
   private entries = new Map<string, PortalEntry>();
   private listeners = new Set<Listener>();
+  private version = 0;
+
+  /** Monotonic counter bumped on every change — used as a render key by consumers. */
+  getVersion(): number {
+    return this.version;
+  }
+
+  /**
+   * Update a panel's params in place. Triggered by `api.onDidParametersChange`
+   * after `updateParameters` is called on an existing panel (preview tabs).
+   */
+  updateParams(panelId: string, params: Record<string, unknown>): void {
+    const entry = this.entries.get(panelId);
+    if (!entry) return;
+    entry.params = params;
+    this.version++;
+    this.notify();
+  }
 
   /**
    * Get or create the portal entry for a panel.
@@ -74,6 +92,7 @@ export class PanelPortalManager {
       el.dataset.portalPanel = panelId;
       entry = { element: el, component, params, api, sessionId };
       this.entries.set(panelId, entry);
+      this.version++;
       this.notify();
     } else {
       // Panel remounted after fromJSON — update api & params
@@ -91,6 +110,7 @@ export class PanelPortalManager {
     entry.element.remove();
     entry.api = null;
     this.entries.delete(panelId);
+    this.version++;
     this.notify();
   }
 
@@ -109,6 +129,7 @@ export class PanelPortalManager {
       entry.api = null;
       this.entries.delete(panelId);
     }
+    this.version++;
     this.notify();
   }
 
@@ -131,6 +152,7 @@ export class PanelPortalManager {
       entry.api = null;
       this.entries.delete(panelId);
     }
+    this.version++;
     this.notify();
   }
 
@@ -142,6 +164,7 @@ export class PanelPortalManager {
       entry.api = null;
     }
     this.entries.clear();
+    this.version++;
     this.notify();
   }
 

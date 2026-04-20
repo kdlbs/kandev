@@ -129,6 +129,10 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if savedLayouts == nil {
 		savedLayouts = []models.SavedLayout{}
 	}
+	sidebarViews := settings.SidebarViews
+	if sidebarViews == nil {
+		sidebarViews = []models.SidebarView{}
+	}
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
@@ -150,6 +154,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"lsp_auto_install_languages":      lspAutoInstall,
 		"lsp_server_configs":              lspServerConfigs,
 		"saved_layouts":                   savedLayouts,
+		"sidebar_views":                   sidebarViews,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              keyboardShortcuts,
@@ -200,6 +205,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
+		settings.SidebarViews = []models.SidebarView{}
 		return settings, nil
 	}
 	var payload struct {
@@ -219,6 +225,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 		LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 		SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
+		SidebarViews                []models.SidebarView              `json:"sidebar_views"`
 		DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 		DefaultUtilityModel         string                            `json:"default_utility_model"`
 		KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`
@@ -266,6 +273,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.SavedLayouts = payload.SavedLayouts
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
+	}
+	settings.SidebarViews = payload.SidebarViews
+	if settings.SidebarViews == nil {
+		settings.SidebarViews = []models.SidebarView{}
 	}
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel

@@ -291,7 +291,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
                 className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
               />
             )}
-            <DockviewDefaultTab {...props} />
+            <DockviewDefaultTab {...props} hideClose={sessionCount <= 1} />
           </div>
         </ContextMenuTrigger>
         <SessionContextMenuItems

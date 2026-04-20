@@ -404,6 +404,9 @@ func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionI
 func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error {
 	return nil
 }
+func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	return nil
+}
 
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {

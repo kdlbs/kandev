@@ -119,6 +119,45 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 	}
 }
 
+// TestPromptTask_CancelEscalatedDoesNotMoveTaskToReview ensures that when the
+// lifecycle manager force-unblocks a hung agent (returning ErrCancelEscalated
+// wrapped in the agent-error format), PromptTask recognises it as a cancel and
+// leaves the task state untouched — the user cancelled, this is not a failure
+// the reviewer needs to look at. Service.CancelAgent reconciles session state
+// separately; PromptTask must not race ahead with UpdateTaskState(REVIEW).
+func TestPromptTask_CancelEscalatedDoesNotMoveTaskToReview(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptErr:      fmt.Errorf("agent error: cancel escalated: agent did not complete turn within timeout: %w", lifecycle.ErrCancelEscalated),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	if err == nil {
+		t.Fatal("expected cancel-escalated error to bubble up from PromptTask")
+	}
+	if !errors.Is(err, lifecycle.ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
+	}
+
+	if got, ok := taskRepo.updatedStates["task1"]; ok && got == v1.TaskStateReview {
+		t.Fatalf("expected task state to avoid REVIEW on cancel escalation, got %q", got)
+	}
+}
+
 // TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts ensures that when
 // Prompt returns executor.ErrExecutionNotFound, PromptTask reverts the session
 // state via the broadcasting wrapper (not a direct repo write), so the WS

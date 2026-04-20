@@ -108,6 +108,11 @@ type Adapter struct {
 	// Used by SetModel to validate the requested model exists.
 	availableModels []acp.UnstableModelInfo
 
+	// Available modes from the most recent session creation/load.
+	// Used by SetMode to include cached modes in the event so the
+	// frontend mode selector can render available options.
+	availableModes []streams.SessionModeInfo
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -294,8 +299,11 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 
 // filterMcpServersByCapabilities removes MCP servers that the agent doesn't support.
 // Stdio servers are always allowed; SSE/HTTP servers require the corresponding capability.
+// If multiple servers share the same name (e.g., dual SSE+HTTP injection), only the first
+// surviving entry is kept to prevent duplicate tool registration.
 func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapabilities, logger *logger.Logger) []types.McpServer {
 	filtered := make([]types.McpServer, 0, len(servers))
+	seenNames := make(map[string]bool)
 	for _, s := range servers {
 		switch s.Type {
 		case "sse":
@@ -309,6 +317,12 @@ func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapab
 				continue
 			}
 		}
+		// Skip duplicate names - first surviving entry wins
+		if seenNames[s.Name] {
+			logger.Debug("skipping duplicate MCP server name", zap.String("name", s.Name), zap.String("type", s.Type))
+			continue
+		}
+		seenNames[s.Name] = true
 		filtered = append(filtered, s)
 	}
 	return filtered
@@ -1022,6 +1036,11 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 			Description: derefStr(m.Description),
 		})
 	}
+	// Cache available modes so SetMode can include them in subsequent events.
+	a.mu.Lock()
+	a.availableModes = availModes
+	a.mu.Unlock()
+
 	a.sendUpdate(AgentEvent{
 		Type:           streams.EventTypeSessionMode,
 		SessionID:      a.sessionID,
@@ -1094,10 +1113,15 @@ func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
 		return fmt.Errorf("set session mode failed: %w", err)
 	}
 
+	a.mu.RLock()
+	cachedModes := a.availableModes
+	a.mu.RUnlock()
+
 	a.sendUpdate(AgentEvent{
-		Type:          streams.EventTypeSessionMode,
-		SessionID:     sessionID,
-		CurrentModeID: modeID,
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      sessionID,
+		CurrentModeID:  modeID,
+		AvailableModes: cachedModes,
 	})
 	return nil
 }

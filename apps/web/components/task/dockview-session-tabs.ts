@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { DockviewReadyEvent, AddPanelOptions } from "dockview-react";
+import type { DockviewApi, DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 
 /**
@@ -100,6 +100,23 @@ export function shouldAutoAddPRPanel(params: {
 }
 
 /**
+ * Resolve the group ID to anchor the PR detail panel to.
+ *
+ * Preference: the live session chat panel's group. It's the group the user is
+ * actively looking at, and reading it directly avoids the stale-id window the
+ * store's centerGroupId has across layout transitions (which caused the PR
+ * panel to land in a split instead of as a tab next to the session).
+ */
+export function resolvePRPanelTargetGroup(
+  api: DockviewApi,
+  sessionId: string,
+  centerGroupId: string,
+): string {
+  const sessionPanel = api.getPanel(`session:${sessionId}`);
+  return sessionPanel?.group?.id ?? centerGroupId;
+}
+
+/**
  * Auto-add the PR detail panel to the center group when the active task
  * has an associated pull request. The panel is added as a background tab
  * (the session/agent tab stays focused).
@@ -138,15 +155,16 @@ export function useAutoPRPanel() {
         }
 
         if (decision === "add") {
-          const { centerGroupId } = useDockviewStore.getState();
-          // Route through focusOrAddPanel so a stale centerGroupId falls back
-          // to another non-sidebar group rather than letting dockview place
-          // the panel in the active group (which may be the sidebar).
+          const targetGroupId = resolvePRPanelTargetGroup(
+            api,
+            sessionId,
+            useDockviewStore.getState().centerGroupId,
+          );
           focusOrAddPanel(api, {
             id: "pr-detail",
             component: "pr-detail",
             title: "Pull Request",
-            position: { referenceGroup: centerGroupId },
+            position: { referenceGroup: targetGroupId },
             inactive: true,
           });
           markPRPanelOffered(sessionId);
@@ -163,12 +181,38 @@ export function useAutoPRPanel() {
   }, [taskId, hasPR, hasApi, sessionId]);
 }
 
+/** Remove panels for terminal sessions that are no longer active. */
+function cleanupTerminalSessionPanels(
+  api: DockviewReadyEvent["api"],
+  createdSet: Set<string>,
+  activeSessionId: string,
+  sessions: Record<string, { state?: string }>,
+): void {
+  for (const panelId of [...createdSet]) {
+    if (panelId === activeSessionId) continue;
+    const sess = sessions[panelId];
+    if (!sess) continue;
+    if (sess.state === "COMPLETED" || sess.state === "CANCELLED" || sess.state === "FAILED") {
+      const stalePanel = api.getPanel(`session:${panelId}`);
+      if (stalePanel) {
+        try {
+          stalePanel.api.close();
+        } catch {
+          /* already gone */
+        }
+      }
+      createdSet.delete(panelId);
+    }
+  }
+}
+
 /**
  * Auto-create a session tab when a session becomes active.
  * Replaces the generic "chat" panel with a per-session tab on first use.
  */
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
+  const appStore = useAppStoreApi();
   useEffect(() => {
     if (!effectiveSessionId) return;
     const api = useDockviewStore.getState().api;
@@ -185,6 +229,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     }
     if (api.getPanel(`session:${effectiveSessionId}`)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
+      // Activate the existing panel so it comes to focus
+      const existingPanel = api.getPanel(`session:${effectiveSessionId}`);
+      if (existingPanel) existingPanel.api.setActive();
       return;
     }
     // In maximized state the session panel is intentionally absent from the layout;
@@ -221,5 +268,14 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       useDockviewStore.setState({ centerGroupId: panel.group.id });
     }
     sessionTabCreatedRef.current.add(effectiveSessionId);
-  }, [effectiveSessionId]);
+
+    // Clean up panels for completed intermediate sessions (e.g., sessions
+    // created during on_turn_start profile switch that were immediately completed).
+    cleanupTerminalSessionPanels(
+      api,
+      sessionTabCreatedRef.current,
+      effectiveSessionId,
+      appStore.getState().taskSessions.items,
+    );
+  }, [effectiveSessionId, appStore]);
 }

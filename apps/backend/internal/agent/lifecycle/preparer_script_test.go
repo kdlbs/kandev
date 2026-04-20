@@ -7,21 +7,71 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 )
 
-func TestResolvePreparerSetupScript_LocalFallback(t *testing.T) {
+func TestResolvePreparerSetupScript_LocalFallbackCommentOnly(t *testing.T) {
 	req := &EnvPrepareRequest{
 		ExecutorType:   executor.NameStandalone,
 		RepositoryPath: "/tmp/my-repo",
 	}
 
 	got := resolvePreparerSetupScript(req, "/tmp/my-repo")
+	if got != "" {
+		t.Fatalf("expected comment-only default script to be treated as empty, got %q", got)
+	}
+}
+
+func TestIsScriptEffectivelyEmpty(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty", "", true},
+		{"shebang only", "#!/bin/bash\n", true},
+		{"shebang and comments", "#!/bin/bash\n# comment\n# another\n", true},
+		{"blank lines and comments", "\n# comment\n\n# more\n\n", true},
+		{"has command", "#!/bin/bash\necho hello\n", false},
+		{"command after comments", "#!/bin/bash\n# setup\napt-get install git\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isScriptEffectivelyEmpty(tt.input)
+			if got != tt.want {
+				t.Fatalf("isScriptEffectivelyEmpty(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePreparerSetupScript_LocalWithRepoSetupScript(t *testing.T) {
+	req := &EnvPrepareRequest{
+		ExecutorType:    executor.NameStandalone,
+		RepositoryPath:  "/tmp/my-repo",
+		RepoSetupScript: "make install",
+	}
+
+	got := resolvePreparerSetupScript(req, "/tmp/my-repo")
 	if got == "" {
-		t.Fatal("expected default local setup script")
+		t.Fatal("expected non-empty script when repo setup script is set")
 	}
-	if strings.Contains(got, "{{repository.path}}") {
-		t.Fatalf("expected repository.path placeholder to be resolved, got %q", got)
+	if !strings.Contains(got, "make install") {
+		t.Fatalf("expected repo setup script in resolved output, got %q", got)
 	}
-	if !strings.Contains(got, "set to /tmp/my-repo.") {
-		t.Fatalf("expected resolved workspace path in script comment, got %q", got)
+}
+
+func TestResolvePreparerSetupScript_WorktreeWithRepoSetupScript(t *testing.T) {
+	req := &EnvPrepareRequest{
+		ExecutorType:    executor.NameStandalone,
+		UseWorktree:     true,
+		RepositoryPath:  "/tmp/my-repo",
+		RepoSetupScript: "npm ci",
+	}
+
+	got := resolvePreparerSetupScript(req, "/tmp/worktrees/wt-1")
+	if got == "" {
+		t.Fatal("expected non-empty script when repo setup script is set")
+	}
+	if !strings.Contains(got, "npm ci") {
+		t.Fatalf("expected repo setup script in resolved output, got %q", got)
 	}
 }
 

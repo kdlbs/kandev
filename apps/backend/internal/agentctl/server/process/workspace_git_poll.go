@@ -14,7 +14,10 @@ import (
 )
 
 // pollGitChanges periodically checks for git changes (commits, branch switches, staging)
-// This catches manual git operations done via shell that file watching might miss
+// This catches manual git operations done via shell that file watching might miss.
+//
+// The tick interval is driven by PollMode (set via SetPollMode), same as
+// monitorLoop — see workspace_monitor.go for the wake-up channel design.
 func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	defer wt.wg.Done()
 
@@ -26,8 +29,11 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(wt.gitPollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
 
 	// Initialize cached HEAD SHA, branch name, and index hash
 	wt.gitStateMu.Lock()
@@ -37,31 +43,64 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	wt.gitStateMu.Unlock()
 
 	wt.logger.Info("git polling started",
-		zap.Duration("interval", wt.gitPollInterval),
+		zap.Duration("fast_interval", wt.gitPollInterval),
+		zap.String("initial_mode", string(wt.GetPollMode())),
 		zap.String("initial_head", wt.cachedHeadSHA),
 		zap.String("initial_branch", wt.cachedBranchName))
 
 	var consecutiveFailures int
 
 	for {
+		_, gitPoll, _ := wt.pollIntervals(wt.GetPollMode())
+		timer.Reset(gitPoll)
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-wt.stopCh:
 			return
-		case <-ticker.C:
-			// Skip this tick if the previous cycle is still running (prevents process pile-up
-			// when git commands take longer than the poll interval on large repos).
-			if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
-				continue
+		case <-wt.gitPollModeChanged:
+			if stop := wt.handleGitPollModeChange(ctx, timer, &consecutiveFailures); stop {
+				return
 			}
-
-			stop := wt.gitPollTick(ctx, &consecutiveFailures)
-			if stop {
+		case <-timer.C:
+			if stop := wt.handleGitPollTimerTick(ctx, &consecutiveFailures); stop {
 				return
 			}
 		}
 	}
+}
+
+// handleGitPollModeChange responds to a SetPollMode wake-up: drains the timer
+// and runs an immediate scan if we just transitioned into fast mode. Returns
+// true if pollGitChanges should exit.
+func (wt *WorkspaceTracker) handleGitPollModeChange(ctx context.Context, timer *time.Timer, consecutiveFailures *int) bool {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	if wt.GetPollMode() != PollModeFast {
+		return false
+	}
+	if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+		return false
+	}
+	return wt.gitPollTick(ctx, consecutiveFailures)
+}
+
+// handleGitPollTimerTick is the body of a regular timer-driven tick. In paused
+// mode it's a no-op (we still wake periodically as a safety net). Returns true
+// if pollGitChanges should exit.
+func (wt *WorkspaceTracker) handleGitPollTimerTick(ctx context.Context, consecutiveFailures *int) bool {
+	if _, _, paused := wt.pollIntervals(wt.GetPollMode()); paused {
+		return false
+	}
+	if !atomic.CompareAndSwapInt32(&wt.gitPollRunning, 0, 1) {
+		return false
+	}
+	return wt.gitPollTick(ctx, consecutiveFailures)
 }
 
 // gitPollTick runs a single git poll cycle: checks for manual git operations
@@ -127,8 +166,7 @@ func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
 // already handled by monitorLoop via git ls-files. This avoids the expensive
 // directory traversal that --untracked-files=all performs on large repos.
 func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=no")
-	cmd.Dir = wt.workDir
+	cmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=no")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

@@ -3,6 +3,8 @@
  * Handles both images (with preview) and arbitrary files (code, docs, etc.).
  */
 
+import { generateUUID } from "@/lib/utils";
+
 export type FileAttachment = {
   id: string;
   data: string; // Base64-encoded content (without data: prefix)
@@ -70,7 +72,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
         const img = new Image();
         img.onload = () => {
           resolve({
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             data: base64,
             mimeType,
             fileName: file.name,
@@ -83,7 +85,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
         img.src = dataUrl;
       } else {
         resolve({
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           data: base64,
           mimeType,
           fileName: file.name,

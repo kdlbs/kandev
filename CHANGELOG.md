@@ -2,6 +2,49 @@
 
 All notable changes to Kandev.
 
+## 0.35 - 2026-04-20
+
+### Features
+
+- sidebar filter UX polish — align ops, group steps by workflow ([#647](https://github.com/kdlbs/kandev/pull/647))
+- explain why Start task button is disabled via hover tooltip ([#649](https://github.com/kdlbs/kandev/pull/649))
+- add filter/group/sort and saved views to task sidebar ([#644](https://github.com/kdlbs/kandev/pull/644))
+- vscode-style preview tabs for files, diffs, and commits ([#622](https://github.com/kdlbs/kandev/pull/622))
+- add confirmation dialog before archiving tasks ([#621](https://github.com/kdlbs/kandev/pull/621))
+- introduce card multi-selection ([#573](https://github.com/kdlbs/kandev/pull/573))
+
+### Bug Fixes
+
+- release script tags fetching
+- show repo name instead of full path in task sidebar ([#652](https://github.com/kdlbs/kandev/pull/652))
+- unstick agent session when cancel times out ([#651](https://github.com/kdlbs/kandev/pull/651))
+- anchor PR detail panel to session group on auto-open ([#646](https://github.com/kdlbs/kandev/pull/646))
+- push git snapshot on session focus ([#645](https://github.com/kdlbs/kandev/pull/645))
+- follow workflow step session switches in chat UI ([#625](https://github.com/kdlbs/kandev/pull/625))
+- stop PR polling for archived tasks ([#643](https://github.com/kdlbs/kandev/pull/643))
+- clear kanban snapshots when active workspace changes ([#633](https://github.com/kdlbs/kandev/pull/633))
+- persist agent profile mode through bulk-edit save ([#626](https://github.com/kdlbs/kandev/pull/626))
+- stream setup script output and keep prepare panel on failure ([#607](https://github.com/kdlbs/kandev/pull/607))
+- inject HTTP MCP server for Codex ACP support ([#641](https://github.com/kdlbs/kandev/pull/641))
+- route user shell to container instead of host ([#638](https://github.com/kdlbs/kandev/pull/638))
+- use UUID fallback for attachments on non-secure contexts ([#640](https://github.com/kdlbs/kandev/pull/640))
+- collapse repeated "Resumed agent" boot messages into the last one ([#631](https://github.com/kdlbs/kandev/pull/631))
+- use API version negotiation instead of hardcoded 1.41 ([#636](https://github.com/kdlbs/kandev/pull/636))
+- wrap long paths in Discard Changes dialog ([#620](https://github.com/kdlbs/kandev/pull/620))
+- ux consistency on archiving and deleting tasks ([#627](https://github.com/kdlbs/kandev/pull/627))
+- apply display filters in list view ([#612](https://github.com/kdlbs/kandev/pull/612))
+- isolate dev mode state when running inside a kandev task ([#617](https://github.com/kdlbs/kandev/pull/617))
+- disable multi-select mode after bulk archive or delete ([#623](https://github.com/kdlbs/kandev/pull/623))
+
+### Performance
+
+- focus-gated git polling to reduce CPU on retained worktrees ([#610](https://github.com/kdlbs/kandev/pull/610))
+
+### Documentation
+
+- add Discord link and require e2e tests for UI changes ([#630](https://github.com/kdlbs/kandev/pull/630))
+- refresh README, roadmap, and workflow templates ([#624](https://github.com/kdlbs/kandev/pull/624))
+
 ## 0.34 - 2026-04-17
 
 ### Features

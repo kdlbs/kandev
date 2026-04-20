@@ -4,6 +4,59 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { TaskSessionState } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
+const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
+  "COMPLETED",
+  "CANCELLED",
+  "FAILED",
+]);
+
+export function isTerminalSessionState(state: TaskSessionState | undefined): boolean {
+  return !!state && TERMINAL_SESSION_STATES.has(state);
+}
+
+/**
+ * When the backend creates a new session for the active task (e.g., due to a
+ * workflow step transition with a different agent profile), the chat UI should
+ * follow the switch. Returns true when the caller should adopt the new session
+ * as the task's active session.
+ *
+ * Adopts only when the current active session is missing, cross-task, or
+ * already terminal — not while a live session for the same task is still
+ * running (the backend only creates sessions during workflow step transitions
+ * after stopping the previous one, but WS events may arrive out of order).
+ */
+export function shouldAdoptNewSession(
+  state: AppState,
+  taskId: string,
+  newState: TaskSessionState | undefined,
+): boolean {
+  if (!newState || isTerminalSessionState(newState)) return false;
+  if (state.tasks.activeTaskId !== taskId) return false;
+  const activeSessionId = state.tasks.activeSessionId;
+  if (activeSessionId) {
+    const activeSession = state.taskSessions.items[activeSessionId];
+    if (activeSession?.task_id === taskId && !isTerminalSessionState(activeSession.state)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Pick the newest non-terminal session for a task. Used when the currently
+ * active session just reached a terminal state — we want to hand focus to the
+ * session that replaced it (typically created by a workflow step transition).
+ */
+export function pickReplacementSessionId(state: AppState, taskId: string): string | null {
+  const sessions = state.taskSessionsByTask.itemsByTaskId[taskId];
+  if (!sessions) return null;
+  for (let i = sessions.length - 1; i >= 0; i -= 1) {
+    const candidate = sessions[i];
+    if (!isTerminalSessionState(candidate.state)) return candidate.id;
+  }
+  return null;
+}
+
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): Record<string, unknown> {
@@ -91,6 +144,48 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
   });
 }
 
+/** Copy agentctl "ready" status from one session to another (same-task switch). */
+function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSessionId: string): void {
+  const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[fromSessionId];
+  if (oldAgentctl?.status === "ready") {
+    state.setSessionAgentctlStatus(toSessionId, oldAgentctl);
+  }
+}
+
+/**
+ * After a `session.state_changed` event, decide whether the chat UI should
+ * follow a workflow-driven session switch. Covers both event orderings:
+ *   1. New non-terminal session appears for the active task before the old
+ *      one is torn down — adopt immediately.
+ *   2. The current active session transitions to a terminal state — hand off
+ *      to the newest non-terminal session for the same task, if any.
+ */
+function maybeAdoptSessionOnTransition(
+  store: StoreApi<AppState>,
+  taskId: string,
+  sessionId: string,
+  newState: TaskSessionState | undefined,
+  wasKnownToStore: boolean,
+): void {
+  const state = store.getState();
+
+  if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
+    const oldSessionId = state.tasks.activeSessionId;
+    if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
+    state.setActiveSession(taskId, sessionId);
+    return;
+  }
+
+  const isActive = state.tasks.activeSessionId === sessionId;
+  if (isActive && newState && isTerminalSessionState(newState)) {
+    const replacement = pickReplacementSessionId(state, taskId);
+    if (replacement && replacement !== sessionId) {
+      inheritAgentctlStatus(state, sessionId, replacement);
+      state.setActiveSession(taskId, replacement);
+    }
+  }
+}
+
 /** Handle the agentctl_ready event: update session worktree info. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
@@ -138,7 +233,8 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
-      const { task_id: taskId, session_id: sessionId, new_state: newState } = payload;
+      const { task_id: taskId, session_id: sessionId } = payload;
+      const newState = payload.new_state as TaskSessionState | undefined;
 
       if (!sessionId) return;
 
@@ -161,6 +257,8 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);
+
+      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
 
       if (
         newState === "FAILED" &&

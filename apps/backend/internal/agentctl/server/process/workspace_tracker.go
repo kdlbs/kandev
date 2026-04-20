@@ -47,9 +47,21 @@ type WorkspaceTracker struct {
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
 	workspaceSubMu             sync.RWMutex
 
-	// Polling intervals
+	// Polling intervals (used in PollModeFast)
 	filePollInterval time.Duration
 	gitPollInterval  time.Duration
+
+	// pollMode is the current rate at which the polling loops scan git state.
+	// Default at construction is PollModeSlow — safe fallback before the gateway
+	// pushes a focus signal. Mutate via SetPollMode (never directly) so loops
+	// receive the wake-up notification on transitions.
+	pollMode   PollMode
+	pollModeMu sync.RWMutex
+	// One channel per loop because we need both loops to wake up on a mode
+	// change. A single shared channel would let the first reader steal the
+	// signal so only one loop wakes.
+	monitorModeChanged chan struct{} // buffered(1); read by monitorLoop
+	gitPollModeChanged chan struct{} // buffered(1); read by pollGitChanges
 
 	// Overlap guards: prevent tick pile-up when git commands take longer than the poll interval.
 	monitorRunning int32 // atomic; 1 if monitorLoop tick is in progress
@@ -60,12 +72,14 @@ type WorkspaceTracker struct {
 	updateMu sync.Mutex
 
 	// Control
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
-	started    bool
-	stopOnce   sync.Once
-	cancelCtx  context.Context    // Cancellable context for killing in-flight git commands on Stop
-	cancelFunc context.CancelFunc // Cancel function called during Stop
+	stopCh          chan struct{}
+	wg              sync.WaitGroup
+	started         bool
+	stopOnce        sync.Once
+	initialScanDone chan struct{}      // closed after monitorLoop's first getWorkspaceState; tests wait on it
+	tickDone        chan struct{}      // buffered(1); signalled after each monitorTick completes; tests wait on it
+	cancelCtx       context.Context    // Cancellable context for killing in-flight git commands on Stop
+	cancelFunc      context.CancelFunc // Cancel function called during Stop
 }
 
 // NewWorkspaceTracker creates a new workspace tracker
@@ -84,9 +98,22 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
-		stopCh:                     make(chan struct{}),
-		cancelCtx:                  ctx,
-		cancelFunc:                 cancel,
+		// Default to fast polling — matches pre-PR behavior so newly-created
+		// agentctl instances don't have a startup window where changes go
+		// undetected for up to 30s. The gateway pushes slow/paused once it
+		// knows no client is actively watching this workspace; until then,
+		// fast is the safe default (a freshly-spawned instance was always
+		// about to be used by someone, historically). Retained-task CPU
+		// savings still apply because those instances eventually receive a
+		// slow or paused mode push.
+		pollMode:           PollModeFast,
+		monitorModeChanged: make(chan struct{}, 1),
+		gitPollModeChanged: make(chan struct{}, 1),
+		stopCh:             make(chan struct{}),
+		initialScanDone:    make(chan struct{}),
+		tickDone:           make(chan struct{}, 1),
+		cancelCtx:          ctx,
+		cancelFunc:         cancel,
 	}
 }
 

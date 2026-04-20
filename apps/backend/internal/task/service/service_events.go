@@ -14,6 +14,13 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// PublishTaskUpdated publishes a task.updated event for the given task.
+// Used when task metadata changes (e.g., primary session assignment) that
+// don't go through the normal UpdateTask path.
+func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState) {
 	if s.eventBus == nil {

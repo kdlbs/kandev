@@ -175,8 +175,25 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		zap.Bool("plan_mode", planMode))
 
 	// Process on_turn_start before launching the agent.
+	// If the target step has a different agent profile, executeStepTransition will switch
+	// the session — so we need to pick up the new session afterwards.
 	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
 		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
+
+	// Re-read the session — on_turn_start may have switched it (agent profile change).
+	reloadedSession, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+	if reloadErr != nil {
+		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", reloadErr)
+	}
+	if reloadedSession.State == models.TaskSessionStateCompleted {
+		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+		if activeErr != nil || activeSession == nil {
+			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+		}
+		sessionID = activeSession.ID
+		agentProfileID = activeSession.AgentProfileID
+		executorID = activeSession.ExecutorID
 	}
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
@@ -275,12 +292,25 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Process on_turn_start before launching the agent, just like user-initiated messages.
 	// This allows workflow transitions (e.g. move_to_next) to fire on the initial prompt.
+	// If the target step has a different agent profile, executeStepTransition switches
+	// the session — so we need to pick up the new session afterwards.
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
 
-	// Re-read the session after on_turn_start may have changed the workflow step.
+	// Re-read the session after on_turn_start may have switched it (agent profile change).
+	// The original session may have been completed; use the active session for this task.
 	session, err = s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
+	}
+	if session.State == models.TaskSessionStateCompleted {
+		// on_turn_start switched the agent profile — find the new active session.
+		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+		if activeErr != nil || activeSession == nil {
+			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+		}
+		session = activeSession
+		sessionID = activeSession.ID
+		effectiveProfileID = activeSession.AgentProfileID
 	}
 
 	// Apply workflow step prompt wrapping and plan mode injection.
@@ -450,6 +480,17 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
 			if err == nil {
 				s.setSessionPlanMode(ctx, session, true)
+			}
+		}
+
+		// Persist prepare_result using SetSessionMetadataKey (json_set) which
+		// atomically sets ONE key without touching others. This avoids the
+		// read-modify-write race where UpdateSessionMetadata clobbers plan_mode.
+		if execution.PrepareResult != nil && execution.PrepareResult.Success {
+			pr := lifecycle.SerializePrepareResult(execution.PrepareResult)
+			if err := s.repo.SetSessionMetadataKey(ctx, execution.SessionID, "prepare_result", pr); err != nil {
+				s.logger.Warn("failed to persist prepare_result",
+					zap.String("session_id", execution.SessionID), zap.Error(err))
 			}
 		}
 	}
@@ -1498,7 +1539,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
 		// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
 		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
-		if !isTransientPromptError(err) {
+		// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
+		// force-unblock a hung agent. That is not a "review this failure" condition —
+		// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
+		// complete turn) already.
+		if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 		}
 		s.completeTurnForSession(ctx, sessionID)
@@ -1625,16 +1670,25 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		switch {
+		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
+			// The session was live but there is no execution to cancel — the agent process
+			// crashed, exited, or never re-registered after a backend restart. Log at error
+			// level so operators notice the stuck state; we still reconcile DB state below
+			// so the UI unsticks.
+			s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		case errors.Is(err, lifecycle.ErrCancelEscalated):
+			// The agent accepted the ACP cancel but never published a completion event.
+			// The lifecycle manager already unblocked the in-flight prompt and marked the
+			// execution ready; reconcile DB state below so the UI unsticks.
+			s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		default:
 			return fmt.Errorf("cancel agent: %w", err)
 		}
-		// The session was live but there is no execution to cancel — the agent process
-		// crashed, exited, or never re-registered after a backend restart. Log at error
-		// level so operators notice the stuck state; we still reconcile DB state below
-		// so the UI unsticks.
-		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
 	}
 
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt

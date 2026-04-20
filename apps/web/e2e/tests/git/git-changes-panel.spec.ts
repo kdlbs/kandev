@@ -1355,10 +1355,11 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // Unified commits section should show both commits
+    // Unified commits section should show at least the two commits we created.
+    // Other tests in the same worker may have left additional commits in the shared e2e-repo.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator("li")).toHaveCount(2, { timeout: 5_000 });
+    await expect(commitsList.locator("li").first()).toBeVisible({ timeout: 5_000 });
 
     // Unpushed commit should have arrow-up icon (emerald)
     const unpushedRow = commitsList.locator("li", { hasText: "Unpushed commit" });
@@ -1366,9 +1367,9 @@ test.describe("Git Changes Panel", () => {
     await expect(unpushedRow.locator(".tabler-icon-arrow-up")).toBeVisible({ timeout: 5_000 });
 
     // Pushed commit should have git-commit icon (muted)
-    const pushedRow = commitsList.locator(
-      `li:has-text("Pushed commit"):not(:has-text("Unpushed"))`,
-    );
+    const pushedRow = commitsList
+      .locator(`li:has-text("Pushed commit"):not(:has-text("Unpushed"))`)
+      .first();
     await expect(pushedRow).toBeVisible({ timeout: 10_000 });
     await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
   });

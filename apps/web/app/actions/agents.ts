@@ -48,7 +48,9 @@ export async function listAgentsAction(): Promise<ListAgentsResponse> {
 export async function createAgentAction(payload: {
   name: string;
   workspace_id?: string | null;
-  profiles?: Array<{ name: string; model: string; cli_passthrough: boolean } & ProfilePermissions>;
+  profiles?: Array<
+    { name: string; model: string; mode?: string; cli_passthrough: boolean } & ProfilePermissions
+  >;
 }): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
     method: "POST",
@@ -76,7 +78,12 @@ export async function deleteAgentAction(id: string) {
 
 export async function createAgentProfileAction(
   agentId: string,
-  payload: { name: string; model: string; cli_passthrough: boolean } & ProfilePermissions,
+  payload: {
+    name: string;
+    model: string;
+    mode?: string;
+    cli_passthrough: boolean;
+  } & ProfilePermissions,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
     method: "POST",

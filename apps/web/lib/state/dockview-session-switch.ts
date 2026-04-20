@@ -10,6 +10,18 @@ import { applyLayoutFixups } from "./dockview-layout-builders";
 import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 
+const EPHEMERAL_COMPONENTS = new Set(["file-editor", "diff-viewer", "commit-detail"]);
+
+/** Check whether a serialized dockview layout contains ephemeral panels. */
+function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const panels = (serialized as any).panels as
+    | Record<string, { contentComponent?: string }>
+    | undefined;
+  if (!panels) return false;
+  return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
+}
+
 export type SessionSwitchParams = {
   api: DockviewApi;
   oldSessionId: string | null;
@@ -78,6 +90,12 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
 
   if (!structuresMatch) return null;
 
+  // If the saved layout contains ephemeral panels (file-editors, diffs,
+  // commit-details), fall through to the slow path so that `api.fromJSON()`
+  // restores them.  The fast path skips fromJSON and removeEphemeralPanels
+  // would discard the current ones without restoring the target session's.
+  if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
+
   // Fast path: keep the grid structure, clean up ephemeral panels and any
   // session chat tabs that belong to a different session (cross-task switch).
   // Session-scoped portals (browser, vscode, etc.) will be re-acquired
@@ -126,7 +144,9 @@ export function performSessionSwitch(params: SessionSwitchParams): LayoutGroupId
 
   // Try fast path: skip fromJSON when layout structure hasn't changed
   const fastResult = tryFastSessionSwitch(params);
-  if (fastResult) return fastResult;
+  if (fastResult) {
+    return fastResult;
+  }
 
   // Slow path: full layout rebuild via fromJSON
   const saved = getSessionLayout(newSessionId);

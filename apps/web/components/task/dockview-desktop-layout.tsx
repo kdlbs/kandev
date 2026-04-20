@@ -38,6 +38,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
+import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
 import {
   setupSessionTabSync,
@@ -152,6 +153,10 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
   sessionTab: SessionTab,
+  previewFileTab: PreviewFileTab,
+  previewDiffTab: PreviewDiffTab,
+  previewCommitTab: PreviewCommitTab,
+  pinnedDefaultTab: PinnedDefaultTab,
 };
 
 // ---------------------------------------------------------------------------
@@ -378,6 +383,8 @@ const VALID_COMPONENTS = new Set(Object.keys(components));
 
 function useSessionSwitchCleanup(effectiveSessionId: string | null) {
   const prevSessionRef = useRef<string | null | undefined>(undefined);
+  const prevTaskRef = useRef<string | null>(null);
+  const appStore = useAppStoreApi();
   useEffect(() => {
     if (prevSessionRef.current === undefined) {
       prevSessionRef.current = effectiveSessionId;
@@ -393,9 +400,29 @@ function useSessionSwitchCleanup(effectiveSessionId: string | null) {
     // serves as a backup for external session changes (e.g. WS-driven)
     // that don't go through the sidebar/dropdown switch helpers.
     if (effectiveSessionId) {
+      // Skip full layout rebuild for same-task session switches (workflow step
+      // transitions with different agent profiles). useAutoSessionTab already
+      // handles creating the new panel — a full fromJSON rebuild would destroy
+      // the old session tab and cause a visible layout flash.
+      const state = appStore.getState();
+      const oldTask = oldSessionId ? state.taskSessions.items[oldSessionId]?.task_id : null;
+      const newTask = state.taskSessions.items[effectiveSessionId]?.task_id;
+      // Use activeTaskId as fallback when the old session has been cleaned from
+      // the store (e.g., after a COMPLETED state change removed it).
+      const effectiveOldTask = oldTask ?? prevTaskRef.current;
+      if (effectiveOldTask && newTask && effectiveOldTask === newTask) {
+        console.log("[session-switch] same-task switch, skipping layout rebuild", {
+          oldSessionId: oldSessionId?.slice(0, 8),
+          newSessionId: effectiveSessionId.slice(0, 8),
+          taskId: newTask.slice(0, 8),
+        });
+        prevTaskRef.current = newTask;
+        return;
+      }
+      prevTaskRef.current = newTask ?? null;
       performLayoutSwitch(oldSessionId, effectiveSessionId);
     }
-  }, [effectiveSessionId]);
+  }, [effectiveSessionId, appStore]);
 }
 
 // ---------------------------------------------------------------------------

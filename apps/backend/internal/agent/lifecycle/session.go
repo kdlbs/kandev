@@ -477,6 +477,12 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 				sm.logger.Error("prompt completed with error",
 					zap.String("execution_id", execution.ID),
 					zap.String("error", signal.Error))
+				// Wrap the cancel-escalation sentinel so PromptTask can identify it and
+				// skip the REVIEW task-state transition — the user is cancelling, not
+				// hitting a real agent failure.
+				if strings.HasPrefix(signal.Error, "cancel escalated") {
+					return nil, fmt.Errorf("agent error: %s: %w", signal.Error, ErrCancelEscalated)
+				}
 				return nil, fmt.Errorf("agent error: %s", signal.Error)
 			}
 

@@ -25,6 +25,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // scriptServiceAdapter adapts the task service to scripts.ScriptService.
@@ -42,6 +43,16 @@ func (a *scriptServiceAdapter) GetRepositoryScript(ctx context.Context, id strin
 		Name:    script.Name,
 		Command: script.Command,
 	}, nil
+}
+
+// hubModeQuerierAdapter converts the hub's SessionMode enum to lifecycle's
+// WorkspacePollMode (same string values) so lifecycle doesn't import websocket.
+type hubModeQuerierAdapter struct {
+	hub *gateways.Hub
+}
+
+func (a *hubModeQuerierAdapter) GetSessionMode(sessionID string) lifecycle.WorkspacePollMode {
+	return lifecycle.WorkspacePollMode(a.hub.GetSessionMode(sessionID))
 }
 
 // sessionReaderAdapter implements agenthandlers.SessionReader using the task repository.
@@ -183,6 +194,34 @@ func provideGateway(
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
+
+	// Route session focus/subscription transitions from the hub into the
+	// lifecycle manager so it can push poll-mode changes to agentctl.
+	if lifecycleMgr != nil {
+		gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
+			lifecycleMgr.HandleSessionMode(sessionID, lifecycle.WorkspacePollMode(mode))
+		})
+		// Expose hub's live mode state to lifecycle so it can query on
+		// execution-ready and proactively push the right mode even when
+		// gateway events fired before the execution was registered.
+		lifecycleMgr.SetSessionModeQuerier(&hubModeQuerierAdapter{hub: gateway.Hub})
+	}
+
+	// Broadcast session poll mode transitions to all WS clients. Uses Broadcast
+	// (not BroadcastToSession) because focus events fire before subscribe events
+	// on page load, so BroadcastToSession misses the focused-but-not-yet-
+	// subscribed client. Volume is low (debounced down-transitions) and clients
+	// filter by session_id in the payload.
+	gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
+		msg, err := ws.NewNotification(ws.ActionSessionPollModeChanged, map[string]interface{}{
+			"session_id": sessionID,
+			"poll_mode":  string(mode),
+		})
+		if err != nil {
+			return
+		}
+		gateway.Hub.Broadcast(msg)
+	})
 
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)

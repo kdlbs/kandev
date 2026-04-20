@@ -29,14 +29,17 @@ type PanelPortalHostProps = {
  * dockview tree.  Mount this as a sibling to `<DockviewReact>`.
  */
 export function PanelPortalHost({ renderPanel }: PanelPortalHostProps) {
-  // Re-render when the set of registered panels changes.
-  const ids = useSyncExternalStore(
+  // Re-render when panels are added/removed OR when any panel's params change.
+  // The version counter bumps on all three — we read ids() at render time
+  // rather than encoding them in the snapshot so panel ids can contain any
+  // character (a path like `file:path/with,comma.txt` would break a delimiter).
+  useSyncExternalStore(
     useCallback((cb) => panelPortalManager.subscribe(cb), []),
-    useCallback(() => panelPortalManager.ids().join(","), []),
-    useCallback(() => panelPortalManager.ids().join(","), []),
+    useCallback(() => panelPortalManager.getVersion(), []),
+    useCallback(() => panelPortalManager.getVersion(), []),
   );
 
-  const panelIds = ids ? ids.split(",") : [];
+  const panelIds = panelPortalManager.ids();
 
   return (
     <>
@@ -97,6 +100,16 @@ export function usePortalSlot(
     // Global panels pass sessionId=undefined so this is a no-op for them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId, sessionId]);
+
+  // Forward dockview's param updates into the portal manager so preview-tab
+  // content (file-editor, diff-viewer, commit-detail) re-renders when the
+  // single preview panel switches to a different file/diff/commit.
+  useEffect(() => {
+    const disposable = props.api.onDidParametersChange((next) => {
+      panelPortalManager.updateParams(panelId, next as Record<string, unknown>);
+    });
+    return () => disposable.dispose();
+  }, [panelId, props.api]);
 
   return containerRef;
 }

@@ -410,6 +410,7 @@ export class ApiClient {
     enable_preview_on_click?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
+    repository_ids?: string[];
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;

@@ -1,4 +1,12 @@
 import type { HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+import type {
+  FilterClause,
+  GroupKey,
+  SidebarSliceState,
+  SidebarView,
+  SidebarViewDraft,
+  SortSpec,
+} from "./sidebar-view-types";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -101,6 +109,7 @@ export type UISliceState = {
   configChat: ConfigChatState;
   sessionFailureNotification: SessionFailureNotification | null;
   bottomTerminal: BottomTerminalState;
+  sidebarViews: SidebarSliceState;
 };
 
 export type UISliceActions = {
@@ -137,6 +146,21 @@ export type UISliceActions = {
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
+  setSidebarActiveView: (viewId: string) => void;
+  updateSidebarDraft: (
+    patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+  ) => void;
+  saveSidebarDraftAs: (name: string) => void;
+  saveSidebarDraftOverwrite: () => void;
+  discardSidebarDraft: () => void;
+  deleteSidebarView: (viewId: string) => void;
+  renameSidebarView: (viewId: string, name: string) => void;
+  duplicateSidebarView: (viewId: string, name: string) => void;
+  toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  clearSidebarSyncError: () => void;
+  migrateLocalViewsToBackend: () => void;
 };
+
+export type { SidebarView, SidebarViewDraft };
 
 export type UISlice = UISliceState & UISliceActions;

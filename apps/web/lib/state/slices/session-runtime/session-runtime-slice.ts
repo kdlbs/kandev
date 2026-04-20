@@ -2,6 +2,7 @@ import type { StateCreator } from "zustand";
 import type {
   SessionRuntimeSlice,
   SessionRuntimeSliceState,
+  SessionPollMode,
   GitStatusEntry,
   FileInfo,
 } from "./types";
@@ -89,6 +90,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
+  sessionPollMode: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -181,6 +183,10 @@ function buildUserShellActions(set: ImmerSet) {
         draft.userShells.byEnvironmentId[envKey] = existing.filter(
           (s) => s.terminalId !== terminalId,
         );
+      }),
+    setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
+      set((draft) => {
+        draft.sessionPollMode.bySessionId[sessionId] = mode;
       }),
   };
 }
@@ -298,14 +304,6 @@ export const createSessionRuntimeSlice: StateCreator<
     }),
   setSessionModels: (sessionId, data) =>
     set((draft) => {
-      console.log("[store] setSessionModels", {
-        sessionId,
-        modelsCount: data.models?.length ?? 0,
-        models: data.models?.map((m) => m.modelId),
-        currentModelId: data.currentModelId,
-        configOptionsCount: data.configOptions?.length ?? 0,
-        configOptions: data.configOptions?.map((o) => ({ id: o.id, category: o.category })),
-      });
       draft.sessionModels.bySessionId[sessionId] = data;
     }),
   setPromptUsage: (sessionId, usage) =>

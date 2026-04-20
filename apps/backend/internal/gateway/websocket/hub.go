@@ -39,6 +39,10 @@ type Hub struct {
 	// Optional provider for session data on subscription (e.g., git status)
 	sessionDataProvider SessionDataProvider
 
+	// sessionMode tracks per-session focus state and fires listeners when
+	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
+	sessionMode *sessionModeTracker
+
 	mu     sync.RWMutex
 	logger *logger.Logger
 }
@@ -54,6 +58,7 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		unregister:         make(chan *Client),
 		broadcast:          make(chan *ws.Message, 256),
 		dispatcher:         dispatcher,
+		sessionMode:        newSessionModeTracker(),
 		logger:             log.WithFields(zap.String("component", "ws_hub")),
 	}
 }
@@ -84,25 +89,29 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// closeAllClients closes all client connections
+// closeAllClients closes all client connections.
+// Cancels any pending debounced session-mode transitions so timers don't fire
+// after shutdown and call into listeners with stale state.
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	for client := range h.clients {
 		client.closeSend()
 		delete(h.clients, client)
 	}
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
+	h.mu.Unlock()
+
+	h.stopAllPendingTransitions()
 }
 
 // removeClient removes a client from the hub
 func (h *Hub) removeClient(client *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	if _, ok := h.clients[client]; !ok {
+		h.mu.Unlock()
 		h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
 		return
 	}
@@ -114,14 +123,44 @@ func (h *Hub) removeClient(client *Client) {
 	for taskID := range client.subscriptions {
 		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
 	}
+	// Capture session IDs that need mode recomputation after we drop the lock.
+	// Disconnect can change mode either way: removing the last subscriber drops
+	// to paused, removing the last focuser drops fast → slow.
+	affectedSessions := make([]string, 0, len(client.sessionSubscriptions)+len(client.sessionFocus))
 	for sessionID := range client.sessionSubscriptions {
 		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+		affectedSessions = append(affectedSessions, sessionID)
+	}
+	for sessionID := range client.sessionFocus {
+		removeClientFromSubscriberMap(h.sessionMode.focusByClient, sessionID, client)
+		affectedSessions = append(affectedSessions, sessionID)
 	}
 	for userID := range client.userSubscriptions {
 		removeClientFromSubscriberMap(h.userSubscribers, userID, client)
 	}
+	h.mu.Unlock()
+
+	for _, sessionID := range dedupStrings(affectedSessions) {
+		h.recomputeSessionMode(sessionID)
+	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// dedupStrings returns the input with duplicates removed, preserving order.
+// Used to call recomputeSessionMode at most once per affected session when a
+// client is both subscribed and focused.
+func dedupStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // removeClientFromSubscriberMap removes a client from a subscriber map entry,
@@ -261,24 +300,23 @@ func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 // SubscribeToSession subscribes a client to session notifications
 func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if _, ok := h.sessionSubscribers[sessionID]; !ok {
 		h.sessionSubscribers[sessionID] = make(map[*Client]bool)
 	}
 	h.sessionSubscribers[sessionID][client] = true
 	client.sessionSubscriptions[sessionID] = true
+	h.mu.Unlock()
 
 	h.logger.Debug("Client subscribed to session",
 		zap.String("client_id", client.ID),
 		zap.String("session_id", sessionID))
+
+	h.recomputeSessionMode(sessionID)
 }
 
 // UnsubscribeFromSession unsubscribes a client from session notifications
 func (h *Hub) UnsubscribeFromSession(client *Client, sessionID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	delete(client.sessionSubscriptions, sessionID)
 	if clients, ok := h.sessionSubscribers[sessionID]; ok {
 		delete(clients, client)
@@ -286,6 +324,9 @@ func (h *Hub) UnsubscribeFromSession(client *Client, sessionID string) {
 			delete(h.sessionSubscribers, sessionID)
 		}
 	}
+	h.mu.Unlock()
+
+	h.recomputeSessionMode(sessionID)
 }
 
 // SubscribeToUser subscribes a client to user notifications

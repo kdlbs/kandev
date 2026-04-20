@@ -23,11 +23,11 @@ function useNextWorkflowStep(taskId: string | null) {
     return task?.workflowStepId ?? null;
   });
 
-  // Track which step the user was on when they clicked proceed. isMoving is true
-  // while taskStepId still matches the step we're moving FROM. Once the WS event
-  // updates taskStepId, isMoving becomes false and the button is clickable again.
-  const [moveFromStepId, setMoveFromStepId] = useState<string | null>(null);
-  const isMoving = moveFromStepId != null && taskStepId === moveFromStepId;
+  // Track agent switching: isMoving stays true from "proceed" click until the
+  // new session is adopted (activeSessionId changes from the original).
+  const [moveFromSessionId, setMoveFromSessionId] = useState<string | null>(null);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const isMoving = moveFromSessionId != null && activeSessionId === moveFromSessionId;
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -60,19 +60,26 @@ function useNextWorkflowStep(taskId: string | null) {
 
   const proceed = useCallback(async () => {
     if (!taskId || !workflowId || !nextStep) return;
-    setMoveFromStepId(taskStepId);
+    const capturedSessionId = activeSessionId;
+    setMoveFromSessionId(capturedSessionId);
     try {
       await moveTask(taskId, {
         workflow_id: workflowId,
         workflow_step_id: nextStep.id,
         position: 0,
       });
+      // Safety: if the next step reuses the same session (no agent-profile
+      // override), activeSessionId never changes and isMoving would be stuck.
+      // Clear after 10 s if no session handoff occurred.
+      setTimeout(() => {
+        setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
+      }, 10_000);
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
       toast({ description: "Failed to proceed to next step", variant: "error" });
-      setMoveFromStepId(null);
+      setMoveFromSessionId(null);
     }
-  }, [taskId, workflowId, nextStep, taskStepId, toast]);
+  }, [taskId, workflowId, nextStep, activeSessionId, toast]);
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 

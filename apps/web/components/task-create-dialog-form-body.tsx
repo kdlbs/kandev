@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
+import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
@@ -64,7 +65,7 @@ type CreateEditSelectorsProps = {
   }>;
   isLocalExecutor: boolean;
   useGitHubUrl: boolean;
-  workflowAgentProfileId?: string;
+  workflowAgentLocked: boolean;
 };
 
 export const CreateEditSelectors = memo(function CreateEditSelectors({
@@ -87,14 +88,14 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   executorsLoading,
   isLocalExecutor,
   useGitHubUrl,
-  workflowAgentProfileId,
+  workflowAgentLocked,
   BranchSelectorComponent,
   AgentSelectorComponent,
   ExecutorProfileSelectorComponent,
 }: CreateEditSelectorsProps) {
   if (isTaskStarted) return null;
 
-  const agentLockedByWorkflow = Boolean(workflowAgentProfileId);
+  const agentLockedByWorkflow = workflowAgentLocked;
 
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
 
@@ -235,10 +236,11 @@ export const SessionSelectors = memo(function SessionSelectors({
 type WorkflowSectionProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
-  workflows: Array<{ id: string; name: string; [key: string]: unknown }>;
+  workflows: Array<{ id: string; name: string; agent_profile_id?: string; [key: string]: unknown }>;
   snapshots: Record<string, WorkflowSnapshotData>;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
+  agentProfiles: AgentProfileOption[];
 };
 
 export const WorkflowSection = memo(function WorkflowSection({
@@ -248,6 +250,7 @@ export const WorkflowSection = memo(function WorkflowSection({
   snapshots,
   effectiveWorkflowId,
   onWorkflowChange,
+  agentProfiles,
 }: WorkflowSectionProps) {
   const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
 
@@ -259,7 +262,46 @@ export const WorkflowSection = memo(function WorkflowSection({
     [onWorkflowChange],
   );
 
-  if (!isCreateMode || workflows.length <= 1 || isTaskStarted) return null;
+  if (!isCreateMode || isTaskStarted) return null;
+
+  // Single workflow — show agent override info if any overrides exist
+  if (workflows.length <= 1) {
+    const singleWorkflow = workflows[0];
+    if (!singleWorkflow) return null;
+    const snapshot = snapshots[singleWorkflow.id];
+    const workflowProfile = singleWorkflow.agent_profile_id
+      ? agentProfiles.find((p) => p.id === singleWorkflow.agent_profile_id)
+      : null;
+    const stepsWithOverrides = (snapshot?.steps ?? [])
+      .filter((s) => s.agent_profile_id)
+      .map((s) => ({
+        name: s.title,
+        profile: agentProfiles.find((p) => p.id === s.agent_profile_id),
+      }))
+      .filter((s) => s.profile);
+    if (!workflowProfile && stepsWithOverrides.length === 0) return null;
+    return (
+      <div
+        className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        data-testid="workflow-override-info"
+      >
+        {workflowProfile && (
+          <span className="flex items-center gap-1">
+            <AgentLogo agentName={workflowProfile.agent_name} size={14} className="shrink-0" />
+            <span>{workflowProfile.label}</span>
+          </span>
+        )}
+        {stepsWithOverrides.map((s) => (
+          <span key={s.name} className="flex items-center gap-1">
+            <span className="text-muted-foreground/50">{s.name}:</span>
+            <AgentLogo agentName={s.profile!.agent_name} size={14} className="shrink-0" />
+            <span>{s.profile!.label}</span>
+          </span>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <WorkflowSelectorRow
       workflows={workflows}
@@ -267,6 +309,7 @@ export const WorkflowSection = memo(function WorkflowSection({
       selectedWorkflowId={effectiveWorkflowId ?? null}
       onWorkflowChange={handleWorkflowChange}
       lastUsedWorkflowId={lastUsedWorkflowId}
+      agentProfiles={agentProfiles}
     />
   );
 });

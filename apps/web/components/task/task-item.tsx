@@ -10,7 +10,10 @@ import {
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
+import { DEBUG_UI } from "@/lib/config";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
@@ -106,20 +109,48 @@ function TaskStateIcon({
   );
 }
 
+const POLL_MODE_CONFIG: Record<SessionPollMode, { letter: string; color: string; label: string }> =
+  {
+    fast: { letter: "F", color: "text-emerald-500", label: "focused, 2s polling" },
+    slow: { letter: "S", color: "text-yellow-500", label: "subscribed, 30s polling" },
+    paused: { letter: "P", color: "text-muted-foreground/40", label: "no subscribers" },
+  };
+
 function TaskItemStatsRow({
   updatedAt,
   prInfo,
+  primarySessionId,
 }: {
   updatedAt?: string;
   prInfo?: { number: number; state: string };
+  primarySessionId?: string | null;
 }) {
-  if (!updatedAt && !prInfo) return null;
+  const pollMode = useAppStore((s) =>
+    DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
+  );
+
+  if (!updatedAt && !prInfo && !pollMode) return null;
+
+  const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
+
   return (
     <span className="flex items-center gap-1.5 text-[11px]">
       {updatedAt && (
         <span className="text-muted-foreground/50">{formatRelativeTime(updatedAt)}</span>
       )}
       {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
+      {modeConfig && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={cn("font-mono text-[10px] font-semibold", modeConfig.color)}>
+              {modeConfig.letter}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            Git poll: {pollMode} ({modeConfig.label})
+          </TooltipContent>
+        </Tooltip>
+      )}
     </span>
   );
 }
@@ -211,7 +242,7 @@ function TaskItemContent({
           {repositories.join(" · ")}
         </span>
       )}
-      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} />
+      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} primarySessionId={primarySessionId} />
     </div>
   );
 }

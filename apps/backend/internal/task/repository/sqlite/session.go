@@ -328,14 +328,13 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))
 }
 
-// UpdateTaskSession updates an existing agent session
+// UpdateTaskSession updates an existing agent session.
+// Note: metadata is NOT updated here to prevent clobbering concurrent writes
+// from UpdateSessionMetadata callers (e.g. setSessionPlanMode, persistPrepareResult).
+// Use UpdateSessionMetadata for metadata changes.
 func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
 
-	metadataJSON, err := json.Marshal(session.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
-	}
 	agentProfileSnapshotJSON, err := json.Marshal(session.AgentProfileSnapshot)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
@@ -358,13 +357,13 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
-			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
+			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?
 	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
-		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
+		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
 		session.ID)
@@ -413,6 +412,29 @@ func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET metadata = ?, updated_at = ? WHERE id = ?
 	`), string(metadataJSON), now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetSessionMetadataKey atomically sets a single key in the session's metadata
+// using SQLite's json_set. Unlike UpdateSessionMetadata (which does a full
+// replacement), this preserves all other metadata keys.
+func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	path := "$." + key
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?
+	`), path, string(valueJSON), now, sessionID)
 	if err != nil {
 		return err
 	}

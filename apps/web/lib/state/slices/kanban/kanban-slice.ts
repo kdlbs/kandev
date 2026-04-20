@@ -67,6 +67,7 @@ export const createKanbanSlice: StateCreator<
   clearKanbanMulti: () =>
     set((draft) => {
       draft.kanbanMulti.snapshots = {};
+      draft.kanbanMulti.isLoading = false;
     }),
   updateMultiTask: (workflowId, task) =>
     set((draft) => {

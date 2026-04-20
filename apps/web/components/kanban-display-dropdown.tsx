@@ -41,12 +41,16 @@ function WorkspaceSection({
         value={activeWorkspaceId ?? ""}
         onValueChange={(value) => onWorkspaceChange(value || null)}
       >
-        <SelectTrigger className="w-full border-border">
+        <SelectTrigger className="w-full border-border" data-testid="workspace-select-trigger">
           <SelectValue placeholder="Select workspace" />
         </SelectTrigger>
         <SelectContent>
           {workspaces.map((workspace: Workspace) => (
-            <SelectItem key={workspace.id} value={workspace.id}>
+            <SelectItem
+              key={workspace.id}
+              value={workspace.id}
+              data-testid={`workspace-select-item-${workspace.id}`}
+            >
               {workspace.name}
             </SelectItem>
           ))}
@@ -72,7 +76,7 @@ function WorkflowSection({
         value={activeWorkflowId ?? "all"}
         onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
       >
-        <SelectTrigger className="w-full border-border">
+        <SelectTrigger data-testid="display-workflow-filter" className="w-full border-border">
           <SelectValue placeholder="Select workflow" />
         </SelectTrigger>
         <SelectContent>
@@ -107,7 +111,7 @@ function RepositorySection({
         onValueChange={(value) => onRepositoryChange(value as string | "all")}
         disabled={repositories.length === 0}
       >
-        <SelectTrigger className="w-full border-border">
+        <SelectTrigger data-testid="display-repository-filter" className="w-full border-border">
           <SelectValue
             placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
           />
@@ -147,7 +151,7 @@ export function KanbanDisplayDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="cursor-pointer">
+        <Button variant="outline" data-testid="display-button" className="cursor-pointer">
           <IconAdjustmentsHorizontal className="h-4 w-4 mr-2" />
           Display
         </Button>

@@ -1,3 +1,5 @@
+import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
@@ -14,7 +16,7 @@ function buildTerminalFields(s: UserSettingsData) {
   };
 }
 
-export function buildCoreFields(s: UserSettingsData) {
+function buildIdentityFields(s: UserSettingsData) {
   return {
     workspaceId: s.workspace_id || null,
     workflowId: s.workflow_filter_id || null,
@@ -22,14 +24,27 @@ export function buildCoreFields(s: UserSettingsData) {
     repositoryIds: s.repository_ids ?? [],
     preferredShell: s.preferred_shell || null,
     defaultEditorId: s.default_editor_id || null,
+    defaultUtilityAgentId: s.default_utility_agent_id || null,
+  };
+}
+
+function buildBehaviorFields(s: UserSettingsData) {
+  return {
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: s.release_notes_last_seen_version || null,
-    savedLayouts: s.saved_layouts ?? [],
-    defaultUtilityAgentId: s.default_utility_agent_id || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
+  };
+}
+
+export function buildCoreFields(s: UserSettingsData) {
+  return {
+    ...buildIdentityFields(s),
+    ...buildBehaviorFields(s),
+    savedLayouts: s.saved_layouts ?? [],
+    sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView) as SidebarView[],
     ...buildTerminalFields(s),
   };
 }
@@ -64,6 +79,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       showReleaseNotification: true,
       releaseNotesLastSeenVersion: null,
       savedLayouts: [] as SavedLayout[],
+      sidebarViews: [] as SidebarView[],
       defaultUtilityAgentId: null,
       keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
       terminalLinkBehavior: "new_tab" as const,

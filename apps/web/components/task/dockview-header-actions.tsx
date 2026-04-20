@@ -419,22 +419,6 @@ function RightTopGroupActions() {
   );
 }
 
-function SessionModeBadge() {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const modeState = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    return state.sessionMode.bySessionId[activeSessionId] ?? null;
-  });
-
-  if (!modeState?.currentModeId) return null;
-
-  return (
-    <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-      {modeState.currentModeId}
-    </span>
-  );
-}
-
 function CenterRightActions() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const repository = useAppStore((state) => {
@@ -469,7 +453,7 @@ function CenterRightActions() {
 
   return (
     <div className="flex items-center gap-1">
-      <SessionModeBadge />
+      {/* Mode is shown in the chat input ModeSelector instead */}
       {hasDevScript && (
         <Button
           size="sm"

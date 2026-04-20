@@ -110,15 +110,51 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 // For worktree executors, workspace resolution is handled by the WorktreePreparer.
 // For tasks without repositories, creates a workspace directory in ~/.kandev/quick-chat/.
 // Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
-func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
-	if req.UseWorktree {
-		// Worktree executors: preparer handles worktree creation.
-		// Return empty path; it will be populated from preparer results.
+// resolveResumeWorktreePath resolves workspace path for worktree resume using the provider.
+func (m *Manager) resolveResumeWorktreePath(ctx context.Context, req *LaunchRequest) (string, string, string, string) {
+	ws := m.resolveWorkspaceFromProvider(ctx, req)
+	if ws == "" {
+		m.logger.Warn("could not resolve workspace path for worktree resume",
+			zap.String("session_id", req.SessionID))
 		return "", "", "", ""
+	}
+	var mainRepoGitDir string
+	if req.RepositoryPath != "" {
+		mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
+	}
+	return ws, mainRepoGitDir, req.WorktreeID, ""
+}
+
+// resolveWorkspaceFromProvider looks up the workspace path from the info provider.
+func (m *Manager) resolveWorkspaceFromProvider(ctx context.Context, req *LaunchRequest) string {
+	if m.workspaceInfoProvider == nil {
+		return ""
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, req.TaskID, req.SessionID)
+	if err != nil || info.WorkspacePath == "" {
+		return ""
+	}
+	m.logger.Debug("resolved workspace from provider for resume",
+		zap.String("session_id", req.SessionID),
+		zap.String("path", info.WorkspacePath))
+	return info.WorkspacePath
+}
+
+func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	if req.UseWorktree && req.ACPSessionID == "" {
+		return "", "", "", ""
+	}
+	if req.UseWorktree && req.ACPSessionID != "" {
+		return m.resolveResumeWorktreePath(ctx, req)
 	}
 	workspacePath = req.WorkspacePath
 	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
+	}
+	if workspacePath == "" && req.ACPSessionID != "" {
+		if resolved := m.resolveWorkspaceFromProvider(ctx, req); resolved != "" {
+			return resolved, "", "", ""
+		}
 	}
 	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
 	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
@@ -204,6 +240,7 @@ func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressC
 			TaskID:        taskID,
 			SessionID:     sessionID,
 			StepName:      step.Name,
+			StepCommand:   step.Command,
 			StepIndex:     stepIndex,
 			TotalSteps:    totalSteps,
 			Status:        string(step.Status),
@@ -211,6 +248,8 @@ func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressC
 			Error:         step.Error,
 			Warning:       step.Warning,
 			WarningDetail: step.WarningDetail,
+			StartedAt:     step.StartedAt,
+			EndedAt:       step.EndedAt,
 		})
 	}
 }
@@ -310,6 +349,7 @@ func (m *Manager) runEnvironmentPreparer(
 		return nil
 	}
 
+	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
@@ -321,6 +361,7 @@ func (m *Manager) runEnvironmentPreparer(
 		UseWorktree:          req.UseWorktree,
 		WorktreeID:           req.WorktreeID,
 		SetupScript:          req.SetupScript,
+		RepoSetupScript:      repoSetupScript,
 		BaseBranch:           req.BaseBranch,
 		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
@@ -418,8 +459,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
-	// For worktree executors, the preparer creates the worktree and returns workspace metadata.
-	prepResult := m.runEnvironmentPreparer(ctx, req, workspacePath)
+	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
+	var prepResult *EnvPrepareResult
+	if req.ACPSessionID == "" {
+		prepResult = m.runEnvironmentPreparer(ctx, req, workspacePath)
+	} else {
+		m.logger.Debug("skipping environment preparation for resumed session",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID))
+	}
 	if prepResult != nil {
 		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
@@ -441,8 +489,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		return nil, err
 	}
 	// Publish PrepareCompleted for CreateInstance only if no preparer ran
-	// (preparers publish their own completion above).
-	if prepResult == nil {
+	// AND this is not a resume (resume already has persisted prepare_result).
+	if prepResult == nil && req.ACPSessionID == "" {
 		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
 			TaskID:     req.TaskID,
 			SessionID:  req.SessionID,
@@ -458,6 +506,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
+	// Carry prepare result back to caller for synchronous persistence.
+	execution.PrepareResult = prepResult
 	if req.PreviousExecutionID != "" {
 		execution.isResumedSession = true
 	}

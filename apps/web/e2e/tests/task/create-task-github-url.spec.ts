@@ -734,11 +734,6 @@ test.describe("Task creation from GitHub URL", () => {
     // Clicking again should collapse the details.
     await detailsBtn.click();
     await expect(warningBanner.locator("pre")).not.toBeVisible();
-
-    // Dismissing the banner hides it entirely.
-    const dismissBtn = warningBanner.getByRole("button", { name: "Dismiss warning" });
-    await dismissBtn.click();
-    await expect(warningBanner).not.toBeVisible();
   });
 
   test("two tasks from the same PR URL create independent worktrees", async ({

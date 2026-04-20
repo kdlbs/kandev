@@ -30,10 +30,10 @@ const (
 	// binaryCheckSize is how many bytes to inspect for null bytes to detect binary files.
 	binaryCheckSize = 8 * 1024 // 8 KB
 
-	diffSkipReasonTooLarge        = "too_large"
-	diffSkipReasonBinary          = "binary"
-	diffSkipReasonTruncated       = "truncated"
-	diffSkipReasonBudgetExceeded  = "budget_exceeded"
+	diffSkipReasonTooLarge       = "too_large"
+	diffSkipReasonBinary         = "binary"
+	diffSkipReasonTruncated      = "truncated"
+	diffSkipReasonBudgetExceeded = "budget_exceeded"
 )
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info

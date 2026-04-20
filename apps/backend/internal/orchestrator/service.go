@@ -127,6 +127,8 @@ type repoStore interface {
 type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
@@ -134,6 +136,7 @@ type sessionExecutorStore interface {
 	ClearSessionExecutionID(ctx context.Context, id string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
@@ -151,9 +154,8 @@ type sessionExecutorStore interface {
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
-	// Session listing + primary/delete
+	// Session listing + delete
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	SetSessionPrimary(ctx context.Context, sessionID string) error
 	DeleteTaskSession(ctx context.Context, id string) error
 	// Task environment
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
@@ -348,6 +350,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetOnPrimarySessionSet sets a callback on the executor for when the first session
+// of a task is marked primary. Used to publish a task.updated event so the frontend
+// receives the primary_session_id.
+func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
+	s.executor.SetOnPrimarySessionSet(fn)
+}
+
 // SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
 // cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
 // for local/worktree execution and have no local path yet.
@@ -535,6 +544,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()
+
+	// Subscribe to prepare events (persist result in session metadata)
+	s.subscribePrepareEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

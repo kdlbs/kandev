@@ -131,8 +131,13 @@ const (
 	ActionTaskUnsubscribe    = "task.unsubscribe"
 	ActionSessionSubscribe   = "session.subscribe"
 	ActionSessionUnsubscribe = "session.unsubscribe"
-	ActionUserSubscribe      = "user.subscribe"
-	ActionUserUnsubscribe    = "user.unsubscribe"
+	// Focus signals are layered on top of subscriptions to indicate which
+	// session the user is actively viewing (task details page or task panel),
+	// vs merely subscribed (sidebar diff badges). Drives backend polling tier.
+	ActionSessionFocus    = "session.focus"
+	ActionSessionUnfocus  = "session.unfocus"
+	ActionUserSubscribe   = "user.subscribe"
+	ActionUserUnsubscribe = "user.unsubscribe"
 
 	// Message actions
 	ActionMessageAdd  = "message.add"
@@ -180,6 +185,7 @@ const (
 	ActionSessionSetMode           = "session.set_mode"
 	ActionSessionTodosUpdated      = "session.todos_updated"
 	ActionSessionPromptUsage       = "session.prompt_usage"
+	ActionSessionPollModeChanged   = "session.poll_mode_changed"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"

@@ -31,6 +31,7 @@ type UserSettingsDTO struct {
 	LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
+	SidebarViews                []models.SidebarView              `json:"sidebar_views"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 	DefaultUtilityModel         string                            `json:"default_utility_model"`
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
@@ -72,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoInstallLanguages     *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs            *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
+	SidebarViews                *[]models.SidebarView              `json:"sidebar_views,omitempty"`
 	DefaultUtilityAgentID       *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
@@ -108,6 +110,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoInstallLanguages:     settings.LspAutoInstallLanguages,
 		LspServerConfigs:            settings.LspServerConfigs,
 		SavedLayouts:                settings.SavedLayouts,
+		SidebarViews:                settings.SidebarViews,
 		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
 		KeyboardShortcuts:           settings.KeyboardShortcuts,

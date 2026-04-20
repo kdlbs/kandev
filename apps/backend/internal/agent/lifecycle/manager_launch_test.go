@@ -1,12 +1,14 @@
 package lifecycle
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/executor"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -70,4 +72,53 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
 	})
+}
+
+// trackingPreparer records whether Prepare was called.
+type trackingPreparer struct {
+	called bool
+}
+
+func (p *trackingPreparer) Name() string { return "tracking" }
+
+func (p *trackingPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, _ PrepareProgressCallback) (*EnvPrepareResult, error) {
+	p.called = true
+	return &EnvPrepareResult{Success: true, WorkspacePath: "/tmp/ws"}, nil
+}
+
+func TestRunEnvironmentPreparer_CalledOnFreshLaunch(t *testing.T) {
+	mgr := newTestManager()
+	preparer := &trackingPreparer{}
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register(executor.NameStandalone, preparer)
+
+	req := &LaunchRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		ExecutorType:   string(executor.NameStandalone),
+		RepositoryPath: "/tmp/repo",
+	}
+
+	result := mgr.runEnvironmentPreparer(context.Background(), req, "/tmp/repo")
+	require.True(t, preparer.called, "preparer should be called on fresh launch")
+	require.NotNil(t, result)
+	require.True(t, result.Success)
+}
+
+func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
+	mgr := newTestManager()
+	preparer := &trackingPreparer{}
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register(executor.NameStandalone, preparer)
+
+	req := &LaunchRequest{
+		TaskID:       "task-1",
+		SessionID:    "session-1",
+		ExecutorType: string(executor.NameStandalone),
+		// No RepositoryPath — preparer should be skipped
+	}
+
+	result := mgr.runEnvironmentPreparer(context.Background(), req, "")
+	require.False(t, preparer.called, "preparer should be skipped when no repository path")
+	require.Nil(t, result)
 }

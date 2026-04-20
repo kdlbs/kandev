@@ -40,6 +40,11 @@ export class WebSocketClient {
   private intentionalClose = false;
   private subscriptions = new Map<string, number>();
   private sessionSubscriptions = new Map<string, number>();
+  // Ref-counted focus signals: a session can be focused by both the task panel
+  // and the task details page if both are mounted. Backend wakes its workspace
+  // tracker into fast-poll mode while any client has focus, falling back to
+  // slow when the count reaches 0 (debounced server-side).
+  private sessionFocusCounts = new Map<string, number>();
   private userSubscriptionCount = 0;
 
   constructor(
@@ -147,6 +152,7 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
+
     if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
@@ -156,6 +162,40 @@ export class WebSocketClient {
       });
     }
     return () => this.unsubscribeSession(sessionId);
+  }
+
+  focusSession(sessionId: string) {
+    const currentCount = this.sessionFocusCounts.get(sessionId) ?? 0;
+    const nextCount = currentCount + 1;
+    this.sessionFocusCounts.set(sessionId, nextCount);
+    if (this.status === "open" && nextCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "session.focus",
+        payload: { session_id: sessionId },
+      });
+    }
+    return () => this.unfocusSession(sessionId);
+  }
+
+  unfocusSession(sessionId: string) {
+    const currentCount = this.sessionFocusCounts.get(sessionId);
+    if (!currentCount) return;
+    const nextCount = currentCount - 1;
+    if (nextCount <= 0) {
+      this.sessionFocusCounts.delete(sessionId);
+      if (this.status === "open") {
+        this.send({
+          id: generateUUID(),
+          type: "request",
+          action: "session.unfocus",
+          payload: { session_id: sessionId },
+        });
+      }
+      return;
+    }
+    this.sessionFocusCounts.set(sessionId, nextCount);
   }
 
   subscribeUser() {
@@ -193,6 +233,7 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId);
     if (!currentCount) return;
     const nextCount = currentCount - 1;
+
     if (nextCount <= 0) {
       this.sessionSubscriptions.delete(sessionId);
       if (this.status === "open") {
@@ -351,6 +392,14 @@ export class WebSocketClient {
         id: generateUUID(),
         type: "request",
         action: "session.subscribe",
+        payload: { session_id: sessionId },
+      });
+    });
+    this.sessionFocusCounts.forEach((_count, sessionId) => {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "session.focus",
         payload: { session_id: sessionId },
       });
     });

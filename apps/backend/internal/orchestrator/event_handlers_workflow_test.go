@@ -62,7 +62,8 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 			t.Fatalf("failed to get session: %v", err)
 		}
 		session.AgentProfileID = "profile-auggie"
-		session.Metadata = map[string]any{"plan_mode": true}
+		_ = repo.UpdateTaskSession(ctx, session)
+		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]any{"plan_mode": true})
 		if err := repo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("failed to update session: %v", err)
 		}
