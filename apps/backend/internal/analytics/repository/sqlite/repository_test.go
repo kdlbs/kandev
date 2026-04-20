@@ -53,9 +53,11 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		board_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
+		is_ephemeral INTEGER NOT NULL DEFAULT 0,
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
@@ -291,5 +293,81 @@ func TestGetGitStats_EmptyWorkspace(t *testing.T) {
 
 	if stats.TotalCommits != 0 {
 		t.Errorf("expected 0 commits, got %d", stats.TotalCommits)
+	}
+}
+
+func TestGetGlobalStats_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	// Insert workspace + board + workflow step
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-todo', 'board-1', 'To Do', 0, ?, ?)`, nowStr, nowStr)
+
+	// Insert a regular task
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-todo', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+
+	// Insert an ephemeral (quick chat) task
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	// Add sessions for both tasks
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	// Add turns for both sessions
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-regular', 'sess-regular', 'task-regular', ?, ?, ?, ?)`, nowStr, nowStr, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-ephemeral', 'sess-ephemeral', 'task-ephemeral', ?, ?, ?, ?)`, nowStr, nowStr, nowStr, nowStr)
+
+	// Global stats should only count the regular task
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	if stats.TotalTasks != 1 {
+		t.Errorf("expected 1 total task (ephemeral excluded), got %d", stats.TotalTasks)
+	}
+	if stats.TotalSessions != 1 {
+		t.Errorf("expected 1 total session (ephemeral excluded), got %d", stats.TotalSessions)
+	}
+	if stats.TotalTurns != 1 {
+		t.Errorf("expected 1 total turn (ephemeral excluded), got %d", stats.TotalTurns)
+	}
+}
+
+func TestGetTaskStats_ExcludesEphemeralTasks(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+
+	// Insert regular and ephemeral tasks
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
+
+	results, err := repo.GetTaskStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetTaskStats failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 task stat (ephemeral excluded), got %d", len(results))
+	}
+	if results[0].TaskID != "task-regular" {
+		t.Errorf("expected task-regular, got %s", results[0].TaskID)
 	}
 }

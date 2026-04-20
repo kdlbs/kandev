@@ -76,7 +76,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 			WHERE (? IS NULL OR s.started_at >= ?)
 			GROUP BY s.task_id
 		) turn_stats ON turn_stats.task_id = t.id
-		WHERE t.workspace_id = ? AND (? IS NULL OR t.created_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
 		ORDER BY t.updated_at DESC
 	`, dur)
 
@@ -133,37 +133,38 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 
 	query := fmt.Sprintf(`
 		SELECT
-			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND (? IS NULL OR created_at >= ?)) as total_tasks,
+			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0 AND (? IS NULL OR created_at >= ?)) as total_tasks,
 			(SELECT COUNT(*) FROM tasks t
 			 LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			 WHERE t.workspace_id = ?
+			   AND t.is_ephemeral = 0
 			   AND (t.archived_at IS NOT NULL
 			        OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
 			   AND (? IS NULL OR t.created_at >= ?)) as completed_tasks,
-			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND state = 'IN_PROGRESS' AND archived_at IS NULL AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
-			(SELECT COUNT(*) FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_sessions,
+			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0 AND state = 'IN_PROGRESS' AND archived_at IS NULL AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
+			(SELECT COUNT(*) FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_sessions,
 			(SELECT COUNT(*) FROM task_session_turns turn
 			 JOIN task_sessions s ON s.id = turn.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_turns,
+			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_turns,
 			(SELECT COUNT(*) FROM task_session_messages msg
 			 JOIN task_sessions s ON s.id = msg.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_messages,
+			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_messages,
 			(SELECT COUNT(*) FROM task_session_messages msg
 			 JOIN task_sessions s ON s.id = msg.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND msg.author_type = 'user' AND (? IS NULL OR s.started_at >= ?)) as total_user_messages,
+			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND msg.author_type = 'user' AND (? IS NULL OR s.started_at >= ?)) as total_user_messages,
 			(SELECT COUNT(*) FROM task_session_messages msg
 			 JOIN task_sessions s ON s.id = msg.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND msg.type LIKE 'tool_%%' AND (? IS NULL OR s.started_at >= ?)) as total_tool_calls,
+			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND msg.type LIKE 'tool_%%' AND (? IS NULL OR s.started_at >= ?)) as total_tool_calls,
 			(SELECT COALESCE(SUM(
 				CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END
 			), 0) FROM task_session_turns turn
 			 JOIN task_sessions s ON s.id = turn.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_duration_ms
+			 WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)) as total_duration_ms
 	`, dur)
 
 	var stats models.GlobalStats
@@ -229,7 +230,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 			JOIN tasks t ON t.id = s.task_id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
 				AND %s = %s
-			WHERE t.workspace_id = ?
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
@@ -277,7 +278,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 				SELECT task_id, MAX(completed_at) as completed_at
 				FROM task_sessions WHERE completed_at IS NOT NULL GROUP BY task_id
 			) ts ON ts.task_id = t.id
-			WHERE t.workspace_id = ?
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0
 			  AND (t.archived_at IS NOT NULL
 			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
 			GROUP BY %s
@@ -370,7 +371,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			FROM task_repositories tr
 			JOIN tasks t ON t.id = tr.task_id
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE (? IS NULL OR t.created_at >= ?)
+			WHERE t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
 			GROUP BY tr.repository_id
 		) task_stats ON task_stats.repository_id = r.id
 		LEFT JOIN (
@@ -381,19 +382,21 @@ func buildRepositoryStatsQuery(drv string) string {
 				COUNT(DISTINCT CASE WHEN msg.author_type = 'user' THEN msg.id END) as user_message_count,
 				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) as tool_call_count
 			FROM task_repositories tr
+			JOIN tasks t ON t.id = tr.task_id
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
 			GROUP BY tr.repository_id
 		) session_stats ON session_stats.repository_id = r.id
 		LEFT JOIN (
 			SELECT tr.repository_id,
 				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
 			FROM task_repositories tr
+			JOIN tasks t ON t.id = tr.task_id
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
 			GROUP BY tr.repository_id
 		) duration_stats ON duration_stats.repository_id = r.id
 		LEFT JOIN (
@@ -404,7 +407,8 @@ func buildRepositoryStatsQuery(drv string) string {
 				COALESCE(SUM(c.deletions), 0) as total_deletions
 			FROM task_session_commits c
 			JOIN task_sessions s ON s.id = c.session_id
-			WHERE s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.is_ephemeral = 0 AND s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
 			GROUP BY s.repository_id
 		) git_stats ON git_stats.repository_id = r.id
 		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
@@ -438,7 +442,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
 		LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-		WHERE t.workspace_id = ? AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
 		GROUP BY s.agent_profile_id
 		ORDER BY session_count DESC
 		LIMIT ?
@@ -484,7 +488,7 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 		FROM task_session_commits c
 		JOIN task_sessions s ON s.id = c.session_id
 		JOIN tasks t ON t.id = s.task_id
-		WHERE t.workspace_id = ? AND (? IS NULL OR c.committed_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR c.committed_at >= ?)
 	`
 
 	var stats models.GitStats
