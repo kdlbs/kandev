@@ -196,6 +196,15 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 			zap.Error(err))
 	}
 
+	// Drain any stale signal that may have been left if the agent completed
+	// concurrently with the escalation timeout (Go's select is non-deterministic
+	// when both promptFinished and time.After are ready, so our send above may
+	// have landed on a channel that SendPrompt had just drained).
+	select {
+	case <-execution.promptDoneCh:
+	default:
+	}
+
 	return ErrCancelEscalated
 }
 

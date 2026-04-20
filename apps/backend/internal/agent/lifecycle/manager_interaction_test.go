@@ -868,7 +868,10 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 		close(promptFinished)
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Tight bounds: escalation window is cancelWaitTimeout + cancelEscalationTimeout
+	// (100 ms). Use channel-based synchronization per CLAUDE.md — synctest cannot be
+	// used here because the HTTP mock server spawns goroutines outside its bubble.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	err := mgr.CancelAgent(ctx, exec.ID)
@@ -876,7 +879,7 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 
 	select {
 	case <-sendPromptDone:
-	case <-time.After(1 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("simulated SendPrompt did not release after cancel escalation")
 	}
 	require.True(t, signal.IsError, "escalation signal must carry IsError=true")
