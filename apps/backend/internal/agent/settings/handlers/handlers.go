@@ -122,9 +122,10 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name  string `json:"name"`
-	Model string `json:"model"`
-	Mode  string `json:"mode,omitempty"`
+	Name     string           `json:"name"`
+	Model    string           `json:"model"`
+	Mode     string           `json:"mode,omitempty"`
+	CLIFlags []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -144,9 +145,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:  profile.Name,
-			Model: profile.Model,
-			Mode:  profile.Mode,
+			Name:     profile.Name,
+			Model:    profile.Model,
+			Mode:     profile.Mode,
+			CLIFlags: profile.CLIFlags,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
