@@ -430,7 +430,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
     branch: fs.branch,
-    agentProfileId: fs.agentProfileId,
+    agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
     editingTask,
@@ -556,7 +556,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               hasDescription={fs.hasDescription}
               hasRepositorySelection={computed.hasRepositorySelection}
               branch={fs.branch}
-              agentProfileId={fs.agentProfileId}
+              agentProfileId={computed.effectiveAgentProfileId}
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
               executorHint={computed.executorHint}
