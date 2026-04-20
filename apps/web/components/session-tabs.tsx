@@ -12,6 +12,8 @@ export type SessionTab = {
   alwaysShowClose?: boolean;
   onClose?: (event: MouseEvent) => void;
   className?: string;
+  testId?: string;
+  closeTestId?: string;
 };
 
 type SessionTabsProps = {
@@ -75,6 +77,7 @@ function SessionTabItem({
       )}
       <TabsTrigger
         value={tab.id}
+        data-testid={tab.testId}
         className={tab.className + " group relative py-1 cursor-pointer rounded-sm max-w-[120px]"}
       >
         {tab.icon}
@@ -85,6 +88,7 @@ function SessionTabItem({
           <span
             role="button"
             tabIndex={-1}
+            data-testid={tab.closeTestId}
             className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
             onClick={tab.onClose}
           >
