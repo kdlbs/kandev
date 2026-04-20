@@ -126,7 +126,12 @@ function resolveProfileSubLabel(
 }
 
 function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | undefined }) {
-  if (!profile?.agent_name) return null;
+  if (!profile?.agent_name) {
+    // Keep tabs visually aligned when the agent profile is missing/unknown.
+    return (
+      <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full bg-muted-foreground/40" />
+    );
+  }
   return <AgentLogo agentName={profile.agent_name} size={12} className="shrink-0" />;
 }
 
