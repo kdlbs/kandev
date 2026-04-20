@@ -111,7 +111,7 @@ export function BuiltinActionRow({
     agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
 
   return (
-    <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50 group">
+    <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50">
       <div className="w-[420px] shrink-0">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
@@ -158,7 +158,7 @@ type CustomAgentRowProps = {
 
 export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps) {
   return (
-    <div className="flex items-center justify-between py-3 px-3 rounded hover:bg-muted/50 group">
+    <div className="flex items-center justify-between py-3 px-3 rounded hover:bg-muted/50">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
