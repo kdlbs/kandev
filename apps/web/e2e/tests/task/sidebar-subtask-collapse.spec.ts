@@ -99,11 +99,17 @@ test.describe("Sidebar subtasks — collapse/expand", () => {
       timeout: 5_000,
     });
 
-    // Expanding restores the subtasks.
+    // Expanding restores the subtasks — and at this point the active task is
+    // `other`, not `parent`, so a bubbled parent-row click (if any) would
+    // change the URL. Capture it and assert it doesn't change after the
+    // chevron click, which exercises the no-navigation invariant on an
+    // unselected parent row.
     const chevronAgain = session.sidebar.locator(
       `[data-testid='sidebar-subtask-toggle'][data-task-id='${parent.id}']`,
     );
+    const urlBeforeExpand = testPage.url();
     await chevronAgain.click();
+    expect(testPage.url()).toBe(urlBeforeExpand);
     await expect(chevronAgain).toHaveAttribute("aria-expanded", "true");
     await expect(session.sidebar.getByText("Collapse Child One")).toBeVisible({ timeout: 5_000 });
     await expect(session.sidebar.getByText("Collapse Child Two")).toBeVisible({ timeout: 5_000 });

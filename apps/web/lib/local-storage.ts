@@ -633,6 +633,12 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
+  // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
+  const collapsed = getStoredCollapsedSubtaskParents();
+  if (collapsed.includes(taskId)) {
+    setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
+  }
+
   // Session-keyed storage — clean all sessions belonging to the task
   for (const sessionId of sessionIds) {
     removeSessionMaximizeState(sessionId);

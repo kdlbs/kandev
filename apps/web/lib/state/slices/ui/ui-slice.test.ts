@@ -12,6 +12,8 @@ function makeStore() {
 }
 
 const KEY = "kandev.sidebar.collapsedSubtasks";
+const TASK_A = "task-a";
+const TASK_B = "task-b";
 
 describe("toggleSubtaskCollapsed", () => {
   beforeEach(() => {
@@ -26,16 +28,16 @@ describe("toggleSubtaskCollapsed", () => {
 
   it("adds a parent id on first toggle and persists it", () => {
     const store = makeStore();
-    store.getState().toggleSubtaskCollapsed("task-a");
+    store.getState().toggleSubtaskCollapsed(TASK_A);
 
-    expect(store.getState().collapsedSubtaskParents).toEqual(["task-a"]);
-    expect(JSON.parse(window.sessionStorage.getItem(KEY) ?? "null")).toEqual(["task-a"]);
+    expect(store.getState().collapsedSubtaskParents).toEqual([TASK_A]);
+    expect(JSON.parse(window.sessionStorage.getItem(KEY) ?? "null")).toEqual([TASK_A]);
   });
 
   it("removes a parent id on second toggle", () => {
     const store = makeStore();
-    store.getState().toggleSubtaskCollapsed("task-a");
-    store.getState().toggleSubtaskCollapsed("task-a");
+    store.getState().toggleSubtaskCollapsed(TASK_A);
+    store.getState().toggleSubtaskCollapsed(TASK_A);
 
     expect(store.getState().collapsedSubtaskParents).toEqual([]);
     expect(JSON.parse(window.sessionStorage.getItem(KEY) ?? "null")).toEqual([]);
@@ -43,12 +45,12 @@ describe("toggleSubtaskCollapsed", () => {
 
   it("tracks multiple parents independently", () => {
     const store = makeStore();
-    store.getState().toggleSubtaskCollapsed("task-a");
-    store.getState().toggleSubtaskCollapsed("task-b");
+    store.getState().toggleSubtaskCollapsed(TASK_A);
+    store.getState().toggleSubtaskCollapsed(TASK_B);
 
-    expect(store.getState().collapsedSubtaskParents).toEqual(["task-a", "task-b"]);
+    expect(store.getState().collapsedSubtaskParents).toEqual([TASK_A, TASK_B]);
 
-    store.getState().toggleSubtaskCollapsed("task-a");
-    expect(store.getState().collapsedSubtaskParents).toEqual(["task-b"]);
+    store.getState().toggleSubtaskCollapsed(TASK_A);
+    expect(store.getState().collapsedSubtaskParents).toEqual([TASK_B]);
   });
 });
