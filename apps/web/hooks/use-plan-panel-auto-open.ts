@@ -30,7 +30,7 @@ export function usePlanPanelAutoOpen() {
   useEffect(() => {
     if (!api || isRestoringLayout) return;
     if (!plan || plan.created_by !== "agent") return;
-    if (!plan.updated_at || lastSeen === plan.updated_at) return;
+    if (lastSeen === plan.updated_at) return;
     if (api.getPanel("plan")) return;
 
     addPlanPanel({ quiet: true, inCenter: true });
