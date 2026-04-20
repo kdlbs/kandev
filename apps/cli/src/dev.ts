@@ -72,25 +72,28 @@ type DevBackendEnv = {
   extra: Record<string, string>;
 };
 
-// Computes the dev-mode backend env. When invoked from inside a kandev task
-// workspace, force-relocates the entire kandev root to <repo>/.kandev-dev so
-// dev state is isolated from the user's production ~/.kandev. In a normal
-// shell, preserves the existing override-friendly behavior (honor an
-// explicit KANDEV_DATABASE_PATH, otherwise default to a repo-local db).
-function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
+// Computes the dev-mode backend env. Dev mode always roots kandev under
+// <repo>/.kandev-dev so state is isolated from the user's production ~/.kandev
+// and so `make clean-db` (which removes .kandev-dev/) matches what `make dev`
+// writes.
+//
+// When invoked from inside a kandev task workspace, any KANDEV_DATABASE_PATH
+// is assumed to be leaked from the parent backend and is ignored. In a normal
+// shell, an explicit KANDEV_DATABASE_PATH is honored as an escape hatch.
+export function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
   const baseExtra: Record<string, string> = {
     KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
     KANDEV_DEBUG_PPROF_ENABLED: "true",
   };
+  const devHome = devKandevHome(repoRoot);
+  // Display only; the backend derives its own DB path from KANDEV_HOME_DIR
+  // via ResolvedDataDir(). Both resolve to the same location.
+  const devDbPath = path.join(devHome, "data", "kandev.db");
 
   if (isInsideKandevTask(repoRoot)) {
-    const devHome = devKandevHome(repoRoot);
-    // Display only; the backend derives its own DB path from KANDEV_HOME_DIR
-    // via ResolvedDataDir(). Both resolve to the same location.
-    const dbPath = path.join(devHome, "data", "kandev.db");
     console.log("[kandev] task workspace detected → using local dev state");
     return {
-      dbPath,
+      dbPath: devDbPath,
       extra: {
         ...baseExtra,
         KANDEV_HOME_DIR: devHome,
@@ -100,10 +103,19 @@ function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
     };
   }
 
-  const dbPath =
-    process.env.KANDEV_DATABASE_PATH || path.join(repoRoot, "apps", "backend", "kandev.db");
+  const override = process.env.KANDEV_DATABASE_PATH;
+  if (override) {
+    return {
+      dbPath: override,
+      extra: { ...baseExtra, KANDEV_DATABASE_PATH: override },
+    };
+  }
   return {
-    dbPath,
-    extra: { ...baseExtra, KANDEV_DATABASE_PATH: dbPath },
+    dbPath: devDbPath,
+    extra: {
+      ...baseExtra,
+      KANDEV_HOME_DIR: devHome,
+      KANDEV_DATABASE_PATH: "",
+    },
   };
 }
