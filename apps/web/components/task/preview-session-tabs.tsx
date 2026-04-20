@@ -24,7 +24,7 @@ const LABEL_SEPARATOR = " \u2022 ";
 type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
-  onSessionChange: (sessionId: string | null) => void;
+  onSessionChange?: (sessionId: string | null) => void;
 };
 
 /**
@@ -101,7 +101,7 @@ export function PreviewSessionTabs({
         <SessionTabs
           tabs={tabs}
           activeTab={activeSessionId ?? ""}
-          onTabChange={onSessionChange}
+          onTabChange={(id) => onSessionChange?.(id)}
           listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         />
       </div>

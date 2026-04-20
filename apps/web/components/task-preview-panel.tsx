@@ -20,10 +20,6 @@ export function TaskPreviewPanel({
   onMaximize,
   onSessionChange,
 }: TaskPreviewPanelProps) {
-  const handleSessionChange = (nextSessionId: string | null) => {
-    onSessionChange?.(nextSessionId);
-  };
-
   return (
     <div
       data-testid="task-preview-panel"
@@ -58,7 +54,7 @@ export function TaskPreviewPanel({
           <PreviewSessionTabs
             taskId={task.id}
             sessionId={sessionId}
-            onSessionChange={handleSessionChange}
+            onSessionChange={onSessionChange}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
