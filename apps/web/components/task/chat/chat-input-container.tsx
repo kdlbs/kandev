@@ -57,6 +57,7 @@ type ChatInputContainerProps = {
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
   isStarting: boolean;
+  isMoving?: boolean;
   isSending: boolean;
   onCancel: () => void;
   placeholder?: string;
@@ -241,10 +242,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
       isAgentBusy,
       isStarting,
+      isMoving = false,
       isSending,
       isFailed = false,
       showRequestChangesTooltip = false,
     } = props;
+    const isBusyVisual = isStarting || isMoving;
 
     const p = {
       ...props,
@@ -262,6 +265,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       sessionId,
       isSending,
       isStarting,
+      isMoving,
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,
       isAgentBusy,
@@ -309,7 +313,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         containerRef={s.containerRef}
         height={s.height}
         resizeHandleProps={s.resizeHandleProps}
-        isStarting={isStarting}
+        isStarting={isBusyVisual}
         isAgentBusy={isAgentBusy}
         hasClarification={s.hasClarification}
         showRequestChangesTooltip={showRequestChangesTooltip}
