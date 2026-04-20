@@ -281,6 +281,20 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
       set((draft) => {
         draft.sidebarViews.syncError = null;
       }),
+    // collapsedGroups is per-device visual state; update in memory and the
+    // localStorage cache only. Don't PATCH — we'd flood the backend on every
+    // expand/collapse click, and the server-side copy is stale anyway across
+    // devices. The next mutateViews call picks up any newer local state.
+    toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => {
+      set((draft) => {
+        const view = draft.sidebarViews.views.find((v) => v.id === viewId);
+        if (!view) return;
+        const idx = view.collapsedGroups.indexOf(groupKey);
+        if (idx === -1) view.collapsedGroups.push(groupKey);
+        else view.collapsedGroups.splice(idx, 1);
+      });
+      persistUserViews(get().sidebarViews.views);
+    },
     migrateLocalViewsToBackend: () => {
       const views = get().sidebarViews.views;
       const thisRequestId = ++viewsSyncRequestId;
@@ -352,14 +366,6 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
         const next = name.trim();
         if (!next || next === view.name) return false;
         view.name = next;
-      }),
-    toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) =>
-      mv((s) => {
-        const view = s.views.find((v) => v.id === viewId);
-        if (!view) return false;
-        const idx = view.collapsedGroups.indexOf(groupKey);
-        if (idx === -1) view.collapsedGroups.push(groupKey);
-        else view.collapsedGroups.splice(idx, 1);
       }),
   };
 }
