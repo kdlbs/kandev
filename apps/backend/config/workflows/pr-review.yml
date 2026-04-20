@@ -26,6 +26,9 @@ steps:
 
       {{task_prompt}}
 
+      STEP 0: CREATE A TASK LIST
+      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
+
       STEP 1: DETERMINE WHAT TO REVIEW
 
       The PR branch is checked out and the full codebase is available. You can and should read surrounding code to understand changes in context.
