@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { Badge } from "@kandev/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { IconSettings, IconList, IconLayoutKanban, IconChartBar } from "@tabler/icons-react";
@@ -139,12 +138,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
               onTogglePreviewOnClick?.(!!checked);
             }}
           />
-          <span className="text-sm">
-            Open preview on click{" "}
-            <Badge variant="secondary" className="ml-1">
-              beta
-            </Badge>
-          </span>
+          <span className="text-sm">Open preview on click</span>
         </label>
       </div>
     </div>
