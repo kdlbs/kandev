@@ -390,7 +390,8 @@ export function ChatInputArea({
         mcpServers={panelState.mcpServers}
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
-        isStarting={panelState.isStarting || isMoving}
+        isStarting={panelState.isStarting}
+        isMoving={isMoving}
         isSending={isSending}
         onCancel={handleCancelTurn}
         placeholder={placeholder}

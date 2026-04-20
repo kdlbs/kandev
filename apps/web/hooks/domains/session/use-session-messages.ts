@@ -125,6 +125,26 @@ function useTerminalStateFetch(
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
 }
 
+// Silent WS disconnects (NAT timeout, laptop sleep, suspended tab) leave
+// connectionStatus stuck at "connected" and no resubscribe fires. Backfill
+// whenever the tab regains visibility to recover missed messages without
+// requiring a page refresh.
+function useVisibilityBackfill(
+  taskSessionId: string | null,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  useEffect(() => {
+    if (!taskSessionId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [taskSessionId, store]);
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const messages = useAppStore((state) =>
@@ -216,12 +236,18 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     // (which may have run before the agent responded) and this subscription.
     // Without this, fast-responding agents can complete a turn before the
     // subscription is active, causing the response to never appear.
+    // taskSessionState is in deps so a freshly-adopted session that was still
+    // being constructed server-side when we subscribed re-runs subscribe+fetch
+    // once it transitions (e.g. STARTING → RUNNING), covering the backend race
+    // where an early session.subscribe arrives before the session exists.
     fetchAndStoreMessages(taskSessionId, store).catch(() => {});
 
     return () => {
       unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store]);
+  }, [taskSessionId, connectionStatus, store, taskSessionState]);
+
+  useVisibilityBackfill(taskSessionId, store);
 
   const terminalFetchRefs = useMemo(
     () => ({
