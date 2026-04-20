@@ -24,6 +24,7 @@ import type {
 import { DIMENSION_METAS, getDimensionMeta, getOpLabel } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
 import { FilterMultiSelect } from "./filter-multi-select";
+import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
 
 type ValueOption = { value: string; label: string; color?: string; group?: string };
 
@@ -206,8 +207,7 @@ function ValueInput({
 }
 
 function GroupedSelectItems({ options }: { options: ValueOption[] }) {
-  const hasGroups = options.some((o) => o.group);
-  if (!hasGroups) {
+  if (!hasGroupedOptions(options)) {
     return (
       <>
         {options.map((opt) => (
@@ -219,13 +219,7 @@ function GroupedSelectItems({ options }: { options: ValueOption[] }) {
     );
   }
 
-  const groups: Array<{ heading: string; items: ValueOption[] }> = [];
-  for (const opt of options) {
-    const heading = opt.group ?? "";
-    const last = groups[groups.length - 1];
-    if (last && last.heading === heading) last.items.push(opt);
-    else groups.push({ heading, items: [opt] });
-  }
+  const groups = buildOptionGroups(options);
 
   return (
     <>

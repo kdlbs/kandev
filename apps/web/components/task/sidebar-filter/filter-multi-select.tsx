@@ -13,6 +13,7 @@ import {
   CommandSeparator,
 } from "@kandev/ui/command";
 import { cn } from "@/lib/utils";
+import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
 
 export type MultiSelectOption = { value: string; label: string; color?: string; group?: string };
 
@@ -86,8 +87,7 @@ function GroupedOptions({
   selectedSet: Set<string>;
   onToggle: (value: string) => void;
 }) {
-  const hasGroups = options.some((o) => o.group);
-  if (!hasGroups) {
+  if (!hasGroupedOptions(options)) {
     return (
       <>
         {options.map((opt) => (
@@ -102,13 +102,7 @@ function GroupedOptions({
     );
   }
 
-  const groups: Array<{ heading: string; items: MultiSelectOption[] }> = [];
-  for (const opt of options) {
-    const heading = opt.group ?? "";
-    const last = groups[groups.length - 1];
-    if (last && last.heading === heading) last.items.push(opt);
-    else groups.push({ heading, items: [opt] });
-  }
+  const groups = buildOptionGroups(options);
 
   return (
     <>
@@ -142,7 +136,9 @@ function OptionRow({
 }) {
   return (
     <CommandItem
-      value={`${option.group ? `${option.group} ` : ""}${option.label}`}
+      // cmdk identifies and filters items by `value`; include `option.value`
+      // so same-titled steps under one workflow don't collide.
+      value={[option.group, option.label, option.value].filter(Boolean).join(" ")}
       onSelect={onSelect}
       data-checked={checked}
       data-testid="filter-value-multi-option"
