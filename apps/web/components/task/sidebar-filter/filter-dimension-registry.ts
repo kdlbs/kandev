@@ -110,3 +110,11 @@ export const OP_LABELS: Record<FilterOp, string> = {
   matches: "contains",
   not_matches: "does not contain",
 };
+
+export function getOpLabel(op: FilterOp, valueKind: DimensionValueKind): string {
+  if (valueKind === "boolean") {
+    if (op === "is") return "Show";
+    if (op === "is_not") return "Hide";
+  }
+  return OP_LABELS[op];
+}

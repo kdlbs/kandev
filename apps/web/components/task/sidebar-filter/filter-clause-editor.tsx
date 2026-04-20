@@ -11,7 +11,7 @@ import type {
   FilterOp,
   FilterValue,
 } from "@/lib/state/slices/ui/sidebar-view-types";
-import { DIMENSION_METAS, OP_LABELS, getDimensionMeta } from "./filter-dimension-registry";
+import { DIMENSION_METAS, getDimensionMeta, getOpLabel } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
 import { FilterMultiSelect } from "./filter-multi-select";
 
@@ -112,7 +112,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
         <SelectContent>
           {meta.ops.map((op) => (
             <SelectItem key={op} value={op} className="text-xs">
-              {OP_LABELS[op]}
+              {getOpLabel(op, meta.valueKind)}
             </SelectItem>
           ))}
         </SelectContent>
