@@ -250,21 +250,15 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
   );
 }
 
-type ButtonKind = "update" | "start-task" | "default";
+export type ButtonKind = "update" | "start-task" | "default";
 
-const REASON_TITLE = "Add a task title";
-const REASON_REPO = "Select a repository";
-const REASON_BRANCH = "Select a branch";
-const REASON_WORKSPACE = "Select a workspace";
-const REASON_WORKFLOW = "Select a workflow";
-const REASON_AGENT = "Select an agent";
-const REASON_DESCRIPTION = "Add a session description";
-
-function requiresAgent(kind: ButtonKind, props: TaskCreateDialogFooterProps): boolean {
-  if (kind === "start-task") return true;
-  if (kind === "default" && props.isSessionMode) return true;
-  return false;
-}
+export const REASON_TITLE = "Add a task title";
+export const REASON_REPO = "Select a repository";
+export const REASON_BRANCH = "Select a branch";
+export const REASON_WORKSPACE = "Select a workspace";
+export const REASON_WORKFLOW = "Select a workflow";
+export const REASON_AGENT = "Select an agent";
+export const REASON_DESCRIPTION = "Add a session description";
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasTitle) return REASON_TITLE;
@@ -276,7 +270,13 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
 }
 
 function missingSessionDescription(props: TaskCreateDialogFooterProps): boolean {
-  return props.isSessionMode && !props.hasDescription && !props.isPassthroughProfile;
+  return !props.hasDescription && !props.isPassthroughProfile;
+}
+
+function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
+  if (!props.agentProfileId) return REASON_AGENT;
+  if (missingSessionDescription(props)) return REASON_DESCRIPTION;
+  return null;
 }
 
 export function computeDisabledReason(
@@ -285,10 +285,10 @@ export function computeDisabledReason(
 ): string | null {
   if (props.isCreatingTask) return null;
   if (kind === "update") return props.hasTitle ? null : REASON_TITLE;
+  if (kind === "default" && props.isSessionMode) return sessionDefaultReason(props);
   const base = baseReason(props);
   if (base) return base;
-  if (requiresAgent(kind, props) && !props.agentProfileId) return REASON_AGENT;
-  if (kind === "default" && missingSessionDescription(props)) return REASON_DESCRIPTION;
+  if (kind === "start-task" && !props.agentProfileId) return REASON_AGENT;
   return null;
 }
 

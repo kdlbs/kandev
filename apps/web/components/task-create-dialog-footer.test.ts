@@ -1,17 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { computeDisabledReason } from "./task-create-dialog-footer";
-import type { TaskCreateDialogFooterProps } from "./task-create-dialog-footer";
+import {
+  computeDisabledReason,
+  REASON_TITLE,
+  REASON_REPO,
+  REASON_BRANCH,
+  REASON_WORKSPACE,
+  REASON_WORKFLOW,
+  REASON_AGENT,
+  REASON_DESCRIPTION,
+} from "./task-create-dialog-footer";
+import type { ButtonKind, TaskCreateDialogFooterProps } from "./task-create-dialog-footer";
 
-const REASON_TITLE = "Add a task title";
-const REASON_REPO = "Select a repository";
-const REASON_BRANCH = "Select a branch";
-const REASON_WORKSPACE = "Select a workspace";
-const REASON_WORKFLOW = "Select a workflow";
-const REASON_AGENT = "Select an agent";
-const REASON_DESCRIPTION = "Add a session description";
-const KIND_START = "start-task" as const;
-const KIND_UPDATE = "update" as const;
-const KIND_DEFAULT = "default" as const;
+const KIND_START: ButtonKind = "start-task";
+const KIND_UPDATE: ButtonKind = "update";
+const KIND_DEFAULT: ButtonKind = "default";
 
 function makeProps(
   overrides: Partial<TaskCreateDialogFooterProps> = {},
@@ -140,6 +142,23 @@ describe("computeDisabledReason (default)", () => {
     expect(
       computeDisabledReason(
         makeProps({ isSessionMode: true, hasDescription: false, isPassthroughProfile: true }),
+        KIND_DEFAULT,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores base reasons in session mode to match DefaultSubmitButton disabled logic", () => {
+    // In session mode the default button is only disabled by !agentProfileId or
+    // missing description — NOT by missing title/repo/branch/workspace/workflow.
+    // The tooltip must not contradict that state.
+    expect(
+      computeDisabledReason(
+        makeProps({
+          isSessionMode: true,
+          hasTitle: false,
+          hasRepositorySelection: false,
+          branch: "",
+        }),
         KIND_DEFAULT,
       ),
     ).toBeNull();
