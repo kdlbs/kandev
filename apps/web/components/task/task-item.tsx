@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import {
+  IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
   IconDots,
@@ -41,6 +42,12 @@ type TaskItemProps = {
   primarySessionId?: string | null;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /** Number of subtasks under this parent task. Only set for parent rows. */
+  subtaskCount?: number;
+  /** Whether the subtasks of this parent are currently hidden. */
+  subtasksCollapsed?: boolean;
+  /** Toggles subtask visibility when the chevron is clicked. */
+  onToggleSubtasks?: () => void;
   repositories?: string[];
   prInfo?: { number: number; state: string };
 };
@@ -264,12 +271,16 @@ export const TaskItem = memo(function TaskItem({
   taskId,
   primarySessionId,
   isSubTask,
+  subtaskCount,
+  subtasksCollapsed,
+  onToggleSubtasks,
   repositories,
   prInfo,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
 
   return (
     <div
@@ -296,6 +307,14 @@ export const TaskItem = memo(function TaskItem({
           ↳
         </span>
       )}
+      {showSubtaskToggle && (
+        <SubtaskToggle
+          taskId={taskId}
+          count={subtaskCount!}
+          collapsed={!!subtasksCollapsed}
+          onToggle={onToggleSubtasks!}
+        />
+      )}
       <TaskStateIcon sessionState={sessionState} state={state} isInProgress={isInProgress} />
       <TaskItemContent
         title={title}
@@ -315,6 +334,39 @@ export const TaskItem = memo(function TaskItem({
     </div>
   );
 });
+
+function SubtaskToggle({
+  taskId,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  taskId?: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="sidebar-subtask-toggle"
+      data-task-id={taskId}
+      aria-label={collapsed ? "Expand subtasks" : "Collapse subtasks"}
+      aria-expanded={!collapsed}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="mt-[1px] flex h-3.5 items-center gap-0.5 shrink-0 cursor-pointer text-[11px] text-muted-foreground/60 hover:text-foreground"
+    >
+      <IconChevronDown
+        className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")}
+      />
+      <span>{count}</span>
+    </button>
+  );
+}
 
 function TaskMenuButton({ visible }: { visible: boolean }) {
   return (

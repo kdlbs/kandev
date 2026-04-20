@@ -563,6 +563,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   }, [tasksWithRepositories, preparingTaskId]);
 
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
+  const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
+  const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
   const effectiveView = useEffectiveSidebarView();
   const grouped = useMemo(
     () => applyView(displayTasks, effectiveView),
@@ -580,6 +582,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           selectedTaskId={selectedTaskId}
           collapsedGroupKeys={effectiveView.collapsedGroups}
           onToggleGroup={(groupKey) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey)}
+          collapsedSubtaskParentIds={collapsedSubtaskParents}
+          onToggleSubtasks={toggleSubtaskCollapsed}
           onSelectTask={handleSelectTask}
           onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}

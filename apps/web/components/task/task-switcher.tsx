@@ -60,6 +60,8 @@ type TaskSwitcherProps = {
   selectedTaskId: string | null;
   collapsedGroupKeys?: string[];
   onToggleGroup?: (groupKey: string) => void;
+  collapsedSubtaskParentIds?: string[];
+  onToggleSubtasks?: (parentTaskId: string) => void;
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
@@ -68,6 +70,12 @@ type TaskSwitcherProps = {
   deletingTaskId?: string | null;
   isLoading?: boolean;
   totalTaskCount?: number;
+};
+
+type SubtaskToggleInfo = {
+  subtaskCount: number;
+  subtasksCollapsed: boolean;
+  onToggleSubtasks: () => void;
 };
 
 function TaskSwitcherSkeleton() {
@@ -117,6 +125,73 @@ function GroupHeader({
   );
 }
 
+type TaskRowProps = {
+  task: TaskSwitcherItem;
+  isSubTask?: boolean;
+  subtaskToggle?: SubtaskToggleInfo;
+  stepsByWorkflowId?: Record<string, StepDef[]>;
+  activeTaskId: string | null;
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+  onArchiveTask?: (taskId: string) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  deletingTaskId?: string | null;
+};
+
+function TaskRow({
+  task,
+  isSubTask,
+  subtaskToggle,
+  stepsByWorkflowId,
+  activeTaskId,
+  selectedTaskId,
+  onSelectTask,
+  onRenameTask,
+  onArchiveTask,
+  onDeleteTask,
+  onMoveToStep,
+  deletingTaskId,
+}: TaskRowProps) {
+  const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
+  const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
+  return (
+    <TaskItemWithContextMenu
+      task={task}
+      steps={taskSteps}
+      onRenameTask={onRenameTask}
+      onArchiveTask={onArchiveTask}
+      onDeleteTask={onDeleteTask}
+      onMoveToStep={onMoveToStep}
+      isDeleting={deletingTaskId === task.id}
+    >
+      <TaskItem
+        title={task.title}
+        state={task.state}
+        sessionState={task.sessionState}
+        isArchived={task.isArchived}
+        isSelected={isSelected}
+        diffStats={task.diffStats}
+        isRemoteExecutor={task.isRemoteExecutor}
+        remoteExecutorType={task.remoteExecutorType}
+        remoteExecutorName={task.remoteExecutorName}
+        taskId={task.id}
+        primarySessionId={task.primarySessionId ?? null}
+        updatedAt={task.updatedAt}
+        repositories={task.repositories}
+        prInfo={task.prInfo}
+        isSubTask={isSubTask}
+        subtaskCount={subtaskToggle?.subtaskCount}
+        subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
+        onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
+        onClick={() => onSelectTask(task.id)}
+        isDeleting={deletingTaskId === task.id}
+      />
+    </TaskItemWithContextMenu>
+  );
+}
+
 function GroupSection({
   group,
   subTasksByParentId,
@@ -125,6 +200,8 @@ function GroupSection({
   selectedTaskId,
   isCollapsed,
   onToggleCollapsed,
+  collapsedSubtaskParentIds,
+  onToggleSubtasks,
   showHeader,
   onSelectTask,
   onRenameTask,
@@ -140,6 +217,8 @@ function GroupSection({
   selectedTaskId: string | null;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
+  collapsedSubtaskParentIds?: string[];
+  onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -152,43 +231,18 @@ function GroupSection({
     (sum, t) => sum + 1 + (subTasksByParentId.get(t.id)?.length ?? 0),
     0,
   );
-
-  function renderItem(task: TaskSwitcherItem, isSubTask?: boolean) {
-    const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
-    const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
-    return (
-      <TaskItemWithContextMenu
-        key={task.id}
-        task={task}
-        steps={taskSteps}
-        onRenameTask={onRenameTask}
-        onArchiveTask={onArchiveTask}
-        onDeleteTask={onDeleteTask}
-        onMoveToStep={onMoveToStep}
-        isDeleting={deletingTaskId === task.id}
-      >
-        <TaskItem
-          title={task.title}
-          state={task.state}
-          sessionState={task.sessionState}
-          isArchived={task.isArchived}
-          isSelected={isSelected}
-          diffStats={task.diffStats}
-          isRemoteExecutor={task.isRemoteExecutor}
-          remoteExecutorType={task.remoteExecutorType}
-          remoteExecutorName={task.remoteExecutorName}
-          taskId={task.id}
-          primarySessionId={task.primarySessionId ?? null}
-          updatedAt={task.updatedAt}
-          repositories={task.repositories}
-          prInfo={task.prInfo}
-          isSubTask={isSubTask}
-          onClick={() => onSelectTask(task.id)}
-          isDeleting={deletingTaskId === task.id}
-        />
-      </TaskItemWithContextMenu>
-    );
-  }
+  const collapsedSubs = new Set(collapsedSubtaskParentIds ?? []);
+  const rowProps = {
+    stepsByWorkflowId,
+    activeTaskId,
+    selectedTaskId,
+    onSelectTask,
+    onRenameTask,
+    onArchiveTask,
+    onDeleteTask,
+    onMoveToStep,
+    deletingTaskId,
+  };
 
   return (
     <div>
@@ -202,12 +256,26 @@ function GroupSection({
         />
       )}
       {!isCollapsed &&
-        group.tasks.map((task) => (
-          <div key={task.id}>
-            {renderItem(task)}
-            {subTasksByParentId.get(task.id)?.map((sub) => renderItem(sub, true))}
-          </div>
-        ))}
+        group.tasks.map((task) => {
+          const subs = subTasksByParentId.get(task.id);
+          const hasSubs = !!subs?.length;
+          const subsHidden = hasSubs && collapsedSubs.has(task.id);
+          const toggleInfo: SubtaskToggleInfo | undefined =
+            hasSubs && onToggleSubtasks
+              ? {
+                  subtaskCount: subs!.length,
+                  subtasksCollapsed: subsHidden,
+                  onToggleSubtasks: () => onToggleSubtasks(task.id),
+                }
+              : undefined;
+          return (
+            <div key={task.id}>
+              <TaskRow task={task} subtaskToggle={toggleInfo} {...rowProps} />
+              {!subsHidden &&
+                subs?.map((sub) => <TaskRow key={sub.id} task={sub} isSubTask {...rowProps} />)}
+            </div>
+          );
+        })}
     </div>
   );
 }
@@ -348,6 +416,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   selectedTaskId,
   collapsedGroupKeys = [],
   onToggleGroup,
+  collapsedSubtaskParentIds,
+  onToggleSubtasks,
   onSelectTask,
   onRenameTask,
   onArchiveTask,
@@ -380,6 +450,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           selectedTaskId={selectedTaskId}
           isCollapsed={collapsedSet.has(group.key)}
           onToggleCollapsed={() => onToggleGroup?.(group.key)}
+          collapsedSubtaskParentIds={collapsedSubtaskParentIds}
+          onToggleSubtasks={onToggleSubtasks}
           showHeader={showHeaders}
           onSelectTask={onSelectTask}
           onRenameTask={onRenameTask}

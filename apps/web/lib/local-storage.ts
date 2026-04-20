@@ -690,6 +690,25 @@ export function removeStoredSidebarDraft(): void {
   removeLocalStorage(SIDEBAR_DRAFT_KEY);
 }
 
+// --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
+
+const COLLAPSED_SUBTASKS_KEY = "kandev.sidebar.collapsedSubtasks";
+
+/**
+ * Get the list of parent task IDs whose subtasks are collapsed in the sidebar.
+ * Tab-scoped (sessionStorage) so it survives reload/task switches but not tab close.
+ */
+export function getStoredCollapsedSubtaskParents(): string[] {
+  return getSessionStorage<string[]>(COLLAPSED_SUBTASKS_KEY, []);
+}
+
+/**
+ * Save the list of parent task IDs whose subtasks are collapsed in the sidebar.
+ */
+export function setStoredCollapsedSubtaskParents(ids: string[]): void {
+  setSessionStorage(COLLAPSED_SUBTASKS_KEY, ids);
+}
+
 // --- Task creation draft persistence (sessionStorage, per workspace) ---
 
 const TASK_CREATE_DRAFT_KEY = "kandev.taskCreateDraft";
