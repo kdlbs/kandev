@@ -343,10 +343,14 @@ export class SessionPage {
   }
 
   /**
-   * Assert the `pr-detail` panel shares a dockview group with the active
-   * `session:{sessionId}` panel — i.e. it opened as a tab next to the session,
-   * not as a split in a separate group. Regression guard for the "PR opens in
-   * a split instead of the center tab" bug.
+   * Assert the `pr-detail` panel's dockview group contains at least one
+   * `session:{sessionId}` panel — i.e. the PR opened as a tab next to a
+   * session chat, not as a split in a separate group. Regression guard for
+   * the "PR opens in a split instead of the center tab" bug.
+   *
+   * Checks group membership of the PR panel directly rather than picking a
+   * session panel first, so the assertion is deterministic even when outgoing
+   * and incoming session panels briefly coexist during a task switch.
    */
   async expectPrPanelAndSessionShareGroup(): Promise<void> {
     const result = await this.page.evaluate(() => {
@@ -356,20 +360,22 @@ export class SessionPage {
       if (!api) return { error: "dockview api not exposed" };
       const pr = api.getPanel("pr-detail");
       if (!pr) return { error: "pr-detail panel missing" };
-      const session = api.panels.find((p) => p.id.startsWith("session:"));
-      if (!session) return { error: "no session panel" };
+      const prGroupId = pr.group?.id ?? null;
+      const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+      if (sessionPanels.length === 0) return { error: "no session panel" };
+      const sessionInPrGroup = sessionPanels.some((p) => p.group?.id === prGroupId);
       return {
-        prGroupId: pr.group?.id ?? null,
-        sessionGroupId: session.group?.id ?? null,
-        sessionPanelId: session.id,
+        sessionInPrGroup,
+        prGroupId,
+        sessionLocations: sessionPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
       };
     });
     expect(result.error, result.error).toBeUndefined();
     expect(
-      result.prGroupId,
-      `PR panel landed in a different dockview group than the session panel. ` +
-        `PR group=${result.prGroupId} session=${result.sessionPanelId} group=${result.sessionGroupId}`,
-    ).toBe(result.sessionGroupId);
+      result.sessionInPrGroup,
+      `PR panel landed in a dockview group that contains no session chat. ` +
+        `PR group=${result.prGroupId} sessions=[${result.sessionLocations?.join(", ")}]`,
+    ).toBe(true);
   }
 
   /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
