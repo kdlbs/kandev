@@ -28,6 +28,34 @@ import {
 } from "./shared";
 import { launchWebApp, openBrowser } from "./web";
 
+/**
+ * Locates the standalone Next.js `server.js` inside `apps/web/.next/standalone/`.
+ *
+ * Normally this sits at `.next/standalone/web/server.js`, but Turbopack may
+ * place it under a deeper path (e.g. `.next/standalone/Users/.../web/server.js`)
+ * when it detects the wrong project root (typically caused by a stray
+ * `package-lock.json` in a parent directory). We look for any `web/server.js`
+ * below the standalone directory so `kandev start` keeps working.
+ *
+ * @returns absolute path to `server.js`, or null if it cannot be found.
+ */
+export function resolveStandaloneServerPath(repoRoot: string): string | null {
+  const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
+  const expected = path.join(standaloneDir, "web", "server.js");
+  if (fs.existsSync(expected)) return expected;
+  if (!fs.existsSync(standaloneDir)) return null;
+
+  const entries = fs.readdirSync(standaloneDir, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.name !== "server.js") continue;
+    const parent = entry.parentPath;
+    if (path.basename(parent) === "web") {
+      return path.join(parent, entry.name);
+    }
+  }
+  return null;
+}
+
 export type StartOptions = {
   /** Path to the repository root directory */
   repoRoot: string;
@@ -69,17 +97,18 @@ export async function runStart({
   }
 
   // Check for standalone build (Next.js standalone output)
-  const webServerPath = path.join(
-    repoRoot,
-    "apps",
-    "web",
-    ".next",
-    "standalone",
-    "web",
-    "server.js",
-  );
-  if (!fs.existsSync(webServerPath)) {
-    throw new Error("Web standalone build not found. Run `make build` first.");
+  const webServerPath = resolveStandaloneServerPath(repoRoot);
+  if (!webServerPath) {
+    const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
+    if (!fs.existsSync(standaloneDir)) {
+      throw new Error("Web standalone build not found. Run `make build` first.");
+    }
+    throw new Error(
+      `Web standalone build is missing server.js under ${standaloneDir}. ` +
+        "This can happen when Next.js/Turbopack detects a different project root " +
+        "(e.g. a stray package-lock.json in a parent directory). " +
+        "Remove the stray lockfile and re-run `make build`.",
+    );
   }
   const webStandaloneDir = path.dirname(webServerPath);
   const webStaticDir = path.join(repoRoot, "apps", "web", ".next", "static");
