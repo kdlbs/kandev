@@ -129,7 +129,7 @@ function useTerminalStateFetch(
 // connectionStatus stuck at "connected" and no resubscribe fires. Backfill
 // whenever the tab regains visibility to recover missed messages without
 // requiring a page refresh.
-function useVisibilityBackfill(
+export function useVisibilityBackfill(
   taskSessionId: string | null,
   store: ReturnType<typeof useAppStoreApi>,
 ) {
@@ -226,6 +226,12 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     });
   }, [taskSessionId, connectionStatus, messages.length, store]);
 
+  // Bool flips exactly once when a freshly-adopted session leaves STARTING,
+  // so the subscription effect re-runs then (covering the backend race where
+  // session.subscribe arrives before the session is fully constructed) without
+  // churning on every subsequent RUNNING ↔ WAITING_FOR_INPUT transition.
+  const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
+
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
     const client = getWebSocketClient();
@@ -236,16 +242,12 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     // (which may have run before the agent responded) and this subscription.
     // Without this, fast-responding agents can complete a turn before the
     // subscription is active, causing the response to never appear.
-    // taskSessionState is in deps so a freshly-adopted session that was still
-    // being constructed server-side when we subscribed re-runs subscribe+fetch
-    // once it transitions (e.g. STARTING → RUNNING), covering the backend race
-    // where an early session.subscribe arrives before the session exists.
     fetchAndStoreMessages(taskSessionId, store).catch(() => {});
 
     return () => {
       unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store, taskSessionState]);
+  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 
   useVisibilityBackfill(taskSessionId, store);
 
