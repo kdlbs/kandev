@@ -144,7 +144,7 @@ test.describe("Workflow agent profile", () => {
     }
   });
 
-  test("single workflow with agent override enables Start task button and shows profile", async ({
+  test("single workflow with agent override enables Start task button and submits with that profile", async ({
     testPage,
     seedData,
     apiClient,
@@ -172,7 +172,8 @@ test.describe("Workflow agent profile", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      await testPage.getByTestId("task-title-input").fill("Single Workflow Test");
+      const taskTitle = "Single Workflow Test";
+      await testPage.getByTestId("task-title-input").fill(taskTitle);
       await testPage.getByTestId("task-description-input").fill("testing single workflow");
 
       // The selector should be disabled with "Agent set by workflow" text
@@ -181,6 +182,86 @@ test.describe("Workflow agent profile", () => {
       // The agent selector should be disabled (locked by workflow)
       const agentSelector = testPage.getByTestId("agent-profile-selector");
       await expect(agentSelector).toBeDisabled({ timeout: 10_000 });
+
+      // Start task must be enabled: the workflow provides the agent even though
+      // the in-dialog agent selector is empty.
+      const startButton = testPage.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled({ timeout: 10_000 });
+
+      // Submit and verify the task + session are created with the workflow's profile.
+      await startButton.click();
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+
+      let createdTaskId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            const created = tasks.find((t) => t.title === taskTitle);
+            createdTaskId = created?.id;
+            return createdTaskId;
+          },
+          { timeout: 15_000 },
+        )
+        .toBeDefined();
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(createdTaskId!);
+            return sessions[0]?.agent_profile_id;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(agentProfile.id);
+    } finally {
+      await apiClient.updateWorkflow(seedData.workflowId, {
+        agent_profile_id: "",
+      });
+    }
+  });
+
+  test("Start task stays enabled after closing and re-opening the dialog", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Same setup: a single workflow with an agent override.
+    const { agents } = await apiClient.listAgents();
+    const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
+    expect(agentProfile).toBeDefined();
+    await apiClient.updateWorkflow(seedData.workflowId, {
+      agent_profile_id: agentProfile.id,
+    });
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await testPage.reload({ waitUntil: "networkidle" });
+
+      const startButton = testPage.getByTestId("submit-start-agent");
+      const dialog = testPage.getByTestId("create-task-dialog");
+
+      // First open: fill and confirm enabled.
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+      await testPage.getByTestId("task-title-input").fill("Reopen Test 1");
+      await testPage.getByTestId("task-description-input").fill("first open");
+      await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
+      await expect(startButton).toBeEnabled({ timeout: 10_000 });
+
+      // Cancel (Escape) and re-open.
+      await testPage.keyboard.press("Escape");
+      await expect(dialog).toBeHidden({ timeout: 10_000 });
+
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+
+      // Second open: fill content; workflow override must still enable Start.
+      await testPage.getByTestId("task-title-input").fill("Reopen Test 2");
+      await testPage.getByTestId("task-description-input").fill("second open");
+      await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
+      await expect(startButton).toBeEnabled({ timeout: 10_000 });
     } finally {
       await apiClient.updateWorkflow(seedData.workflowId, {
         agent_profile_id: "",
