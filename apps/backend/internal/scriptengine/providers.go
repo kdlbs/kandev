@@ -166,3 +166,39 @@ func AgentInstallProvider(installScripts []string) PlaceholderProvider {
 func shellSingleQuote(value string) string {
 	return strings.ReplaceAll(value, "'", `'"'"'`)
 }
+
+// GitHubAuthProvider returns placeholders for GitHub authentication setup.
+// It configures both the gh CLI and git credential helper to use the GitHub token.
+func GitHubAuthProvider(env map[string]string) PlaceholderProvider {
+	return func() map[string]string {
+		vars := map[string]string{
+			"github.auth_setup": "",
+		}
+
+		// Check for GitHub token in env (either GH_TOKEN or GITHUB_TOKEN)
+		token := env["GH_TOKEN"]
+		if token == "" {
+			token = env["GITHUB_TOKEN"]
+		}
+		if token == "" {
+			// No token - output fallback commands that may work if gh is pre-authenticated
+			vars["github.auth_setup"] = `# No GitHub token configured - trying fallback methods
+gh auth setup-git 2>/dev/null || true
+gh config set git_protocol https --host github.com 2>/dev/null || true`
+			return vars
+		}
+
+		// Build auth setup script that configures both gh CLI and git
+		lines := []string{
+			"# GitHub token authentication",
+			"# Configure git credential helper for GitHub HTTPS authentication",
+			"git config --global credential.https://github.com.helper '!/bin/bash -c \"echo username=x-access-token; echo password=$GH_TOKEN\"'",
+			"# Configure gh CLI to use HTTPS protocol",
+			"gh config set git_protocol https --host github.com 2>/dev/null || true",
+			"# Register gh as git credential helper (backup method)",
+			"gh auth setup-git 2>/dev/null || true",
+		}
+		vars["github.auth_setup"] = strings.Join(lines, "\n")
+		return vars
+	}
+}

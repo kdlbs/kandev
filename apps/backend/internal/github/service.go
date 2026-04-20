@@ -32,6 +32,13 @@ type TaskSessionChecker interface {
 	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
 }
 
+// SecretManager handles secret creation, update, and deletion.
+type SecretManager interface {
+	Create(ctx context.Context, name, value string) (id string, err error)
+	Update(ctx context.Context, id, value string) error
+	Delete(ctx context.Context, id string) error
+}
+
 // prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
 const prSyncFreshnessWindow = 30 * time.Second
 
@@ -41,6 +48,7 @@ type Service struct {
 	client             Client
 	authMethod         string
 	secrets            SecretProvider
+	secretManager      SecretManager
 	store              *Store
 	eventBus           bus.EventBus
 	logger             *logger.Logger
@@ -66,6 +74,9 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
+
+// SetSecretManager sets the secret manager for token configuration operations.
+func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {
@@ -95,6 +106,9 @@ func (s *Service) AuthMethod() string {
 	return s.authMethod
 }
 
+// RequiredGitHubScopes lists the GitHub token scopes needed for full functionality.
+var RequiredGitHubScopes = []string{"repo", "read:org"}
+
 // GetStatus returns the current GitHub connection status.
 // If not authenticated, it retries client creation to pick up auth changes
 // (e.g. GITHUB_TOKEN secret added after startup).
@@ -109,8 +123,15 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	s.mu.Unlock()
 
 	status := &GitHubStatus{
-		AuthMethod: authMethod,
+		AuthMethod:     authMethod,
+		RequiredScopes: RequiredGitHubScopes,
 	}
+
+	// Check if a GITHUB_TOKEN secret is configured
+	tokenSecretID, hasToken := s.findGitHubTokenSecret(ctx)
+	status.TokenConfigured = hasToken
+	status.TokenSecretID = tokenSecretID
+
 	if client == nil {
 		status.Diagnostics = runGHDiagnostics(ctx)
 		return status, nil
@@ -129,6 +150,27 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 		status.Diagnostics = runGHDiagnostics(ctx)
 	}
 	return status, nil
+}
+
+// findGitHubTokenSecret checks if a GITHUB_TOKEN secret exists in the secrets store.
+// Returns the secret ID and whether a token is configured.
+func (s *Service) findGitHubTokenSecret(ctx context.Context) (string, bool) {
+	if s.secrets == nil {
+		return "", false
+	}
+	items, err := s.secrets.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, item := range items {
+		if !item.HasValue {
+			continue
+		}
+		if item.Name == "GITHUB_TOKEN" || item.Name == "github_token" {
+			return item.ID, true
+		}
+	}
+	return "", false
 }
 
 // retryClientCreation attempts to create a GitHub client when not authenticated.
@@ -160,6 +202,75 @@ func runGHDiagnostics(ctx context.Context) *AuthDiagnostics {
 		}
 	}
 	return NewGHClient().RunAuthDiagnostics(ctx)
+}
+
+// ConfigureToken saves or updates a GitHub Personal Access Token in the secrets store.
+// It validates the token by making a test API call before saving.
+func (s *Service) ConfigureToken(ctx context.Context, token string) error {
+	if s.secretManager == nil {
+		return fmt.Errorf("secret manager not configured")
+	}
+
+	// Validate the token by testing authentication
+	testClient := NewPATClient(token)
+	user, err := testClient.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+	s.logger.Info("validated GitHub token", zap.String("user", user))
+
+	// Check if a GITHUB_TOKEN secret already exists
+	existingID, exists := s.findGitHubTokenSecret(ctx)
+	if exists {
+		// Update existing secret
+		if err := s.secretManager.Update(ctx, existingID, token); err != nil {
+			return fmt.Errorf("update token: %w", err)
+		}
+		s.logger.Info("updated GitHub token secret", zap.String("id", existingID))
+	} else {
+		// Create new secret
+		newID, err := s.secretManager.Create(ctx, "GITHUB_TOKEN", token)
+		if err != nil {
+			return fmt.Errorf("create token: %w", err)
+		}
+		s.logger.Info("created GitHub token secret", zap.String("id", newID))
+	}
+
+	// Refresh the client to use the new token
+	s.mu.Lock()
+	s.client = testClient
+	s.authMethod = AuthMethodPAT
+	s.mu.Unlock()
+
+	return nil
+}
+
+// ClearToken removes the configured GitHub token from the secrets store.
+func (s *Service) ClearToken(ctx context.Context) error {
+	if s.secretManager == nil {
+		return fmt.Errorf("secret manager not configured")
+	}
+
+	existingID, exists := s.findGitHubTokenSecret(ctx)
+	if !exists {
+		return nil // No token to clear
+	}
+
+	if err := s.secretManager.Delete(ctx, existingID); err != nil {
+		return fmt.Errorf("delete token: %w", err)
+	}
+	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
+
+	// Reset to try gh CLI or other methods
+	s.mu.Lock()
+	s.client = nil
+	s.authMethod = AuthMethodNone
+	s.mu.Unlock()
+
+	// Try to re-establish connection via other methods
+	s.retryClientCreation(ctx)
+
+	return nil
 }
 
 // SubmitReview submits a review on a pull request.

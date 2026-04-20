@@ -509,7 +509,7 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 // Goroutine Safety:
 //   - Each process has exactly one wait() goroutine
 //   - wait() is the sole authority for final status updates
-//   - Cleanup happens exactly once (no race with Stop())
+//   - Cleanup happens after a delay to allow polling
 func (r *ProcessRunner) wait(proc *commandProcess) {
 	err := proc.cmd.Wait()
 	exitCode := 0

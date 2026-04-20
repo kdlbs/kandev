@@ -124,4 +124,10 @@ var DefaultPlaceholders = []PlaceholderInfo{
 		Example:       "8765",
 		ExecutorTypes: []string{"local_docker", "remote_docker", "sprites"},
 	},
+	{
+		Key:           "github.auth_setup",
+		Description:   "Expands to commands that configure gh CLI and git credential helper for GitHub token auth",
+		Example:       "git config --global credential.https://github.com.helper '...'",
+		ExecutorTypes: []string{"local_docker", "remote_docker", "sprites"},
+	},
 }

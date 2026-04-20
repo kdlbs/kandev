@@ -75,6 +75,7 @@ func assertWindowsShell(t *testing.T, shell string) {
 }
 
 // TestDetectShellWithSHELLEnv tests shell detection respects SHELL env var on Unix
+// when the shell actually exists.
 func TestDetectShellWithSHELLEnv(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SHELL env var is not used on Windows")
@@ -83,15 +84,44 @@ func TestDetectShellWithSHELLEnv(t *testing.T) {
 	originalShell := os.Getenv("SHELL")
 	defer func() { _ = os.Setenv("SHELL", originalShell) }()
 
-	// Test with custom SHELL
-	_ = os.Setenv("SHELL", "/bin/custom-shell")
+	// Test with a shell that actually exists (/bin/sh is always present)
+	_ = os.Setenv("SHELL", "/bin/sh")
 	shell, args := detectShell()
 
-	if shell != "/bin/custom-shell" {
-		t.Errorf("expected shell from SHELL env, got %q", shell)
+	if shell != "/bin/sh" {
+		t.Errorf("expected shell from SHELL env (/bin/sh), got %q", shell)
 	}
 	if len(args) == 0 || args[0] != "-l" {
 		t.Errorf("expected args to contain '-l', got %v", args)
+	}
+}
+
+// TestDetectShellWithNonExistentSHELL tests shell detection falls back when SHELL doesn't exist
+func TestDetectShellWithNonExistentSHELL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SHELL env var is not used on Windows")
+	}
+
+	originalShell := os.Getenv("SHELL")
+	defer func() { _ = os.Setenv("SHELL", originalShell) }()
+
+	// Set SHELL to a non-existent path (like host's zsh in a minimal container)
+	_ = os.Setenv("SHELL", "/usr/bin/this-shell-does-not-exist")
+	shell, _ := detectShell()
+
+	// Should fall back to a shell that exists, NOT the non-existent one
+	if shell == "/usr/bin/this-shell-does-not-exist" {
+		t.Errorf("expected fallback to an existing shell, but got non-existent %q", shell)
+	}
+
+	// Should be one of the common fallback shells
+	validShells := map[string]bool{
+		"/bin/bash": true,
+		"/bin/zsh":  true,
+		"/bin/sh":   true,
+	}
+	if !validShells[shell] {
+		t.Logf("Detected fallback shell: %q", shell)
 	}
 }
 

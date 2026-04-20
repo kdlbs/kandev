@@ -216,7 +216,9 @@ func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID
 	// Check in-memory execution first (fast path when execution is already running).
 	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if exists {
-		if execution.RuntimeName == string(executor.NameSprites) {
+		// Docker and Sprites run shells inside containers, not on the host
+		if execution.RuntimeName == string(executor.NameSprites) ||
+			execution.RuntimeName == string(executor.NameDocker) {
 			return true
 		}
 		if execution.Metadata != nil {

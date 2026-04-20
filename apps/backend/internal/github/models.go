@@ -209,10 +209,18 @@ type RepoBranch struct {
 
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
-	Authenticated bool             `json:"authenticated"`
-	Username      string           `json:"username"`
-	AuthMethod    string           `json:"auth_method"` // "gh_cli", "pat", "none"
-	Diagnostics   *AuthDiagnostics `json:"diagnostics,omitempty"`
+	Authenticated   bool             `json:"authenticated"`
+	Username        string           `json:"username"`
+	AuthMethod      string           `json:"auth_method"` // "gh_cli", "pat", "none"
+	TokenConfigured bool             `json:"token_configured"`
+	TokenSecretID   string           `json:"token_secret_id,omitempty"`
+	RequiredScopes  []string         `json:"required_scopes"`
+	Diagnostics     *AuthDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// ConfigureTokenRequest is the request body for configuring a GitHub token.
+type ConfigureTokenRequest struct {
+	Token string `json:"token" binding:"required"`
 }
 
 // AuthDiagnostics captures the output of gh auth status for troubleshooting.
