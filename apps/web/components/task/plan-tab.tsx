@@ -34,8 +34,7 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
     if (api.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
   }, [api, activeTaskId, markTaskPlanSeen, planUpdatedAt]);
 
-  const hasUnseen =
-    plan?.created_by === "agent" && plan.updated_at !== undefined && lastSeen !== plan.updated_at;
+  const hasUnseen = plan?.created_by === "agent" && lastSeen !== plan.updated_at;
 
   return (
     <div data-testid="plan-tab" className="relative">
