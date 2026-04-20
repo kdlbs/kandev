@@ -50,18 +50,18 @@ func (s *tokeniseState) step(raw string, i int) (int, error) {
 	if s.quote != 0 {
 		return s.stepInsideQuote(raw, i, ch)
 	}
-	switch {
-	case ch == '\'' || ch == '"':
+	switch ch {
+	case '\'', '"':
 		s.quote = ch
 		s.inToken = true
-	case ch == '\\':
+	case '\\':
 		if i+1 >= len(raw) {
 			return i, fmt.Errorf("trailing backslash in flag %q", raw)
 		}
 		s.current.WriteByte(raw[i+1])
 		s.inToken = true
 		return i + 1, nil
-	case ch == ' ' || ch == '\t' || ch == '\n':
+	case ' ', '\t', '\n':
 		s.flush()
 	default:
 		s.current.WriteByte(ch)
