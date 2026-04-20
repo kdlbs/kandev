@@ -593,14 +593,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 
 	// Completed sessions cannot be restarted — they require a new session.
-	// Failed sessions clear the resume token so the agent starts fresh (the old
-	// process crashed). Cancelled sessions keep the token so --resume restores
-	// the conversation when the user re-starts a manually stopped session.
-	switch session.State {
-	case models.TaskSessionStateCompleted:
+	// Failed and cancelled sessions keep the resume token so the relaunched
+	// agent continues the previous conversation (via ACP session/load for
+	// native-resume agents, or --resume on CLI). Users who want a fresh start
+	// after a failure can invoke RecoverSession with action="fresh_start".
+	if session.State == models.TaskSessionStateCompleted {
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	case models.TaskSessionStateFailed:
-		s.clearResumeToken(ctx, sessionID)
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.

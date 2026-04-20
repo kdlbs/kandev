@@ -290,3 +290,89 @@ func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 		t.Errorf("expected LaunchAgent called twice, got %d", agentMgr.launchAgentCallCount)
 	}
 }
+
+// TestResumeSession_FailedStateForceCleansUpStaleState covers the FAILED-task
+// resume scenario where agentctl wrongly reports "starting" and the executionStore
+// still tracks a stale AgentExecution. The pre-launch cleanup should wipe stale
+// state so the fresh LaunchAgent succeeds without hitting the "resume race" path.
+func TestResumeSession_FailedStateForceCleansUpStaleState(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		// Stale agentctl status still reports "starting" for the dead agent.
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+			return true
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	execution, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if execution == nil || execution.AgentExecutionID != "exec-new" {
+		t.Fatalf("expected fresh execution exec-new, got %+v", execution)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 1 {
+		t.Errorf("expected stale-cleanup called exactly once before LaunchAgent, got %d",
+			agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if agentMgr.launchAgentCallCount != 1 {
+		t.Errorf("expected LaunchAgent called once (no retry), got %d", agentMgr.launchAgentCallCount)
+	}
+}
+
+// TestResumeSession_CancelledStateForceCleansUpStaleState mirrors the FAILED
+// scenario for CANCELLED sessions: stale state must not block the relaunch.
+func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 1 {
+		t.Errorf("expected stale-cleanup called once, got %d", agentMgr.cleanupStaleExecutionCallCount)
+	}
+}
+
+// TestIsTerminalSessionState is a small unit test for the helper that drives
+// both the preemptive cleanup and the validateAndLockResume carve-out.
+func TestIsTerminalSessionState(t *testing.T) {
+	cases := []struct {
+		state models.TaskSessionState
+		want  bool
+	}{
+		{models.TaskSessionStateFailed, true},
+		{models.TaskSessionStateCancelled, true},
+		{models.TaskSessionStateWaitingForInput, false},
+		{models.TaskSessionStateRunning, false},
+		{models.TaskSessionStateStarting, false},
+		{models.TaskSessionStateCompleted, false},
+	}
+	for _, c := range cases {
+		if got := isTerminalSessionState(c.state); got != c.want {
+			t.Errorf("isTerminalSessionState(%q) = %v, want %v", c.state, got, c.want)
+		}
+	}
+}
