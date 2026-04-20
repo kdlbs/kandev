@@ -156,7 +156,7 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
   }
 
   return (
-    <div className="h-full p-4 flex flex-col">
+    <div className="flex h-full flex-col">
       <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
     </div>
   );
