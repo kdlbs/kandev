@@ -68,67 +68,8 @@ import type {
 } from "./slices/session-runtime/types";
 
 // Re-export all types from slices for backwards compatibility
-export type {
-  KanbanState,
-  KanbanMultiState,
-  WorkflowSnapshotData,
-  WorkflowsState,
-  TaskState,
-  WorkspaceState,
-  RepositoriesState,
-  RepositoryBranchesState,
-  RepositoryScriptsState,
-  ExecutorsState,
-  SettingsAgentsState,
-  AgentDiscoveryState,
-  AvailableAgentsState,
-  AgentProfileOption,
-  AgentProfilesState,
-  EditorsState,
-  PromptsState,
-  SecretsState,
-  NotificationProvidersState,
-  SettingsDataState,
-  UserSettingsState,
-  MessagesState,
-  TurnsState,
-  TaskSessionsState,
-  TaskSessionsByTaskState,
-  SessionAgentctlStatus,
-  SessionAgentctlState,
-  Worktree,
-  WorktreesState,
-  SessionWorktreesState,
-  PendingModelState,
-  ActiveModelState,
-  TerminalState,
-  ShellState,
-  ProcessStatusEntry,
-  ProcessState,
-  FileInfo,
-  GitStatusEntry,
-  GitStatusState,
-  ContextWindowEntry,
-  ContextWindowState,
-  AgentState,
-  UserShellInfo,
-  UserShellsState,
-  PreviewStage,
-  PreviewViewMode,
-  PreviewDevicePreset,
-  PreviewPanelState,
-  RightPanelState,
-  DiffState,
-  ConnectionState,
-  MobileKanbanState,
-  GitHubSlice,
-  GitHubSliceState,
-  GitHubSliceActions,
-  GitHubStatusState,
-  TaskPRsState,
-  PRWatchesState,
-  ReviewWatchesState,
-} from "./slices";
+/* prettier-ignore */
+export type { KanbanState, KanbanMultiState, WorkflowSnapshotData, WorkflowsState, TaskState, WorkspaceState, RepositoriesState, RepositoryBranchesState, RepositoryScriptsState, ExecutorsState, SettingsAgentsState, AgentDiscoveryState, AvailableAgentsState, AgentProfileOption, AgentProfilesState, EditorsState, PromptsState, SecretsState, NotificationProvidersState, SettingsDataState, UserSettingsState, MessagesState, TurnsState, TaskSessionsState, TaskSessionsByTaskState, SessionAgentctlStatus, SessionAgentctlState, Worktree, WorktreesState, SessionWorktreesState, PendingModelState, ActiveModelState, TerminalState, ShellState, ProcessStatusEntry, ProcessState, FileInfo, GitStatusEntry, GitStatusState, ContextWindowEntry, ContextWindowState, AgentState, UserShellInfo, UserShellsState, PreviewStage, PreviewViewMode, PreviewDevicePreset, PreviewPanelState, RightPanelState, DiffState, ConnectionState, MobileKanbanState, GitHubSlice, GitHubSliceState, GitHubSliceActions, GitHubStatusState, TaskPRsState, PRWatchesState, ReviewWatchesState } from "./slices";
 
 // Combined AppState type
 export type AppState = {
@@ -407,7 +348,7 @@ export type AppState = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
-  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"]; updateSidebarDraft: UIA["updateSidebarDraft"]; saveSidebarDraftAs: UIA["saveSidebarDraftAs"]; saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"]; discardSidebarDraft: UIA["discardSidebarDraft"]; deleteSidebarView: UIA["deleteSidebarView"]; renameSidebarView: UIA["renameSidebarView"]; duplicateSidebarView: UIA["duplicateSidebarView"]; toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
+  /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"]; updateSidebarDraft: UIA["updateSidebarDraft"]; saveSidebarDraftAs: UIA["saveSidebarDraftAs"]; saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"]; discardSidebarDraft: UIA["discardSidebarDraft"]; deleteSidebarView: UIA["deleteSidebarView"]; renameSidebarView: UIA["renameSidebarView"]; duplicateSidebarView: UIA["duplicateSidebarView"]; toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"]; clearSidebarSyncError: UIA["clearSidebarSyncError"]; migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -475,7 +416,8 @@ const defaultState = {
   quickChat: defaultUIState.quickChat,
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   // prettier-ignore
-  bottomTerminal: defaultUIState.bottomTerminal, sidebarViews: defaultUIState.sidebarViews,
+  bottomTerminal: defaultUIState.bottomTerminal,
+  sidebarViews: defaultUIState.sidebarViews,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {

@@ -48,6 +48,7 @@ function carryForwardSettings(current: DisplaySettings) {
     lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
     lspServerConfigs: current.lspServerConfigs ?? {},
     savedLayouts: current.savedLayouts ?? [],
+    sidebarViews: current.sidebarViews ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
     ...carryForwardTerminalSettings(current),

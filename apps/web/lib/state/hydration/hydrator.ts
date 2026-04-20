@@ -77,6 +77,19 @@ function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.userSettings && !draft.userSettings.loaded) {
     deepMerge(draft.userSettings, state.userSettings);
+    bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
+  }
+}
+
+function bridgeSidebarViewsFromUserSettings(
+  draft: Draft<AppState>,
+  userSettings: Partial<AppState["userSettings"]>,
+): void {
+  const serverViews = userSettings.sidebarViews;
+  if (!serverViews || serverViews.length === 0) return;
+  draft.sidebarViews.views = serverViews;
+  if (!serverViews.some((v) => v.id === draft.sidebarViews.activeViewId)) {
+    draft.sidebarViews.activeViewId = serverViews[0].id;
   }
 }
 

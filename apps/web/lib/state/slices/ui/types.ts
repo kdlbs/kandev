@@ -157,6 +157,8 @@ export type UISliceActions = {
   renameSidebarView: (viewId: string, name: string) => void;
   duplicateSidebarView: (viewId: string, name: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  clearSidebarSyncError: () => void;
+  migrateLocalViewsToBackend: () => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

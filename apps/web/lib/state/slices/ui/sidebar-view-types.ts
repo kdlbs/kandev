@@ -45,6 +45,8 @@ export type SidebarSliceState = {
   views: SidebarView[];
   activeViewId: string;
   draft: SidebarViewDraft | null;
+  /** Last error surfaced by an async backend sync. Consumed by a toast bridge. */
+  syncError: string | null;
 };
 
 export type SidebarViewDraft = {
