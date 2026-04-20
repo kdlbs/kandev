@@ -17,9 +17,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
  */
 export function usePlanPanelAutoOpen() {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const plan = useAppStore((s) =>
-    activeTaskId ? s.taskPlans.byTaskId[activeTaskId] : null,
-  );
+  const plan = useAppStore((s) => (activeTaskId ? s.taskPlans.byTaskId[activeTaskId] : null));
   const lastSeen = useAppStore((s) =>
     activeTaskId ? s.taskPlans.lastSeenUpdatedAtByTaskId[activeTaskId] : undefined,
   );
