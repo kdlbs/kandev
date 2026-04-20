@@ -595,6 +595,15 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	// Wait a bit for the old process to be cleaned up from the process map
 	time.Sleep(cleanupDelay)
 
+	// Shutdown may have started during cleanupDelay; re-check before emitting
+	// the "attempting auto-restart" log and the terminal banner, which would
+	// otherwise mislead the user during a clean shutdown.
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		m.logger.Debug("no interactive runner available for auto-restart",
