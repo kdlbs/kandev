@@ -248,7 +248,10 @@ export class ApiClient {
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
     },
-  ): Promise<{ id: string; cli_flags: Array<{ description: string; flag: string; enabled: boolean }> }> {
+  ): Promise<{
+    id: string;
+    cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
+  }> {
     return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
@@ -258,9 +261,7 @@ export class ApiClient {
     });
   }
 
-  async getAgentProfile(
-    profileId: string,
-  ): Promise<{
+  async getAgentProfile(profileId: string): Promise<{
     id: string;
     name: string;
     cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;

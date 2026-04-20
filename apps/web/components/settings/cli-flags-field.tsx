@@ -34,11 +34,7 @@ export function CLIFlagsField({ flags, onChange, variant = "default" }: CLIFlags
 
   return (
     <div className={isCompact ? "space-y-2" : "space-y-3"} data-testid="cli-flags-field">
-      <CLIFlagsHeader
-        total={flags.length}
-        enabled={enabledCount}
-        compact={isCompact}
-      />
+      <CLIFlagsHeader total={flags.length} enabled={enabledCount} compact={isCompact} />
       {flags.length === 0 ? (
         <p className="text-xs italic text-muted-foreground" data-testid="cli-flags-empty">
           No CLI flags configured. Add one below.
