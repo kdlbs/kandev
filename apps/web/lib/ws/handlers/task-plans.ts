@@ -18,13 +18,14 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  if (task_id !== store.getState().tasks.activeTaskId) return;
-
+  // Mark user-authored writes as seen regardless of active task so the
+  // indicator never fires spuriously if the user switches tasks mid-save.
   if (created_by === "user") {
-    // User just saved the plan — mark as seen so no indicator fires.
     store.getState().markTaskPlanSeen(task_id);
     return;
   }
+
+  if (task_id !== store.getState().tasks.activeTaskId) return;
 
   // Agent-authored: reveal plan panel quietly in the center group so the user
   // sees the indicator without losing focus. If the panel is already open the

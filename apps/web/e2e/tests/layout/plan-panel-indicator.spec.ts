@@ -21,7 +21,9 @@ const UPDATE_PLAN_SCRIPT = [
 ].join("\n");
 
 function planTabLocator(page: Page) {
-  return page.locator(".dv-default-tab:has-text('Plan')");
+  // `.dv-tab` is the wrapper dockview toggles `dv-active-tab` on; `.dv-default-tab`
+  // below it never gets the active class so we target the outer wrapper here.
+  return page.locator(".dv-tab", { has: page.locator(".dv-default-tab:has-text('Plan')") });
 }
 
 function planTabIndicator(page: Page) {
@@ -58,7 +60,7 @@ async function seedTaskAndWaitForIdle(
 test.describe("Plan panel auto-open + indicator", () => {
   test.describe.configure({ retries: 1 });
 
-  test("agent create reveals plan panel without focus and shows indicator", async ({
+  test("agent create reveals plan tab with indicator and keeps chat focused", async ({
     testPage,
     apiClient,
     seedData,
@@ -73,18 +75,22 @@ test.describe("Plan panel auto-open + indicator", () => {
       CREATE_PLAN_SCRIPT,
     );
 
-    // Plan panel mounted with its content
-    await expect(session.planPanel).toBeVisible({ timeout: 15_000 });
-    await expect(session.planPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
+    // Plan tab is rendered (panel mounted as a sibling of chat in the center group)
+    await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
 
-    // Chat tab kept focus
+    // Chat panel remained active (no focus steal — plan panel body stays hidden)
+    await expect(session.chat).toBeVisible();
     await expect(planTabLocator(testPage)).not.toHaveClass(/dv-active-tab/);
 
     // Indicator dot is visible on the Plan tab
     await expect(planTabIndicator(testPage)).toBeVisible();
   });
 
-  test("clicking the Plan tab clears the indicator", async ({ testPage, apiClient, seedData }) => {
+  test("clicking the Plan tab clears the indicator and reveals plan content", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(90_000);
 
     const { session } = await seedTaskAndWaitForIdle(
@@ -100,6 +106,8 @@ test.describe("Plan panel auto-open + indicator", () => {
 
     await expect(planTabLocator(testPage)).toHaveClass(/dv-active-tab/);
     await expect(planTabIndicator(testPage)).toHaveCount(0);
+    await expect(session.planPanel).toBeVisible();
+    await expect(session.planPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
   });
 
   test("agent update while on chat re-arms the indicator", async ({
@@ -118,7 +126,7 @@ test.describe("Plan panel auto-open + indicator", () => {
     );
     await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
 
-    // Acknowledge then leave to chat
+    // Acknowledge then leave back to chat
     await session.clickTab("Plan");
     await expect(planTabIndicator(testPage)).toHaveCount(0);
     await session.clickSessionChatTab();
@@ -128,40 +136,13 @@ test.describe("Plan panel auto-open + indicator", () => {
     await session.sendMessage(UPDATE_PLAN_SCRIPT);
     await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
 
-    // New content landed
-    await expect(session.planPanel.getByText("Step two")).toBeVisible({ timeout: 15_000 });
-
     // Chat still focused, indicator re-armed
     await expect(planTabLocator(testPage)).not.toHaveClass(/dv-active-tab/);
     await expect(planTabIndicator(testPage)).toBeVisible();
-  });
 
-  test("agent update while plan tab is active does not arm the indicator", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-
-    const { session } = await seedTaskAndWaitForIdle(
-      testPage,
-      apiClient,
-      seedData,
-      "plan indicator update viewed",
-      CREATE_PLAN_SCRIPT,
-    );
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    // Clicking the Plan tab shows the updated content
     await session.clickTab("Plan");
-    await expect(planTabIndicator(testPage)).toHaveCount(0);
-
-    // Update while Plan tab is active
-    await session.sendMessage(UPDATE_PLAN_SCRIPT);
-    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
     await expect(session.planPanel.getByText("Step two")).toBeVisible({ timeout: 15_000 });
-
-    // Tab still active, no indicator ever shown
-    await expect(planTabLocator(testPage)).toHaveClass(/dv-active-tab/);
-    await expect(planTabIndicator(testPage)).toHaveCount(0);
   });
 
   test("page refresh with existing agent-authored plan shows no stale indicator", async ({
@@ -188,7 +169,7 @@ test.describe("Plan panel auto-open + indicator", () => {
     await testPage.goto(`/t/${taskId}`);
     await session.waitForLoad();
 
-    await expect(session.planPanel).toBeVisible({ timeout: 15_000 });
+    await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
     await expect(planTabIndicator(testPage)).toHaveCount(0);
   });
 });

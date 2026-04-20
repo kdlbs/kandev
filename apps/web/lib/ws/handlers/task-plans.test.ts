@@ -132,6 +132,40 @@ describe("task.plan.* handlers", () => {
     expect(dockviewState.addPlanPanel).not.toHaveBeenCalled();
   });
 
+  it("user-authored update: marks seen even when task is not active", () => {
+    // Reviewer concern: if user saves the plan for a non-active task, the
+    // indicator could fire spuriously on task switch. We unconditionally mark
+    // user-authored writes as seen.
+    const store = makeStore({
+      tasks: { activeTaskId: "other-task", activeSessionId: "s-1" },
+    });
+    const handlers = registerTaskPlansHandlers(store);
+
+    handlers[ACTION_UPDATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_UPDATED, makePayload({ created_by: "user" })) as any,
+    );
+
+    expect(store.getState().markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
+    expect(dockviewState.addPlanPanel).not.toHaveBeenCalled();
+  });
+
+  it("agent update on plan originally created by user: still arms indicator", () => {
+    // Backend sets created_by to the last modifier on update, not the original
+    // creator — so an agent update on a user-created plan emits created_by="agent".
+    const store = makeStore();
+    const handlers = registerTaskPlansHandlers(store);
+
+    handlers[ACTION_UPDATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_UPDATED, makePayload({ created_by: "agent" })) as any,
+    );
+
+    expect(store.getState().setTaskPlan).toHaveBeenCalled();
+    expect(store.getState().markTaskPlanSeen).not.toHaveBeenCalled();
+    expect(dockviewState.addPlanPanel).toHaveBeenCalledWith({ quiet: true, inCenter: true });
+  });
+
   it("delete: nulls plan and marks as seen", () => {
     const store = makeStore();
     const handlers = registerTaskPlansHandlers(store);
