@@ -3,15 +3,14 @@
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { Task } from "./kanban-card";
-import { TaskChatPanel } from "./task/task-chat-panel";
-import { useTaskChatSession } from "@/hooks/use-task-chat-session";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { PreviewSessionTabs } from "./task/preview-session-tabs";
 
 interface TaskPreviewPanelProps {
   task: Task | null;
   sessionId?: string | null;
   onClose: () => void;
   onMaximize?: (task: Task) => void;
+  onSessionChange?: (sessionId: string | null) => void;
 }
 
 export function TaskPreviewPanel({
@@ -19,32 +18,8 @@ export function TaskPreviewPanel({
   sessionId = null,
   onClose,
   onMaximize,
+  onSessionChange,
 }: TaskPreviewPanelProps) {
-  const { taskSessionId } = useTaskChatSession(task?.id ?? null);
-  const activeSessionId = sessionId ?? taskSessionId;
-
-  const handleSendMessage = async (content: string) => {
-    if (!task?.id) return;
-
-    const client = getWebSocketClient();
-    if (!client) return;
-
-    if (!activeSessionId) {
-      console.error("No active task session. Start an agent before sending a message.");
-      return;
-    }
-
-    try {
-      await client.request(
-        "message.add",
-        { task_id: task.id, session_id: activeSessionId, content },
-        10000,
-      );
-    } catch (error) {
-      console.error("Failed to send message:", error);
-    }
-  };
-
   return (
     <div
       data-testid="task-preview-panel"
@@ -74,9 +49,13 @@ export function TaskPreviewPanel({
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 p-4 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col">
         {task ? (
-          <TaskChatPanel onSend={handleSendMessage} sessionId={activeSessionId} />
+          <PreviewSessionTabs
+            taskId={task.id}
+            sessionId={sessionId}
+            onSessionChange={onSessionChange}
+          />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Select a task to start chatting

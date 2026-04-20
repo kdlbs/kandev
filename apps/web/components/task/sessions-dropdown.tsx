@@ -23,21 +23,11 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
-
-const STATUS_ORDER: Record<TaskSessionState, number> = {
-  RUNNING: 1,
-  STARTING: 1,
-  WAITING_FOR_INPUT: 2,
-  CREATED: 3,
-  COMPLETED: 4,
-  FAILED: 5,
-  CANCELLED: 6,
-};
 
 // Format duration from start time
 function formatDuration(startedAt: string, isRunning: boolean, now: number): string {
@@ -181,20 +171,10 @@ function useSessionsDropdownState(taskId: string | null) {
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const currentTime = useRunningSessionsClock(sessions);
 
-  const agentLabelsById = useMemo(
-    () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p.label])),
-    [agentProfiles],
-  );
-  const sortedSessions = useMemo(() => {
-    const visible = taskId ? sessions : [];
-    return [...visible].sort((a: TaskSession, b: TaskSession) => {
-      const d = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
-      return d !== 0 ? d : new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
-    });
-  }, [sessions, taskId]);
+  const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
+  const sortedSessions = useMemo(() => sortSessions(taskId ? sessions : []), [sessions, taskId]);
   const resolveAgentLabel = useCallback(
-    (s: TaskSession) =>
-      (s.agent_profile_id && agentLabelsById[s.agent_profile_id]) || "Unknown agent",
+    (s: TaskSession) => resolveAgentLabelFor(s, agentLabelsById),
     [agentLabelsById],
   );
   return { sortedSessions, currentTime, loadSessions, resolveAgentLabel };
