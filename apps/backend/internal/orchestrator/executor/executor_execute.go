@@ -19,6 +19,13 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// envGitHubToken is the environment variable name for GitHub authentication tokens.
+	envGitHubToken = "GITHUB_TOKEN"
+	// envGHToken is the gh CLI compatible environment variable name.
+	envGHToken = "GH_TOKEN"
+)
+
 // isConfigModeSession returns true if the session has config_mode: true in its metadata.
 // Config-mode sessions are dedicated settings-chat sessions that get config MCP tools.
 func isConfigModeSession(session *models.TaskSession) bool {
@@ -528,7 +535,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// 4. Auto-extract from local gh CLI (final fallback)
 	if isContainerizedExecutor(execConfig.ExecutorType) {
 		e.resolveRemoteCredentials(ctx, req, metadata)
-		e.injectGitHubToken(ctx, req)      // Fallback to global secret
+		e.injectGitHubToken(ctx, req)        // Fallback to global secret
 		e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
 	}
 
@@ -825,7 +832,7 @@ func (e *Executor) injectGitHubToken(ctx context.Context, req *LaunchAgentReques
 	}
 
 	// Skip if already set (user configured explicitly in profile)
-	if req.Env["GITHUB_TOKEN"] != "" || req.Env["GH_TOKEN"] != "" {
+	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
 		return
 	}
 
@@ -845,7 +852,7 @@ func (e *Executor) injectGitHubToken(ctx context.Context, req *LaunchAgentReques
 		if !item.HasValue {
 			continue
 		}
-		if item.Name == "GITHUB_TOKEN" || item.Name == "github_token" {
+		if item.Name == envGitHubToken || item.Name == "github_token" {
 			tokenSecretID = item.ID
 			break
 		}
@@ -861,8 +868,8 @@ func (e *Executor) injectGitHubToken(ctx context.Context, req *LaunchAgentReques
 	}
 
 	// Inject both env vars for compatibility
-	req.Env["GITHUB_TOKEN"] = token
-	req.Env["GH_TOKEN"] = token
+	req.Env[envGitHubToken] = token
+	req.Env[envGHToken] = token
 	e.logger.Debug("injected GitHub token for remote executor")
 }
 
@@ -875,7 +882,7 @@ func (e *Executor) injectGitHubTokenFromCLI(_ context.Context, req *LaunchAgentR
 	}
 
 	// Skip if already set by any previous method
-	if req.Env["GITHUB_TOKEN"] != "" || req.Env["GH_TOKEN"] != "" {
+	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
 		return
 	}
 
@@ -886,8 +893,8 @@ func (e *Executor) injectGitHubTokenFromCLI(_ context.Context, req *LaunchAgentR
 		return
 	}
 
-	req.Env["GITHUB_TOKEN"] = token
-	req.Env["GH_TOKEN"] = token
+	req.Env[envGitHubToken] = token
+	req.Env[envGHToken] = token
 	e.logger.Debug("injected GitHub token from local gh CLI")
 }
 
@@ -944,8 +951,8 @@ func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentReque
 		}
 		req.Env[envVar] = value
 		// Also set GH_TOKEN for gh CLI compatibility
-		if envVar == "GITHUB_TOKEN" {
-			req.Env["GH_TOKEN"] = value
+		if envVar == envGitHubToken {
+			req.Env[envGHToken] = value
 		}
 		e.logger.Debug("resolved remote auth secret", zap.String("env_var", envVar))
 	}
@@ -955,7 +962,7 @@ func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentReque
 func methodIDToEnvVar(methodID string) string {
 	switch methodID {
 	case "gh_cli_env":
-		return "GITHUB_TOKEN"
+		return envGitHubToken
 	default:
 		// For agent-specific methods like "agent:claude_code:env:ANTHROPIC_API_KEY"
 		if strings.HasPrefix(methodID, "agent:") && strings.Contains(methodID, ":env:") {
@@ -972,7 +979,7 @@ func methodIDToEnvVar(methodID string) string {
 // If selected, it extracts the token from the local gh CLI via `gh auth token`.
 func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[string]interface{}) {
 	// Skip if GITHUB_TOKEN is already set
-	if req.Env["GITHUB_TOKEN"] != "" {
+	if req.Env[envGitHubToken] != "" {
 		return
 	}
 
@@ -1006,8 +1013,8 @@ func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[strin
 		return
 	}
 
-	req.Env["GITHUB_TOKEN"] = token
-	req.Env["GH_TOKEN"] = token
+	req.Env[envGitHubToken] = token
+	req.Env[envGHToken] = token
 	e.logger.Debug("resolved GITHUB_TOKEN from local gh CLI")
 }
 
