@@ -131,7 +131,7 @@ func parseHostPort(t *testing.T, url string) (string, int) {
 	// Split host:port
 	for i := len(host) - 1; i >= 0; i-- {
 		if host[i] == ':' {
-			fmt.Sscanf(host[i+1:], "%d", &port)
+			_, _ = fmt.Sscanf(host[i+1:], "%d", &port)
 			host = host[:i]
 			break
 		}
