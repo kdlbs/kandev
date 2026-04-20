@@ -26,11 +26,11 @@ steps:
 
       {{task_prompt}}
 
-      STEP 0: CREATE A TASK LIST
-      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
-
       HARD RULE — READ THIS FIRST
       You are reviewing the PR's DIFF, not the repository. Findings are only valid on lines that were ADDED or MODIFIED in this PR. Unchanged lines in changed files, and any code in files the PR did not touch, are OFF-LIMITS even if they contain real bugs. If you cannot point to the exact added/modified line in the PR diff that triggers a finding, discard the finding.
+
+      STEP 0: CREATE A TASK LIST
+      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
 
       STEP 1: GET THE PR DIFF AND ENUMERATE CHANGED LINES
 
