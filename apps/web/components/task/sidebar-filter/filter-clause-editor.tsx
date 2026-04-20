@@ -91,7 +91,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
       >
         <SelectTrigger
           size="sm"
-          className="h-7 flex-1 text-xs"
+          className="h-7 w-32 shrink-0 text-xs"
           data-testid="filter-dimension-select"
         >
           <SelectValue />
@@ -106,7 +106,11 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
       </Select>
 
       <Select value={clause.op} onValueChange={(v) => handleOpChange(v as FilterOp)}>
-        <SelectTrigger size="sm" className="h-7 w-24 text-xs" data-testid="filter-op-select">
+        <SelectTrigger
+          size="sm"
+          className="h-7 w-24 shrink-0 text-xs"
+          data-testid="filter-op-select"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
