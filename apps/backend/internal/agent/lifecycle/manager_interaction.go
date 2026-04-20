@@ -395,9 +395,18 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if execution.agentctl != nil {
 		if !force {
 			if err := execution.agentctl.Stop(ctx); err != nil {
-				m.logger.Warn("failed to stop agent via agentctl",
-					zap.String("execution_id", executionID),
-					zap.Error(err))
+				// During shutdown agentctl typically received the same
+				// terminal-wide SIGINT and is already gone, so a failed
+				// HTTP call here is expected, not noteworthy.
+				if m.IsShuttingDown() {
+					m.logger.Debug("failed to stop agent via agentctl",
+						zap.String("execution_id", executionID),
+						zap.Error(err))
+				} else {
+					m.logger.Warn("failed to stop agent via agentctl",
+						zap.String("execution_id", executionID),
+						zap.Error(err))
+				}
 			}
 		}
 		execution.agentctl.Close()
@@ -994,9 +1003,18 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		StopReason:           reason,
 	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
-		m.logger.Warn("failed to stop runtime instance, continuing with cleanup",
-			zap.String("execution_id", executionID),
-			zap.Error(err))
+		// During shutdown the runtime instance (e.g. a standalone agentctl)
+		// often already exited via the shared SIGINT, so StopInstance returns
+		// a benign 404. Only surface this at WARN outside shutdown.
+		if m.IsShuttingDown() {
+			m.logger.Debug("failed to stop runtime instance, continuing with cleanup",
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+		} else {
+			m.logger.Warn("failed to stop runtime instance, continuing with cleanup",
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+		}
 	}
 }
 

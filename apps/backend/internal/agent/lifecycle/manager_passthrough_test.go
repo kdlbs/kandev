@@ -3,8 +3,10 @@ package lifecycle
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // mockPassthroughProfileResolver is a mock for testing passthrough verification
@@ -215,6 +217,50 @@ func TestBuildPassthroughCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestManager_HandlePassthroughExit_SkipsDuringShutdown verifies that the
+// detached goroutine spawned when a passthrough child exits bails out
+// immediately once graceful shutdown has begun, instead of racing the
+// teardown and logging a spurious "failed to auto-restart passthrough
+// session" error. Regression test for the Ctrl+C-in-terminal shutdown
+// noise.
+func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
+	mgr := newTestManager()
+
+	if mgr.IsShuttingDown() {
+		t.Fatal("fresh manager reports IsShuttingDown() == true")
+	}
+
+	// StopAllAgents should flip the flag even with zero executions.
+	if err := mgr.StopAllAgents(context.Background()); err != nil {
+		t.Fatalf("StopAllAgents returned error: %v", err)
+	}
+	if !mgr.IsShuttingDown() {
+		t.Fatal("StopAllAgents did not set IsShuttingDown() = true")
+	}
+
+	// The exit handler normally sleeps cleanupDelay (100ms) + restartDelay
+	// (500ms) before touching any state. If the shutdown short-circuit works,
+	// it must return well before cleanupDelay elapses.
+	execution := &AgentExecution{ID: "exec-1", SessionID: "sess-1"}
+	status := &agentctltypes.ProcessStatusUpdate{SessionID: "sess-1"}
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		mgr.handlePassthroughExit(execution, status)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+			t.Errorf("handlePassthroughExit did not short-circuit during shutdown: took %v", elapsed)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("handlePassthroughExit did not return promptly during shutdown")
 	}
 }
 
