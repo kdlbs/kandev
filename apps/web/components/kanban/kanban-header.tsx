@@ -19,7 +19,6 @@ import { RefreshReviewsButton } from "../github/refresh-reviews-button";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
-import { HeaderOverflowMenu } from "./header-overflow-menu";
 import { TaskSearchInput } from "./task-search-input";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
@@ -235,24 +234,16 @@ function DesktopHeader({
             <TooltipContent>Stats</TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        <div className="hidden 2xl:flex items-center gap-3">
-          <RefreshReviewsButton />
-          {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
-        </div>
+        <RefreshReviewsButton />
+        {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
         <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         <KanbanDisplayDropdown />
-        <Link href="/settings" className="hidden 2xl:block cursor-pointer">
-          <Button variant="outline" className="cursor-pointer">
-            <IconSettings className="h-4 w-4 mr-2" />
-            Settings
+        <Link href="/settings" className="cursor-pointer">
+          <Button variant="outline" className="cursor-pointer gap-2">
+            <IconSettings className="h-4 w-4" />
+            <span className="hidden 2xl:inline">Settings</span>
           </Button>
         </Link>
-        <div className="2xl:hidden">
-          <HeaderOverflowMenu
-            showReleaseNotes={showReleaseNotesButton}
-            onOpenReleaseNotes={onOpenReleaseNotes}
-          />
-        </div>
       </div>
     </header>
   );
