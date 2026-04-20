@@ -18,18 +18,22 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  // Auto-open plan panel side-by-side with chat when agent writes a plan
-  if (created_by === "agent" && task_id === store.getState().tasks.activeTaskId) {
-    const dockview = useDockviewStore.getState();
-    if (dockview.isRestoringLayout) return;
-    if (dockview.api?.getPanel("plan")) return;
+  if (task_id !== store.getState().tasks.activeTaskId) return;
 
-    const activeSessionId = store.getState().tasks.activeSessionId;
-    if (!activeSessionId) return;
-
-    dockview.addPlanPanel();
-    store.getState().setActiveDocument(activeSessionId, { type: "plan", taskId: task_id });
+  if (created_by === "user") {
+    // User just saved the plan — mark as seen so no indicator fires.
+    store.getState().markTaskPlanSeen(task_id);
+    return;
   }
+
+  // Agent-authored: reveal plan panel quietly in the center group so the user
+  // sees the indicator without losing focus. If the panel is already open the
+  // indicator on the tab drives the UI.
+  const dockview = useDockviewStore.getState();
+  if (dockview.isRestoringLayout) return;
+  if (dockview.api?.getPanel("plan")) return;
+
+  dockview.addPlanPanel({ quiet: true, inCenter: true });
 }
 
 export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -39,6 +43,7 @@ export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers
     "task.plan.deleted": (message) => {
       const { task_id } = message.payload;
       store.getState().setTaskPlan(task_id, null);
+      store.getState().markTaskPlanSeen(task_id);
     },
   };
 }

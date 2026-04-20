@@ -395,6 +395,7 @@ export type AppState = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  markTaskPlanSeen: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;

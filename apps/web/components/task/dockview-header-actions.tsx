@@ -138,7 +138,10 @@ function AddPanelMenuItems({
         VS Code
       </DropdownMenuItem>
       {!state.isPassthrough && (
-        <DropdownMenuItem onClick={() => addPlanPanel(groupId)} className="cursor-pointer text-xs">
+        <DropdownMenuItem
+          onClick={() => addPlanPanel({ groupId })}
+          className="cursor-pointer text-xs"
+        >
           <IconFileText className="h-3.5 w-3.5 mr-1.5" />
           Plan
         </DropdownMenuItem>
