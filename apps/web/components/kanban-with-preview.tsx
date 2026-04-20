@@ -110,7 +110,11 @@ function useSessionSelectionReset(
   const currentTaskId = selectedTaskId ?? null;
   if (prevTaskId !== currentTaskId) {
     setPrevTaskId(currentTaskId);
-    setValue(null);
+    // Only reset on a real task-to-task transition. When prevTaskId is null we
+    // are hydrating the initial task from the URL — preserve the seeded initialValue.
+    if (prevTaskId !== null) {
+      setValue(null);
+    }
   }
   return [value, setValue];
 }
