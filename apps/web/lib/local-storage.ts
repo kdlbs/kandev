@@ -659,12 +659,15 @@ const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
 const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
 const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
 
-export function getStoredSidebarUserViews<T extends JsonValue>(fallback: T): T {
-  return getLocalStorage(SIDEBAR_VIEWS_KEY, fallback);
+// The SidebarView / SidebarViewDraft types aren't structurally assignable to
+// JsonValue (the filter clause value is `unknown`), so these wrappers take the
+// domain type and do the cast once here — keeps call sites type-safe.
+export function getStoredSidebarUserViews<T>(fallback: T): T {
+  return getLocalStorage(SIDEBAR_VIEWS_KEY, fallback as unknown as JsonValue) as unknown as T;
 }
 
-export function setStoredSidebarUserViews<T extends JsonValue>(views: T): void {
-  setLocalStorage(SIDEBAR_VIEWS_KEY, views);
+export function setStoredSidebarUserViews<T>(views: T): void {
+  setLocalStorage(SIDEBAR_VIEWS_KEY, views as unknown as JsonValue);
 }
 
 export function getStoredSidebarActiveViewId(fallback: string): string {
@@ -675,12 +678,12 @@ export function setStoredSidebarActiveViewId(id: string): void {
   setLocalStorage(SIDEBAR_ACTIVE_VIEW_KEY, id);
 }
 
-export function getStoredSidebarDraft<T extends JsonValue>(fallback: T): T {
-  return getLocalStorage(SIDEBAR_DRAFT_KEY, fallback);
+export function getStoredSidebarDraft<T>(fallback: T): T {
+  return getLocalStorage(SIDEBAR_DRAFT_KEY, fallback as unknown as JsonValue) as unknown as T;
 }
 
-export function setStoredSidebarDraft<T extends JsonValue>(draft: T): void {
-  setLocalStorage(SIDEBAR_DRAFT_KEY, draft);
+export function setStoredSidebarDraft<T>(draft: T): void {
+  setLocalStorage(SIDEBAR_DRAFT_KEY, draft as unknown as JsonValue);
 }
 
 export function removeStoredSidebarDraft(): void {

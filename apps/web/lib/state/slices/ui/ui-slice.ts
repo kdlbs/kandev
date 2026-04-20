@@ -26,7 +26,7 @@ function loadSidebarState(): UISliceState["sidebarViews"] {
   if (views.length === 0) {
     views = [DEFAULT_VIEW];
   }
-  setStoredSidebarUserViews(views as unknown as SidebarView[]);
+  setStoredSidebarUserViews(views);
   const storedActive = getStoredSidebarActiveViewId(DEFAULT_ACTIVE_VIEW_ID);
   const activeViewId = views.some((v) => v.id === storedActive) ? storedActive : views[0].id;
   const draft = getStoredSidebarDraft<SidebarViewDraft | null>(null);
@@ -61,7 +61,7 @@ export function migrateView(view: SidebarView): SidebarView {
 }
 
 function persistUserViews(views: SidebarView[]): void {
-  setStoredSidebarUserViews(views as unknown as SidebarView[]);
+  setStoredSidebarUserViews(views);
 }
 
 function makeId(prefix: string): string {
@@ -208,7 +208,7 @@ function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
 function writeCacheFromSidebar(s: SidebarSnapshot | UISliceState["sidebarViews"]) {
   persistUserViews(s.views);
   setStoredSidebarActiveViewId(s.activeViewId);
-  if (s.draft) setStoredSidebarDraft(s.draft as never);
+  if (s.draft) setStoredSidebarDraft(s.draft);
   else removeStoredSidebarDraft();
 }
 
@@ -270,7 +270,7 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
           group: patch.group ?? current.group,
         };
         draft.sidebarViews.draft = next;
-        setStoredSidebarDraft(next as never);
+        setStoredSidebarDraft(next);
       }),
     discardSidebarDraft: () =>
       set((draft) => {
