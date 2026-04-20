@@ -258,6 +258,7 @@ const REASON_BRANCH = "Select a branch";
 const REASON_WORKSPACE = "Select a workspace";
 const REASON_WORKFLOW = "Select a workflow";
 const REASON_AGENT = "Select an agent";
+const REASON_DESCRIPTION = "Add a session description";
 
 function requiresAgent(kind: ButtonKind, props: TaskCreateDialogFooterProps): boolean {
   if (kind === "start-task") return true;
@@ -274,6 +275,10 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   return null;
 }
 
+function missingSessionDescription(props: TaskCreateDialogFooterProps): boolean {
+  return props.isSessionMode && !props.hasDescription && !props.isPassthroughProfile;
+}
+
 export function computeDisabledReason(
   props: TaskCreateDialogFooterProps,
   kind: ButtonKind,
@@ -283,13 +288,11 @@ export function computeDisabledReason(
   const base = baseReason(props);
   if (base) return base;
   if (requiresAgent(kind, props) && !props.agentProfileId) return REASON_AGENT;
+  if (kind === "default" && missingSessionDescription(props)) return REASON_DESCRIPTION;
   return null;
 }
 
-function resolveButtonKind(
-  props: TaskCreateDialogFooterProps,
-  showStartTask: boolean,
-): ButtonKind {
+function resolveButtonKind(props: TaskCreateDialogFooterProps, showStartTask: boolean): ButtonKind {
   if (props.isTaskStarted) return "update";
   if (showStartTask) return "start-task";
   return "default";
@@ -352,10 +355,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
         shortcut={SHORTCUTS.SUBMIT}
         description={disabledReason ?? undefined}
       >
-        <span
-          className="inline-flex w-full sm:w-auto"
-          data-testid="submit-start-agent-wrapper"
-        >
+        <span className="inline-flex w-full sm:w-auto" data-testid="submit-start-agent-wrapper">
           {(() => {
             if (isTaskStarted) {
               return (

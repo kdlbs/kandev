@@ -8,6 +8,7 @@ const REASON_BRANCH = "Select a branch";
 const REASON_WORKSPACE = "Select a workspace";
 const REASON_WORKFLOW = "Select a workflow";
 const REASON_AGENT = "Select an agent";
+const REASON_DESCRIPTION = "Add a session description";
 const KIND_START = "start-task" as const;
 const KIND_UPDATE = "update" as const;
 const KIND_DEFAULT = "default" as const;
@@ -60,9 +61,9 @@ describe("computeDisabledReason (start-task)", () => {
   });
 
   it("flags missing repository selection", () => {
-    expect(
-      computeDisabledReason(makeProps({ hasRepositorySelection: false }), KIND_START),
-    ).toBe(REASON_REPO);
+    expect(computeDisabledReason(makeProps({ hasRepositorySelection: false }), KIND_START)).toBe(
+      REASON_REPO,
+    );
   });
 
   it("flags missing branch", () => {
@@ -91,9 +92,7 @@ describe("computeDisabledReason (start-task)", () => {
   });
 
   it("flags missing agent profile for start-task button", () => {
-    expect(computeDisabledReason(makeProps({ agentProfileId: "" }), KIND_START)).toBe(
-      REASON_AGENT,
-    );
+    expect(computeDisabledReason(makeProps({ agentProfileId: "" }), KIND_START)).toBe(REASON_AGENT);
   });
 });
 
@@ -124,10 +123,25 @@ describe("computeDisabledReason (default)", () => {
 
   it("requires agent in session mode", () => {
     expect(
+      computeDisabledReason(makeProps({ isSessionMode: true, agentProfileId: "" }), KIND_DEFAULT),
+    ).toBe(REASON_AGENT);
+  });
+
+  it("flags missing session description in session mode", () => {
+    expect(
       computeDisabledReason(
-        makeProps({ isSessionMode: true, agentProfileId: "" }),
+        makeProps({ isSessionMode: true, hasDescription: false }),
         KIND_DEFAULT,
       ),
-    ).toBe(REASON_AGENT);
+    ).toBe(REASON_DESCRIPTION);
+  });
+
+  it("does not flag missing description for passthrough profiles", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ isSessionMode: true, hasDescription: false, isPassthroughProfile: true }),
+        KIND_DEFAULT,
+      ),
+    ).toBeNull();
   });
 });
