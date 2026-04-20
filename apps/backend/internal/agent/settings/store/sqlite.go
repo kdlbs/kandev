@@ -485,18 +485,20 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.agent_id, p.name, p.agent_display_name, p.model, p.mode, p.migrated_from, p.auto_approve, p.dangerously_skip_permissions, p.allow_indexing, p.cli_passthrough, p.user_modified, p.plan, p.cli_flags, p.created_at, p.updated_at, p.deleted_at, a.name AS agent_name
-		FROM agent_profiles p JOIN agents a ON a.id = p.agent_id
-		WHERE p.id = ? AND p.deleted_at IS NULL
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`), id)
-	return scanAgentProfile(row)
+	profile, err := scanAgentProfile(row)
+	if err != nil {
+		return nil, err
+	}
+	return r.applyLegacyBackfill(ctx, profile), nil
 }
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.agent_id, p.name, p.agent_display_name, p.model, p.mode, p.migrated_from, p.auto_approve, p.dangerously_skip_permissions, p.allow_indexing, p.cli_passthrough, p.user_modified, p.plan, p.cli_flags, p.created_at, p.updated_at, p.deleted_at, a.name AS agent_name
-		FROM agent_profiles p JOIN agents a ON a.id = p.agent_id
-		WHERE p.agent_id = ? AND p.deleted_at IS NULL ORDER BY p.created_at DESC
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), agentID)
 	if err != nil {
 		return nil, err
@@ -511,9 +513,38 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, profile)
+		result = append(result, r.applyLegacyBackfill(ctx, profile))
 	}
 	return result, rows.Err()
+}
+
+// applyLegacyBackfill returns the profile with CLIFlags populated from the
+// legacy allow_indexing column for Auggie rows that predate the cli_flags
+// column. The backfill is scoped to auggie only so a legacy Claude/Codex/
+// Copilot row (possible via the column's DEFAULT 1) never gains an
+// unsupported --allow-indexing flag. scanAgentProfile leaves CLIFlags nil
+// when the stored JSON is absent; we resolve the agent name lazily via a
+// small lookup here rather than JOINing in the main SELECT (keeps the
+// read query unchanged and avoids cross-test flakiness).
+func (r *sqliteRepository) applyLegacyBackfill(ctx context.Context, profile *models.AgentProfile) *models.AgentProfile {
+	if profile == nil || profile.CLIFlags != nil {
+		return profile
+	}
+	if !profile.AllowIndexing {
+		profile.CLIFlags = []models.CLIFlag{}
+		return profile
+	}
+	agent, err := r.GetAgent(ctx, profile.AgentID)
+	if err != nil || agent == nil || agent.Name != "auggie" {
+		profile.CLIFlags = []models.CLIFlag{}
+		return profile
+	}
+	profile.CLIFlags = []models.CLIFlag{{
+		Description: "Allow workspace indexing without confirmation",
+		Flag:        "--allow-indexing",
+		Enabled:     true,
+	}}
+	return profile
 }
 
 func (r *sqliteRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {
@@ -589,7 +620,6 @@ func scanAgentProfile(scanner interface {
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
-	var agentName string
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -608,7 +638,6 @@ func scanAgentProfile(scanner interface {
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
-		&agentName,
 	); err != nil {
 		return nil, err
 	}
@@ -627,32 +656,11 @@ func scanAgentProfile(scanner interface {
 		if err := json.Unmarshal([]byte(cliFlagsRaw.String), &profile.CLIFlags); err != nil {
 			return nil, fmt.Errorf("failed to parse cli_flags for profile %s: %w", profile.ID, err)
 		}
-	} else {
-		// Legacy row: synthesise cli_flags from the legacy allow_indexing
-		// column. This backfill runs in-memory on every read until the
-		// profile is saved; UpdateAgentProfile persists the cli_flags JSON
-		// so subsequent reads take the non-NULL branch above. Accepting
-		// the repeated in-memory work is worth avoiding a read-path write.
-		profile.CLIFlags = legacyCLIFlagsBackfill(agentName, profile.AllowIndexing)
 	}
+	// When cli_flags is NULL the caller (GetAgentProfile / ListAgentProfiles)
+	// runs applyLegacyBackfill to seed the list scoped to the owning agent.
+	// Leaving CLIFlags as nil here is deliberate: non-nil vs nil discriminates
+	// "stored empty list" from "never written". applyLegacyBackfill rewrites
+	// nil → []CLIFlag{} so downstream code never sees a nil slice.
 	return profile, nil
-}
-
-// legacyCLIFlagsBackfill builds a cli_flags list for a profile row that
-// predates the cli_flags column. Only the auggie --allow-indexing flag
-// has ever been driven by a dedicated DB column; every other CLI flag
-// was hard-coded in the agent's BuildCommand. The agentName guard
-// prevents a legacy non-Auggie row (e.g. from a direct SQL import or an
-// erroneous API write that flipped the column default) from silently
-// injecting an unsupported --allow-indexing flag into Claude / Codex /
-// Copilot argv.
-func legacyCLIFlagsBackfill(agentName string, allowIndexing bool) []models.CLIFlag {
-	if agentName != "auggie" || !allowIndexing {
-		return []models.CLIFlag{}
-	}
-	return []models.CLIFlag{{
-		Description: "Allow workspace indexing without confirmation",
-		Flag:        "--allow-indexing",
-		Enabled:     true,
-	}}
 }
