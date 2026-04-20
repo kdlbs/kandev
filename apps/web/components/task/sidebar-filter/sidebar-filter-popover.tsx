@@ -16,7 +16,7 @@ import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
 import { SortPicker } from "./sort-picker";
 import { GroupPicker } from "./group-picker";
-import { ViewHeaderRow, ViewSaveAsRow, ViewRenameRow } from "./view-manager";
+import { ViewHeaderRow } from "./view-manager";
 
 type Props = {
   trigger: React.ReactNode;
@@ -92,11 +92,11 @@ export function SidebarFilterPopover({ trigger, open, onOpenChange }: Props) {
             hasDraft={hasDraft}
             canDelete={views.length > 1}
             onSaveOverwrite={saveOverwrite}
+            onSaveAs={saveAs}
+            onRename={renameView}
             onDiscard={discard}
             onDelete={() => activeView && deleteView(activeView.id)}
           />
-          <ViewSaveAsRow onSubmit={saveAs} />
-          {activeView && <ViewRenameRow view={activeView} onRename={renameView} />}
         </div>
 
         <FilterSection

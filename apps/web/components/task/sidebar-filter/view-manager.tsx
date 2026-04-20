@@ -5,11 +5,15 @@ import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 
+type HeaderMode = "view" | "rename" | "saveAs";
+
 export function ViewHeaderRow({
   activeView,
   hasDraft,
   canDelete,
   onSaveOverwrite,
+  onSaveAs,
+  onRename,
   onDiscard,
   onDelete,
 }: {
@@ -17,188 +21,170 @@ export function ViewHeaderRow({
   hasDraft: boolean;
   canDelete: boolean;
   onSaveOverwrite: () => void;
+  onSaveAs: (name: string) => void;
+  onRename: (id: string, name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
 }) {
+  const [mode, setMode] = useState<HeaderMode>("view");
+  const [nameDraft, setNameDraft] = useState("");
+
+  const isEditing = mode !== "view";
   const canOverwrite = hasDraft && !!activeView;
+
+  function enterRename() {
+    if (!activeView) return;
+    setNameDraft(activeView.name);
+    setMode("rename");
+  }
+
+  function enterSaveAs() {
+    setNameDraft("");
+    setMode("saveAs");
+  }
+
+  function exit() {
+    setMode("view");
+    setNameDraft("");
+  }
+
+  function submit() {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) return;
+    if (mode === "rename" && activeView) {
+      onRename(activeView.id, trimmed);
+    } else if (mode === "saveAs") {
+      onSaveAs(trimmed);
+    }
+    exit();
+  }
+
   return (
-    <div className="mb-2 flex items-center justify-between gap-2">
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">View:</span>
-        <span className="font-medium" data-testid="sidebar-filter-active-view-name">
-          {activeView?.name ?? "—"}
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-1 items-center gap-2 text-xs">
+        <span className="text-muted-foreground">
+          {mode === "saveAs" ? "Save as:" : "View:"}
         </span>
-        {hasDraft && (
-          <span
-            className="h-1.5 w-1.5 rounded-full bg-amber-500"
-            data-testid="sidebar-filter-dirty-indicator"
-            title="Unsaved changes"
+        {isEditing ? (
+          <Input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              if (e.key === "Escape") exit();
+            }}
+            placeholder={mode === "saveAs" ? "New view name" : undefined}
+            className="h-6 flex-1 text-xs"
+            data-testid={
+              mode === "rename" ? "view-rename-input" : "view-save-as-name-input"
+            }
           />
+        ) : (
+          <>
+            <span className="font-medium" data-testid="sidebar-filter-active-view-name">
+              {activeView?.name ?? "—"}
+            </span>
+            {hasDraft && (
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                data-testid="sidebar-filter-dirty-indicator"
+                title="Unsaved changes"
+              />
+            )}
+          </>
         )}
       </div>
       <div className="flex items-center gap-1">
-        {canOverwrite && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-6 cursor-pointer text-xs"
-            onClick={onSaveOverwrite}
-            data-testid="view-save-button"
-          >
-            Save
-          </Button>
-        )}
-        {hasDraft && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-6 cursor-pointer text-xs"
-            onClick={onDiscard}
-            data-testid="view-discard-button"
-          >
-            Discard
-          </Button>
-        )}
-        {activeView && canDelete && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-6 cursor-pointer text-xs text-destructive"
-            onClick={onDelete}
-            data-testid="view-delete-button"
-          >
-            Delete
-          </Button>
+        {isEditing ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              className="h-6 cursor-pointer text-xs"
+              onClick={submit}
+              disabled={!nameDraft.trim()}
+              data-testid={
+                mode === "rename" ? "view-rename-confirm" : "view-save-as-confirm"
+              }
+            >
+              {mode === "rename" ? "Save" : "Create"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 cursor-pointer text-xs"
+              onClick={exit}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            {canOverwrite && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 cursor-pointer text-xs"
+                onClick={onSaveOverwrite}
+                data-testid="view-save-button"
+              >
+                Save
+              </Button>
+            )}
+            {hasDraft && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 cursor-pointer text-xs"
+                onClick={enterSaveAs}
+                data-testid="view-save-as-button"
+              >
+                Save as…
+              </Button>
+            )}
+            {hasDraft && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 cursor-pointer text-xs"
+                onClick={onDiscard}
+                data-testid="view-discard-button"
+              >
+                Discard
+              </Button>
+            )}
+            {!hasDraft && activeView && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 cursor-pointer text-xs"
+                onClick={enterRename}
+                data-testid="view-rename-button"
+              >
+                Rename
+              </Button>
+            )}
+            {!hasDraft && activeView && canDelete && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 cursor-pointer text-xs text-destructive"
+                onClick={onDelete}
+                data-testid="view-delete-button"
+              >
+                Delete
+              </Button>
+            )}
+          </>
         )}
       </div>
-    </div>
-  );
-}
-
-export function ViewSaveAsRow({ onSubmit }: { onSubmit: (name: string) => void }) {
-  const [showSaveAs, setShowSaveAs] = useState(false);
-  const [name, setName] = useState("");
-
-  function submit() {
-    if (!name.trim()) return;
-    onSubmit(name.trim());
-    setName("");
-    setShowSaveAs(false);
-  }
-
-  if (!showSaveAs) {
-    return (
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 w-full cursor-pointer text-xs"
-        onClick={() => setShowSaveAs(true)}
-        data-testid="view-save-as-button"
-      >
-        Save as new view…
-      </Button>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") {
-            setName("");
-            setShowSaveAs(false);
-          }
-        }}
-        placeholder="View name"
-        className="h-7 flex-1 text-xs"
-        data-testid="view-save-as-name-input"
-      />
-      <Button
-        type="button"
-        size="sm"
-        className="h-7 cursor-pointer text-xs"
-        onClick={submit}
-        disabled={!name.trim()}
-        data-testid="view-save-as-confirm"
-      >
-        Create
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-7 cursor-pointer text-xs"
-        onClick={() => {
-          setName("");
-          setShowSaveAs(false);
-        }}
-      >
-        Cancel
-      </Button>
-    </div>
-  );
-}
-
-export function ViewRenameRow({
-  view,
-  onRename,
-}: {
-  view: SidebarView;
-  onRename: (id: string, name: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(view.name);
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setName(view.name);
-          setEditing(true);
-        }}
-        className="mt-1 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground"
-        data-testid="view-rename-button"
-      >
-        Rename view
-      </button>
-    );
-  }
-  return (
-    <div className="mt-1 flex items-center gap-1.5">
-      <Input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            onRename(view.id, name);
-            setEditing(false);
-          }
-          if (e.key === "Escape") setEditing(false);
-        }}
-        className="h-7 flex-1 text-xs"
-        data-testid="view-rename-input"
-      />
-      <Button
-        type="button"
-        size="sm"
-        className="h-7 cursor-pointer text-xs"
-        onClick={() => {
-          onRename(view.id, name);
-          setEditing(false);
-        }}
-      >
-        Save
-      </Button>
     </div>
   );
 }
