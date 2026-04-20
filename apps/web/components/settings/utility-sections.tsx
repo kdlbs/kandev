@@ -4,13 +4,34 @@ import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@kandev/ui/select";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
 
 export type ModelOption = { value: string; label: string; agentName: string; modelName: string };
+
+type ModelGroup = { agentName: string; models: ModelOption[] };
+
+function groupModelsByAgent(models: ModelOption[]): ModelGroup[] {
+  const map = new Map<string, ModelOption[]>();
+  for (const m of models) {
+    const list = map.get(m.agentName);
+    if (list) list.push(m);
+    else map.set(m.agentName, [m]);
+  }
+  return Array.from(map, ([agentName, items]) => ({ agentName, models: items }));
+}
 
 // Default model selector section
 type DefaultModelSectionProps = {
@@ -90,8 +111,8 @@ export function BuiltinActionRow({
     agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
 
   return (
-    <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50 group">
-      <div className="w-[420px] shrink-0 cursor-pointer" onClick={() => onEdit(agent)}>
+    <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50">
+      <div className="w-[420px] shrink-0">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
@@ -100,14 +121,30 @@ export function BuiltinActionRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
-          {allModels.map((m) => (
-            <SelectItem key={m.value} value={m.value}>
-              {m.agentName} / {m.modelName}
-            </SelectItem>
+          <SelectGroup>
+            <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
+          </SelectGroup>
+          {groupModelsByAgent(allModels).map((group) => (
+            <SelectGroup key={group.agentName}>
+              <SelectSeparator />
+              <SelectLabel>{group.agentName}</SelectLabel>
+              {group.models.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.modelName}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           ))}
         </SelectContent>
       </Select>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => onEdit(agent)}
+        className="h-7 w-7 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
+      >
+        <IconPencil className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }
@@ -121,7 +158,7 @@ type CustomAgentRowProps = {
 
 export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps) {
   return (
-    <div className="flex items-center justify-between py-3 px-3 rounded hover:bg-muted/50 group">
+    <div className="flex items-center justify-between py-3 px-3 rounded hover:bg-muted/50">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
@@ -132,7 +169,7 @@ export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps)
           variant="ghost"
           size="sm"
           onClick={() => onEdit(agent)}
-          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 cursor-pointer"
+          className="h-7 w-7 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
         >
           <IconPencil className="h-3.5 w-3.5" />
         </Button>
@@ -140,7 +177,7 @@ export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps)
           variant="ghost"
           size="sm"
           onClick={() => onDelete(agent)}
-          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-destructive cursor-pointer"
+          className="h-7 w-7 p-0 cursor-pointer text-muted-foreground hover:text-destructive"
         >
           <IconTrash className="h-3.5 w-3.5" />
         </Button>
