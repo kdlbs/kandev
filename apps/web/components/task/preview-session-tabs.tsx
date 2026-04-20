@@ -50,12 +50,12 @@ export function PreviewSessionTabs({
 
   const tabs = useMemo<SessionTab[]>(
     () =>
-      sortedSessions.map((session, index) => ({
+      sortedSessions.map((session) => ({
         id: session.id,
         label: resolveAgentLabelFor(session, agentLabelsById),
         icon: isSessionActive(session.state) ? <RunningSpinner /> : undefined,
         testId: `preview-session-tab-${session.id}`,
-        className: index === 0 ? "" : "ml-1",
+        className: "bg-muted/50 data-[state=active]:bg-muted",
       })),
     [sortedSessions, agentLabelsById],
   );
@@ -77,7 +77,12 @@ export function PreviewSessionTabs({
   return (
     <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
       <div className="border-b px-2 py-1">
-        <SessionTabs tabs={tabs} activeTab={activeSessionId ?? ""} onTabChange={onSessionChange} />
+        <SessionTabs
+          tabs={tabs}
+          activeTab={activeSessionId ?? ""}
+          onTabChange={onSessionChange}
+          listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        />
       </div>
       <div className="flex-1 min-h-0">
         {activeSession && (

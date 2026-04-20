@@ -26,6 +26,8 @@ type SessionTabsProps = {
   addButtonLabel?: string;
   separatorAfterIndex?: number;
   className?: string;
+  /** Overrides the default `TabsList` className — use to drop the pill background, etc. */
+  listClassName?: string;
   // Collapse support
   collapsible?: boolean;
   isCollapsed?: boolean;
@@ -153,13 +155,16 @@ export function SessionTabs({
   addButtonLabel = "+",
   separatorAfterIndex,
   className,
+  listClassName,
   collapsible = false,
   isCollapsed = false,
   onToggleCollapse,
   rightContent,
 }: SessionTabsProps) {
+  const defaultListClassName =
+    "p-0 !h-7 rounded-sm overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]";
   const tabsList = (
-    <TabsList className="p-0 !h-7 rounded-sm overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+    <TabsList className={listClassName ?? defaultListClassName}>
       {tabs.map((tab, index) => (
         <SessionTabItem
           key={tab.id}
