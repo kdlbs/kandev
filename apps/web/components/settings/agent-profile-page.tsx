@@ -389,6 +389,7 @@ function ProfileEditor({
           allow_indexing: draft.allow_indexing,
         }}
         cliPassthrough={draft.cli_passthrough}
+        cliFlags={draft.cli_flags ?? []}
       />
 
       <ProfileMcpConfigCard

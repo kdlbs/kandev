@@ -173,6 +173,7 @@ export type CommandPreviewRequest = {
   model: string;
   permission_settings: Record<string, boolean>;
   cli_passthrough: boolean;
+  cli_flags: CLIFlag[];
 };
 
 export type CommandPreviewResponse = {

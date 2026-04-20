@@ -415,9 +415,10 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string          `json:"model"`
-	PermissionSettings map[string]bool `json:"permission_settings"`
-	CLIPassthrough     bool            `json:"cli_passthrough"`
+	Model              string           `json:"model"`
+	PermissionSettings map[string]bool  `json:"permission_settings"`
+	CLIPassthrough     bool             `json:"cli_passthrough"`
+	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -437,6 +438,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		Model:              body.Model,
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
+		CLIFlags:           body.CLIFlags,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

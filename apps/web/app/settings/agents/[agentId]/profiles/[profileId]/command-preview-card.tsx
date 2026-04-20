@@ -6,12 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { previewAgentCommandAction, type CommandPreviewResponse } from "@/app/actions/agents";
+import type { CLIFlag } from "@/lib/types/http";
 
 type CommandPreviewCardProps = {
   agentName: string;
   model: string;
   permissionSettings: Record<string, boolean>;
   cliPassthrough: boolean;
+  cliFlags: CLIFlag[];
 };
 
 function CommandPreviewLoading() {
@@ -102,14 +104,15 @@ export function CommandPreviewCard({
   model,
   permissionSettings,
   cliPassthrough,
+  cliFlags,
 }: CommandPreviewCardProps) {
   const [preview, setPreview] = useState<CommandPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const settingsKey = useMemo(
-    () => JSON.stringify({ model, permissionSettings, cliPassthrough }),
-    [model, permissionSettings, cliPassthrough],
+    () => JSON.stringify({ model, permissionSettings, cliPassthrough, cliFlags }),
+    [model, permissionSettings, cliPassthrough, cliFlags],
   );
 
   useEffect(() => {
@@ -122,6 +125,7 @@ export function CommandPreviewCard({
           model,
           permission_settings: permissionSettings,
           cli_passthrough: cliPassthrough,
+          cli_flags: cliFlags,
         });
         setPreview(response);
         setError(null);
@@ -134,7 +138,7 @@ export function CommandPreviewCard({
     }, 300);
 
     return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already includes model, permissionSettings, cliPassthrough
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already includes model, permissionSettings, cliPassthrough, cliFlags
   }, [agentName, settingsKey]);
 
   return (

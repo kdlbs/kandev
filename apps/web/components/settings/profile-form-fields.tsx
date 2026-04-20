@@ -56,6 +56,12 @@ export type ProfileFormFieldsProps = {
   variant?: "default" | "compact";
   hideNameField?: boolean;
   lockPassthrough?: boolean;
+  /**
+   * When true, the custom-flag list + Add form on CLIFlagsField is
+   * hidden. Curated predefined toggles still render. Used by the
+   * onboarding flow to keep the first-run UI narrow.
+   */
+  hideCustomCLIFlags?: boolean;
 };
 
 type PermissionToggleProps = {
@@ -518,6 +524,7 @@ export function ProfileFormFields({
   variant = "default",
   hideNameField = false,
   lockPassthrough = false,
+  hideCustomCLIFlags = false,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
   const caps = useAgentCapabilities(agentName, modelConfig);
@@ -561,7 +568,9 @@ export function ProfileFormFields({
       <CLIFlagsField
         flags={profile.cli_flags}
         onChange={(next) => onChange({ cli_flags: next })}
+        permissionSettings={permissionSettings}
         variant={variant}
+        hideCustomFlags={hideCustomCLIFlags}
       />
     </div>
   );

@@ -140,6 +140,7 @@ function InstalledAgentRow({
             <ProfileFormFields
               variant="compact"
               hideNameField
+              hideCustomCLIFlags
               profile={settings.formData}
               onChange={(patch) => onUpdateSetting(agent.name, patch)}
               modelConfig={agent.model_config}
