@@ -4,8 +4,8 @@ import { useCallback, useMemo } from "react";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { getSessionStateIcon } from "@/lib/ui/state-icons";
-import type { TaskSession } from "@/lib/types/http";
+import { cn } from "@/lib/utils";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { TaskChatPanel } from "./task-chat-panel";
@@ -50,11 +50,12 @@ export function PreviewSessionTabs({
 
   const tabs = useMemo<SessionTab[]>(
     () =>
-      sortedSessions.map((session) => ({
+      sortedSessions.map((session, index) => ({
         id: session.id,
         label: resolveAgentLabelFor(session, agentLabelsById),
-        icon: getSessionStateIcon(session.state, "h-3 w-3"),
+        icon: <SessionStateDot state={session.state} />,
         testId: `preview-session-tab-${session.id}`,
+        className: index === 0 ? "" : "ml-1",
       })),
     [sortedSessions, agentLabelsById],
   );
@@ -117,6 +118,25 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
     <div className="h-full p-4 flex flex-col">
       <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
     </div>
+  );
+}
+
+const DOT_COLORS: Record<TaskSessionState, string> = {
+  RUNNING: "bg-emerald-500",
+  STARTING: "bg-blue-500 animate-pulse",
+  WAITING_FOR_INPUT: "bg-amber-500",
+  CREATED: "bg-muted-foreground/60",
+  COMPLETED: "bg-green-500",
+  FAILED: "bg-red-500",
+  CANCELLED: "bg-muted-foreground/60",
+};
+
+function SessionStateDot({ state }: { state: TaskSessionState }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", DOT_COLORS[state])}
+    />
   );
 }
 
