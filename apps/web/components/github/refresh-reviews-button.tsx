@@ -3,7 +3,7 @@
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useRefreshReviews } from "@/hooks/use-refresh-reviews";
+import { useRefreshReviews } from "@/hooks/domains/github/use-refresh-reviews";
 
 export function RefreshReviewsButton() {
   const { available, loading, trigger } = useRefreshReviews();

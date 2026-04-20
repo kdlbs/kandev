@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { IconDots, IconRefresh, IconSettings, IconSparkles } from "@tabler/icons-react";
-import { useRefreshReviews } from "@/hooks/use-refresh-reviews";
+import { useRefreshReviews } from "@/hooks/domains/github/use-refresh-reviews";
 
 type HeaderOverflowMenuProps = {
   showReleaseNotes: boolean;
@@ -37,7 +37,7 @@ export function HeaderOverflowMenu({
           <span className="sr-only">More</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-fit">
         {refreshAvailable && (
           <DropdownMenuItem
             onSelect={triggerRefresh}
