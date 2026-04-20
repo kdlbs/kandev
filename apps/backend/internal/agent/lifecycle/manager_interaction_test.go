@@ -901,3 +901,82 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 	}
 	require.True(t, sawReady, "expected AgentReady event after cancel escalation")
 }
+
+// TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel covers the case where
+// the caller's context is cancelled during the post-escalation wait. Once the
+// synthetic signal has been queued on promptDoneCh, the cleanup (MarkReady + drain)
+// must still run — otherwise the execution leaks in Running state and the stale
+// signal breaks the next PromptAgent call.
+func TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel(t *testing.T) {
+	prevWait := cancelWaitTimeout
+	prevEsc := cancelEscalationTimeout
+	cancelWaitTimeout = 20 * time.Millisecond
+	// Long enough that ctx.Done() fires first during the post-escalation wait.
+	cancelEscalationTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = prevWait
+		cancelEscalationTimeout = prevEsc
+	})
+
+	mock := newMockAgentServer(t)
+	t.Cleanup(func() { mock.server.Close() })
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.cancel" {
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success": true,
+			})
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	require.NoError(t, client.StreamUpdates(streamCtx, func(_ agentctlClient.AgentEvent) {}, nil, nil))
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mock server did not see WS connection")
+	}
+
+	mgr := newTestManager()
+
+	// promptFinished is deliberately never closed — simulates a SendPrompt that
+	// is blocked on something other than promptDoneCh (so escalation can't
+	// release it in time, and our ctx will cancel first).
+	exec := &AgentExecution{
+		ID:             "exec-cancel-ctx",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		promptFinished: make(chan struct{}),
+	}
+	mgr.executionStore.Add(exec)
+
+	// Cancel the caller's context after escalation starts but before the
+	// post-escalation wait completes.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := mgr.CancelAgent(ctx, exec.ID)
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"returns ctx error, not ErrCancelEscalated, when caller ctx cancelled")
+
+	// Critical invariant: cleanup ran despite ctx cancellation.
+	updated, ok := mgr.executionStore.Get(exec.ID)
+	require.True(t, ok)
+	require.Equal(t, v1.AgentStatusReady, updated.Status,
+		"execution must be marked ready even when caller ctx is cancelled mid-escalation")
+
+	select {
+	case sig := <-exec.promptDoneCh:
+		t.Fatalf("stale signal must be drained after escalation; got: %+v", sig)
+	default:
+	}
+}

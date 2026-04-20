@@ -187,7 +187,10 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		m.logger.Warn("in-flight prompt did not release after cancel escalation",
 			zap.String("execution_id", execution.ID))
 	case <-ctx.Done():
-		return ctx.Err()
+		// Fall through to MarkReady/drain below — once the synthetic signal is
+		// queued, the cleanup must survive the caller's context cancellation
+		// or the execution leaks in the Running state and the stale signal
+		// breaks the next PromptAgent call.
 	}
 
 	if err := m.MarkReady(execution.ID); err != nil {
@@ -205,6 +208,9 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 	default:
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return ErrCancelEscalated
 }
 
