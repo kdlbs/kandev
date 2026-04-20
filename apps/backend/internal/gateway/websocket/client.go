@@ -327,6 +327,12 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 
 // handleSessionFocus handles session.focus — marks the session as actively
 // viewed by this client, lifting backend polling to fast mode for the workspace.
+//
+// Also pushes a fresh session data snapshot (git status, etc.) because the
+// session.subscribe frame is often absorbed by the sidebar's bulk subscribe
+// (ref-counted on the client) before the task-page hook can ask for it — so
+// without this, switching tasks leaves the Changes panel showing stale/empty
+// state until the next poll broadcast arrives.
 func (c *Client) handleSessionFocus(msg *ws.Message) {
 	var req SessionSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -344,6 +350,8 @@ func (c *Client) handleSessionFocus(msg *ws.Message) {
 		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
+
+	c.sendSessionData(req.SessionID)
 }
 
 // handleSessionUnfocus handles session.unfocus — releases the focus mark for
