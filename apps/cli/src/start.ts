@@ -45,12 +45,27 @@ export function resolveStandaloneServerPath(repoRoot: string): string | null {
   if (fs.existsSync(expected)) return expected;
   if (!fs.existsSync(standaloneDir)) return null;
 
-  const entries = fs.readdirSync(standaloneDir, { recursive: true, withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile() || entry.name !== "server.js") continue;
-    const parent = entry.parentPath;
-    if (path.basename(parent) === "web") {
-      return path.join(parent, entry.name);
+  return findWebServerJs(standaloneDir);
+}
+
+// Walks `dir` manually instead of relying on `Dirent.parentPath` (Node 20.12+),
+// so the CLI keeps working on older Node 20.x runtimes installed via npx.
+function findWebServerJs(dir: string): string | null {
+  const stack: string[] = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        stack.push(path.join(current, entry.name));
+      } else if (entry.isFile() && entry.name === "server.js" && path.basename(current) === "web") {
+        return path.join(current, entry.name);
+      }
     }
   }
   return null;
