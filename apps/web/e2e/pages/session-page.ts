@@ -343,18 +343,6 @@ export class SessionPage {
   }
 
   /**
-   * Read the dockview group ID for a given panel. Uses `window.__dockviewApi__`
-   * (exposed by the store in `setApi`). Returns null if the panel is missing.
-   */
-  async dockviewGroupIdForPanel(panelId: string): Promise<string | null> {
-    return this.page.evaluate((id) => {
-      type Api = { getPanel: (i: string) => { group?: { id?: string } } | undefined };
-      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      return api?.getPanel(id)?.group?.id ?? null;
-    }, panelId);
-  }
-
-  /**
    * Assert the `pr-detail` panel shares a dockview group with the active
    * `session:{sessionId}` panel — i.e. it opened as a tab next to the session,
    * not as a split in a separate group. Regression guard for the "PR opens in
