@@ -360,9 +360,7 @@ function SubtaskToggle({
       onKeyDown={(e) => e.stopPropagation()}
       className="mt-[1px] flex h-3.5 items-center gap-0.5 shrink-0 cursor-pointer text-[11px] text-muted-foreground/60 hover:text-foreground"
     >
-      <IconChevronDown
-        className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")}
-      />
+      <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       <span>{count}</span>
     </button>
   );

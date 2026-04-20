@@ -79,7 +79,9 @@ test.describe("Sidebar subtasks — collapse/expand", () => {
     await testPage.reload();
     await session.waitForLoad();
     await expect(
-      session.sidebar.locator(`[data-testid='sidebar-subtask-toggle'][data-task-id='${parent.id}']`),
+      session.sidebar.locator(
+        `[data-testid='sidebar-subtask-toggle'][data-task-id='${parent.id}']`,
+      ),
     ).toHaveAttribute("aria-expanded", "false", { timeout: 10_000 });
     await expect(session.sidebar.getByText("Collapse Child One")).not.toBeVisible({
       timeout: 5_000,
@@ -89,7 +91,9 @@ test.describe("Sidebar subtasks — collapse/expand", () => {
     await testPage.goto(`/t/${other.id}`);
     await session.waitForLoad();
     await expect(
-      session.sidebar.locator(`[data-testid='sidebar-subtask-toggle'][data-task-id='${parent.id}']`),
+      session.sidebar.locator(
+        `[data-testid='sidebar-subtask-toggle'][data-task-id='${parent.id}']`,
+      ),
     ).toHaveAttribute("aria-expanded", "false", { timeout: 10_000 });
     await expect(session.sidebar.getByText("Collapse Child One")).not.toBeVisible({
       timeout: 5_000,

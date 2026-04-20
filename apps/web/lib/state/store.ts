@@ -511,7 +511,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       quickChat: merged.quickChat,
       sessionFailureNotification: merged.sessionFailureNotification,
       bottomTerminal: merged.bottomTerminal,
-      collapsedSubtaskParents: merged.collapsedSubtaskParents,
+      // Note: collapsedSubtaskParents is intentionally not overridden here —
+      // createUISlice hydrates it from sessionStorage and we want that to win.
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
