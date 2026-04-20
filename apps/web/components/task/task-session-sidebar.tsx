@@ -207,7 +207,9 @@ function useSidebarData(workspaceId: string | null) {
         repo.id,
         repo.provider_owner && repo.provider_name
           ? `${repo.provider_owner}/${repo.provider_name}`
-          : repo.local_path,
+          : repo.name ||
+            repo.local_path.split("/").filter(Boolean).pop() ||
+            repo.local_path,
       ]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
