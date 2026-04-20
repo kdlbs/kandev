@@ -103,8 +103,9 @@ function useResizeHandler(
 // a setState-in-effect cascade (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
 function useSessionSelectionReset(
   selectedTaskId: string | null | undefined,
+  initialValue: string | null = null,
 ): [string | null, Dispatch<SetStateAction<string | null>>] {
-  const [value, setValue] = useState<string | null>(null);
+  const [value, setValue] = useState<string | null>(initialValue);
   const [prevTaskId, setPrevTaskId] = useState<string | null>(selectedTaskId ?? null);
   const currentTaskId = selectedTaskId ?? null;
   if (prevTaskId !== currentTaskId) {
@@ -135,7 +136,7 @@ function useSelectedTask(
   }, [selectedTaskId, kanbanTasks]);
 }
 
-export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
+export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
 
@@ -157,7 +158,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   // User-selected tab overrides the default primary session pick.
   // Reset when the selected task changes.
   const [userSelectedSessionId, setUserSelectedSessionId] =
-    useSessionSelectionReset(selectedTaskId);
+    useSessionSelectionReset(selectedTaskId, initialSessionId ?? null);
 
   // Track resize state
   const isResizingRef = useRef(false);
