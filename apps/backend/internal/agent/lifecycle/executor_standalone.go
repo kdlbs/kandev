@@ -20,6 +20,7 @@ type StandaloneExecutor struct {
 	ctl               *agentctl.ControlClient
 	host              string
 	port              int
+	authToken         string // per-launch auth token from launcher
 	logger            *logger.Logger
 	interactiveRunner *process.InteractiveRunner
 }
@@ -32,6 +33,11 @@ func NewStandaloneExecutor(ctl *agentctl.ControlClient, host string, port int, l
 		port:   port,
 		logger: log.WithFields(zap.String("runtime", "standalone")),
 	}
+}
+
+// SetAuthToken sets the per-launch auth token for authenticating instance clients.
+func (r *StandaloneExecutor) SetAuthToken(token string) {
+	r.authToken = token
 }
 
 func (r *StandaloneExecutor) Name() executor.Name {
@@ -125,7 +131,8 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	// Create agentctl client pointing to the instance port
 	client := agentctl.NewClient(r.host, resp.Port, r.logger,
 		agentctl.WithExecutionID(req.InstanceID),
-		agentctl.WithSessionID(req.SessionID))
+		agentctl.WithSessionID(req.SessionID),
+		agentctl.WithAuthToken(r.authToken))
 
 	// Extract runtime-specific values from metadata
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)

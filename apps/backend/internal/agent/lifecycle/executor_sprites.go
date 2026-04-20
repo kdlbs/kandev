@@ -370,6 +370,8 @@ func (r *SpritesExecutor) stepApplyNetworkPolicy(
 }
 
 // buildInstanceResult constructs the final ExecutorInstance from sprite creation results.
+// Note: Sprites do not use agentctl auth tokens because each sprite is an isolated VM,
+// and reconnect scenarios cannot retrieve the original token from the running agentctl.
 func (r *SpritesExecutor) buildInstanceResult(
 	req *ExecutorCreateRequest,
 	spriteName string,

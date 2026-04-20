@@ -273,7 +273,7 @@ type MCPHandler interface {
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}

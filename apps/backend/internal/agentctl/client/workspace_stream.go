@@ -46,7 +46,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	c.mu.Unlock()
 
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/stream"
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
 	}

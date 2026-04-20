@@ -6,6 +6,8 @@ package launcher
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -38,6 +41,10 @@ type Launcher struct {
 	// When the backend dies (even SIGKILL), the kernel closes this FD,
 	// breaking the pipe. agentctl detects the break and self-terminates.
 	parentPipe *os.File
+
+	// authToken is retrieved via handshake after agentctl starts.
+	// agentctl generates its own token; the launcher retrieves it using the bootstrap nonce.
+	authToken string
 }
 
 // Config holds configuration for the launcher.
@@ -72,6 +79,21 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 // This may differ from the configured port if fallback port selection was used.
 func (l *Launcher) Port() int {
 	return l.port
+}
+
+// AuthToken returns the auth token retrieved via handshake.
+// Used by the backend to authenticate requests to agentctl.
+func (l *Launcher) AuthToken() string {
+	return l.authToken
+}
+
+// generateNonce creates a cryptographically random 32-byte hex-encoded nonce.
+func generateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate bootstrap nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // agentctlBinaryName returns the platform-appropriate binary name.
@@ -131,6 +153,12 @@ func (l *Launcher) Start(ctx context.Context) error {
 		return fmt.Errorf("port %d not available: %w", l.port, err)
 	}
 
+	// Generate a bootstrap nonce — agentctl will use it to prove parentage
+	nonce, err := generateNonce()
+	if err != nil {
+		return err
+	}
+
 	l.logger.Info("starting agentctl subprocess",
 		zap.String("binary", l.binaryPath),
 		zap.Int("port", l.port),
@@ -144,8 +172,9 @@ func (l *Launcher) Start(ctx context.Context) error {
 		fmt.Sprintf("-port=%d", l.port),
 	)
 
-	// Inherit environment from parent process
-	l.cmd.Env = os.Environ()
+	// Inherit environment from parent process and inject bootstrap nonce.
+	// agentctl generates its own auth token; we retrieve it via handshake.
+	l.cmd.Env = append(os.Environ(), "AGENTCTL_BOOTSTRAP_NONCE="+nonce)
 
 	// Set process attributes:
 	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.
@@ -201,7 +230,20 @@ func (l *Launcher) Start(ctx context.Context) error {
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
 	}
 
-	l.logger.Info("agentctl is healthy and ready")
+	// Perform handshake to retrieve agentctl's self-generated auth token.
+	// The nonce proves we are the parent that launched this process.
+	ctl := agentctlclient.NewControlClient(l.host, l.port, l.logger)
+	token, err := ctl.Handshake(ctx, nonce)
+	if err != nil {
+		if killErr := l.cmd.Process.Kill(); killErr != nil {
+			l.logger.Warn("failed to kill agentctl after handshake failure", zap.Error(killErr))
+		}
+		l.closeParentPipeLocked()
+		return fmt.Errorf("agentctl handshake failed: %w", err)
+	}
+	l.authToken = token
+
+	l.logger.Info("agentctl is healthy and authenticated")
 	return nil
 }
 

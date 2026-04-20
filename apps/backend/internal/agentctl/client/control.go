@@ -21,6 +21,7 @@ type ControlClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	authToken  string
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -69,15 +70,93 @@ type InstanceInfo struct {
 	CreatedAt     time.Time         `json:"created_at"`
 }
 
+// ControlClientOption configures optional ControlClient settings.
+type ControlClientOption func(*ControlClient)
+
+// WithControlAuthToken sets the Bearer token for authenticating control requests.
+func WithControlAuthToken(token string) ControlClientOption {
+	return func(c *ControlClient) {
+		c.authToken = token
+	}
+}
+
 // NewControlClient creates a new ControlClient for the agentctl control server.
-func NewControlClient(host string, port int, log *logger.Logger) *ControlClient {
-	return &ControlClient{
+func NewControlClient(host string, port int, log *logger.Logger, opts ...ControlClientOption) *ControlClient {
+	c := &ControlClient{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		logger: log.WithFields(zap.String("component", "agentctl-control")),
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	if c.authToken != "" {
+		c.httpClient.Transport = &authTransport{token: c.authToken}
+	}
+	return c
+}
+
+// AuthToken returns the current auth token. Used to propagate the token
+// from the ControlClient to per-instance Clients after a handshake.
+func (c *ControlClient) AuthToken() string {
+	return c.authToken
+}
+
+// SetAuthToken sets the Bearer token for future requests.
+// Used after a successful Handshake to authenticate subsequent calls.
+func (c *ControlClient) SetAuthToken(token string) {
+	c.authToken = token
+	c.httpClient.Transport = &authTransport{token: token}
+}
+
+// Handshake performs the bootstrap handshake with agentctl.
+// It sends the one-time nonce and receives the self-generated auth token.
+// On success, the token is automatically set for future requests.
+func (c *ControlClient) Handshake(ctx context.Context, nonce string) (string, error) {
+	body, err := json.Marshal(map[string]string{"nonce": nonce})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal handshake request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/auth/handshake", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("handshake failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if decErr := json.NewDecoder(resp.Body).Decode(&errResp); decErr == nil && errResp.Error != "" {
+			return "", fmt.Errorf("handshake rejected: %s (status %d)", errResp.Error, resp.StatusCode)
+		}
+		return "", fmt.Errorf("handshake failed: status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode handshake response: %w", err)
+	}
+	if result.Token == "" {
+		return "", fmt.Errorf("handshake returned empty token")
+	}
+
+	// Automatically set the token for future requests
+	c.SetAuthToken(result.Token)
+	c.logger.Info("bootstrap handshake completed")
+
+	return result.Token, nil
 }
 
 // Health checks if the agentctl control server is healthy.

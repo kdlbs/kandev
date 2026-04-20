@@ -376,8 +376,10 @@ func startGatewayAndServe(
 	// Long-lived per-agent-type agentctl instances for boot-time capability
 	// probes, on-demand refresh via settings, and sessionless utility prompts
 	// (e.g. "enhance prompt" before a task/session exists).
-	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log)
+	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
+		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
+	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)

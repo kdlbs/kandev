@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 // ErrSessionWorkspaceNotReady indicates the task session exists but does not yet
@@ -289,6 +290,9 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = string(rt.Name())
 
+	// Persist agentctl auth token from handshake (Docker/remote executors)
+	m.persistAuthToken(ctx, runtimeInstance, execution)
+
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
@@ -315,4 +319,37 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.String("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+// MetadataKeyAuthTokenSecret is the metadata key for the encrypted agentctl auth token secret ID.
+const MetadataKeyAuthTokenSecret = "env_secret_id_AGENTCTL_AUTH_TOKEN"
+
+// persistAuthToken stores the agentctl handshake auth token in SecretStore
+// and saves the secret ID in the execution's metadata for recovery after restart.
+func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
+	if instance.AuthToken == "" || m.secretStore == nil {
+		return
+	}
+
+	secret := &secrets.SecretWithValue{
+		Secret: secrets.Secret{
+			Name: fmt.Sprintf("agentctl-auth-%s", instance.InstanceID[:12]),
+		},
+		Value: instance.AuthToken,
+	}
+	if err := m.secretStore.Create(ctx, secret); err != nil {
+		m.logger.Error("failed to persist agentctl auth token",
+			zap.String("instance_id", instance.InstanceID),
+			zap.Error(err))
+		return
+	}
+
+	if execution.Metadata == nil {
+		execution.Metadata = make(map[string]interface{})
+	}
+	execution.Metadata[MetadataKeyAuthTokenSecret] = secret.ID
+
+	m.logger.Debug("persisted agentctl auth token in secret store",
+		zap.String("instance_id", instance.InstanceID),
+		zap.String("secret_id", secret.ID))
 }

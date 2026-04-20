@@ -54,6 +54,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health"))
 
 	s.setupRoutes()
 	return s
