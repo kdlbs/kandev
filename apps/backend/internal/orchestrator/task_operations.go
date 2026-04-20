@@ -1666,16 +1666,25 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		switch {
+		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
+			// The session was live but there is no execution to cancel — the agent process
+			// crashed, exited, or never re-registered after a backend restart. Log at error
+			// level so operators notice the stuck state; we still reconcile DB state below
+			// so the UI unsticks.
+			s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		case errors.Is(err, lifecycle.ErrCancelEscalated):
+			// The agent accepted the ACP cancel but never published a completion event.
+			// The lifecycle manager already unblocked the in-flight prompt and marked the
+			// execution ready; reconcile DB state below so the UI unsticks.
+			s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		default:
 			return fmt.Errorf("cancel agent: %w", err)
 		}
-		// The session was live but there is no execution to cancel — the agent process
-		// crashed, exited, or never re-registered after a backend restart. Log at error
-		// level so operators notice the stuck state; we still reconcile DB state below
-		// so the UI unsticks.
-		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
 	}
 
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt

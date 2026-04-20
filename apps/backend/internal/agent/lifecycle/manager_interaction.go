@@ -88,8 +88,25 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments)
 }
 
+// cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
+// to exit after the ACP cancel was acknowledged by the agent.
+// Exposed as a var (not const) so tests can shorten it without fake clocks.
+var cancelWaitTimeout = 10 * time.Second
+
+// cancelEscalationTimeout bounds the post-escalation wait after we inject a synthetic
+// error onto promptDoneCh to unblock a stuck SendPrompt.
+var cancelEscalationTimeout = 2 * time.Second
+
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
+//
+// When the agent subprocess accepts the ACP cancel but never publishes a `complete`
+// event (and the update stream stays open), the in-flight SendPrompt would otherwise
+// block forever. After cancelWaitTimeout we escalate by signalling promptDoneCh with
+// a synthetic error so SendPrompt returns and its deferred cleanup closes
+// promptFinished normally. Callers receive ErrCancelEscalated to signal that local
+// lifecycle state was reconciled but the agent never confirmed the cancel, and
+// higher layers (Service.CancelAgent) must still reconcile DB state.
 func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -126,21 +143,60 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	ch := execution.promptFinished
 	execution.promptFinishedMu.Unlock()
 
-	if ch != nil {
-		select {
-		case <-ch:
-			m.logger.Debug("in-flight prompt finished after cancel",
-				zap.String("execution_id", executionID))
-		case <-time.After(10 * time.Second):
-			m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel",
-				zap.String("execution_id", executionID))
-			return fmt.Errorf("timed out waiting for in-flight prompt to finish after cancel")
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	if ch == nil {
+		return nil
 	}
 
-	return nil
+	select {
+	case <-ch:
+		m.logger.Debug("in-flight prompt finished after cancel",
+			zap.String("execution_id", executionID))
+		return nil
+	case <-time.After(cancelWaitTimeout):
+		return m.escalateStuckCancel(ctx, execution, ch)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// escalateStuckCancel unblocks a SendPrompt that is stuck waiting for a completion
+// event the agent will never emit. It injects a synthetic error onto promptDoneCh
+// (non-blocking; the channel is buffered size 1), waits briefly for SendPrompt to
+// exit and close promptFinished, and marks the execution ready so the workflow
+// leaves the running state. Returns ErrCancelEscalated so callers know the ACP
+// cancel did not get a clean acknowledgement.
+func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecution, ch <-chan struct{}) error {
+	m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel; escalating",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID))
+
+	select {
+	case execution.promptDoneCh <- PromptCompletionSignal{
+		IsError: true,
+		Error:   "cancel escalated: agent did not complete turn within timeout",
+	}:
+	default:
+		// Channel already has a pending signal; SendPrompt will pick that up instead.
+	}
+
+	select {
+	case <-ch:
+		m.logger.Info("in-flight prompt released after cancel escalation",
+			zap.String("execution_id", execution.ID))
+	case <-time.After(cancelEscalationTimeout):
+		m.logger.Warn("in-flight prompt did not release after cancel escalation",
+			zap.String("execution_id", execution.ID))
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	if err := m.MarkReady(execution.ID); err != nil {
+		m.logger.Warn("failed to mark execution ready after cancel escalation",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+
+	return ErrCancelEscalated
 }
 
 // SetSessionMode changes the session mode for a running agent.
@@ -282,6 +338,14 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 // the session's state in the database, otherwise the session will appear stuck as RUNNING
 // with no agent to drive it.
 var ErrNoExecutionForSession = errors.New("no execution for session")
+
+// ErrCancelEscalated is returned by CancelAgent when the agent subprocess accepted
+// the ACP cancel but did not publish a completion event before the timeout. The
+// lifecycle manager has locally unblocked the in-flight SendPrompt and marked the
+// execution ready, but the agent never acknowledged the cancel. Callers should
+// still reconcile session-level state (e.g. transition the task session to
+// WAITING_FOR_INPUT) — the user's intent was unambiguous.
+var ErrCancelEscalated = errors.New("cancel escalated: agent did not acknowledge within timeout")
 
 // CancelAgentBySessionID cancels the current agent turn for a specific session.
 // Returns ErrNoExecutionForSession (wrapped) when no execution is tracked for the session.

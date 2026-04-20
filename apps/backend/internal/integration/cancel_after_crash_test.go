@@ -95,3 +95,71 @@ func TestOrchestratorCancelAfterAgentCrash_UnsticksSession(t *testing.T) {
 	assert.True(t, foundCancel,
 		"expected a 'Turn cancelled by user' status message to be recorded")
 }
+
+// TestOrchestratorCancelWhenAgentHangs_UnsticksSession covers the second path to a stuck
+// session: the agent subprocess is alive and acknowledges the ACP cancel, but never
+// publishes a completion event. The lifecycle manager's CancelAgent escalates and returns
+// ErrCancelEscalated. The orchestrator service must treat that as a soft-fail (reconcile
+// DB state) — otherwise the UI shows "agent is running" forever and cancel stays broken.
+func TestOrchestratorCancelWhenAgentHangs_UnsticksSession(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	defer ts.Close()
+
+	taskID := ts.CreateTestTask(t, "augment-agent", 2)
+
+	client := NewOrchestratorWSClient(t, ts.Server.URL)
+	defer client.Close()
+
+	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+		"task_id":          taskID,
+		"agent_profile_id": "augment-agent",
+	})
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, startResp.Type, "start should succeed")
+
+	var startPayload map[string]interface{}
+	require.NoError(t, startResp.ParsePayload(&startPayload))
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	require.NoError(t, ts.TaskRepo.UpdateTaskSessionState(
+		context.Background(), sessionID, models.TaskSessionStateRunning, "",
+	))
+
+	// Mark the simulated agent as hung: it's tracked, but CancelAgent will return
+	// ErrCancelEscalated to model the real lifecycle escalation.
+	ts.AgentManager.MarkAgentHungForSession(sessionID)
+
+	cancelResp, err := client.SendRequest("cancel-1", ws.ActionAgentCancel, map[string]interface{}{
+		"session_id": sessionID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, cancelResp.Type,
+		"cancel should succeed even when lifecycle escalated after an unresponsive agent; got: %+v", cancelResp)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var finalState models.TaskSessionState
+	for time.Now().Before(deadline) {
+		session, gErr := ts.TaskRepo.GetTaskSession(context.Background(), sessionID)
+		require.NoError(t, gErr)
+		finalState = session.State
+		if finalState == models.TaskSessionStateWaitingForInput {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, finalState,
+		"session should unstick to WAITING_FOR_INPUT after cancel escalation")
+
+	msgs, err := ts.TaskRepo.ListMessages(context.Background(), sessionID)
+	require.NoError(t, err)
+	foundCancel := false
+	for _, m := range msgs {
+		if m.Type == models.MessageTypeStatus && m.Content == "Turn cancelled by user" {
+			foundCancel = true
+			break
+		}
+	}
+	assert.True(t, foundCancel,
+		"expected a 'Turn cancelled by user' status message to be recorded")
+}

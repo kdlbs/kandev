@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctlClient "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -797,4 +798,103 @@ func TestGetSessionAuthMethodsFallback(t *testing.T) {
 		mgr := &Manager{executionStore: store}
 		require.Nil(t, mgr.GetSessionAuthMethods("nonexistent"))
 	})
+}
+
+// TestManager_CancelAgent_EscalatesWhenAgentHangs reproduces the stuck-turn bug:
+// the agent accepts the ACP cancel but never publishes a `complete` event, so the
+// in-flight SendPrompt would block forever. The manager must escalate by
+// unblocking SendPrompt via promptDoneCh, marking the execution ready, and
+// returning ErrCancelEscalated so higher layers can still reconcile DB state.
+func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
+	prevWait := cancelWaitTimeout
+	prevEsc := cancelEscalationTimeout
+	cancelWaitTimeout = 50 * time.Millisecond
+	cancelEscalationTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = prevWait
+		cancelEscalationTimeout = prevEsc
+	})
+
+	// Mock agentctl: ack agent.cancel but never emit a completion event.
+	mock := newMockAgentServer(t)
+	t.Cleanup(func() { mock.server.Close() })
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.cancel" {
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success": true,
+			})
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	// Establish the agent stream so the client can send agent.cancel.
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	require.NoError(t, client.StreamUpdates(streamCtx, func(_ agentctlClient.AgentEvent) {}, nil, nil))
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mock server did not see WS connection")
+	}
+
+	mgr := newTestManager()
+
+	promptFinished := make(chan struct{})
+	exec := &AgentExecution{
+		ID:             "exec-cancel-hang",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		promptFinished: promptFinished,
+	}
+	mgr.executionStore.Add(exec)
+
+	// Simulate the in-flight SendPrompt: it blocks reading promptDoneCh, and on
+	// signal closes promptFinished (the same cleanup beginPromptBarrier's deferred
+	// closer does).
+	sendPromptDone := make(chan struct{})
+	var signal PromptCompletionSignal
+	go func() {
+		defer close(sendPromptDone)
+		signal = <-exec.promptDoneCh
+		close(promptFinished)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := mgr.CancelAgent(ctx, exec.ID)
+	require.ErrorIs(t, err, ErrCancelEscalated)
+
+	select {
+	case <-sendPromptDone:
+	case <-time.After(1 * time.Second):
+		t.Fatal("simulated SendPrompt did not release after cancel escalation")
+	}
+	require.True(t, signal.IsError, "escalation signal must carry IsError=true")
+	require.Contains(t, signal.Error, "cancel escalated")
+
+	updated, found := mgr.executionStore.Get(exec.ID)
+	require.True(t, found)
+	require.Equal(t, v1.AgentStatusReady, updated.Status,
+		"execution must be marked ready after cancel escalation so the workflow can proceed")
+
+	mockBus, ok := mgr.eventBus.(*MockEventBus)
+	require.True(t, ok)
+	var sawReady bool
+	for _, ev := range mockBus.PublishedEvents {
+		if ev.Type == events.AgentReady {
+			sawReady = true
+			break
+		}
+	}
+	require.True(t, sawReady, "expected AgentReady event after cancel escalation")
 }

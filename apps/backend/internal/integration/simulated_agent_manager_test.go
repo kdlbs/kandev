@@ -47,6 +47,9 @@ type simulatedInstance struct {
 	status         v1.AgentStatus
 	statusMu       sync.Mutex // Protects status field
 	stopCh         chan struct{}
+	// hung indicates the agent acknowledged an ACP cancel but never emitted a
+	// completion event, so CancelAgent should return lifecycle.ErrCancelEscalated.
+	hung bool
 }
 
 // NewSimulatedAgentManager creates a new simulated agent manager
@@ -392,6 +395,10 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Conte
 // Returns lifecycle.ErrNoExecutionForSession when no live execution exists for the session
 // (for example, after CrashAgentForSession has been used to simulate a crash), matching the
 // real lifecycle adapter's behaviour.
+//
+// If the session has been marked "hung" via MarkAgentHungForSession, the call returns
+// lifecycle.ErrCancelEscalated to model the real manager's escalation path when the agent
+// accepts an ACP cancel but never publishes a completion event.
 func (s *SimulatedAgentManagerClient) CancelAgent(ctx context.Context, sessionID string) error {
 	s.logger.Info("simulated: cancelling agent turn",
 		zap.String("session_id", sessionID))
@@ -399,11 +406,30 @@ func (s *SimulatedAgentManagerClient) CancelAgent(ctx context.Context, sessionID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, inst := range s.instances {
-		if inst.sessionID == sessionID {
-			return nil
+		if inst.sessionID != sessionID {
+			continue
 		}
+		if inst.hung {
+			return fmt.Errorf("session %q: %w", sessionID, lifecycle.ErrCancelEscalated)
+		}
+		return nil
 	}
 	return fmt.Errorf("session %q: %w", sessionID, lifecycle.ErrNoExecutionForSession)
+}
+
+// MarkAgentHungForSession marks the simulated agent for a session as "hung" so subsequent
+// CancelAgent calls return lifecycle.ErrCancelEscalated. This models a real agent that
+// acknowledged the ACP cancel but never emitted a completion event, forcing the lifecycle
+// manager to escalate.
+func (s *SimulatedAgentManagerClient) MarkAgentHungForSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, inst := range s.instances {
+		if inst.sessionID == sessionID {
+			inst.hung = true
+			return
+		}
+	}
 }
 
 // CrashAgentForSession simulates an agent subprocess crashing mid-turn.
