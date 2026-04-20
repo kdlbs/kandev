@@ -45,6 +45,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoInstallLanguages     *[]string
 	LspServerConfigs            *map[string]map[string]interface{}
 	SavedLayouts                *[]models.SavedLayout
+	SidebarViews                *[]models.SidebarView
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
@@ -110,6 +111,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applySavedLayouts(settings, req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
+	if err := applySidebarViews(settings, req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
@@ -249,6 +253,34 @@ func applySavedLayouts(settings *models.UserSettings, req *UpdateUserSettingsReq
 	return nil
 }
 
+const maxSidebarViews = 50
+
+// applySidebarViews validates and applies the sidebar_views setting.
+func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarViews == nil {
+		return nil
+	}
+	views := *req.SidebarViews
+	if len(views) > maxSidebarViews {
+		return fmt.Errorf("sidebar_views: max %d views allowed", maxSidebarViews)
+	}
+	seen := make(map[string]struct{}, len(views))
+	for i := range views {
+		if strings.TrimSpace(views[i].ID) == "" {
+			return errors.New("sidebar_views: view id must not be empty")
+		}
+		if strings.TrimSpace(views[i].Name) == "" {
+			return errors.New("sidebar_views: view name must not be empty")
+		}
+		if _, dup := seen[views[i].ID]; dup {
+			return fmt.Errorf("sidebar_views: duplicate view id %q", views[i].ID)
+		}
+		seen[views[i].ID] = struct{}{}
+	}
+	settings.SidebarViews = views
+	return nil
+}
+
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -271,6 +303,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_install_languages":      settings.LspAutoInstallLanguages,
 		"lsp_server_configs":              settings.LspServerConfigs,
 		"saved_layouts":                   settings.SavedLayouts,
+		"sidebar_views":                   settings.SidebarViews,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
