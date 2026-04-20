@@ -250,6 +250,51 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
   );
 }
 
+type ButtonKind = "update" | "start-task" | "default";
+
+const REASON_TITLE = "Add a task title";
+const REASON_REPO = "Select a repository";
+const REASON_BRANCH = "Select a branch";
+const REASON_WORKSPACE = "Select a workspace";
+const REASON_WORKFLOW = "Select a workflow";
+const REASON_AGENT = "Select an agent";
+
+function requiresAgent(kind: ButtonKind, props: TaskCreateDialogFooterProps): boolean {
+  if (kind === "start-task") return true;
+  if (kind === "default" && props.isSessionMode) return true;
+  return false;
+}
+
+function baseReason(props: TaskCreateDialogFooterProps): string | null {
+  if (!props.hasTitle) return REASON_TITLE;
+  if (!props.hasRepositorySelection) return REASON_REPO;
+  if (!props.branch) return REASON_BRANCH;
+  if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
+  if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
+  return null;
+}
+
+export function computeDisabledReason(
+  props: TaskCreateDialogFooterProps,
+  kind: ButtonKind,
+): string | null {
+  if (props.isCreatingTask) return null;
+  if (kind === "update") return props.hasTitle ? null : REASON_TITLE;
+  const base = baseReason(props);
+  if (base) return base;
+  if (requiresAgent(kind, props) && !props.agentProfileId) return REASON_AGENT;
+  return null;
+}
+
+function resolveButtonKind(
+  props: TaskCreateDialogFooterProps,
+  showStartTask: boolean,
+): ButtonKind {
+  if (props.isTaskStarted) return "update";
+  if (showStartTask) return "start-task";
+  return "default";
+}
+
 function computeFooterState(props: TaskCreateDialogFooterProps) {
   const showStartTask =
     (props.isCreateMode && (props.hasDescription || props.isPassthroughProfile)) ||
@@ -258,7 +303,9 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const splitDisabled = altDisabled || !props.agentProfileId;
   const defaultDisabled = props.isSessionMode ? !props.agentProfileId : altDisabled;
 
-  return { showStartTask, splitDisabled, altDisabled, defaultDisabled };
+  const disabledReason = computeDisabledReason(props, resolveButtonKind(props, showStartTask));
+
+  return { showStartTask, splitDisabled, altDisabled, defaultDisabled, disabledReason };
 }
 
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
@@ -280,7 +327,8 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     onCreateWithoutAgent,
     onCreateWithPlanMode,
   } = props;
-  const { showStartTask, splitDisabled, altDisabled, defaultDisabled } = computeFooterState(props);
+  const { showStartTask, splitDisabled, altDisabled, defaultDisabled, disabledReason } =
+    computeFooterState(props);
 
   return (
     <>
@@ -300,42 +348,50 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           Cancel
         </Button>
       </DialogClose>
-      <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-        {(() => {
-          if (isTaskStarted) {
+      <KeyboardShortcutTooltip
+        shortcut={SHORTCUTS.SUBMIT}
+        description={disabledReason ?? undefined}
+      >
+        <span
+          className="inline-flex w-full sm:w-auto"
+          data-testid="submit-start-agent-wrapper"
+        >
+          {(() => {
+            if (isTaskStarted) {
+              return (
+                <UpdateButton
+                  isCreatingTask={isCreatingTask}
+                  hasTitle={hasTitle}
+                  onUpdate={onUpdateWithoutAgent}
+                />
+              );
+            }
+            if (showStartTask) {
+              return (
+                <StartTaskSplitButton
+                  isCreatingTask={isCreatingTask}
+                  disabled={splitDisabled}
+                  altDisabled={altDisabled}
+                  isEditMode={isEditMode}
+                  onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
+                  onPlanModeAction={onCreateWithPlanMode}
+                />
+              );
+            }
             return (
-              <UpdateButton
+              <DefaultSubmitButton
+                isCreatingSession={isCreatingSession}
                 isCreatingTask={isCreatingTask}
-                hasTitle={hasTitle}
-                onUpdate={onUpdateWithoutAgent}
-              />
-            );
-          }
-          if (showStartTask) {
-            return (
-              <StartTaskSplitButton
-                isCreatingTask={isCreatingTask}
-                disabled={splitDisabled}
-                altDisabled={altDisabled}
+                isSessionMode={isSessionMode}
+                isCreateMode={isCreateMode}
                 isEditMode={isEditMode}
-                onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
-                onPlanModeAction={onCreateWithPlanMode}
+                hasDescription={hasDescription}
+                isPassthroughProfile={isPassthroughProfile}
+                disabled={defaultDisabled}
               />
             );
-          }
-          return (
-            <DefaultSubmitButton
-              isCreatingSession={isCreatingSession}
-              isCreatingTask={isCreatingTask}
-              isSessionMode={isSessionMode}
-              isCreateMode={isCreateMode}
-              isEditMode={isEditMode}
-              hasDescription={hasDescription}
-              isPassthroughProfile={isPassthroughProfile}
-              disabled={defaultDisabled}
-            />
-          );
-        })()}
+          })()}
+        </span>
       </KeyboardShortcutTooltip>
     </>
   );
