@@ -415,9 +415,6 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflows,
   });
   const handlers = useDialogHandlers(fs, repositories);
-  // fs.agentProfileId is updated asynchronously by an effect, so it can lag
-  // behind the synchronous workflow override on dialog re-open.
-  const effectiveAgentProfileId = fs.agentProfileId || computed.workflowAgentProfileId;
   const submitHandlers = useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
@@ -433,7 +430,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
     branch: fs.branch,
-    agentProfileId: effectiveAgentProfileId,
+    agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
     editingTask,
@@ -475,7 +472,6 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     handlers,
     submitHandlers,
     handleKeyDown,
-    effectiveAgentProfileId,
     enhance: useEnhanceForDialog(fs),
   };
 }
@@ -560,7 +556,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               hasDescription={fs.hasDescription}
               hasRepositorySelection={computed.hasRepositorySelection}
               branch={fs.branch}
-              agentProfileId={setup.effectiveAgentProfileId}
+              agentProfileId={computed.effectiveAgentProfileId}
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
               executorHint={computed.executorHint}

@@ -56,6 +56,8 @@ export type DialogComputedValues = {
   workflowAgentLocked: boolean;
   /** The agent_profile_id from the effective workflow (empty string if none) */
   workflowAgentProfileId: string;
+  /** User selection if any, else the workflow override; what footer/submit/passthrough should consult */
+  effectiveAgentProfileId: string;
 };
 
 export type DialogComputedArgs = {
