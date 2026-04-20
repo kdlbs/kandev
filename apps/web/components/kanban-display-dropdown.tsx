@@ -150,9 +150,9 @@ export function KanbanDisplayDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" data-testid="display-button" className="cursor-pointer">
-          <IconAdjustmentsHorizontal className="h-4 w-4 mr-2" />
-          Display
+        <Button variant="outline" data-testid="display-button" className="cursor-pointer gap-2">
+          <IconAdjustmentsHorizontal className="h-4 w-4" />
+          <span className="hidden 2xl:inline">Display</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[280px] p-3">

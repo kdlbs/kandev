@@ -14,7 +14,7 @@ export function MobileSearchBar({ searchQuery, onSearchChange }: MobileSearchBar
         value={searchQuery}
         onChange={onSearchChange}
         placeholder="Search tasks..."
-        className="w-full [&_input]:w-full"
+        className="w-full"
       />
     </div>
   );

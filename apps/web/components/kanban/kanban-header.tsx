@@ -211,6 +211,7 @@ function DesktopHeader({
             onChange={onSearchChange}
             placeholder="Search tasks..."
             isLoading={isSearchLoading}
+            className="w-64"
           />
         </div>
       )}
@@ -238,9 +239,9 @@ function DesktopHeader({
         <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         <KanbanDisplayDropdown />
         <Link href="/settings" className="cursor-pointer">
-          <Button variant="outline" className="cursor-pointer">
-            <IconSettings className="h-4 w-4 mr-2" />
-            Settings
+          <Button variant="outline" className="cursor-pointer gap-2">
+            <IconSettings className="h-4 w-4" />
+            <span className="hidden 2xl:inline">Settings</span>
           </Button>
         </Link>
       </div>
