@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -131,6 +131,9 @@ function CLIFlagRow({
 }
 
 function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string) => void }) {
+  const uid = useId();
+  const flagId = `${uid}-flag`;
+  const descId = `${uid}-desc`;
   const [newFlag, setNewFlag] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const commit = () => {
@@ -140,36 +143,38 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string)
     setNewFlag("");
     setNewDesc("");
   };
+  const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && newFlag.trim() !== "") {
+      e.preventDefault();
+      commit();
+    }
+  };
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
       <div className="flex-1 space-y-1">
-        <Label className="text-xs" htmlFor="cli-flags-new-flag">
+        <Label className="text-xs" htmlFor={flagId}>
           Flag
         </Label>
         <Input
-          id="cli-flags-new-flag"
+          id={flagId}
           value={newFlag}
           onChange={(e) => setNewFlag(e.target.value)}
           placeholder="--my-flag or --key=value"
           data-testid="cli-flag-new-flag-input"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && newFlag.trim() !== "") {
-              e.preventDefault();
-              commit();
-            }
-          }}
+          onKeyDown={onEnter}
         />
       </div>
       <div className="flex-1 space-y-1">
-        <Label className="text-xs" htmlFor="cli-flags-new-desc">
+        <Label className="text-xs" htmlFor={descId}>
           Description (optional)
         </Label>
         <Input
-          id="cli-flags-new-desc"
+          id={descId}
           value={newDesc}
           onChange={(e) => setNewDesc(e.target.value)}
           placeholder="What this flag does"
           data-testid="cli-flag-new-desc-input"
+          onKeyDown={onEnter}
         />
       </div>
       <Button

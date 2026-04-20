@@ -28,6 +28,8 @@ func TestTokenise(t *testing.T) {
 		{name: "tabs between tokens", input: "--a\t1", want: []string{"--a", "1"}},
 		{name: "unterminated double quote", input: `--msg "hi`, wantErr: true},
 		{name: "unterminated single quote", input: `--msg 'hi`, wantErr: true},
+		{name: "trailing backslash unquoted", input: `--flag foo\`, wantErr: true},
+		{name: "trailing backslash inside dq", input: `--msg "hi\`, wantErr: true},
 		{name: "empty quoted string yields empty token", input: `--empty ""`, want: []string{"--empty", ""}},
 	}
 	for _, tc := range cases {

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
@@ -46,6 +47,8 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	cliFlags := cliFlagsFromDTO(req.CLIFlags)
 	if req.CLIFlags == nil {
 		cliFlags = seedCLIFlags(agentConfig)
+	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
+		return nil, err
 	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
@@ -148,12 +151,20 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	return &result, nil
 }
 
-// validateCLIFlagDTOs rejects entries with an empty flag string. An empty
-// description is allowed (custom flags often don't have one).
+// validateCLIFlagDTOs rejects entries with an empty flag string or malformed
+// shell tokens (unterminated quotes, trailing backslash). Empty descriptions
+// are allowed (custom flags often don't have one). Tokenising here keeps the
+// launch path's cliflags.Resolve error branch unreachable in practice: a
+// single bad entry must not silently drop every other enabled flag at task
+// start, which is what would happen if we let it slip through to the
+// subprocess builder.
 func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 	for i, f := range in {
 		if strings.TrimSpace(f.Flag) == "" {
 			return fmt.Errorf("cli_flags[%d].flag is required", i)
+		}
+		if _, err := cliflags.Tokenise(f.Flag); err != nil {
+			return fmt.Errorf("cli_flags[%d]: %w", i, err)
 		}
 	}
 	return nil

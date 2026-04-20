@@ -115,6 +115,43 @@ func TestCLIFlags_LegacyBackfill(t *testing.T) {
 	}
 }
 
+// TestCLIFlags_LegacyBackfill_NonAuggieAgent ensures that a legacy profile
+// for a non-Auggie agent with allow_indexing=1 (possible via direct SQL or
+// the DEFAULT 1 column) does NOT synth a --allow-indexing flag, since only
+// Auggie has ever supported that CLI flag.
+func TestCLIFlags_LegacyBackfill_NonAuggieAgent(t *testing.T) {
+	repo := newFreshRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateAgent(ctx, &models.Agent{Name: "claude-acp"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agent, err := repo.GetAgentByName(ctx, "claude-acp")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	// Deliberately set allow_indexing=1 on a claude-acp profile — this is
+	// the scenario CodeRabbit flagged: a legacy row with the column default
+	// on a non-Auggie agent would otherwise inject --allow-indexing into
+	// Claude's argv and crash the launch.
+	_, err = repo.db.Exec(`INSERT INTO agent_profiles
+		(id, agent_id, name, agent_display_name, model, mode, auto_approve,
+		 dangerously_skip_permissions, allow_indexing, cli_passthrough,
+		 user_modified, plan, cli_flags, created_at, updated_at)
+		VALUES ('legacy-claude', ?, 'Claude', 'Claude', '', NULL, 0, 0, 1, 0, 0, '', NULL,
+		        datetime('now'), datetime('now'))`, agent.ID)
+	if err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	got, err := repo.GetAgentProfile(ctx, "legacy-claude")
+	if err != nil {
+		t.Fatalf("get legacy profile: %v", err)
+	}
+	if len(got.CLIFlags) != 0 {
+		t.Errorf("expected no backfilled flags for claude-acp, got %+v", got.CLIFlags)
+	}
+}
+
 // TestCLIFlags_LegacyBackfill_AllowIndexingOff seeds a legacy row with
 // allow_indexing=0 and confirms no flag is backfilled (an off toggle would
 // not have produced a CLI flag historically either).
