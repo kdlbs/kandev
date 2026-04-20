@@ -119,7 +119,9 @@ export function PreviewSessionTabs({
         />
       </div>
       <div className="flex-1 min-h-0">
-        {activeSession && <PreviewSessionBody session={activeSession} taskId={taskId} />}
+        {activeSession && (
+          <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />
+        )}
       </div>
       <NewSessionDialog
         open={showNewSessionDialog}
