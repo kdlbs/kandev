@@ -52,4 +52,29 @@ describe("isProfileDirty", () => {
   it("returns true when there is no saved profile", () => {
     expect(isProfileDirty(draftFrom(baseProfile))).toBe(true);
   });
+
+  it("returns true when cli_flags list changes", () => {
+    const draft = draftFrom(baseProfile, {
+      cli_flags: [{ flag: "--allow-all-tools", enabled: true, description: "" }],
+    });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("returns true when a cli_flag enabled state changes", () => {
+    const saved: AgentProfile = {
+      ...baseProfile,
+      cli_flags: [{ flag: "--allow-all-tools", enabled: false, description: "" }],
+    };
+    const draft = draftFrom(saved, {
+      cli_flags: [{ flag: "--allow-all-tools", enabled: true, description: "" }],
+    });
+    expect(isProfileDirty(draft, saved)).toBe(true);
+  });
+
+  it("returns false when cli_flags are equal", () => {
+    const flags = [{ flag: "--allow-all-tools", enabled: true, description: "desc" }];
+    const saved: AgentProfile = { ...baseProfile, cli_flags: flags };
+    const draft = draftFrom(saved, { cli_flags: [...flags] });
+    expect(isProfileDirty(draft, saved)).toBe(false);
+  });
 });
