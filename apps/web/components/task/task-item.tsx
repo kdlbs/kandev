@@ -307,14 +307,6 @@ export const TaskItem = memo(function TaskItem({
           ↳
         </span>
       )}
-      {showSubtaskToggle && (
-        <SubtaskToggle
-          taskId={taskId}
-          count={subtaskCount!}
-          collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
-        />
-      )}
       <TaskStateIcon sessionState={sessionState} state={state} isInProgress={isInProgress} />
       <TaskItemContent
         title={title}
@@ -329,6 +321,14 @@ export const TaskItem = memo(function TaskItem({
         prInfo={prInfo}
         reserveMenuSpace={!hasDiffStats}
       />
+      {showSubtaskToggle && (
+        <SubtaskToggle
+          taskId={taskId}
+          count={subtaskCount!}
+          collapsed={!!subtasksCollapsed}
+          onToggle={onToggleSubtasks!}
+        />
+      )}
       {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
       <TaskMenuButton visible={effectiveMenuOpen} />
     </div>
