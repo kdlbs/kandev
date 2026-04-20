@@ -26,15 +26,7 @@ describe("resolveStandaloneServerPath", () => {
   });
 
   it("returns the expected path when .next/standalone/web/server.js exists", () => {
-    const expected = path.join(
-      repoRoot,
-      "apps",
-      "web",
-      ".next",
-      "standalone",
-      "web",
-      "server.js",
-    );
+    const expected = path.join(repoRoot, "apps", "web", ".next", "standalone", "web", "server.js");
     writeFile(expected);
 
     expect(resolveStandaloneServerPath(repoRoot)).toBe(expected);
