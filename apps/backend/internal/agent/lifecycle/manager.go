@@ -82,6 +82,10 @@ type Manager struct {
 	remoteStatusBySession    map[string]*RemoteStatus
 	stopCh                   chan struct{}
 	wg                       sync.WaitGroup
+
+	// pollAggregator routes hub session-mode events to agentctl. See
+	// manager_subscription.go.
+	pollAggregator *workspacePollAggregator
 }
 
 // NewManager creates a new lifecycle manager.
@@ -160,11 +164,34 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 
+	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
+
 	if executorRegistry != nil {
 		mgr.logger.Info("initialized with runtimes", zap.Int("count", len(executorRegistry.List())))
 	}
 
 	return mgr
+}
+
+// HandleSessionMode routes a session-level mode transition (from the gateway
+// hub) into the per-workspace aggregator, which pushes the resulting
+// workspace-effective mode to agentctl. See manager_subscription.go.
+func (m *Manager) HandleSessionMode(sessionID string, mode WorkspacePollMode) {
+	if m.pollAggregator == nil {
+		return
+	}
+	m.pollAggregator.HandleSessionMode(sessionID, mode)
+}
+
+// flushCachedPollMode pushes any session mode the gateway cached before this
+// execution was ready. Closes the pre-execution-focus race where the frontend
+// sent session.focus during execution startup and the cached mode never
+// reached agentctl. No-op when nothing was cached.
+func (m *Manager) flushCachedPollMode(sessionID string) {
+	if m.pollAggregator == nil {
+		return
+	}
+	m.pollAggregator.FlushSessionMode(sessionID)
 }
 
 // SetWorktreeManager sets the worktree manager for Git worktree isolation.

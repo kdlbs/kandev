@@ -36,6 +36,7 @@ type Client struct {
 	send                 chan []byte
 	subscriptions        map[string]bool // Task IDs this client is subscribed to
 	sessionSubscriptions map[string]bool // Session IDs this client is subscribed to
+	sessionFocus         map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
 	userSubscriptions    map[string]bool // User IDs this client is subscribed to
 	mu                   sync.RWMutex
 	closed               bool
@@ -51,6 +52,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		send:                 make(chan []byte, 256),
 		subscriptions:        make(map[string]bool),
 		sessionSubscriptions: make(map[string]bool),
+		sessionFocus:         make(map[string]bool),
 		userSubscriptions:    make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
 	}
@@ -119,6 +121,12 @@ func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
 		return
 	case ws.ActionSessionUnsubscribe:
 		c.handleSessionUnsubscribe(msg)
+		return
+	case ws.ActionSessionFocus:
+		c.handleSessionFocus(msg)
+		return
+	case ws.ActionSessionUnfocus:
+		c.handleSessionUnfocus(msg)
 		return
 	case ws.ActionUserSubscribe:
 		c.handleUserSubscribe(msg)
@@ -309,6 +317,49 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 	}
 
 	c.hub.UnsubscribeFromSession(c, req.SessionID)
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
+	})
+	c.sendMessage(resp)
+}
+
+// handleSessionFocus handles session.focus — marks the session as actively
+// viewed by this client, lifting backend polling to fast mode for the workspace.
+func (c *Client) handleSessionFocus(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	c.hub.FocusSession(c, req.SessionID)
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
+	})
+	c.sendMessage(resp)
+}
+
+// handleSessionUnfocus handles session.unfocus — releases the focus mark for
+// this client. The session falls back to slow mode (still subscribed) or
+// paused (no subscribers), with a debounce to absorb tab churn.
+func (c *Client) handleSessionUnfocus(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	c.hub.UnfocusSession(c, req.SessionID)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,

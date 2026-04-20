@@ -40,6 +40,10 @@ type AgentExecution struct {
 	ErrorMessage    string
 	Metadata        map[string]interface{}
 
+	// PrepareResult carries the environment preparation result back to the caller
+	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
+	PrepareResult *EnvPrepareResult `json:"-"`
+
 	// agentctl client for this execution
 	agentctl *agentctl.Client
 

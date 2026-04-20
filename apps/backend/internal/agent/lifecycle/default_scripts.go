@@ -21,6 +21,9 @@ const defaultLocalPrepareScript = `#!/bin/bash
 # Runs before launching the local agent runtime.
 # The script executes with working directory set to {{workspace.path}}.
 # Use {{repository.path}} when you need the canonical repository root path.
+
+# ---- Repository setup (if configured) ----
+{{repository.setup_script}}
 `
 
 const defaultWorktreePrepareScript = `#!/bin/bash
@@ -28,6 +31,9 @@ const defaultWorktreePrepareScript = `#!/bin/bash
 # Runs after the worktree has already been created/reused by Kandev.
 # The script executes with working directory set to {{worktree.path}}.
 # Use {{repository.path}} if you need to run commands in the main repository.
+
+# ---- Repository setup (if configured) ----
+{{repository.setup_script}}
 `
 
 const defaultDockerPrepareScript = `#!/bin/bash

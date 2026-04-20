@@ -357,15 +357,16 @@ export function ChatInputArea({
     chatInputRef,
   });
   const hasClarification = !!panelState.pendingClarification;
-  const placeholder =
-    placeholderOverride ??
-    resolveInputPlaceholder(
-      isAgentBusy,
-      activeDocument?.type,
-      planModeEnabled,
-      hasClarification,
-      needsRecovery,
-    );
+  const placeholder = isMoving
+    ? "Switching agent..."
+    : (placeholderOverride ??
+      resolveInputPlaceholder(
+        isAgentBusy,
+        activeDocument?.type,
+        planModeEnabled,
+        hasClarification,
+        needsRecovery,
+      ));
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatStatusBar
@@ -389,7 +390,7 @@ export function ChatInputArea({
         mcpServers={panelState.mcpServers}
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
-        isStarting={panelState.isStarting}
+        isStarting={panelState.isStarting || isMoving}
         isSending={isSending}
         onCancel={handleCancelTurn}
         placeholder={placeholder}

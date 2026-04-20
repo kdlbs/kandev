@@ -4,6 +4,7 @@ import { registerAgentsHandlers } from "@/lib/ws/handlers/agents";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 import { registerAvailableCommandsHandlers } from "@/lib/ws/handlers/available-commands";
 import { registerSessionModeHandlers } from "@/lib/ws/handlers/session-mode";
+import { registerSessionPollModeHandlers } from "@/lib/ws/handlers/session-poll-mode";
 import { registerAgentCapabilitiesHandlers } from "@/lib/ws/handlers/agent-capabilities";
 import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
@@ -43,6 +44,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerTaskSessionHandlers(store),
     ...registerAvailableCommandsHandlers(store),
     ...registerSessionModeHandlers(store),
+    ...registerSessionPollModeHandlers(store),
     ...registerAgentCapabilitiesHandlers(store),
     ...registerSessionModelsHandlers(store),
     ...registerSessionTodosHandlers(store),

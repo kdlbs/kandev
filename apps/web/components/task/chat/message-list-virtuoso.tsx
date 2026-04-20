@@ -6,7 +6,6 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
-import { PrepareProgress } from "@/components/session/prepare-progress";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import {
@@ -101,7 +100,8 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     (messageId: string) => {
       const idx = items.findIndex((item) => {
         if (item.type === "turn_group") return item.messages.some((m) => m.id === messageId);
-        return item.message?.id === messageId;
+        if (item.type === "message") return item.message.id === messageId;
+        return false;
       });
       if (idx >= 0)
         virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + idx, align: "center" });
@@ -257,7 +257,6 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
   const Footer = useCallback(
     () => (
       <>
-        {sessionId && <PrepareProgress sessionId={sessionId} />}
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
           <MessageRenderer
@@ -283,7 +282,6 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           isInitialLoading={isInitialLoading}
           messagesCount={messages.length}
         />
-        {sessionId && <PrepareProgress sessionId={sessionId} />}
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
           <MessageRenderer

@@ -37,6 +37,7 @@ export type BackendMessageType =
   | "session.models_updated"
   | "session.todos_updated"
   | "session.prompt_usage"
+  | "session.poll_mode_changed"
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
@@ -316,6 +317,7 @@ export type PrepareProgressPayload = {
   session_id: string;
   execution_id: string;
   step_name: string;
+  step_command?: string;
   step_index: number;
   total_steps: number;
   status: string;
@@ -323,6 +325,8 @@ export type PrepareProgressPayload = {
   error?: string;
   warning?: string;
   warning_detail?: string;
+  started_at?: string;
+  ended_at?: string;
   timestamp: string;
 };
 
@@ -336,11 +340,14 @@ export type PrepareCompletedPayload = {
   workspace_path?: string;
   steps?: Array<{
     name: string;
+    command?: string;
     status: string;
     output?: string;
     error?: string;
     warning?: string;
     warning_detail?: string;
+    started_at?: string;
+    ended_at?: string;
   }>;
   timestamp: string;
 };
@@ -539,6 +546,10 @@ export type BackendMessageMap = {
   "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
+  "session.poll_mode_changed": BackendMessage<
+    "session.poll_mode_changed",
+    { session_id: string; poll_mode: string }
+  >;
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;

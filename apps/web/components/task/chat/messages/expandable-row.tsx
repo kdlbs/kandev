@@ -36,13 +36,13 @@ export const ExpandableRow = memo(function ExpandableRow({
       {/* Clickable header row */}
       <div
         className={cn(
-          "flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors",
+          "flex items-center gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors",
           hasExpandableContent && "hover:bg-muted/50 cursor-pointer",
         )}
         onClick={handleClick}
       >
         {/* Icon with hover-to-show chevron */}
-        <div className="flex-shrink-0 mt-0.5 relative w-4 h-4">
+        <div className="flex-shrink-0 relative w-4 h-4">
           <div
             className={cn(
               "absolute inset-0 transition-opacity",
@@ -60,7 +60,7 @@ export const ExpandableRow = memo(function ExpandableRow({
         </div>
 
         {/* Header content */}
-        <div className="flex-1 min-w-0 pt-0.5">{header}</div>
+        <div className="flex-1 min-w-0">{header}</div>
       </div>
 
       {/* Expanded content - outside clickable area */}

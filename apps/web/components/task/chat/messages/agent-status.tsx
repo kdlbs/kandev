@@ -15,10 +15,10 @@ type AgentStatusProps = {
 
 const STATE_CONFIG: Record<
   TaskSessionState,
-  { label: string; icon: "spinner" | "error" | "warning" | null }
+  { label: string; dynamicLabel?: boolean; icon: "spinner" | "error" | "warning" | null }
 > = {
   CREATED: { label: "", icon: null },
-  STARTING: { label: "Agent is starting", icon: "spinner" },
+  STARTING: { label: "Agent is starting", dynamicLabel: true, icon: "spinner" },
   RUNNING: { label: "Agent is running", icon: "spinner" },
   WAITING_FOR_INPUT: { label: "", icon: null },
   COMPLETED: { label: "", icon: null },
@@ -247,14 +247,26 @@ function renderActiveStatus(
   }
 }
 
+function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string | null {
+  const agentProfileId = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.agent_profile_id : undefined,
+  ) as string | undefined;
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  if (!dynamicLabel || !agentProfileId) return null;
+  const profile = agentProfiles.find((p) => p.id === agentProfileId);
+  return profile ? profile.label.split(" \u2022 ")[0] : null;
+}
+
 export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
   const config = sessionState ? STATE_CONFIG[sessionState] : null;
   const isRunning = config?.icon === "spinner";
+  const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 
   const runningData = useAgentStatusData(sessionId, messages, isRunning);
 
   if (config?.icon) {
-    return renderActiveStatus({ label: config.label, icon: config.icon }, sessionId, runningData);
+    const label = agentLabel ? `Starting ${agentLabel}` : config.label;
+    return renderActiveStatus({ label, icon: config.icon }, sessionId, runningData);
   }
 
   const displayDuration = runningData.displayDuration;

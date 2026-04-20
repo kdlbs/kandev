@@ -151,10 +151,17 @@ func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, 
 	return &w, err
 }
 
-// ListActivePRWatches returns all active PR watches.
+// ListActivePRWatches returns all active PR watches whose task is not archived.
+// Watches for archived tasks (and orphaned watches whose task row was hard-deleted)
+// are excluded so the poller stops making GitHub API calls for them. An INNER JOIN
+// on `tasks` is used so orphans are dropped automatically.
 func (s *Store) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	var watches []*PRWatch
-	err := s.ro.SelectContext(ctx, &watches, `SELECT * FROM github_pr_watches ORDER BY created_at`)
+	err := s.ro.SelectContext(ctx, &watches, `
+		SELECT w.* FROM github_pr_watches w
+		INNER JOIN tasks t ON t.id = w.task_id
+		WHERE t.archived_at IS NULL
+		ORDER BY w.created_at`)
 	return watches, err
 }
 
@@ -171,6 +178,20 @@ func (s *Store) UpdatePRWatchTimestamps(ctx context.Context, id string, checkedA
 func (s *Store) DeletePRWatch(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id)
 	return err
+}
+
+// DeletePRWatchesByTaskID deletes all PR watches for a task. Returns the number
+// of rows removed so callers can log meaningful diagnostics.
+func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE task_id = ?`, taskID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.

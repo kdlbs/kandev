@@ -1,11 +1,13 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -71,6 +73,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	// Step 2: Checkout branch (if specified)
 	if effectiveBranch != "" {
 		step = beginStep("Checkout branch")
+		step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
 		reportProgress(onProgress, step, stepIdx, totalSteps)
 		output, err := checkoutBranch(ctx, workspacePath, effectiveBranch)
 		if err != nil {
@@ -89,22 +92,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 
 	// Step 3: Run setup script (if provided)
 	if resolvedScript != "" {
-		step = beginStep("Run setup script")
-		reportProgress(onProgress, step, stepIdx, totalSteps)
-		output, err := runSetupScript(ctx, resolvedScript, workspacePath, req.Env)
-		if err != nil {
-			completeStepError(&step, err.Error())
-			step.Output = output
-			steps = append(steps, step)
-			reportProgress(onProgress, step, stepIdx, totalSteps)
-			p.logger.Warn("setup script failed", zap.String("task_id", req.TaskID), zap.Error(err))
-			// Setup script failure is non-fatal — log and continue
-		} else {
-			step.Output = output
-			completeStepSuccess(&step)
-			steps = append(steps, step)
-			reportProgress(onProgress, step, stepIdx, totalSteps)
-		}
+		steps = runSetupScriptStep(ctx, req, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
 	}
 
 	return &EnvPrepareResult{
@@ -137,15 +125,65 @@ func checkoutBranch(ctx context.Context, workDir, branch string) (string, error)
 	return outStr, nil
 }
 
-// runSetupScript executes a setup script in the given working directory.
-func runSetupScript(ctx context.Context, script, workDir string, env map[string]string) (string, error) {
+// setupScriptStreamInterval is the minimum gap between streaming-output callbacks
+// while a setup script runs. Chatty scripts (e.g. npm install with progress bars)
+// can emit hundreds of writes per second; throttling keeps WS event volume sane
+// while still showing live output.
+const setupScriptStreamInterval = 100 * time.Millisecond
+
+// runSetupScript executes a setup script in the given working directory,
+// streaming combined stdout/stderr to onOutput (if non-nil) as it runs.
+// Returns the full accumulated output (trimmed) and any execution error.
+func runSetupScript(ctx context.Context, script, workDir string, env map[string]string, onOutput func(current string)) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
 	cmd.Env = buildEnvSlice(env)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+
+	w := newStreamingWriter(onOutput, setupScriptStreamInterval)
+	cmd.Stdout = w
+	cmd.Stderr = w
+
+	err := cmd.Run()
+	return strings.TrimSpace(w.String()), err
+}
+
+// streamingWriter accumulates writes into a buffer and invokes onFlush with the
+// current snapshot at most once per minGap. It's safe for concurrent Write calls
+// (both stdout and stderr write through the same writer).
+type streamingWriter struct {
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	onFlush   func(current string)
+	lastFlush time.Time
+	minGap    time.Duration
+}
+
+func newStreamingWriter(onFlush func(current string), minGap time.Duration) *streamingWriter {
+	return &streamingWriter{onFlush: onFlush, minGap: minGap}
+}
+
+func (w *streamingWriter) Write(p []byte) (int, error) {
+	// Hold the lock through the flush so concurrent stdout+stderr writes
+	// can't both observe `now-lastFlush >= minGap` and race on the captured
+	// `step.Output` shared by the caller's callback.
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	now := time.Now()
+	if w.onFlush != nil && now.Sub(w.lastFlush) >= w.minGap {
+		w.lastFlush = now
+		w.onFlush(strings.TrimSpace(w.buf.String()))
+	}
+	return n, err
+}
+
+// String returns the full accumulated output.
+func (w *streamingWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }
 
 // buildEnvSlice converts a map to os.Environ format (KEY=VALUE).
@@ -160,6 +198,19 @@ func buildEnvSlice(env map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+// setupScriptDisplayCommand returns a short, user-facing command string for the
+// "Run setup script" step. Prefers the explicit profile script, then the
+// repository-level script. Falls back to empty (the step still shows its name).
+func setupScriptDisplayCommand(req *EnvPrepareRequest) string {
+	if s := strings.TrimSpace(req.SetupScript); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(req.RepoSetupScript); s != "" {
+		return s
+	}
+	return ""
 }
 
 // Helper functions for step lifecycle

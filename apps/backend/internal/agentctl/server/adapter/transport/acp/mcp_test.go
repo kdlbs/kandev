@@ -346,6 +346,46 @@ func TestFilterMcpServersByCapabilities_Mixed(t *testing.T) {
 	}
 }
 
+func TestFilterMcpServersByCapabilities_DeduplicatesSameName(t *testing.T) {
+	log := newTestLoggerForMcp()
+	// Simulate dual injection: same name "kandev" with different types
+	servers := []types.McpServer{
+		{Name: "kandev", Type: "sse", URL: "http://localhost:10005/sse"},
+		{Name: "kandev", Type: "http", URL: "http://localhost:10005/mcp"},
+		{Name: "other", Type: "stdio", Command: "cmd"},
+	}
+
+	// Agent supports both SSE and HTTP - should only get first kandev entry
+	result := filterMcpServersByCapabilities(servers, acp.McpCapabilities{Sse: true, Http: true}, log)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 (first kandev + other), got %d", len(result))
+	}
+	if result[0].Name != "kandev" || result[0].Type != "sse" {
+		t.Errorf("expected first entry to be kandev/sse, got %s/%s", result[0].Name, result[0].Type)
+	}
+	if result[1].Name != "other" {
+		t.Errorf("expected second entry to be other, got %s", result[1].Name)
+	}
+
+	// Agent supports only HTTP - should get kandev/http (SSE filtered, then HTTP kept)
+	result = filterMcpServersByCapabilities(servers, acp.McpCapabilities{Sse: false, Http: true}, log)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 (kandev/http + other), got %d", len(result))
+	}
+	if result[0].Name != "kandev" || result[0].Type != "http" {
+		t.Errorf("expected first entry to be kandev/http, got %s/%s", result[0].Name, result[0].Type)
+	}
+
+	// Agent supports only SSE - should get kandev/sse (HTTP filtered)
+	result = filterMcpServersByCapabilities(servers, acp.McpCapabilities{Sse: true, Http: false}, log)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 (kandev/sse + other), got %d", len(result))
+	}
+	if result[0].Name != "kandev" || result[0].Type != "sse" {
+		t.Errorf("expected first entry to be kandev/sse, got %s/%s", result[0].Name, result[0].Type)
+	}
+}
+
 // newTestLoggerForMcp creates a logger for MCP tests.
 func newTestLoggerForMcp() *logger.Logger {
 	return newTestAdapter().logger

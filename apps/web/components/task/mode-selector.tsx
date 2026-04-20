@@ -78,6 +78,7 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
             <Button
               variant="ghost"
               size="sm"
+              data-testid="session-mode-selector"
               className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap"
             >
               <span className="text-xs">{displayName}</span>

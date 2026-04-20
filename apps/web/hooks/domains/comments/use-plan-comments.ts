@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import { isPlanComment } from "@/lib/state/slices/comments";
+import { generateUUID } from "@/lib/utils";
 
 const EMPTY_COMMENTS: PlanComment[] = [];
 
@@ -52,7 +53,7 @@ export function usePlanComments(sessionId: string | null | undefined) {
         setEditingComment(null);
         return editingCommentId;
       } else {
-        const id = crypto.randomUUID();
+        const id = generateUUID();
         const comment: PlanComment = {
           id,
           sessionId,

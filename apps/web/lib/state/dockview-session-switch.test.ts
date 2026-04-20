@@ -104,6 +104,35 @@ describe("performSessionSwitch", () => {
     expect(params.api.addPanel).not.toHaveBeenCalled();
   });
 
+  it("skips fast path when saved layout has ephemeral panels (file-editor)", () => {
+    const savedLayout = {
+      grid: {},
+      panels: { "preview:file-editor": { contentComponent: "file-editor" } },
+    } as unknown as ReturnType<typeof getSessionLayout>;
+    vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performSessionSwitch(params);
+
+    // Should use fromJSON (slow path) instead of fast path
+    expect(params.api.fromJSON).toHaveBeenCalled();
+  });
+
+  it("skips fast path when saved layout has ephemeral panels (diff-viewer)", () => {
+    const savedLayout = {
+      grid: {},
+      panels: { "preview:file-diff": { contentComponent: "diff-viewer" } },
+    } as unknown as ReturnType<typeof getSessionLayout>;
+    vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performSessionSwitch(params);
+
+    expect(params.api.fromJSON).toHaveBeenCalled();
+  });
+
   it("calls api.layout on the slow path (buildDefault fallback)", () => {
     const params = makeParams();
 

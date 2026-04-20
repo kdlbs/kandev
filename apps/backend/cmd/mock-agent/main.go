@@ -75,9 +75,10 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-// The Models field advertises the available models so the host utility
-// capability probe can populate them in the cache — this is what makes
-// the utility-agents settings page show model options for mock-agent in E2E.
+// The Models and Modes fields advertise available capabilities so the host
+// utility capability probe can populate them in the cache — this is what makes
+// the utility-agents settings page show model and mode options for mock-agent
+// in E2E, and lets profile-mode tests select a non-default mode.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
@@ -91,6 +92,7 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	return acp.NewSessionResponse{
 		SessionId: sid,
 		Models:    mockSessionModels(),
+		Modes:     mockSessionModes(),
 	}, nil
 }
 
@@ -105,6 +107,22 @@ func mockSessionModels() *acp.UnstableSessionModelState {
 		AvailableModels: []acp.UnstableModelInfo{
 			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
 			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
+		},
+	}
+}
+
+// mockSessionModes returns the mock agent's advertised session-mode list for
+// ACP session responses. The "default" mode is current; "plan-mock" is an
+// alternative used by tests that need to verify a non-default profile mode
+// propagates from the agent profile through to a new task session.
+func mockSessionModes() *acp.SessionModeState {
+	defaultDesc := "Default mock mode"
+	planDesc := "Plan-style mock mode for testing"
+	return &acp.SessionModeState{
+		CurrentModeId: "default",
+		AvailableModes: []acp.SessionMode{
+			{Id: "default", Name: "Default", Description: &defaultDesc},
+			{Id: "plan-mock", Name: "Plan Mock", Description: &planDesc},
 		},
 	}
 }

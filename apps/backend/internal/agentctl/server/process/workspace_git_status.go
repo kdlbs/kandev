@@ -178,9 +178,10 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 
 // parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
-	// --untracked-files=all shows all files in untracked directories, not just the directory name
-	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
-	statusCmd.Dir = wt.workDir
+	// --untracked-files=all shows all files in untracked directories, not just the directory name.
+	// GIT_OPTIONAL_LOCKS=0 (via pollingGitCommand) prevents the background poll loop from taking
+	// .git/index.lock, which would race with concurrent user-initiated git operations.
+	statusCmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=all")
 	statusOut, err := statusCmd.Output()
 	if err != nil {
 		return err

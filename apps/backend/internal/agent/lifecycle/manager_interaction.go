@@ -572,6 +572,42 @@ func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 	return info.RuntimeName == string(executor.NameSprites) || info.RuntimeName == string(executor.NameRemoteDocker)
 }
 
+// ShouldUseContainerShell checks whether a session's shell should run inside a container/sandbox
+// (via agentctl) rather than on the host. This is true for Docker, Sprites, and remote executors.
+// It first checks the in-memory execution store, then falls back to the database.
+func (m *Manager) ShouldUseContainerShell(ctx context.Context, sessionID string) bool {
+	// Check in-memory execution first (fast path).
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		// Docker and Sprites executors run shells inside the container/sandbox
+		if execution.RuntimeName == string(executor.NameDocker) ||
+			execution.RuntimeName == string(executor.NameSprites) {
+			return true
+		}
+		if execution.Metadata != nil {
+			if isRemote, ok := execution.Metadata[MetadataKeyIsRemote].(bool); ok && isRemote {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Fall back to database records (post-restart, execution not yet recreated).
+	if m.workspaceInfoProvider == nil {
+		return false
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil || info == nil {
+		return false
+	}
+	if models.IsContainerizedExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return true
+	}
+	// Backwards compatibility: old records may only have RuntimeName set.
+	return info.RuntimeName == string(executor.NameDocker) ||
+		info.RuntimeName == string(executor.NameSprites) ||
+		info.RuntimeName == string(executor.NameRemoteDocker)
+}
+
 // GetAvailableCommandsForSession returns the available slash commands for a session.
 // Returns nil if the session doesn't exist or has no commands stored.
 //

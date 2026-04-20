@@ -166,6 +166,16 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
 
+	// Merge prepare result into session metadata synchronously so it survives
+	// the UpdateTaskSession write (which would otherwise clobber it if the async
+	// handlePrepareCompleted event handler hasn't run yet).
+	if resp.PrepareResult != nil && resp.PrepareResult.Success {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["prepare_result"] = buildPrepareResultMetadata(resp.PrepareResult)
+	}
+
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
@@ -182,8 +192,12 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	}
 }
 
-// persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains
-// a new worktree not already tracked by the session.
+// buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
+// Uses lifecycle.SerializePrepareResult which is shared with the event handler.
+func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]interface{} {
+	return lifecycle.SerializePrepareResult(result)
+}
+
 func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
 	if resp.WorktreeID == "" {
 		return

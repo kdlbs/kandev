@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -21,20 +22,21 @@ const (
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID         string
-	SessionID      string
-	TaskTitle      string
-	ExecutionID    string
-	ExecutorType   executor.Name
-	WorkspacePath  string
-	RepositoryPath string
-	RepositoryID   string
-	UseWorktree    bool
-	SetupScript    string
-	BaseBranch     string
-	CheckoutBranch string
-	WorktreeID     string
-	WorktreeBranch string
+	TaskID          string
+	SessionID       string
+	TaskTitle       string
+	ExecutionID     string
+	ExecutorType    executor.Name
+	WorkspacePath   string
+	RepositoryPath  string
+	RepositoryID    string
+	UseWorktree     bool
+	SetupScript     string
+	RepoSetupScript string // Repository-level setup script (e.g. "make install")
+	BaseBranch      string
+	CheckoutBranch  string
+	WorktreeID      string
+	WorktreeBranch  string
 
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
@@ -48,6 +50,7 @@ type EnvPrepareRequest struct {
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
 	Name          string            `json:"name"`
+	Command       string            `json:"command,omitempty"`
 	Status        PrepareStepStatus `json:"status"`
 	Output        string            `json:"output,omitempty"`
 	Error         string            `json:"error,omitempty"`
@@ -81,6 +84,53 @@ type EnvironmentPreparer interface {
 
 	// Prepare executes the environment preparation steps.
 	Prepare(ctx context.Context, req *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error)
+}
+
+// MaxStepOutputBytes is the maximum size of a single step's Output field
+// when persisting to session metadata.
+const MaxStepOutputBytes = 10 * 1024
+
+// SerializePrepareResult converts a prepare result into a map suitable for
+// storage in session metadata. Used by both the synchronous persistence path
+// (persistLaunchState) and the async event handler (handlePrepareCompleted).
+func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
+	status := "completed"
+	if !result.Success {
+		status = "failed"
+	}
+	steps := make([]map[string]interface{}, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		output := step.Output
+		if len(output) > MaxStepOutputBytes {
+			// Truncate at a valid UTF-8 boundary to avoid splitting multi-byte runes.
+			output = strings.ToValidUTF8(output[:MaxStepOutputBytes], "") + "\n... (truncated)"
+		}
+		entry := map[string]interface{}{
+			"name": step.Name, "status": string(step.Status),
+			"output": output, "command": step.Command,
+		}
+		if step.Error != "" {
+			entry["error"] = step.Error
+		}
+		if step.Warning != "" {
+			entry["warning"] = step.Warning
+		}
+		if step.WarningDetail != "" {
+			entry["warning_detail"] = step.WarningDetail
+		}
+		if step.StartedAt != nil {
+			entry["started_at"] = step.StartedAt.Format(time.RFC3339Nano)
+		}
+		if step.EndedAt != nil {
+			entry["ended_at"] = step.EndedAt.Format(time.RFC3339Nano)
+		}
+		steps = append(steps, entry)
+	}
+	return map[string]interface{}{
+		"status": status, "steps": steps,
+		"error_message": result.ErrorMessage,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
 }
 
 // PreparerRegistry maps executor types to environment preparers.

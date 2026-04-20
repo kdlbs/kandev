@@ -87,6 +87,9 @@ func (s *Server) setupRoutes() {
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)
 
+		// Workspace state (poll mode driven by gateway focus signal)
+		api.POST("/workspace/poll-mode", s.handleSetPollMode)
+
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)

@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractRepoName,
   formatUserHomePath,
+  generateUUID,
   getRepositoryDisplayName,
   selectPreferredBranch,
   truncateRepoPath,
 } from "./utils";
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const TILDE_PROJECTS_APP = "~/Projects/App";
 
@@ -100,5 +103,37 @@ describe("getRepositoryDisplayName", () => {
 
   it("returns org/name for remote repositories", () => {
     expect(getRepositoryDisplayName("https://github.com/org/repo.git")).toBe("org/repo");
+  });
+});
+
+describe("generateUUID", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses crypto.randomUUID when available (secure context)", () => {
+    const stub = vi.fn(() => "11111111-1111-4111-8111-111111111111");
+    vi.stubGlobal("crypto", { randomUUID: stub });
+    expect(generateUUID()).toBe("11111111-1111-4111-8111-111111111111");
+    expect(stub).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to Math.random UUID when crypto.randomUUID is undefined (HTTP/non-secure)", () => {
+    vi.stubGlobal("crypto", {});
+    const id = generateUUID();
+    expect(id).toMatch(UUID_V4_REGEX);
+  });
+
+  it("falls back when crypto itself is undefined", () => {
+    vi.stubGlobal("crypto", undefined);
+    const id = generateUUID();
+    expect(id).toMatch(UUID_V4_REGEX);
+  });
+
+  it("produces distinct ids across calls in the fallback path", () => {
+    vi.stubGlobal("crypto", {});
+    const a = generateUUID();
+    const b = generateUUID();
+    expect(a).not.toBe(b);
   });
 });

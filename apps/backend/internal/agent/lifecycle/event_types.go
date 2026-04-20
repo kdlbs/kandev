@@ -42,18 +42,21 @@ type ACPSessionCreatedPayload struct {
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
 type PrepareProgressEventPayload struct {
-	TaskID        string `json:"task_id"`
-	SessionID     string `json:"session_id"`
-	ExecutionID   string `json:"execution_id"`
-	StepName      string `json:"step_name"`
-	StepIndex     int    `json:"step_index"`
-	TotalSteps    int    `json:"total_steps"`
-	Status        string `json:"status"`
-	Output        string `json:"output,omitempty"`
-	Error         string `json:"error,omitempty"`
-	Warning       string `json:"warning,omitempty"`
-	WarningDetail string `json:"warning_detail,omitempty"`
-	Timestamp     string `json:"timestamp"`
+	TaskID        string     `json:"task_id"`
+	SessionID     string     `json:"session_id"`
+	ExecutionID   string     `json:"execution_id"`
+	StepName      string     `json:"step_name"`
+	StepCommand   string     `json:"step_command,omitempty"`
+	StepIndex     int        `json:"step_index"`
+	TotalSteps    int        `json:"total_steps"`
+	Status        string     `json:"status"`
+	Output        string     `json:"output,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Warning       string     `json:"warning,omitempty"`
+	WarningDetail string     `json:"warning_detail,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	Timestamp     string     `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

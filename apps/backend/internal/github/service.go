@@ -47,6 +47,7 @@ type Service struct {
 	taskDeleter        TaskDeleter
 	taskSessionChecker TaskSessionChecker
 	syncGroup          singleflight.Group
+	taskEventSubs      []bus.Subscription
 }
 
 // NewService creates a new GitHub service.

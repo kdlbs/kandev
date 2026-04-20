@@ -36,11 +36,14 @@ export function registerExecutorPrepareHandlers(store: StoreApi<AppState>): WsHa
         const steps = payload.steps?.length
           ? payload.steps.map((s) => ({
               name: s.name,
+              command: s.command,
               status: s.status,
               output: s.output,
               error: s.error,
               warning: s.warning,
               warningDetail: s.warning_detail,
+              startedAt: s.started_at,
+              endedAt: s.ended_at,
             }))
           : existing?.steps;
 
@@ -77,11 +80,14 @@ function updateSteps(
   }
   steps[payload.step_index] = {
     name: payload.step_name,
+    command: payload.step_command,
     status: payload.status,
     output: payload.output,
     error: payload.error,
     warning: payload.warning,
     warningDetail: payload.warning_detail,
+    startedAt: payload.started_at,
+    endedAt: payload.ended_at,
   };
   return steps;
 }

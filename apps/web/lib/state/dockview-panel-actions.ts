@@ -24,9 +24,275 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
-export function buildPanelActions(set: StoreSet, get: StoreGet) {
-  const getFileName = (path: string) => path.split("/").pop() || path;
+// ---------------------------------------------------------------------------
+// Preview-tab machinery
+// ---------------------------------------------------------------------------
 
+/** Preview types that support single-tab (VSCode-style) behavior. */
+export type PreviewType = "file-editor" | "file-diff" | "commit-detail";
+
+type PreviewSpec = {
+  /** Stable id for the preview panel (only one per type). */
+  previewId: string;
+  /** Dockview `component` key used for rendering. */
+  component: string;
+  /** Tab component used for preview tabs (italic title, double-click to pin). */
+  previewTabComponent: string;
+  /** Compute the per-item pinned panel id. */
+  pinnedId: (itemId: string) => string;
+};
+
+const PREVIEW_SPECS: Record<PreviewType, PreviewSpec> = {
+  "file-editor": {
+    previewId: "preview:file-editor",
+    component: "file-editor",
+    previewTabComponent: "previewFileTab",
+    pinnedId: (path) => `file:${path}`,
+  },
+  "file-diff": {
+    previewId: "preview:file-diff",
+    component: "diff-viewer",
+    previewTabComponent: "previewDiffTab",
+    pinnedId: (path) => `diff:file:${path}`,
+  },
+  "commit-detail": {
+    previewId: "preview:commit-detail",
+    component: "commit-detail",
+    previewTabComponent: "previewCommitTab",
+    pinnedId: (sha) => `commit:${sha}`,
+  },
+};
+
+function getFileName(path: string): string {
+  return path.split("/").pop() || path;
+}
+
+type OpenPreviewArgs = {
+  api: DockviewApi;
+  type: PreviewType;
+  /** Stable identifier for the item (path / sha). Used to compute pinnedId and detect no-op. */
+  itemId: string;
+  /** Title rendered on the tab. */
+  title: string;
+  /** Params to pass to the panel component (path, sha, kind, etc.). */
+  params: Record<string, unknown>;
+  /** Group to place the preview in when it is first created. */
+  groupId: string;
+  /** `quiet: true` keeps the currently active panel focused. */
+  quiet?: boolean;
+  /** `pin: true` forces the per-item pinned id instead of the preview slot. */
+  pin?: boolean;
+  /** Custom tab component for pinned opens (falls back to default dockview tab). */
+  pinnedTabComponent?: string;
+};
+
+/** Update an existing preview panel with new content, materializing promoted items first. */
+function updateExistingPreview(
+  preview: ReturnType<DockviewApi["getPanel"]> & object,
+  args: OpenPreviewArgs,
+): void {
+  const { api, type, itemId, title, params, quiet, pinnedTabComponent } = args;
+  const currentItemId = preview.params?.previewItemId as string | undefined;
+  if (preview.params?.promoted && currentItemId && currentItemId !== itemId) {
+    materializePromotedPreview(api, type, pinnedTabComponent ?? PINNED_TAB);
+  }
+  // Preserve the promoted flag when re-opening the same item; clear it when
+  // switching to a different item (the old promoted file was already
+  // materialized above).
+  const keepPromoted = currentItemId === itemId && !!preview.params?.promoted;
+  preview.api.updateParameters({
+    ...params,
+    previewItemId: itemId,
+    promoted: keepPromoted || undefined,
+  });
+  preview.setTitle(title);
+  if (!quiet) preview.api.setActive();
+}
+
+/**
+ * Open the single "preview" panel for a given content type, VSCode-style.
+ *
+ * Lookup rules:
+ *   1. If a pinned panel for the item already exists → focus it.
+ *   2. Else if a preview panel for the type exists and already shows the
+ *      item → focus it.
+ *   3. Else if a preview panel for the type exists → replace its content
+ *      (title + params) and focus it.
+ *   4. Else → create a new preview panel.
+ */
+function openOrReplacePreview(args: OpenPreviewArgs): void {
+  const { api, type, itemId, title, params, groupId, quiet, pin, pinnedTabComponent } = args;
+  const spec = PREVIEW_SPECS[type];
+  const pinnedId = spec.pinnedId(itemId);
+
+  // Always prefer an existing pinned panel for this item — never disturb it.
+  const pinned = api.getPanel(pinnedId);
+  if (pinned) {
+    if (!quiet) pinned.api.setActive();
+    return;
+  }
+
+  if (pin) {
+    focusOrAddPanel(
+      api,
+      {
+        id: pinnedId,
+        component: spec.component,
+        title,
+        params,
+        ...(pinnedTabComponent ? { tabComponent: pinnedTabComponent } : {}),
+        position: { referenceGroup: groupId },
+      },
+      quiet,
+    );
+    return;
+  }
+
+  const preview = api.getPanel(spec.previewId);
+  if (preview) {
+    updateExistingPreview(preview, args);
+    return;
+  }
+
+  focusOrAddPanel(
+    api,
+    {
+      id: spec.previewId,
+      component: spec.component,
+      title,
+      tabComponent: spec.previewTabComponent,
+      params: { ...params, previewItemId: itemId },
+      position: { referenceGroup: groupId },
+    },
+    quiet,
+  );
+}
+
+/**
+ * Mark the current preview panel as "promoted" (VSCode-style keep-open).
+ *
+ * This does NOT swap panels — it sets a `promoted` flag on the preview's
+ * params so the tab renders as non-italic (pinned look) while the editor
+ * stays mounted (no remount, no focus loss).
+ *
+ * The actual panel swap (materialization) happens lazily when the user opens
+ * a different file via {@link openOrReplacePreview}.
+ */
+export function promotePreviewToPinned(api: DockviewApi, type: PreviewType): void {
+  const spec = PREVIEW_SPECS[type];
+  const preview = api.getPanel(spec.previewId);
+  if (!preview || preview.params?.promoted) return;
+  preview.api.updateParameters({ ...(preview.params ?? {}), promoted: true });
+}
+
+/**
+ * Materialize a promoted preview into a proper pinned panel.
+ *
+ * Called internally by {@link openOrReplacePreview} when the preview slot is
+ * needed for a new item and the current preview was promoted.  Also available
+ * for explicit "pin now" actions where an immediate panel swap is acceptable
+ * (e.g. the user is navigating away anyway).
+ */
+function materializePromotedPreview(
+  api: DockviewApi,
+  type: PreviewType,
+  pinnedTabComponent?: string,
+): void {
+  const spec = PREVIEW_SPECS[type];
+  const preview = api.getPanel(spec.previewId);
+  if (!preview) return;
+
+  const itemId = preview.params?.previewItemId as string | undefined;
+  if (!itemId) return;
+
+  const pinnedId = spec.pinnedId(itemId);
+  if (api.getPanel(pinnedId)) return; // Already materialized
+
+  const groupId = preview.group?.id;
+  const title = preview.title;
+  const params = { ...(preview.params ?? {}) } as Record<string, unknown>;
+  delete params.previewItemId;
+  delete params.promoted;
+
+  focusOrAddPanel(
+    api,
+    {
+      id: pinnedId,
+      component: spec.component,
+      title,
+      params,
+      ...(pinnedTabComponent ? { tabComponent: pinnedTabComponent } : {}),
+      ...(groupId ? { position: { referenceGroup: groupId } } : {}),
+    },
+    true, // quiet — don't steal focus
+  );
+}
+
+export type OpenPanelOpts = {
+  /** Don't steal focus from the active panel. */
+  quiet?: boolean;
+  /** Force the per-item pinned panel instead of the shared preview slot. */
+  pin?: boolean;
+};
+
+export const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
+const PINNED_TAB = "pinnedDefaultTab";
+
+function buildFileEditorAction(get: StoreGet) {
+  return (path: string, name: string, opts?: OpenPanelOpts) => {
+    const { api, centerGroupId } = get();
+    if (!api) return;
+    openOrReplacePreview({
+      api,
+      type: "file-editor",
+      itemId: path,
+      title: name,
+      params: { path },
+      groupId: centerGroupId,
+      quiet: opts?.quiet,
+      pin: opts?.pin,
+      pinnedTabComponent: PINNED_TAB,
+    });
+  };
+}
+
+function buildFileDiffAction(get: StoreGet) {
+  return (path: string, opts?: OpenPanelOpts & { content?: string; groupId?: string }) => {
+    const { api, centerGroupId } = get();
+    if (!api) return;
+    openOrReplacePreview({
+      api,
+      type: "file-diff",
+      itemId: path,
+      title: `Diff [${getFileName(path)}]`,
+      params: { kind: "file", path, content: opts?.content },
+      groupId: opts?.groupId ?? centerGroupId,
+      quiet: opts?.quiet,
+      pin: opts?.pin,
+      pinnedTabComponent: PINNED_TAB,
+    });
+  };
+}
+
+function buildCommitDetailAction(get: StoreGet) {
+  return (sha: string, opts?: OpenPanelOpts & { groupId?: string }) => {
+    const { api, centerGroupId } = get();
+    if (!api) return;
+    openOrReplacePreview({
+      api,
+      type: "commit-detail",
+      itemId: sha,
+      title: sha.slice(0, 7),
+      params: { commitSha: sha },
+      groupId: opts?.groupId ?? centerGroupId,
+      quiet: opts?.quiet,
+      pin: opts?.pin,
+      pinnedTabComponent: PINNED_TAB,
+    });
+  };
+}
+
+export function buildPanelActions(set: StoreSet, get: StoreGet) {
   return {
     addChatPanel: () => {
       const { api, centerGroupId } = get();
@@ -69,41 +335,9 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         params: { kind: "all" },
       });
     },
-    addFileDiffPanel: (path: string, content?: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: `diff:file:${path}`,
-        component: "diff-viewer",
-        title: `Diff [${getFileName(path)}]`,
-        params: { kind: "file", path, content },
-      });
-    },
-    addCommitDetailPanel: (sha: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: `commit:${sha}`,
-        component: "commit-detail",
-        title: sha.slice(0, 7),
-        params: { commitSha: sha },
-      });
-    },
-    addFileEditorPanel: (path: string, name: string, quiet?: boolean) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      focusOrAddPanel(
-        api,
-        {
-          id: `file:${path}`,
-          component: "file-editor",
-          title: name,
-          params: { path },
-          position: { referenceGroup: centerGroupId },
-        },
-        quiet,
-      );
-    },
+    addFileDiffPanel: buildFileDiffAction(get),
+    addCommitDetailPanel: buildCommitDetailAction(get),
+    addFileEditorPanel: buildFileEditorAction(get),
     addBrowserPanel: (url?: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
@@ -114,6 +348,11 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         title: "Browser",
         params: { url: url ?? "" },
       });
+    },
+    promotePreviewToPinned: (type: PreviewType): void => {
+      const { api } = get();
+      if (!api) return;
+      promotePreviewToPinned(api, type);
     },
   };
 }

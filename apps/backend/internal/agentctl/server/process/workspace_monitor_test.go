@@ -17,6 +17,9 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
 	wt.gitPollInterval = 100 * time.Millisecond
+	// Default mode is slow (30s) — set fast so the test exercises real polling
+	// cadence rather than sitting on a 30s timer.
+	wt.SetPollMode(PollModeFast)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -93,6 +96,7 @@ func TestWorkspaceTracker_StopsWhenGitBroken(t *testing.T) {
 	// Use fast poll intervals so the test completes quickly
 	wt.filePollInterval = 50 * time.Millisecond
 	wt.gitPollInterval = 50 * time.Millisecond
+	wt.SetPollMode(PollModeFast)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

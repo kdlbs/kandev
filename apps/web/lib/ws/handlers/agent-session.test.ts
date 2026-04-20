@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { registerTaskSessionHandlers } from "./agent-session";
+import {
+  isTerminalSessionState,
+  pickReplacementSessionId,
+  registerTaskSessionHandlers,
+  shouldAdoptNewSession,
+} from "./agent-session";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import type { TaskSessionState } from "@/lib/types/http";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
+    tasks: { activeTaskId: null, activeSessionId: null },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
     setTaskSession: vi.fn(),
     setTaskSessionsForTask: vi.fn(),
+    setActiveSession: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     ...overrides,
@@ -22,8 +30,10 @@ function makeStore(overrides: Record<string, unknown> = {}) {
   } as unknown as StoreApi<AppState>;
 }
 
+const STATE_CHANGED_EVENT = "session.state_changed";
+
 function makeMessage(payload: Record<string, unknown>) {
-  return { id: "msg-1", type: "notification", action: "session.state_changed", payload };
+  return { id: "msg-1", type: "notification", action: STATE_CHANGED_EVENT, payload };
 }
 
 describe("session.state_changed handler", () => {
@@ -41,7 +51,7 @@ describe("session.state_changed handler", () => {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
       },
     });
-    handler = registerTaskSessionHandlers(store)["session.state_changed"]!;
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -65,7 +75,7 @@ describe("session.state_changed handler", () => {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "FAILED" } },
       },
     });
-    handler = registerTaskSessionHandlers(store)["session.state_changed"]!;
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -81,7 +91,7 @@ describe("session.state_changed handler", () => {
 
   it("sets failure notification for unknown session (first event)", () => {
     store = makeStore();
-    handler = registerTaskSessionHandlers(store)["session.state_changed"]!;
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -105,7 +115,7 @@ describe("session.state_changed handler", () => {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
       },
     });
-    handler = registerTaskSessionHandlers(store)["session.state_changed"]!;
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -118,5 +128,264 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+});
+
+function makeAppState(partial: Partial<AppState>): AppState {
+  return {
+    tasks: { activeTaskId: null, activeSessionId: null },
+    taskSessions: { items: {} },
+    taskSessionsByTask: { itemsByTaskId: {} },
+    ...partial,
+  } as unknown as AppState;
+}
+
+describe("isTerminalSessionState", () => {
+  it.each<[TaskSessionState | undefined, boolean]>([
+    ["COMPLETED", true],
+    ["FAILED", true],
+    ["CANCELLED", true],
+    ["RUNNING", false],
+    ["STARTING", false],
+    ["CREATED", false],
+    ["WAITING_FOR_INPUT", false],
+    [undefined, false],
+  ])("returns %o → %s", (input, expected) => {
+    expect(isTerminalSessionState(input)).toBe(expected);
+  });
+});
+
+describe("shouldAdoptNewSession", () => {
+  it("adopts when there is no active session for the task", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: null },
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
+  it("adopts when active session belongs to a different task", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-other" },
+      taskSessions: {
+        items: { "s-other": { id: "s-other", task_id: "t-2", state: "RUNNING" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
+  it("adopts when active session is already terminal", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
+  it("does NOT adopt while the current active session is still running", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(false);
+  });
+
+  it("does NOT adopt when the event is for a non-active task", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: null },
+    });
+    expect(shouldAdoptNewSession(state, "t-2", "STARTING")).toBe(false);
+  });
+
+  it("does NOT adopt terminal state events", () => {
+    const state = makeAppState({
+      tasks: { activeTaskId: "t-1", activeSessionId: null },
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "COMPLETED")).toBe(false);
+  });
+});
+
+describe("pickReplacementSessionId", () => {
+  it("returns the newest non-terminal session in the per-task list", () => {
+    const state = makeAppState({
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-1", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+            { id: "s-2", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+            { id: "s-3", task_id: "t-1", state: "CANCELLED", started_at: "", updated_at: "" },
+          ],
+        },
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+    expect(pickReplacementSessionId(state, "t-1")).toBe("s-2");
+  });
+
+  it("returns null when all sessions are terminal", () => {
+    const state = makeAppState({
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-1", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+            { id: "s-2", task_id: "t-1", state: "FAILED", started_at: "", updated_at: "" },
+          ],
+        },
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+    expect(pickReplacementSessionId(state, "t-1")).toBeNull();
+  });
+
+  it("returns null when the task has no sessions tracked", () => {
+    expect(pickReplacementSessionId(makeAppState({}), "t-missing")).toBeNull();
+  });
+});
+
+describe("session.state_changed → active session switching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("adopts a newly-created session for the active task", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: null },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
+    });
+
+    expect(store.getState().setActiveSession).toHaveBeenCalledWith("t-1", "s-new");
+  });
+
+  it("does not adopt a new session for a task that is not active", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "other-task", activeSessionId: null },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
+    });
+
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not adopt while the current active session is still running", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
+    });
+
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed → active session handoff on terminal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hands off when the current active session transitions to terminal", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSession).toHaveBeenCalledWith("t-1", "s-new");
+  });
+
+  // The per-task list here still shows s-old as RUNNING (pre-event state), so
+  // pickReplacementSessionId returns s-old itself. This exercises the
+  // `replacement !== sessionId` guard — without it, we'd set activeSessionId
+  // to the same session that just became terminal.
+  it("does not hand off when the only candidate is the terminating session itself", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not hand off when all other sessions for the task are terminal", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 });

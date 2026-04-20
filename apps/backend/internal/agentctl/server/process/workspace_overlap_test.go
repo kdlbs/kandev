@@ -295,6 +295,8 @@ func TestOverlapGuard_ResetsAfterNormalCycle(t *testing.T) {
 	wt := NewWorkspaceTracker(repoDir, log)
 	wt.filePollInterval = 50 * time.Millisecond
 	wt.gitPollInterval = 50 * time.Millisecond
+	// Default mode is slow (30s) — set fast so the loops actually tick at 50ms.
+	wt.SetPollMode(PollModeFast)
 
 	wt.Start(context.Background())
 
@@ -325,6 +327,8 @@ func TestOverlapGuard_WorkDirDeletedResetsFlag(t *testing.T) {
 	wt := NewWorkspaceTracker(repoDir, log)
 	wt.filePollInterval = 50 * time.Millisecond
 	wt.gitPollInterval = 50 * time.Millisecond
+	// Default mode is slow (30s) — set fast so the loops actually tick at 50ms.
+	wt.SetPollMode(PollModeFast)
 
 	wt.Start(context.Background())
 	defer wt.Stop()

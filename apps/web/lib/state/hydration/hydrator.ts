@@ -192,6 +192,14 @@ function hydrateSessionRuntime(
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   if (state.agents) deepMerge(draft.agents, state.agents);
+  if (state.prepareProgress) {
+    mergeSessionMap(
+      draft.prepareProgress.bySessionId,
+      state.prepareProgress?.bySessionId,
+      activeSessionId,
+      forceMergeSessionId,
+    );
+  }
 }
 
 /** Hydrate UI slices without overwriting active connection state. */

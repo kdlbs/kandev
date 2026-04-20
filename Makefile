@@ -333,6 +333,5 @@ clean-web:
 
 .PHONY: clean-db
 clean-db:
-	@printf "$(CYAN)Removing local SQLite database...$(RESET)\n"
-	@$(RM) kandev.db kandev.db-wal kandev.db-shm \
-		$(BACKEND_DIR)/kandev.db $(BACKEND_DIR)/kandev.db-wal $(BACKEND_DIR)/kandev.db-shm
+	@printf "$(CYAN)Removing dev database (.kandev-dev/)...$(RESET)\n"
+	@$(RMDIR) .kandev-dev

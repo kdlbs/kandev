@@ -5,6 +5,7 @@ import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
+import { PrepareProgress } from "@/components/session/prepare-progress";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -24,7 +25,8 @@ export type MessageListProps = {
 };
 
 export function getItemKey(item: RenderItem): string {
-  return item.type === "turn_group" ? item.id : item.message.id;
+  if (item.type === "turn_group" || item.type === "prepare_progress") return item.id;
+  return item.message.id;
 }
 
 export function getSessionRunningState(sessionState: string | null | undefined) {
@@ -105,6 +107,9 @@ export function MessageItem({
   taskState?: TaskState;
   onScrollToMessage: (id: string) => void;
 }) {
+  if (item.type === "prepare_progress") {
+    return <PrepareProgress sessionId={item.sessionId} />;
+  }
   if (item.type === "turn_group") {
     return (
       <TurnGroupMessage

@@ -48,7 +48,13 @@ export type TurnGroup = {
   messages: Message[];
 };
 
-export type RenderItem = { type: "message"; message: Message } | TurnGroup;
+export type PrepareProgressItem = {
+  type: "prepare_progress";
+  id: string;
+  sessionId: string;
+};
+
+export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
 
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
@@ -133,6 +139,29 @@ function deduplicateRecoveryMessages(messages: Message[]): Message[] {
   });
 }
 
+export function isAgentBootResumeMessage(message: Message): boolean {
+  if (message.type !== "script_execution") return false;
+  const meta = message.metadata as { script_type?: string; is_resuming?: boolean } | undefined;
+  return meta?.script_type === "agent_boot" && meta?.is_resuming === true;
+}
+
+/** A resumed session may produce many "Resumed agent …" boot messages over its
+ *  lifetime (every backend restart emits one). They all convey the same info;
+ *  keep only the most recent and drop the rest — unconditionally, even if user
+ *  messages occurred between them (unlike `deduplicateRecoveryMessages`). The
+ *  underlying DB rows are untouched; this only affects the rendered chat. */
+export function deduplicateAgentBootResumes(messages: Message[]): Message[] {
+  let lastResumeIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isAgentBootResumeMessage(messages[i])) {
+      lastResumeIdx = i;
+      break;
+    }
+  }
+  if (lastResumeIdx === -1) return messages;
+  return messages.filter((msg, i) => !isAgentBootResumeMessage(msg) || i === lastResumeIdx);
+}
+
 function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
@@ -154,7 +183,7 @@ function filterVisibleMessages(
     return false;
   });
 
-  return deduplicateRecoveryMessages(filtered);
+  return deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered));
 }
 
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {
@@ -195,6 +224,20 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   }
   flushGroup();
   return items;
+}
+
+function injectPrepareProgressItem(
+  items: RenderItem[],
+  resolvedSessionId: string | null,
+): RenderItem[] {
+  if (!resolvedSessionId) return items;
+  const prepareItem: PrepareProgressItem = {
+    type: "prepare_progress",
+    id: `prepare-progress-${resolvedSessionId}`,
+    sessionId: resolvedSessionId,
+  };
+  if (items.length === 0) return [prepareItem];
+  return [items[0], prepareItem, ...items.slice(1)];
 }
 
 export function useProcessedMessages(
@@ -275,10 +318,9 @@ export function useProcessedMessages(
     return { regularMessages: regular, footerActionMessages: footer };
   }, [allMessages]);
 
-  const groupedItems = useMemo<RenderItem[]>(
-    () => groupActivityMessages(regularMessages),
-    [regularMessages],
-  );
+  const groupedItems = useMemo<RenderItem[]>(() => {
+    return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
+  }, [regularMessages, resolvedSessionId]);
 
   return {
     visibleMessages,

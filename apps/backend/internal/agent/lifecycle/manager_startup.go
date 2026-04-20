@@ -237,6 +237,11 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", elapsed))
 	}
+	// Flush any session mode the gateway cached before this execution was
+	// ready (pre-execution-focus race). Without this, agentctl stays in its
+	// default slow poll mode even though the frontend already sent focus,
+	// and git state updates take up to 30s to reach the UI.
+	m.flushCachedPollMode(execution.SessionID)
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

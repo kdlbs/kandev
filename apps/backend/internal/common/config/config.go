@@ -263,7 +263,7 @@ func setDefaults(v *viper.Viper) {
 	// Docker defaults — platform-aware host and volume path
 	v.SetDefault("docker.enabled", true) // Docker runtime enabled by default if Docker is available
 	v.SetDefault("docker.host", DefaultDockerHost())
-	v.SetDefault("docker.apiVersion", "1.41")
+	v.SetDefault("docker.apiVersion", "") // Empty = auto-negotiate with daemon
 	v.SetDefault("docker.tlsVerify", false)
 	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())

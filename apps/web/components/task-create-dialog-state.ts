@@ -522,6 +522,7 @@ export function useDialogComputed({
   workspaces,
   executors,
   repositories,
+  workflows,
 }: DialogComputedArgs): DialogComputedValues {
   const isPassthroughProfile = useMemo(
     () => computePassthroughProfile(fs.agentProfileId, agentProfiles),
@@ -562,6 +563,14 @@ export function useDialogComputed({
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
+  // Compute workflow agent lock directly from data — avoids effect timing issues.
+  const workflowAgentProfileId = (() => {
+    const wfId = effectiveWorkflowId;
+    if (!wfId) return "";
+    const wf = workflows.find((w) => w.id === wfId);
+    return wf?.agent_profile_id ?? "";
+  })();
+  const workflowAgentLocked = Boolean(workflowAgentProfileId);
   return {
     isPassthroughProfile,
     effectiveWorkflowId,
@@ -576,6 +585,8 @@ export function useDialogComputed({
     headerRepositoryOptions,
     agentProfilesLoading,
     executorsLoading,
+    workflowAgentLocked,
+    workflowAgentProfileId,
   };
 }
 
@@ -628,6 +639,7 @@ export function useTaskCreateDialogData(
     workspaces,
     executors,
     repositories,
+    workflows,
   });
   return {
     workflows,

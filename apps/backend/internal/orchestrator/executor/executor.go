@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -279,6 +280,7 @@ type LaunchAgentResponse struct {
 	WorktreePath     string
 	WorktreeBranch   string
 	Metadata         map[string]interface{}
+	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
 }
 
 // TaskExecution tracks an active task execution
@@ -294,6 +296,8 @@ type TaskExecution struct {
 	// Worktree info for the agent
 	WorktreePath   string
 	WorktreeBranch string
+	// PrepareResult carries the env preparation result for deferred persistence
+	PrepareResult *lifecycle.EnvPrepareResult
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution
@@ -339,6 +343,11 @@ type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExec
 // Useful for creating user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID string, err error)
 
+// PrimarySessionSetFunc is called when the first session for a task is marked
+// primary. This lets the orchestrator publish a task.updated event so the
+// frontend receives the primary_session_id.
+type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -376,6 +385,9 @@ type Executor struct {
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
 	onLaunchFailed LaunchFailedFunc
+
+	// Callback when the first session for a task is marked primary.
+	onPrimarySessionSet PrimarySessionSetFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -448,6 +460,13 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // recoverable instead of terminal failures.
 func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 	e.onAgentStartFailed = fn
+}
+
+// SetOnPrimarySessionSet sets a callback for when the first session for a task
+// is marked primary. This publishes a task.updated event so the frontend
+// receives primary_session_id.
+func (e *Executor) SetOnPrimarySessionSet(fn PrimarySessionSetFunc) {
+	e.onPrimarySessionSet = fn
 }
 
 // SetOnLaunchFailed sets a callback for launch failures that happen before

@@ -127,13 +127,10 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 }
 
 func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data map[string]any) error {
+	// Read existing workflow_data to merge new keys into it.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("load session for data persist: %w", err)
-	}
-
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
 	}
 	existing, _ := session.Metadata["workflow_data"].(map[string]interface{})
 	if existing == nil {
@@ -142,9 +139,9 @@ func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data 
 	for k, v := range data {
 		existing[k] = v
 	}
-	session.Metadata["workflow_data"] = existing
-
-	if err := s.repo.UpdateSessionMetadata(ctx, sessionID, session.Metadata); err != nil {
+	// Use SetSessionMetadataKey (json_set) to atomically set workflow_data
+	// without clobbering other metadata keys (plan_mode, prepare_result).
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, "workflow_data", existing); err != nil {
 		return fmt.Errorf("persist workflow data: %w", err)
 	}
 	return nil

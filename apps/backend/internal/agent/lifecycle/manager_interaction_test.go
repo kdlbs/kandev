@@ -621,6 +621,114 @@ func TestIsRemoteSession(t *testing.T) {
 	})
 }
 
+func TestShouldUseContainerShell(t *testing.T) {
+	t.Run("in-memory execution with docker runtime", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-1",
+			SessionID:   "session-1",
+			RuntimeName: string(executor.NameDocker),
+			Status:      v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-1"))
+	})
+
+	t.Run("in-memory execution with sprites runtime", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-2",
+			SessionID:   "session-2",
+			RuntimeName: string(executor.NameSprites),
+			Status:      v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-2"))
+	})
+
+	t.Run("in-memory execution with is_remote metadata", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-3",
+			SessionID:   "session-3",
+			RuntimeName: string(executor.NameStandalone),
+			Status:      v1.AgentStatusRunning,
+			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
+		})
+		mgr := &Manager{executionStore: store}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-3"))
+	})
+
+	t.Run("in-memory execution with standalone runtime", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-4",
+			SessionID:   "session-4",
+			RuntimeName: string(executor.NameStandalone),
+			Status:      v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store}
+		require.False(t, mgr.ShouldUseContainerShell(context.Background(), "session-4"))
+	})
+
+	t.Run("not in memory, DB returns local_docker executor type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-5": {ExecutorType: string(models.ExecutorTypeLocalDocker)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-5"))
+	})
+
+	t.Run("not in memory, DB returns sprites executor type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-6": {ExecutorType: string(models.ExecutorTypeSprites)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-6"))
+	})
+
+	t.Run("not in memory, DB returns docker runtime name", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-7": {RuntimeName: string(executor.NameDocker)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-7"))
+	})
+
+	t.Run("not in memory, DB returns local type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-8": {ExecutorType: string(models.ExecutorTypeLocal)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.False(t, mgr.ShouldUseContainerShell(context.Background(), "session-8"))
+	})
+
+	t.Run("not in memory, DB error returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{err: fmt.Errorf("db error")}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.False(t, mgr.ShouldUseContainerShell(context.Background(), "session-9"))
+	})
+
+	t.Run("nil workspaceInfoProvider returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		mgr := &Manager{executionStore: store}
+		require.False(t, mgr.ShouldUseContainerShell(context.Background(), "nonexistent"))
+	})
+}
+
 func TestFallbackAuthMethods(t *testing.T) {
 	t.Run("claude-acp returns auth login method", func(t *testing.T) {
 		methods := fallbackAuthMethods("claude-acp")

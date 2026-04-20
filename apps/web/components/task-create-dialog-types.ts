@@ -52,6 +52,10 @@ export type DialogComputedValues = {
   headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
+  /** True when the effective workflow has an agent_profile_id override */
+  workflowAgentLocked: boolean;
+  /** The agent_profile_id from the effective workflow (empty string if none) */
+  workflowAgentProfileId: string;
 };
 
 export type DialogComputedArgs = {
@@ -66,6 +70,7 @@ export type DialogComputedArgs = {
   workspaces: Workspace[];
   executors: Executor[];
   repositories: Repository[];
+  workflows: Array<{ id: string; agent_profile_id?: string }>;
 };
 
 export type TaskCreateEffectsArgs = {

@@ -397,6 +397,18 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 	}
 }
 
+// IsContainerizedExecutorType reports whether the given executor type runs
+// in a container/sandbox where shells must be executed inside the container
+// via agentctl, not on the host.
+func IsContainerizedExecutorType(t ExecutorType) bool {
+	switch t {
+	case ExecutorTypeLocalDocker, ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsAlwaysResumableRuntime reports whether the given runtime string represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime string) bool {

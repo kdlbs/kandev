@@ -114,9 +114,10 @@ func (r *sqliteRepository) initSchema() error {
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
-// CHECK(model != '') constraint. Existing databases created before the ACP-first
-// migration carry this constraint, which prevents empty model values. New
-// databases (created by the CREATE TABLE IF NOT EXISTS above) never have it.
+// non-empty-model CHECK constraint. Existing databases created before the
+// ACP-first migration carry this constraint, which prevents empty model
+// values. New databases (created by the CREATE TABLE IF NOT EXISTS above)
+// never have it.
 //
 // The migration is idempotent: it inspects sqlite_master for the CHECK keyword
 // and only proceeds when the constraint is present.

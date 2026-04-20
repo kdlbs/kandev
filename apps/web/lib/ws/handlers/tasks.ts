@@ -7,7 +7,16 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 
 type KanbanTask = KanbanState["tasks"][number];
 
+/** Falls back to existing value when incoming is null, undefined, or empty string. */
 function withFallback<T>(value: T | null | undefined, fallback: T | undefined): T | undefined {
+  return value || fallback;
+}
+
+/** Falls back only on null/undefined -- preserves 0 and other falsy non-string values. */
+function withNullishFallback<T>(
+  value: T | null | undefined,
+  fallback: T | undefined,
+): T | undefined {
   return value ?? fallback;
 }
 
@@ -33,7 +42,7 @@ function buildNullableFields(
     repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
     primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
     primarySessionState: withFallback(payload.primary_session_state, existing?.primarySessionState),
-    sessionCount: withFallback(payload.session_count, existing?.sessionCount),
+    sessionCount: withNullishFallback(payload.session_count, existing?.sessionCount),
     reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
     primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
     primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),

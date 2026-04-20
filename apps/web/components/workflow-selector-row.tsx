@@ -1,30 +1,76 @@
 "use client";
 
 import { Fragment, memo, useMemo, useState } from "react";
-import { IconCheck, IconChevronDown, IconLogicBuffer, IconUserCog } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import type { AgentProfileOption } from "@/lib/state/slices";
+import { AgentLogo } from "@/components/agent-logo";
 
-type StepItem = { id: string; title: string; color: string; position: number };
+type StepItem = {
+  id: string;
+  title: string;
+  color: string;
+  position: number;
+  agent_profile_id?: string;
+  is_start_step?: boolean;
+};
 
-function InlineSteps({ steps }: { steps: StepItem[] }) {
+function InlineSteps({
+  steps,
+  agentProfiles,
+}: {
+  steps: StepItem[];
+  agentProfiles: AgentProfileOption[];
+}) {
   if (steps.length === 0) return null;
   return (
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
-      {steps.map((s, i) => (
-        <Fragment key={s.id}>
-          {i > 0 && <span className="text-muted-foreground/40">→</span>}
-          <span className="flex items-center gap-1">
-            <span
-              className="h-1.5 w-1.5 rounded-full shrink-0"
-              style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
-            />
-            {s.title}
-          </span>
-        </Fragment>
-      ))}
+      {steps.map((s, i) => {
+        const stepProfile = s.agent_profile_id
+          ? agentProfiles.find((p) => p.id === s.agent_profile_id)
+          : null;
+        return (
+          <Fragment key={s.id}>
+            {i > 0 && <span className="text-muted-foreground/40">{"\u2192"}</span>}
+            <span className="flex items-center gap-1">
+              <span
+                className="h-1.5 w-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
+              />
+              {s.title}
+              {s.is_start_step && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-[10px] text-muted-foreground/60 leading-none">*</span>
+                    </TooltipTrigger>
+                    <TooltipContent>Start step</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {stepProfile && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span data-testid="step-agent-logo">
+                        <AgentLogo
+                          agentName={stepProfile.agent_name}
+                          size={12}
+                          className="shrink-0"
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{stepProfile.label}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </span>
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -40,6 +86,7 @@ type WorkflowSelectorRowProps = {
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
   lastUsedWorkflowId?: string | null;
+  agentProfiles: AgentProfileOption[];
 };
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
@@ -48,6 +95,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   selectedWorkflowId,
   onWorkflowChange,
   lastUsedWorkflowId,
+  agentProfiles,
 }: WorkflowSelectorRowProps) {
   const [open, setOpen] = useState(false);
 
@@ -94,20 +142,30 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
               <div className="flex items-center gap-2">
                 <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-sm">{wf.name}</span>
-                {wf.agent_profile_id && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <IconUserCog className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>Custom agent profile</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
+                {wf.agent_profile_id &&
+                  (() => {
+                    const wfProfile = agentProfiles.find((p) => p.id === wf.agent_profile_id);
+                    return wfProfile ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span data-testid="workflow-agent-logo">
+                              <AgentLogo
+                                agentName={wfProfile.agent_name}
+                                size={14}
+                                className="shrink-0"
+                              />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>{wfProfile.label}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null;
+                  })()}
               </div>
               {steps.length > 0 && (
                 <div className="pl-[calc(0.875rem+0.5rem)]">
-                  <InlineSteps steps={steps} />
+                  <InlineSteps steps={steps} agentProfiles={agentProfiles} />
                 </div>
               )}
               {isSelected && (

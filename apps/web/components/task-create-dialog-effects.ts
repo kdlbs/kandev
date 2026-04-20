@@ -23,6 +23,7 @@ import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 export function useWorkflowAgentProfileEffect(
   fs: DialogFormState,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
+  agentProfiles: AgentProfileOption[],
 ) {
   const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
   useEffect(() => {
@@ -32,15 +33,21 @@ export function useWorkflowAgentProfileEffect(
     }
     const workflow = workflows.find((w) => w.id === selectedWorkflowId);
     if (workflow?.agent_profile_id) {
-      setAgentProfileId(workflow.agent_profile_id);
+      // Always lock the selector when the workflow specifies an agent profile.
+      // This prevents the race condition where agentProfiles hasn't loaded yet.
       setWorkflowAgentProfileId(workflow.agent_profile_id);
+      // Only set the agentProfileId once the profile is confirmed available.
+      const profileExists = agentProfiles.some((p) => p.id === workflow.agent_profile_id);
+      if (profileExists) {
+        setAgentProfileId(workflow.agent_profile_id);
+      }
     } else {
       setWorkflowAgentProfileId("");
       // Restore the user's last-used agent profile when unlocking
       const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
       setAgentProfileId(lastId ?? "");
     }
-  }, [selectedWorkflowId, workflows, setAgentProfileId, setWorkflowAgentProfileId]);
+  }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
 }
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
@@ -174,11 +181,13 @@ export function useDefaultSelectionsEffect(
   fs: DialogFormState,
   open: boolean,
   sel: StoreSelections,
+  workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
   const { agentProfiles, executors, workspaceDefaults } = sel;
   const {
     agentProfileId,
     workflowAgentProfileId,
+    selectedWorkflowId,
     executorId,
     executorProfileId,
     setAgentProfileId,
@@ -186,7 +195,20 @@ export function useDefaultSelectionsEffect(
     setExecutorProfileId,
   } = fs;
   useEffect(() => {
-    if (!open || agentProfileId || workflowAgentProfileId || agentProfiles.length === 0) return;
+    // Check synchronously whether the selected workflow has an agent override.
+    // This avoids a race condition where workflowAgentProfileId state hasn't
+    // been committed yet by the workflow effect running in the same cycle.
+    const workflowHasAgent = selectedWorkflowId
+      ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
+      : false;
+    if (
+      !open ||
+      agentProfileId ||
+      workflowAgentProfileId ||
+      workflowHasAgent ||
+      agentProfiles.length === 0
+    )
+      return;
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
     if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
       void Promise.resolve().then(() => setAgentProfileId(lastId));
@@ -202,6 +224,8 @@ export function useDefaultSelectionsEffect(
     open,
     agentProfileId,
     workflowAgentProfileId,
+    selectedWorkflowId,
+    workflows,
     agentProfiles,
     workspaceDefaults,
     setAgentProfileId,
@@ -384,11 +408,11 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   const { open, workspaceId, workflowId, repositories, repositoriesLoading, branches } = args;
   const { agentProfiles, executors, workspaceDefaults, toast, workflows } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs, branches);
   useLocalBranchesEffect(fs, open, workspaceId, toast);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults });
+  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
 }

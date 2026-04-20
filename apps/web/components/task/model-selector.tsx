@@ -96,43 +96,6 @@ function resolveCurrentModel(
   return activeModel || acpCurrentModel || snapshotModel || profileModel;
 }
 
-function logModelSelectorState(
-  sessionId: string | null,
-  state: {
-    usingAcpModels: boolean;
-    sessionModelsData:
-      | { models?: { modelId: string }[]; currentModelId?: string; configOptions?: unknown[] }
-      | undefined;
-    activeModel: string | null;
-    acpCurrentModel: string | null;
-    snapshotModel: string | null;
-    profileModel: string | null;
-    currentModel: string | null;
-    modelOptions: ModelOption[];
-  },
-) {
-  if (!sessionId) return;
-  console.log("[model-selector] state resolved", {
-    sessionId,
-    usingAcpModels: state.usingAcpModels,
-    sessionModelsData: state.sessionModelsData
-      ? {
-          modelsCount: state.sessionModelsData.models?.length ?? 0,
-          models: state.sessionModelsData.models?.map((m) => m.modelId),
-          currentModelId: state.sessionModelsData.currentModelId,
-          configOptionsCount: state.sessionModelsData.configOptions?.length ?? 0,
-        }
-      : null,
-    activeModel: state.activeModel,
-    acpCurrentModel: state.acpCurrentModel,
-    snapshotModel: state.snapshotModel,
-    profileModel: state.profileModel,
-    resolvedCurrentModel: state.currentModel,
-    modelOptionsCount: state.modelOptions.length,
-    modelOptions: state.modelOptions.map((m) => ({ id: m.id, name: m.name })),
-  });
-}
-
 /** Resolves available models and current model from store state. */
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
@@ -167,17 +130,6 @@ function useModelSelectorState(sessionId: string | null) {
     profileModel,
   );
   const modelOptions = buildModelOptions(availableModels, currentModel);
-
-  logModelSelectorState(sessionId, {
-    usingAcpModels,
-    sessionModelsData,
-    activeModel,
-    acpCurrentModel,
-    snapshotModel,
-    profileModel,
-    currentModel,
-    modelOptions,
-  });
 
   const handleModelChange = useCallback(
     (sid: string, modelId: string) => {

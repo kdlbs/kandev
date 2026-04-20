@@ -19,7 +19,6 @@ import (
 	gorillaws "github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -213,24 +212,9 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 }
 
 func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID string) bool {
-	// Check in-memory execution first (fast path when execution is already running).
-	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if exists {
-		if execution.RuntimeName == string(executor.NameSprites) {
-			return true
-		}
-		if execution.Metadata != nil {
-			if isRemote, ok := execution.Metadata[lifecycle.MetadataKeyIsRemote].(bool); ok && isRemote {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Execution not in memory — check DB records. After a backend restart the
-	// execution may not exist yet (resume in progress), but the session's
-	// executor type is persisted in the database.
-	return h.lifecycleMgr.IsRemoteSession(ctx, sessionID)
+	// Delegates to lifecycle manager which checks both in-memory execution
+	// and database records for containerized/remote executors.
+	return h.lifecycleMgr.ShouldUseContainerShell(ctx, sessionID)
 }
 
 // waitForRemoteExecution polls the lifecycle manager for the session's execution,

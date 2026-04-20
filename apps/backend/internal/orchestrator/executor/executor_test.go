@@ -59,6 +59,36 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSession_InvokesPrimarySessionCallback(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	var callbackTaskID, callbackSessionID string
+	exec.SetOnPrimarySessionSet(func(_ context.Context, taskID, sessionID string) {
+		callbackTaskID = taskID
+		callbackSessionID = sessionID
+	})
+
+	task := &v1.Task{
+		ID:          "task-456",
+		WorkspaceID: "workspace-456",
+		Title:       "Callback Test",
+	}
+
+	sessionID, err := exec.PrepareSession(context.Background(), task, "profile-1", "executor-1", "", "step-1")
+	if err != nil {
+		t.Fatalf("PrepareSession failed: %v", err)
+	}
+
+	if callbackTaskID != task.ID {
+		t.Errorf("callback taskID = %q, want %q", callbackTaskID, task.ID)
+	}
+	if callbackSessionID != sessionID {
+		t.Errorf("callback sessionID = %q, want %q", callbackSessionID, sessionID)
+	}
+}
+
 func TestPrepareSession_NoAgentProfileID(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
