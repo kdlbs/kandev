@@ -151,6 +151,6 @@ func (a *Auggie) InferenceConfig() *InferenceConfig {
 var auggiePermSettings = map[string]PermissionSetting{
 	"allow_indexing": {
 		Supported: true, Default: true, Label: "Allow indexing", Description: "Enable workspace indexing without confirmation",
-		ApplyMethod: "cli_flag", CLIFlag: "--allow-indexing",
+		ApplyMethod: PermissionApplyMethodCLIFlag, CLIFlag: "--allow-indexing",
 	},
 }

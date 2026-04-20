@@ -180,6 +180,12 @@ func (c SessionConfig) SupportsRecovery() bool {
 	return *c.CanRecover
 }
 
+// PermissionApplyMethodCLIFlag is the PermissionSetting.ApplyMethod sentinel
+// for permission flags that map to a CLI argument on the agent subprocess.
+// A typo in any one caller (e.g. "cli-flag") silently breaks the seed and
+// filter chain across agents, so the literal lives in exactly one place.
+const PermissionApplyMethodCLIFlag = "cli_flag"
+
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {
 	Supported    bool   `json:"supported"`

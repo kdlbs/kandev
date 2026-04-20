@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
+import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -171,22 +172,6 @@ function useSyncAgentsToStore() {
       ),
     );
   };
-}
-
-function areCLIFlagsEqual(a: AgentProfile["cli_flags"], b: AgentProfile["cli_flags"]): boolean {
-  const left = a ?? [];
-  const right = b ?? [];
-  if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i++) {
-    if (
-      left[i].flag !== right[i].flag ||
-      left[i].enabled !== right[i].enabled ||
-      (left[i].description ?? "") !== (right[i].description ?? "")
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function useProfileEditorState(profile: AgentProfile) {

@@ -71,7 +71,7 @@ func (b *CmdBuilder) Settings(settings map[string]PermissionSetting, values map[
 		return b
 	}
 	for settingName, setting := range settings {
-		if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+		if !setting.Supported || setting.ApplyMethod != PermissionApplyMethodCLIFlag || setting.CLIFlag == "" {
 			continue
 		}
 		value, exists := values[settingName]

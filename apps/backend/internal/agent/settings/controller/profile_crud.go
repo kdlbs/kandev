@@ -76,7 +76,7 @@ func seedCLIFlags(agent agents.Agent) []models.CLIFlag {
 	settings := agent.PermissionSettings()
 	flags := make([]models.CLIFlag, 0, len(settings))
 	for _, s := range settings {
-		if !s.Supported || s.ApplyMethod != "cli_flag" || s.CLIFlag == "" {
+		if !s.Supported || s.ApplyMethod != agents.PermissionApplyMethodCLIFlag || s.CLIFlag == "" {
 			continue
 		}
 		flagText := s.CLIFlag

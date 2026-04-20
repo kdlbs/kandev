@@ -122,7 +122,7 @@ var copilotPermSettings = map[string]PermissionSetting{
 		Default:     false,
 		Label:       "Allow all tools",
 		Description: "Skip confirmation for every tool call (--allow-all-tools)",
-		ApplyMethod: "cli_flag",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
 		CLIFlag:     "--allow-all-tools",
 	},
 	"allow_all_paths": {
@@ -130,7 +130,7 @@ var copilotPermSettings = map[string]PermissionSetting{
 		Default:     false,
 		Label:       "Allow all paths",
 		Description: "Allow file access outside the workspace (--allow-all-paths)",
-		ApplyMethod: "cli_flag",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
 		CLIFlag:     "--allow-all-paths",
 	},
 	"allow_all_urls": {
@@ -138,7 +138,7 @@ var copilotPermSettings = map[string]PermissionSetting{
 		Default:     false,
 		Label:       "Allow all URLs",
 		Description: "Allow network access to any URL (--allow-all-urls)",
-		ApplyMethod: "cli_flag",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
 		CLIFlag:     "--allow-all-urls",
 	},
 	"no_ask_user": {
@@ -146,7 +146,7 @@ var copilotPermSettings = map[string]PermissionSetting{
 		Default:     false,
 		Label:       "Disable ask_user tool",
 		Description: "Agent works autonomously without asking clarifying questions (--no-ask-user)",
-		ApplyMethod: "cli_flag",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
 		CLIFlag:     "--no-ask-user",
 	},
 }

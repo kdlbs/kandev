@@ -5,6 +5,7 @@ import type {
   Agent,
   AgentProfile,
   AgentProfileMcpConfig,
+  CLIFlag,
   McpServerDef,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
@@ -49,7 +50,13 @@ export async function createAgentAction(payload: {
   name: string;
   workspace_id?: string | null;
   profiles?: Array<
-    { name: string; model: string; mode?: string; cli_passthrough: boolean } & ProfilePermissions
+    {
+      name: string;
+      model: string;
+      mode?: string;
+      cli_passthrough: boolean;
+      cli_flags?: CLIFlag[];
+    } & ProfilePermissions
   >;
 }): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
@@ -83,6 +90,7 @@ export async function createAgentProfileAction(
     model: string;
     mode?: string;
     cli_passthrough: boolean;
+    cli_flags?: CLIFlag[];
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
