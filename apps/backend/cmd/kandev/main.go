@@ -408,8 +408,6 @@ func startGatewayAndServe(
 
 	services.Task.StartAutoArchiveLoop(ctx)
 
-	subscribeEventBusHandlers(eventBus, gateway, log)
-
 	// ============================================
 	// HTTP SERVER
 	// ============================================
@@ -496,32 +494,6 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
-	}
-}
-
-// subscribeEventBusHandlers subscribes WebSocket broadcast handlers to the event bus.
-func subscribeEventBusHandlers(eventBus bus.EventBus, gateway *gateways.Gateway, log *logger.Logger) {
-	if _, err := eventBus.Subscribe(events.MessageAdded, newMessageAddedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.added events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
-	}
-	if _, err := eventBus.Subscribe(events.MessageUpdated, newMessageUpdatedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
-	}
-	if _, err := eventBus.Subscribe(events.TaskSessionStateChanged, newSessionStateChangedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
-	}
-
-	// GitHub task-PR update broadcasts
-	if _, err := eventBus.Subscribe(events.GitHubTaskPRUpdated, newGitHubTaskPRUpdatedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to github.task_pr.updated events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to github.task_pr.updated events for WebSocket broadcasting")
 	}
 }
 
