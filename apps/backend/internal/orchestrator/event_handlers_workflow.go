@@ -594,6 +594,16 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 			return
 		}
+		// When processOnEnter runs from an on_turn_complete engine transition,
+		// the in-memory session was loaded at the start of handleAgentReady
+		// before the turn finished — its State is still RUNNING. After a
+		// successful reset the agent is idle, so mark the session
+		// WAITING_FOR_INPUT in both DB and memory. Without this, a subsequent
+		// auto_start_agent enters queueAutoStartPromptIfRunning → queues the
+		// prompt instead of sending it, and PromptTask rejects the drained
+		// queued message because DB state still reads RUNNING.
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+		session.State = models.TaskSessionStateWaitingForInput
 	}
 
 	hasAutoStart := false

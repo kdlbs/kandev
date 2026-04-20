@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -112,15 +114,22 @@ var workflowTestCases = []workflowTestCase{
 			// Agent finishes at Backlog → In Progress (auto_start queues)
 			{Trigger: engine.TriggerOnTurnComplete, ExpectStep: "In Progress",
 				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 0},
-			// Agent finishes at In Progress → New Context (reset + auto_start)
+			// Agent finishes at In Progress → New Context (reset + auto_start).
+			// After reset_agent_context, processOnEnter flips session state to
+			// WAITING_FOR_INPUT so auto_start sends directly instead of queueing
+			// against a stale RUNNING state. PromptTask then attempts the send —
+			// in this mock environment the executor has no running record for
+			// the session, so the send fails and autoStartStepPrompt's error
+			// path leaves the session at WAITING_FOR_INPUT. Crucially, the
+			// message is NOT sitting in the queue.
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 1},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
 			// Agent starts at New Context → on_turn_start → back to In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
-			// Agent finishes at In Progress → New Context again
+			// Agent finishes at In Progress → New Context again (same reset + auto_start path)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 2},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 2},
 			// Agent finishes at New Context → New Step (reset, no auto_start)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Step",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
@@ -283,7 +292,7 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 }
 
 // createEngineService creates a Service with the workflow engine initialized.
-func createEngineService(t *testing.T, repo sessionExecutorStore, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
+func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
 	t.Helper()
 	log := testLogger()
 	svc := &Service{
@@ -292,6 +301,7 @@ func createEngineService(t *testing.T, repo sessionExecutorStore, sg *mockStepGe
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
 		messageQueue: messagequeue.NewService(log),
+		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 	}
 	svc.SetWorkflowStepGetter(sg)
 	return svc
