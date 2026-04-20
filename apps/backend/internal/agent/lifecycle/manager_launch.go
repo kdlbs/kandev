@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -77,12 +78,21 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
+	var cliFlagTokens []string
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
 		permissionValues["auto_approve"] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
+		tokens, err := cliflags.Resolve(profileInfo.CLIFlags)
+		if err != nil {
+			m.logger.Warn("failed to resolve cli_flags for profile, launching without user-configured flags",
+				zap.String("profile_id", profileInfo.ProfileID),
+				zap.Error(err))
+		} else {
+			cliFlagTokens = tokens
+		}
 	}
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
@@ -99,6 +109,7 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		SessionID:        sessionID,
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
+		CLIFlagTokens:    cliFlagTokens,
 	}
 	return agentCommands{
 		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),

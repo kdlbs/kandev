@@ -140,6 +140,7 @@ function ProfileSettingsCard({
             mode: draft.mode ?? "",
             allow_indexing: draft.allow_indexing,
             cli_passthrough: draft.cli_passthrough,
+            cli_flags: draft.cli_flags ?? [],
           }}
           onChange={onDraftChange}
           modelConfig={modelConfig}
@@ -172,6 +173,22 @@ function useSyncAgentsToStore() {
   };
 }
 
+function areCLIFlagsEqual(a: AgentProfile["cli_flags"], b: AgentProfile["cli_flags"]): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (
+      left[i].flag !== right[i].flag ||
+      left[i].enabled !== right[i].enabled ||
+      (left[i].description ?? "") !== (right[i].description ?? "")
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function useProfileEditorState(profile: AgentProfile) {
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
@@ -183,7 +200,8 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough,
+      draft.cli_passthrough !== savedProfile.cli_passthrough ||
+      !areCLIFlagsEqual(draft.cli_flags, savedProfile.cli_flags),
     [draft, savedProfile],
   );
 
@@ -236,6 +254,7 @@ function useProfileSave({
         mode: draft.mode,
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
+        cli_flags: draft.cli_flags,
       });
       setSavedProfile(updated);
       setDraft(updated);

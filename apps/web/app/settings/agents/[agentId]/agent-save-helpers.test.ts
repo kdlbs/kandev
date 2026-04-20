@@ -10,6 +10,7 @@ const baseProfile: AgentProfile = {
   model: "mock-fast",
   mode: "default",
   allow_indexing: false,
+  cli_flags: [],
   cli_passthrough: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",

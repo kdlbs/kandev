@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -297,11 +298,12 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name           string `json:"name"`
-	Model          string `json:"model"`
-	Mode           string `json:"mode,omitempty"`
-	AllowIndexing  bool   `json:"allow_indexing"`
-	CLIPassthrough bool   `json:"cli_passthrough"`
+	Name           string           `json:"name"`
+	Model          string           `json:"model"`
+	Mode           string           `json:"mode,omitempty"`
+	AllowIndexing  bool             `json:"allow_indexing"`
+	CLIPassthrough bool             `json:"cli_passthrough"`
+	CLIFlags       []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -321,6 +323,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
 		CLIPassthrough: body.CLIPassthrough,
+		CLIFlags:       body.CLIFlags,
 	})
 	if err != nil {
 		h.logger.Error("failed to create profile", zap.Error(err))
@@ -337,11 +340,12 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string `json:"name,omitempty"`
-	Model          *string `json:"model,omitempty"`
-	Mode           *string `json:"mode,omitempty"`
-	AllowIndexing  *bool   `json:"allow_indexing,omitempty"`
-	CLIPassthrough *bool   `json:"cli_passthrough,omitempty"`
+	Name           *string           `json:"name,omitempty"`
+	Model          *string           `json:"model,omitempty"`
+	Mode           *string           `json:"mode,omitempty"`
+	AllowIndexing  *bool             `json:"allow_indexing,omitempty"`
+	CLIPassthrough *bool             `json:"cli_passthrough,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -361,6 +365,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
 		CLIPassthrough: body.CLIPassthrough,
+		CLIFlags:       body.CLIFlags,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {

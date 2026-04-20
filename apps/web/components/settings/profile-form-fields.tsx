@@ -25,7 +25,9 @@ import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
+import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import type {
+  CLIFlag,
   CommandEntry,
   ModelConfig,
   ModeEntry,
@@ -39,6 +41,7 @@ export type ProfileFormData = {
   model: string;
   mode: string;
   cli_passthrough: boolean;
+  cli_flags: CLIFlag[];
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -553,6 +556,12 @@ export function ProfileFormFields({
         passthroughConfig={passthroughConfig}
         variant={variant}
         lockPassthrough={lockPassthrough}
+      />
+
+      <CLIFlagsField
+        flags={profile.cli_flags}
+        onChange={(next) => onChange({ cli_flags: next })}
+        variant={variant}
       />
     </div>
   );

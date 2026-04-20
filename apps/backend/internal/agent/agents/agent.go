@@ -111,6 +111,10 @@ type CommandOptions struct {
 	PermissionPolicy    string          // "autonomous", "supervised", "plan"
 	PermissionValues    map[string]bool // e.g. {"allow_indexing": true}
 	AgentType           string          // for --agent flag (e.g. "task" for subagent)
+	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
+	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
+	// verbatim to the built command by every agent's BuildCommand.
+	CLIFlagTokens []string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
