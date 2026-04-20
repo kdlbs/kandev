@@ -69,6 +69,8 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 		{name: "valid with empty description", flags: []dto.CLIFlagDTO{{Flag: "--x"}}},
 		{name: "empty flag rejected", flags: []dto.CLIFlagDTO{{Flag: ""}}, wantErr: true},
 		{name: "whitespace flag rejected", flags: []dto.CLIFlagDTO{{Flag: "   "}}, wantErr: true},
+		{name: "unterminated quote rejected", flags: []dto.CLIFlagDTO{{Flag: `--msg "hi`}}, wantErr: true},
+		{name: "trailing backslash rejected", flags: []dto.CLIFlagDTO{{Flag: `--path foo\`}}, wantErr: true},
 		{name: "empty list accepted", flags: []dto.CLIFlagDTO{}},
 	}
 	for _, tc := range cases {
