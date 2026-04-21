@@ -3,6 +3,11 @@ import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
+import {
+  isPRReviewFromMetadata,
+  isIssueWatchFromMetadata,
+  issueFieldsFromMetadata,
+} from "@/lib/metadata-utils";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 
@@ -95,29 +100,7 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
   } as KanbanTask;
 }
 
-function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
-  if (!metadata || typeof metadata !== "object") return false;
-  const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
-  return typeof watchId === "string" && watchId.length > 0;
-}
 
-function isIssueWatchFromMetadata(metadata: Task["metadata"]): boolean {
-  if (!metadata || typeof metadata !== "object") return false;
-  const watchId = (metadata as Record<string, unknown>)["issue_watch_id"];
-  return typeof watchId === "string" && watchId.length > 0;
-}
-
-function issueFieldsFromMetadata(metadata: Task["metadata"]): {
-  issueUrl?: string;
-  issueNumber?: number;
-} {
-  if (!metadata || typeof metadata !== "object") return {};
-  const m = metadata as Record<string, unknown>;
-  const url = typeof m["issue_url"] === "string" ? m["issue_url"] : undefined;
-  const num = typeof m["issue_number"] === "number" ? m["issue_number"] : undefined;
-  if (!url && !num) return {};
-  return { issueUrl: url, issueNumber: num };
-}
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const store = useAppStoreApi();
