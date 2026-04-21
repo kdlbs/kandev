@@ -100,8 +100,6 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
   } as KanbanTask;
 }
 
-
-
 export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
