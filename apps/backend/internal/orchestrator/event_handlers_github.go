@@ -18,6 +18,11 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+const (
+	issueWatchIDKey = "issue_watch_id"
+	issueNumberKey  = "issue_number"
+)
+
 // GitHubService is the interface the orchestrator uses for GitHub operations.
 type GitHubService interface {
 	Client() github.Client
@@ -754,9 +759,9 @@ func (s *Service) handleNewIssue(ctx context.Context, event *bus.Event) error {
 
 	issue := issueEvt.Issue
 	s.logger.Info("new issue detected from watch",
-		zap.String("issue_watch_id", issueEvt.IssueWatchID),
+		zap.String(issueWatchIDKey, issueEvt.IssueWatchID),
 		zap.String("repo", fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)),
-		zap.Int("issue_number", issue.Number))
+		zap.Int(issueNumberKey, issue.Number))
 
 	if s.issueTaskCreator == nil {
 		s.logger.Warn("issue task creator not configured, skipping task creation")
@@ -784,8 +789,8 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 		Title:          fmt.Sprintf("Issue #%d: %s", issue.Number, issue.Title),
 		Description:    interpolateIssuePrompt(evt.Prompt, issue),
 		Metadata: map[string]interface{}{
-			"issue_watch_id":      evt.IssueWatchID,
-			"issue_number":        issue.Number,
+			issueWatchIDKey:       evt.IssueWatchID,
+			issueNumberKey:        issue.Number,
 			"issue_url":           issue.HTMLURL,
 			"issue_repo":          repoSlug,
 			"issue_author":        issue.AuthorLogin,
@@ -798,8 +803,8 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 	task, err := s.issueTaskCreator.CreateIssueTask(ctx, req)
 	if err != nil {
 		s.logger.Error("failed to create issue task",
-			zap.String("issue_watch_id", evt.IssueWatchID),
-			zap.Int("issue_number", issue.Number),
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number),
 			zap.Error(err))
 		s.releaseIssueWatch(ctx, evt)
 		return
@@ -809,7 +814,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 
 	s.logger.Info("created issue task",
 		zap.String("task_id", task.ID),
-		zap.Int("issue_number", issue.Number),
+		zap.Int(issueNumberKey, issue.Number),
 		zap.String("repo", repoSlug))
 
 	if !s.shouldAutoStartStep(ctx, evt.WorkflowStepID) {
@@ -828,15 +833,15 @@ func (s *Service) reserveIssueWatch(ctx context.Context, evt *github.NewIssueEve
 	)
 	if err != nil {
 		s.logger.Error("failed to reserve issue watch slot",
-			zap.String("issue_watch_id", evt.IssueWatchID),
-			zap.Int("issue_number", issue.Number),
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number),
 			zap.Error(err))
 		return false
 	}
 	if !reserved {
 		s.logger.Debug("issue already reserved by concurrent handler, skipping",
-			zap.String("issue_watch_id", evt.IssueWatchID),
-			zap.Int("issue_number", issue.Number))
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number))
 		return false
 	}
 	return true
@@ -851,7 +856,7 @@ func (s *Service) releaseIssueWatch(ctx context.Context, evt *github.NewIssueEve
 		ctx, evt.IssueWatchID, issue.RepoOwner, issue.RepoName, issue.Number,
 	); err != nil {
 		s.logger.Warn("failed to release issue watch reservation after task-create failure",
-			zap.Int("issue_number", issue.Number),
+			zap.Int(issueNumberKey, issue.Number),
 			zap.Error(err))
 	}
 }
@@ -866,7 +871,7 @@ func (s *Service) attachIssueTaskToReservation(ctx context.Context, evt *github.
 	); err != nil {
 		s.logger.Error("failed to assign task ID to issue watch reservation",
 			zap.String("task_id", taskID),
-			zap.Int("issue_number", issue.Number),
+			zap.Int(issueNumberKey, issue.Number),
 			zap.Error(err))
 	}
 }
@@ -922,7 +927,7 @@ func (s *Service) autoStartIssueTask(
 	}
 	s.logger.Info("auto-started issue task",
 		zap.String("task_id", task.ID),
-		zap.Int("issue_number", evt.Issue.Number))
+		zap.Int(issueNumberKey, evt.Issue.Number))
 }
 
 // interpolateReviewPrompt replaces {{pr.*}} placeholders in the prompt template with actual PR values.
