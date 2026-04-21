@@ -260,7 +260,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 	dateStart := dialect.DateNowMinusDays(drv, "?")
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
-	dateOfCompleted := dialect.DateOf(drv, "ts.completed_at")
+	dateOfCompleted := dialect.DateOf(drv, "COALESCE(ts.completed_at, t.archived_at)")
 
 	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
@@ -274,13 +274,14 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 			SELECT %s as activity_date, COUNT(DISTINCT t.id) as completed_tasks
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			JOIN (
+			LEFT JOIN (
 				SELECT task_id, MAX(completed_at) as completed_at
 				FROM task_sessions WHERE completed_at IS NOT NULL GROUP BY task_id
 			) ts ON ts.task_id = t.id
 			WHERE t.workspace_id = ? AND t.is_ephemeral = 0
 			  AND (t.archived_at IS NOT NULL
 			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
+			  AND COALESCE(ts.completed_at, t.archived_at) IS NOT NULL
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC

@@ -424,13 +424,17 @@ func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-done', 'board-1', 'Done', 1, ?, ?)`, nowStr, nowStr)
 
-	// Regular completed task
+	// Regular completed task (with session completed_at)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 0, ?, ?, ?)`, nowStr, nowStr, nowStr)
+	// Archived task WITHOUT session completed_at — should still count using archived_at
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-archived-no-session', 'ws-1', 'board-1', 'step-done', 'Archived No Session', 0, ?, ?, ?)`, nowStr, nowStr, nowStr)
 	// Ephemeral completed task
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?, ?)`, nowStr, nowStr, nowStr)
 
 	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, completed_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', 'COMPLETED', ?, ?, ?)`, nowStr, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, completed_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', 'COMPLETED', ?, ?, ?)`, nowStr, nowStr, nowStr)
+	// Session for archived task with NO completed_at
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-archived', 'task-archived-no-session', 'agent-1', 'CANCELLED', ?, ?)`, nowStr, nowStr)
 
 	results, err := repo.GetCompletedTaskActivity(ctx, "ws-1", 7)
 	if err != nil {
@@ -441,8 +445,10 @@ func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
 	for _, r := range results {
 		totalCompleted += r.CompletedTasks
 	}
-	if totalCompleted != 1 {
-		t.Errorf("expected 1 completed task (ephemeral excluded), got %d", totalCompleted)
+	// Should count both: task-regular (via session completed_at) and task-archived-no-session (via archived_at)
+	// Ephemeral task should be excluded
+	if totalCompleted != 2 {
+		t.Errorf("expected 2 completed tasks (1 with session + 1 archived, ephemeral excluded), got %d", totalCompleted)
 	}
 }
 
