@@ -313,9 +313,6 @@ func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
 	if detected == "" {
 		return ""
 	}
-	if repo.DefaultBranch != "" {
-		return detected
-	}
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {

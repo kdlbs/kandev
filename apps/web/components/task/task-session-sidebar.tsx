@@ -129,7 +129,10 @@ function toSidebarItem(
     parentTaskId: task.parentTaskId ?? undefined,
     prInfo: toPrInfo(pr),
     isPRReview: task.isPRReview ?? false,
-    issueInfo: task.issueUrl ? { url: task.issueUrl, number: task.issueNumber ?? 0 } : undefined,
+    issueInfo:
+      task.issueUrl && task.issueNumber
+        ? { url: task.issueUrl, number: task.issueNumber }
+        : undefined,
   };
 }
 

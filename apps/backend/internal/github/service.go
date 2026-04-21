@@ -1496,7 +1496,7 @@ func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask)
 	}
 	reason := "issue_closed"
 	// Don't delete tasks the user has interacted with (has sessions).
-	if it.TaskID != "" && s.taskSessionChecker != nil {
+	if it.TaskID != "" {
 		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, it.TaskID)
 		if err != nil {
 			s.logger.Debug("failed to check task sessions",
