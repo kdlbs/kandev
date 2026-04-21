@@ -49,9 +49,10 @@ describe("issueFieldsFromMetadata", () => {
   const ISSUE_URL = "https://github.com/a/b/issues/7";
 
   it("extracts issueUrl and issueNumber when both are present", () => {
-    expect(
-      issueFieldsFromMetadata({ issue_url: ISSUE_URL, issue_number: 7 }),
-    ).toEqual({ issueUrl: ISSUE_URL, issueNumber: 7 });
+    expect(issueFieldsFromMetadata({ issue_url: ISSUE_URL, issue_number: 7 })).toEqual({
+      issueUrl: ISSUE_URL,
+      issueNumber: 7,
+    });
   });
 
   it("returns only issueUrl when issue_number is absent", () => {
