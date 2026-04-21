@@ -1,7 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { isPRReviewFromMetadata } from "@/lib/kanban/is-pr-review";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
 import {

@@ -4,7 +4,11 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cleanupTaskStorage } from "@/lib/local-storage";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { isPRReviewFromMetadata } from "@/lib/kanban/is-pr-review";
+import {
+  isPRReviewFromMetadata,
+  isIssueWatchFromMetadata,
+  issueFieldsFromMetadata,
+} from "@/lib/metadata-utils";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -55,12 +59,26 @@ function buildNullableFields(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildMetadataFields(payload: any, existing?: KanbanTask) {
+  // Orchestrator-sourced events may omit metadata; fall back to existing values
+  // so watcher-derived flags stay stable across updates after task.created.
+  if (!payload.metadata) {
+    return {
+      isPRReview: existing?.isPRReview ?? false,
+      isIssueWatch: existing?.isIssueWatch ?? false,
+      issueUrl: existing?.issueUrl,
+      issueNumber: existing?.issueNumber,
+    };
+  }
+  return {
+    isPRReview: isPRReviewFromMetadata(payload.metadata),
+    isIssueWatch: isIssueWatchFromMetadata(payload.metadata),
+    ...issueFieldsFromMetadata(payload.metadata),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
-  // Orchestrator-sourced events may omit metadata; fall back to existing flag
-  // so isPRReview stays stable across updates after the initial task.created.
-  const isPRReview = payload.metadata
-    ? isPRReviewFromMetadata(payload.metadata)
-    : (existing?.isPRReview ?? false);
   return {
     id: payload.task_id,
     workflowStepId: payload.workflow_step_id,
@@ -69,7 +87,7 @@ function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
     position: payload.position ?? 0,
     state: payload.state,
     isRemoteExecutor: payload.is_remote_executor ?? existing?.isRemoteExecutor ?? false,
-    isPRReview,
+    ...buildMetadataFields(payload, existing),
     ...buildNullableFields(payload, existing),
   };
 }
