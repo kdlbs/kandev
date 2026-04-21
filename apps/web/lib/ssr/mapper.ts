@@ -35,6 +35,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,
         updatedAt: task.updated_at,
+        isIssueWatch: isIssueWatchFromMetadata(task.metadata),
         ...issueFieldsFromMetadata(task.metadata),
       } as KanbanTask;
     })
@@ -88,6 +89,12 @@ export function taskToState(
           }
         : undefined,
   };
+}
+
+function isIssueWatchFromMetadata(metadata: Task["metadata"]): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const watchId = (metadata as Record<string, unknown>)["issue_watch_id"];
+  return typeof watchId === "string" && watchId.length > 0;
 }
 
 function issueFieldsFromMetadata(metadata: Task["metadata"]): {

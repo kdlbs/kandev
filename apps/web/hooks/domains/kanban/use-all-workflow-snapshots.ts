@@ -90,6 +90,7 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
     updatedAt: task.updated_at,
     createdAt: task.created_at,
     isPRReview: isPRReviewFromMetadata(task.metadata),
+    isIssueWatch: isIssueWatchFromMetadata(task.metadata),
     ...issueFieldsFromMetadata(task.metadata),
   } as KanbanTask;
 }
@@ -97,6 +98,12 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
 function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
   if (!metadata || typeof metadata !== "object") return false;
   const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
+  return typeof watchId === "string" && watchId.length > 0;
+}
+
+function isIssueWatchFromMetadata(metadata: Task["metadata"]): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const watchId = (metadata as Record<string, unknown>)["issue_watch_id"];
   return typeof watchId === "string" && watchId.length > 0;
 }
 

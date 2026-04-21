@@ -49,6 +49,7 @@ export type TaskSwitcherItem = {
   parentTaskId?: string;
   prInfo?: { number: number; state: string };
   isPRReview?: boolean;
+  isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
 };
 

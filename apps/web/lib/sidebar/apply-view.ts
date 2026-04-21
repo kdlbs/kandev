@@ -47,6 +47,7 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
     return !!ds && (ds.additions > 0 || ds.deletions > 0);
   },
   isPRReview: (t) => t.isPRReview === true,
+  isIssueWatch: (t) => t.isIssueWatch === true,
   titleMatch: (t) => t.title ?? "",
 };
 
