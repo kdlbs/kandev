@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { isPRReviewFromMetadata, isIssueWatchFromMetadata, issueFieldsFromMetadata } from "./metadata-utils";
+import {
+  isPRReviewFromMetadata,
+  isIssueWatchFromMetadata,
+  issueFieldsFromMetadata,
+} from "./metadata-utils";
 
 describe("isPRReviewFromMetadata", () => {
   it("returns true when review_watch_id is a non-empty string", () => {
