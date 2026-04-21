@@ -24,7 +24,7 @@ const (
 // buildTaskEventPayload builds the standard map payload for TaskUpdated events.
 // This is the single source of truth; all TaskUpdated publishers should call it.
 func buildTaskEventPayload(task *models.Task) map[string]interface{} {
-	return map[string]interface{}{
+	data := map[string]interface{}{
 		"task_id":          task.ID,
 		"workflow_id":      task.WorkflowID,
 		"workflow_step_id": task.WorkflowStepID,
@@ -37,6 +37,15 @@ func buildTaskEventPayload(task *models.Task) map[string]interface{} {
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":     task.IsEphemeral,
 	}
+	// Include metadata so the frontend can derive flags like isPRReview
+	// (review_watch_id) on WS-driven updates without a page refresh.
+	if task.Metadata != nil {
+		data["metadata"] = task.Metadata
+	}
+	if task.ParentID != "" {
+		data["parent_id"] = task.ParentID
+	}
+	return data
 }
 
 // toolKindToMessageType maps the normalized tool kind to a frontend message type.
