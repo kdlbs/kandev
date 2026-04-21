@@ -53,10 +53,6 @@ export const DEFAULT_ISSUE_WATCH_PROMPT = `You have been assigned a GitHub issue
 **Author:** {{issue.author}}
 **Labels:** {{issue.labels}}
 
-## Issue Description
-
-{{issue.body}}
-
 ## Instructions
 
 1. Read the issue description carefully and understand the requirements.
