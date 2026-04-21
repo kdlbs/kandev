@@ -43,6 +43,24 @@ describe("applyFilters — per-dimension", () => {
     expect(out.map((t) => t.id)).toEqual(["b"]);
   });
 
+  it("filters by isIssueWatch is true (issue-watcher-created task)", () => {
+    const tasks = [task({ id: "a", isIssueWatch: true }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "isIssueWatch", op: "is", value: true })]);
+    expect(out.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("filters by isIssueWatch is false (regular task)", () => {
+    const tasks = [task({ id: "a", isIssueWatch: true }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "isIssueWatch", op: "is", value: false })]);
+    expect(out.map((t) => t.id)).toEqual(["b"]);
+  });
+
+  it("supports is_not negation on isIssueWatch", () => {
+    const tasks = [task({ id: "a", isIssueWatch: true }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "isIssueWatch", op: "is_not", value: true })]);
+    expect(out.map((t) => t.id)).toEqual(["b"]);
+  });
+
   it("filters by archived boolean", () => {
     const tasks = [task({ id: "a", isArchived: true }), task({ id: "b" })];
     const only = applyFilters(tasks, [C({ dimension: "archived", op: "is", value: true })]);
