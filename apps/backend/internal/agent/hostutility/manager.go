@@ -39,6 +39,7 @@ type Manager struct {
 	controlHost   string
 	controlPort   int
 	controlClient *agentctlclient.ControlClient
+	authToken     string // per-launch auth token for instance clients
 	log           *logger.Logger
 
 	parentTmpDir string
@@ -74,6 +75,11 @@ func NewManager(
 		cache:         newCache(),
 		instances:     make(map[string]*instance),
 	}
+}
+
+// SetAuthToken sets the per-launch auth token for authenticating instance clients.
+func (m *Manager) SetAuthToken(token string) {
+	m.authToken = token
 }
 
 // Start boots one warm instance per ACP-capable inference agent and runs an
@@ -253,7 +259,8 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		return nil, fmt.Errorf("create instance: %w", err)
 	}
 
-	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log)
+	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+		agentctlclient.WithAuthToken(m.authToken))
 
 	// Wait a moment for the instance HTTP server to come up.
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

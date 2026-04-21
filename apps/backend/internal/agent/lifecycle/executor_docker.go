@@ -138,14 +138,14 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		McpServers:     req.McpServers,
 	}
 
-	// Use ContainerManager to launch container
-	containerID, client, err := containerMgr.LaunchContainer(ctx, containerCfg)
+	// Use ContainerManager to launch container (includes nonce handshake)
+	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
 	// Get container IP for logging
-	containerIP, _ := dockerClient.GetContainerIP(ctx, containerID)
+	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
 
 	// Build metadata
 	metadata := make(map[string]interface{})
@@ -157,7 +157,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
-		zap.String("container_id", containerID),
+		zap.String("container_id", result.ContainerID),
 		zap.String("container_ip", containerIP))
 
 	return &ExecutorInstance{
@@ -165,11 +165,12 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		TaskID:        req.TaskID,
 		SessionID:     req.SessionID,
 		RuntimeName:   string(r.Name()),
-		Client:        client,
-		ContainerID:   containerID,
+		Client:        result.Client,
+		ContainerID:   result.ContainerID,
 		ContainerIP:   containerIP,
 		WorkspacePath: "/workspace", // Docker mounts workspace to /workspace
 		Metadata:      metadata,
+		AuthToken:     result.AuthToken,
 	}, nil
 }
 

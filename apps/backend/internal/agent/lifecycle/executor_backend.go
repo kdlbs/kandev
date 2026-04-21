@@ -209,6 +209,12 @@ type ExecutorInstance struct {
 	WorkspacePath string
 	Metadata      map[string]interface{}
 	StopReason    string
+
+	// AuthToken is the agentctl auth token retrieved via handshake.
+	// Populated by Docker executor for encrypted storage in SecretStore.
+	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
+	// and Sprites (no agentctl auth).
+	AuthToken string
 }
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.

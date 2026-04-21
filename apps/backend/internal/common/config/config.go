@@ -180,6 +180,10 @@ type AgentConfig struct {
 	// StandalonePort is the control port for standalone agentctl (default: 9999)
 	StandalonePort int `mapstructure:"standalonePort"`
 
+	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
+	// Set at runtime after agentctl starts; not persisted in config files.
+	StandaloneAuthToken string `mapstructure:"-"`
+
 	// McpServerEnabled enables the standalone MCP server (default: false)
 	// Note: MCP is now embedded in agentctl and tunnels to backend via WebSocket.
 	// This setting is only for running a separate standalone MCP server process.

@@ -6,6 +6,8 @@ package launcher
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -38,6 +41,10 @@ type Launcher struct {
 	// When the backend dies (even SIGKILL), the kernel closes this FD,
 	// breaking the pipe. agentctl detects the break and self-terminates.
 	parentPipe *os.File
+
+	// authToken is retrieved via handshake after agentctl starts.
+	// agentctl generates its own token; the launcher retrieves it using the bootstrap nonce.
+	authToken string
 }
 
 // Config holds configuration for the launcher.
@@ -72,6 +79,23 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 // This may differ from the configured port if fallback port selection was used.
 func (l *Launcher) Port() int {
 	return l.port
+}
+
+// AuthToken returns the auth token retrieved via handshake.
+// Used by the backend to authenticate requests to agentctl.
+func (l *Launcher) AuthToken() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.authToken
+}
+
+// generateNonce creates a cryptographically random 32-byte hex-encoded nonce.
+func generateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate bootstrap nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // agentctlBinaryName returns the platform-appropriate binary name.
@@ -120,47 +144,71 @@ func findAgentctlBinary() string {
 // Start spawns the agentctl subprocess and waits for it to become healthy.
 func (l *Launcher) Start(ctx context.Context) error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if l.cmd != nil {
+		l.mu.Unlock()
 		return fmt.Errorf("agentctl already running")
 	}
 
-	// Ensure port is available (diagnoses and cleans up stale processes if needed)
 	if err := l.ensurePortAvailable(); err != nil {
+		l.mu.Unlock()
 		return fmt.Errorf("port %d not available: %w", l.port, err)
 	}
 
+	nonce, err := generateNonce()
+	if err != nil {
+		l.mu.Unlock()
+		return err
+	}
+
+	if err := l.buildAndStartProcess(nonce); err != nil {
+		l.mu.Unlock()
+		return err
+	}
+	// Release the lock before blocking so monitorExit() can close l.exited,
+	// enabling the fast-fail path in waitForHealthy if agentctl crashes.
+	l.mu.Unlock()
+
+	if err := l.waitForHealthy(ctx); err != nil {
+		if killErr := l.cmd.Process.Kill(); killErr != nil {
+			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
+		}
+		l.closeParentPipe()
+		return fmt.Errorf("agentctl failed to become healthy: %w", err)
+	}
+
+	token, err := l.performHandshake(ctx, nonce)
+	if err != nil {
+		return err
+	}
+
+	l.mu.Lock()
+	l.authToken = token
+	l.mu.Unlock()
+
+	l.logger.Info("agentctl is healthy and authenticated")
+	return nil
+}
+
+// buildAndStartProcess sets up and launches the agentctl subprocess.
+func (l *Launcher) buildAndStartProcess(nonce string) error {
 	l.logger.Info("starting agentctl subprocess",
 		zap.String("binary", l.binaryPath),
 		zap.Int("port", l.port),
 		zap.String("host", l.host))
 
-	// Build command with flags
-	// Note: We use exec.Command (not CommandContext) because we want to control
-	// shutdown ourselves via Stop(). CommandContext sends SIGKILL on context
-	// cancellation which prevents graceful shutdown.
-	l.cmd = exec.Command(l.binaryPath,
-		fmt.Sprintf("-port=%d", l.port),
-	)
+	// Use exec.Command (not CommandContext) so we control shutdown via Stop().
+	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
+	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inherit environment from parent process
-	l.cmd.Env = os.Environ()
-
-	// Set process attributes:
-	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.
+	// Inject bootstrap nonce; agentctl generates its own auth token.
+	l.cmd.Env = append(os.Environ(), "AGENTCTL_BOOTSTRAP_NONCE="+nonce)
 	l.cmd.SysProcAttr = buildSysProcAttr()
 
-	// Parent liveness pipe (Unix only): agentctl inherits the read-end via
-	// ExtraFiles and blocks on it. When the parent dies the kernel closes the
-	// write-end, signaling agentctl to shut down. On Windows this is a no-op
-	// because ExtraFiles is not supported; cleanup relies on gracefulStop.
 	pipeWrite, err := setupLivenessPipe(l.cmd)
 	if err != nil {
 		return err
 	}
 
-	// Capture stdout and stderr
 	stdout, err := l.cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
@@ -170,39 +218,36 @@ func (l *Launcher) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	// Start the process
 	if err := l.cmd.Start(); err != nil {
 		closePipeOnStartFailure(pipeWrite, l.cmd)
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
 
-	// Close read-end in parent (child inherited it). Keep write-end open —
-	// it closes automatically when this process exits, signaling agentctl.
-	// On Windows these are no-ops (no liveness pipe); parentPipe stays nil.
 	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
 
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
 
-	// Pipe stdout/stderr to logger in background
 	go l.pipeOutput("stdout", bufio.NewScanner(stdout))
 	go l.pipeOutput("stderr", bufio.NewScanner(stderr))
-
-	// Monitor process exit in background
 	go l.monitorExit()
 
-	// Wait for health check to pass
-	if err := l.waitForHealthy(ctx); err != nil {
-		// Kill the process if health check fails
-		if killErr := l.cmd.Process.Kill(); killErr != nil {
-			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
-		}
-		l.closeParentPipeLocked()
-		return fmt.Errorf("agentctl failed to become healthy: %w", err)
-	}
-
-	l.logger.Info("agentctl is healthy and ready")
 	return nil
+}
+
+// performHandshake retrieves agentctl's self-generated auth token using the nonce.
+// On failure it kills the process and closes the liveness pipe.
+func (l *Launcher) performHandshake(ctx context.Context, nonce string) (string, error) {
+	ctl := agentctlclient.NewControlClient(l.host, l.port, l.logger)
+	token, err := ctl.Handshake(ctx, nonce)
+	if err != nil {
+		if killErr := l.cmd.Process.Kill(); killErr != nil {
+			l.logger.Warn("failed to kill agentctl after handshake failure", zap.Error(killErr))
+		}
+		l.closeParentPipe()
+		return "", fmt.Errorf("agentctl handshake failed: %w", err)
+	}
+	return token, nil
 }
 
 // Stop gracefully shuts down the agentctl subprocess.

@@ -16,6 +16,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -93,6 +94,10 @@ type Manager struct {
 	// pollAggregator routes hub session-mode events to agentctl. See
 	// manager_subscription.go.
 	pollAggregator *workspacePollAggregator
+
+	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
+	// Used to persist tokens across backend restarts for remote executor recovery.
+	secretStore secrets.SecretStore
 }
 
 // NewManager creates a new lifecycle manager.
@@ -259,6 +264,11 @@ func (m *Manager) SetBootMessageService(svc BootMessageService) {
 // SetPreparerRegistry sets the registry of environment preparers.
 func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 	m.preparerRegistry = registry
+}
+
+// SetSecretStore sets the secret store for encrypting runtime auth tokens.
+func (m *Manager) SetSecretStore(store secrets.SecretStore) {
+	m.secretStore = store
 }
 
 // DockerClientProvider returns a function that lazily resolves the Docker client

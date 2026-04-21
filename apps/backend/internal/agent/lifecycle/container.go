@@ -4,6 +4,8 @@ package lifecycle
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -31,6 +33,7 @@ type ContainerConfig struct {
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
 	McpMode         string
+	BootstrapNonce  string // one-time nonce for agentctl handshake (set internally)
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -51,46 +54,100 @@ func NewContainerManager(dockerClient *docker.Client, networkName string, log *l
 	}
 }
 
+// LaunchResult holds the result of a successful container launch.
+type LaunchResult struct {
+	ContainerID string
+	Client      *agentctl.Client
+	AuthToken   string // auth token retrieved via handshake (for encrypted storage)
+}
+
 // LaunchContainer creates and starts a Docker container for an agent.
-// Returns the container ID and agentctl client pointing to the instance.
-func (cm *ContainerManager) LaunchContainer(ctx context.Context, config ContainerConfig) (string, *agentctl.Client, error) {
-	// Build container config
-	containerCfg, err := cm.buildContainerConfig(config)
+// It uses a bootstrap nonce to perform a secure handshake with agentctl:
+// the nonce is passed via env var, agentctl generates its own token,
+// and the backend retrieves it via POST /auth/handshake.
+func (cm *ContainerManager) LaunchContainer(ctx context.Context, config ContainerConfig) (*LaunchResult, error) {
+	// Generate bootstrap nonce (NOT the auth token — agentctl generates that)
+	nonce, err := generateBootstrapNonce()
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to build container config: %w", err)
+		return nil, fmt.Errorf("failed to generate bootstrap nonce: %w", err)
 	}
+	config.BootstrapNonce = nonce
 
-	// Create the container
-	containerID, err := cm.dockerClient.CreateContainer(ctx, containerCfg)
+	containerID, containerIP, err := cm.createAndStartContainer(ctx, config)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to create container: %w", err)
+		return nil, err
 	}
 
-	// Start the container
-	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", nil, fmt.Errorf("failed to start container: %w", err)
-	}
-
-	// Get container IP for agentctl communication
-	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
-	if err != nil {
-		cm.logger.Warn("failed to get container IP, trying localhost",
-			zap.String("container_id", containerID),
-			zap.Error(err))
-		containerIP = "127.0.0.1"
-	}
-
-	// Create ControlClient to communicate with the container's control server
+	// Create ControlClient (no auth token yet — handshake hasn't happened)
 	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
 	if err := cm.waitForHealth(ctx, ctl); err != nil {
 		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", nil, fmt.Errorf("agentctl health check failed: %w", err)
+		return nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
-	// Create an instance via the control API (same flow as standalone mode)
+	// Perform handshake: nonce → token
+	authToken, err := ctl.Handshake(ctx, nonce)
+	if err != nil {
+		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		return nil, fmt.Errorf("agentctl handshake failed: %w", err)
+	}
+
+	// Create instance and client
+	client, err := cm.createInstanceAndClient(ctx, ctl, config, containerID, containerIP)
+	if err != nil {
+		return nil, err
+	}
+
+	cm.logger.Info("docker container launched with handshake auth",
+		zap.String("container_id", containerID),
+		zap.String("container_ip", containerIP),
+		zap.String("instance_id", config.InstanceID))
+
+	return &LaunchResult{
+		ContainerID: containerID,
+		Client:      client,
+		AuthToken:   authToken,
+	}, nil
+}
+
+// createAndStartContainer builds, creates, and starts a Docker container.
+func (cm *ContainerManager) createAndStartContainer(
+	ctx context.Context, config ContainerConfig,
+) (string, string, error) {
+	containerCfg, err := cm.buildContainerConfig(config)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to build container config: %w", err)
+	}
+
+	containerID, err := cm.dockerClient.CreateContainer(ctx, containerCfg)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create container: %w", err)
+	}
+
+	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
+		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		return "", "", fmt.Errorf("failed to start container: %w", err)
+	}
+
+	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
+	if err != nil {
+		cm.logger.Warn("failed to get container IP, trying localhost",
+			zap.String("container_id", containerID), zap.Error(err))
+		containerIP = "127.0.0.1"
+	}
+
+	return containerID, containerIP, nil
+}
+
+// createInstanceAndClient creates an agent instance in the container and returns the client.
+func (cm *ContainerManager) createInstanceAndClient(
+	ctx context.Context,
+	ctl *agentctl.ControlClient,
+	config ContainerConfig,
+	containerID, containerIP string,
+) (*agentctl.Client, error) {
 	agentType := ""
 	if config.AgentConfig != nil {
 		agentType = config.AgentConfig.ID()
@@ -106,7 +163,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:                 config.InstanceID,
 		WorkspacePath:      "/workspace",
-		AgentCommand:       "", // Agent command set via Configure endpoint later
+		AgentCommand:       "",
 		AgentType:          agentType,
 		Env:                config.Credentials,
 		AutoStart:          false,
@@ -120,21 +177,17 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	resp, err := ctl.CreateInstance(ctx, createReq)
 	if err != nil {
 		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", nil, fmt.Errorf("failed to create instance in container: %w", err)
+		return nil, fmt.Errorf("failed to create instance in container: %w", err)
 	}
 
-	// Create agentctl client pointing to the instance port
-	agentctlClient := agentctl.NewClient(containerIP, resp.Port, cm.logger,
+	// ControlClient already has the auth token set via Handshake —
+	// read it back for the per-instance Client.
+	client := agentctl.NewClient(containerIP, resp.Port, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
-		agentctl.WithSessionID(config.SessionID))
+		agentctl.WithSessionID(config.SessionID),
+		agentctl.WithAuthToken(ctl.AuthToken()))
 
-	cm.logger.Info("docker container launched",
-		zap.String("container_id", containerID),
-		zap.String("container_ip", containerIP),
-		zap.String("instance_id", config.InstanceID),
-		zap.Int("instance_port", resp.Port))
-
-	return containerID, agentctlClient, nil
+	return client, nil
 }
 
 // waitForHealth waits for agentctl to be healthy with retries
@@ -345,7 +398,21 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 		env = append(env, fmt.Sprintf("KANDEV_AGENT_PROFILE_ID=%s", config.ProfileInfo.ProfileID))
 	}
 
+	// Inject bootstrap nonce for agentctl handshake (NOT the auth token)
+	if config.BootstrapNonce != "" {
+		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
+	}
+
 	return env
+}
+
+// generateBootstrapNonce creates a cryptographically random 32-byte hex-encoded nonce.
+func generateBootstrapNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate bootstrap nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // ListManagedContainers returns all containers managed by kandev

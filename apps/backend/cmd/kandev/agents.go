@@ -39,6 +39,7 @@ func provideLifecycleManager(
 		cfg.Agent.StandaloneHost,
 		cfg.Agent.StandalonePort,
 		log,
+		agentctl.WithControlAuthToken(cfg.Agent.StandaloneAuthToken),
 	)
 	standaloneExec := lifecycle.NewStandaloneExecutor(
 		controlClient,
@@ -46,6 +47,7 @@ func provideLifecycleManager(
 		cfg.Agent.StandalonePort,
 		log,
 	)
+	standaloneExec.SetAuthToken(cfg.Agent.StandaloneAuthToken)
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
@@ -105,6 +107,7 @@ func provideLifecycleManager(
 	preparerRegistry.Register(agentexecutor.NameDocker, lifecycle.NewDockerPreparer(log))
 	preparerRegistry.Register(agentexecutor.NameSprites, lifecycle.NewSpritesPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
+	lifecycleMgr.SetSecretStore(secretStore)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
