@@ -424,7 +424,8 @@ func wsTriggerIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Contex
 		for _, issue := range newIssues {
 			svc.publishNewIssueEvent(ctx, watch, issue)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_issues": len(newIssues), "issues": newIssues})
+		cleaned, _ := svc.CleanupClosedIssueTasks(ctx, watch)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_issues_found": len(newIssues), "issues": newIssues, "cleaned": cleaned})
 	}
 }
 

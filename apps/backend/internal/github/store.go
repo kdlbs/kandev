@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -401,7 +402,7 @@ func hydrateReviewWatchRepos(rw *ReviewWatch) {
 	if rw.ReposJSON != "" {
 		if err := json.Unmarshal([]byte(rw.ReposJSON), &rw.Repos); err != nil {
 			// Log but don't fail — the watch can still function with no repo filter.
-			fmt.Printf("WARN: failed to unmarshal repos JSON for review watch %s: %v\n", rw.ID, err)
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal repos JSON for review watch %s: %v\n", rw.ID, err)
 		}
 	}
 	if rw.Repos == nil {
@@ -688,7 +689,7 @@ func (s *Store) fetchApprovalRate(ctx context.Context, q *prStatsQuery, stats *P
 func hydrateIssueWatch(iw *IssueWatch) {
 	if iw.ReposJSON != "" {
 		if err := json.Unmarshal([]byte(iw.ReposJSON), &iw.Repos); err != nil {
-			fmt.Printf("WARN: failed to unmarshal repos JSON for issue watch %s: %v\n", iw.ID, err)
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal repos JSON for issue watch %s: %v\n", iw.ID, err)
 		}
 	}
 	if iw.Repos == nil {
@@ -696,7 +697,7 @@ func hydrateIssueWatch(iw *IssueWatch) {
 	}
 	if iw.LabelsJSON != "" {
 		if err := json.Unmarshal([]byte(iw.LabelsJSON), &iw.Labels); err != nil {
-			fmt.Printf("WARN: failed to unmarshal labels JSON for issue watch %s: %v\n", iw.ID, err)
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal labels JSON for issue watch %s: %v\n", iw.ID, err)
 		}
 	}
 	if iw.Labels == nil {
