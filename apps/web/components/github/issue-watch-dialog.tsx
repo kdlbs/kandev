@@ -188,11 +188,33 @@ function IssueWatchFormFields({
   onAllReposChange: (checked: boolean) => void;
   onSelectedReposChange: (repos: RepoFilter[]) => void;
 }) {
-  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(workspaceId);
-  const workflowSteps = useWorkflowSteps(form.workflowId);
-
   return (
     <div className="space-y-5">
+      <IssueFilterFields
+        form={form}
+        setForm={setForm}
+        onAllReposChange={onAllReposChange}
+        onSelectedReposChange={onSelectedReposChange}
+      />
+      <IssueAutomationFields form={form} setForm={setForm} workspaceId={workspaceId} />
+      <IssueSettingsFields form={form} setForm={setForm} />
+    </div>
+  );
+}
+
+function IssueFilterFields({
+  form,
+  setForm,
+  onAllReposChange,
+  onSelectedReposChange,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  onAllReposChange: (checked: boolean) => void;
+  onSelectedReposChange: (repos: RepoFilter[]) => void;
+}) {
+  return (
+    <>
       <SectionHeader>Filter</SectionHeader>
       <RepoFilterSelector
         allRepos={form.allRepos}
@@ -224,7 +246,24 @@ function IssueWatchFormFields({
           GitHub search query. When set, overrides the label filter above.
         </p>
       </div>
+    </>
+  );
+}
 
+function IssueAutomationFields({
+  form,
+  setForm,
+  workspaceId,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  workspaceId: string;
+}) {
+  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(workspaceId);
+  const workflowSteps = useWorkflowSteps(form.workflowId);
+
+  return (
+    <>
       <SectionHeader>Automation</SectionHeader>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
@@ -262,7 +301,6 @@ function IssueWatchFormFields({
           items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
         />
       </div>
-
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
           <Label>Task Prompt</Label>
@@ -282,7 +320,19 @@ function IssueWatchFormFields({
           />
         </div>
       </div>
+    </>
+  );
+}
 
+function IssueSettingsFields({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  return (
+    <>
       <SectionHeader>Settings</SectionHeader>
       <div className="space-y-1.5">
         <Label>Poll Interval (seconds)</Label>
@@ -308,7 +358,7 @@ function IssueWatchFormFields({
           className="cursor-pointer"
         />
       </div>
-    </div>
+    </>
   );
 }
 
@@ -317,6 +367,10 @@ function parseLabels(labelsStr: string): string[] {
     .split(",")
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
+}
+
+function getSaveLabel(watch: IssueWatch | null | undefined): string {
+  return watch ? "Update" : "Create";
 }
 
 export function IssueWatchDialog({
@@ -398,7 +452,7 @@ export function IssueWatchDialog({
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {saving ? "Saving..." : watch ? "Update" : "Create"}
+            {saving ? "Saving..." : getSaveLabel(watch)}
           </Button>
         </DialogFooter>
       </DialogContent>
