@@ -815,12 +815,15 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		svc.processOnEnter(ctx, "t1", session, step, "review task")
 
-		if session.State == models.TaskSessionStateWaitingForInput {
-			t.Errorf("in-memory session.State should NOT be WAITING_FOR_INPUT for passthrough+auto_start, got %q", session.State)
+		// Positive assertion: pin the expected state to RUNNING so any other
+		// unintended mutation (COMPLETED, FAILED, etc.) also fails the test,
+		// not just an erroneous flip to WAITING_FOR_INPUT.
+		if session.State != models.TaskSessionStateRunning {
+			t.Errorf("in-memory session.State should remain RUNNING for passthrough+auto_start, got %q", session.State)
 		}
 		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.State == models.TaskSessionStateWaitingForInput {
-			t.Errorf("DB session.State should NOT be WAITING_FOR_INPUT for passthrough+auto_start, got %q", updated.State)
+		if updated.State != models.TaskSessionStateRunning {
+			t.Errorf("DB session.State should remain RUNNING for passthrough+auto_start, got %q", updated.State)
 		}
 	})
 }
