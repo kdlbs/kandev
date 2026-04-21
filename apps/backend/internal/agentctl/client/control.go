@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -18,6 +19,7 @@ import (
 // It manages creation and deletion of agent instances.
 // Used by both Docker and standalone runtimes.
 type ControlClient struct {
+	mu         sync.Mutex
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
@@ -101,13 +103,16 @@ func NewControlClient(host string, port int, log *logger.Logger, opts ...Control
 // AuthToken returns the current auth token. Used to propagate the token
 // from the ControlClient to per-instance Clients after a handshake.
 func (c *ControlClient) AuthToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.authToken
 }
 
 // SetAuthToken sets the Bearer token for future requests.
 // Used after a successful Handshake to authenticate subsequent calls.
-// Must not be called concurrently with HTTP requests on the same client.
 func (c *ControlClient) SetAuthToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.authToken = token
 	c.httpClient.Transport = &authTransport{token: token}
 }

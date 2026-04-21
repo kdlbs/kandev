@@ -211,8 +211,9 @@ type ExecutorInstance struct {
 	StopReason    string
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
-	// Populated by remote executors (Docker) for encrypted storage in SecretStore.
-	// Empty for standalone (env var auth) and Sprites (no agentctl auth).
+	// Populated by Docker executor for encrypted storage in SecretStore.
+	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
+	// and Sprites (no agentctl auth).
 	AuthToken string
 }
 
