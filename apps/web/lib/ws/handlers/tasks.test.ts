@@ -9,7 +9,17 @@ type KanbanTask = KanbanState["tasks"][number];
 function makeStore(initialTasks: KanbanTask[] = []): StoreApi<AppState> {
   const state: Record<string, unknown> = {
     kanban: { workflowId: "wf-1", steps: [], tasks: initialTasks },
-    kanbanMulti: { snapshots: {}, isLoading: false },
+    kanbanMulti: {
+      snapshots: {
+        "wf-1": {
+          workflowId: "wf-1",
+          workflowName: "W",
+          steps: [],
+          tasks: [...initialTasks],
+        },
+      },
+      isLoading: false,
+    },
     tasks: { activeTaskId: null, activeSessionId: null },
     taskSessionsByTask: { itemsByTaskId: {} },
   };
@@ -23,6 +33,10 @@ function makeStore(initialTasks: KanbanTask[] = []): StoreApi<AppState> {
     destroy: () => {},
     getInitialState: () => state as unknown as AppState,
   } as unknown as StoreApi<AppState>;
+}
+
+function getMultiTask(store: StoreApi<AppState>, id: string) {
+  return store.getState().kanbanMulti.snapshots["wf-1"].tasks.find((t) => t.id === id);
 }
 
 const TASK_UPDATED = "task.updated";
@@ -60,6 +74,7 @@ describe("task.updated handler — isPRReview", () => {
 
     const task = store.getState().kanban.tasks.find((t) => t.id === "task-1")!;
     expect(task.isPRReview).toBe(true);
+    expect(getMultiTask(store, "task-1")?.isPRReview).toBe(true);
   });
 
   it("preserves existing isPRReview when orchestrator payload omits metadata", () => {
@@ -79,6 +94,8 @@ describe("task.updated handler — isPRReview", () => {
     const task = store.getState().kanban.tasks.find((t) => t.id === "task-1")!;
     expect(task.isPRReview).toBe(true);
     expect(task.title).toBe("T2");
+    // Multi-kanban snapshot follows the same path and must also be preserved.
+    expect(getMultiTask(store, "task-1")?.isPRReview).toBe(true);
   });
 
   it("defaults to false for a brand-new task without metadata", () => {

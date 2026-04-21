@@ -60,9 +60,10 @@ function buildNullableFields(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildMetadataFields(payload: any, existing?: KanbanTask) {
-  // Orchestrator-sourced events may omit metadata; fall back to existing values
-  // so watcher-derived flags stay stable across updates after task.created.
-  if (!payload.metadata) {
+  // Orchestrator-sourced events may omit metadata entirely; fall back to
+  // existing values only then. An explicit empty object means the metadata
+  // was sent and should overwrite the derived flags.
+  if (payload.metadata == null) {
     return {
       isPRReview: existing?.isPRReview ?? false,
       isIssueWatch: existing?.isIssueWatch ?? false,

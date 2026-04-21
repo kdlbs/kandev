@@ -37,8 +37,8 @@ func buildTaskEventPayload(task *models.Task) map[string]interface{} {
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":     task.IsEphemeral,
 	}
-	// Include metadata so the frontend can derive flags like isPRReview
-	// (review_watch_id) on WS-driven updates without a page refresh.
+	// Forward metadata so orchestrator-sourced task.updated events carry the
+	// same context as the ones published by the task service.
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
 	}
