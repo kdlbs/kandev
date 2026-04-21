@@ -414,7 +414,12 @@ func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"updated": true})
+	iw, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, iw)
 }
 
 func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
@@ -447,7 +452,7 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 	}
 	// Clean up tasks for closed issues that haven't been started.
 	cleaned, _ := c.service.CleanupClosedIssueTasks(ctx.Request.Context(), watch)
-	ctx.JSON(http.StatusOK, gin.H{"new_issues": len(newIssues), "issues": newIssues, "cleaned": cleaned})
+	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": len(newIssues), "issues": newIssues, "cleaned": cleaned})
 }
 
 func (c *Controller) httpTriggerAllIssueChecks(ctx *gin.Context) {

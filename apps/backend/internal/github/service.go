@@ -1316,7 +1316,11 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 func (s *Service) buildIssueFilter(watch *IssueWatch) string {
 	var parts []string
 	for _, label := range watch.Labels {
-		parts = append(parts, fmt.Sprintf("label:%q", label))
+		if strings.ContainsRune(label, ' ') {
+			parts = append(parts, `label:"`+label+`"`)
+		} else {
+			parts = append(parts, "label:"+label)
+		}
 	}
 	return strings.Join(parts, " ")
 }
