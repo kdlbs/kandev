@@ -602,8 +602,26 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// auto_start_agent enters queueAutoStartPromptIfRunning → queues the
 		// prompt instead of sending it, and PromptTask rejects the drained
 		// queued message because DB state still reads RUNNING.
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
-		session.State = models.TaskSessionStateWaitingForInput
+		//
+		// Skip the flip when:
+		//   - the session was not RUNNING/STARTING (e.g. CREATED, where
+		//     resetAgentContext early-returns true without restarting and
+		//     autoStartStepPrompt routes the prompt through StartCreatedSession);
+		//   - the session is passthrough AND we're about to call
+		//     autoStartPassthroughPrompt below (the agent is actively
+		//     processing the PTY stdin write, not idle).
+		//
+		// We use updateTaskSessionState directly rather than
+		// setSessionWaitingForInput because the latter also flips the task to
+		// TaskStateReview, which would be wrong here — auto_start_agent will
+		// run next and should leave the task as IN_PROGRESS.
+		canFlip := (session.State == models.TaskSessionStateRunning ||
+			session.State == models.TaskSessionStateStarting) &&
+			!(isPassthrough && step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent))
+		if canFlip {
+			s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+			session.State = models.TaskSessionStateWaitingForInput
+		}
 	}
 
 	hasAutoStart := false

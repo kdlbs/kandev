@@ -785,4 +785,42 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			t.Errorf("expected 1 RestartAgentProcess call, got %d", len(agentMgr.restartProcessCalls))
 		}
 	})
+
+	// Regression: passthrough sessions handle auto_start_agent by writing to
+	// PTY stdin via autoStartPassthroughPrompt — the agent is actively
+	// processing immediately after, not idle. We must NOT flip the session to
+	// WAITING_FOR_INPUT, otherwise WS subscribers see "ready for input" while
+	// the agent is mid-prompt.
+	t.Run("reset_agent_context preserves running state for passthrough+auto_start", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1") // RUNNING
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.AgentExecutionID = "exec-pt"
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review Step",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterResetAgentContext},
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
+
+		if session.State == models.TaskSessionStateWaitingForInput {
+			t.Errorf("in-memory session.State should NOT be WAITING_FOR_INPUT for passthrough+auto_start, got %q", session.State)
+		}
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State == models.TaskSessionStateWaitingForInput {
+			t.Errorf("DB session.State should NOT be WAITING_FOR_INPUT for passthrough+auto_start, got %q", updated.State)
+		}
+	})
 }
