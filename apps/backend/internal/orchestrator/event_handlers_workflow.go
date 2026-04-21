@@ -594,34 +594,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 			return
 		}
-		// When processOnEnter runs from an on_turn_complete engine transition,
-		// the in-memory session was loaded at the start of handleAgentReady
-		// before the turn finished — its State is still RUNNING. After a
-		// successful reset the agent is idle, so mark the session
-		// WAITING_FOR_INPUT in both DB and memory. Without this, a subsequent
-		// auto_start_agent enters queueAutoStartPromptIfRunning → queues the
-		// prompt instead of sending it, and PromptTask rejects the drained
-		// queued message because DB state still reads RUNNING.
-		//
-		// Skip the flip when:
-		//   - the session was not RUNNING/STARTING (e.g. CREATED, where
-		//     resetAgentContext early-returns true without restarting and
-		//     autoStartStepPrompt routes the prompt through StartCreatedSession);
-		//   - the session is passthrough AND we're about to call
-		//     autoStartPassthroughPrompt below (the agent is actively
-		//     processing the PTY stdin write, not idle).
-		//
-		// We use updateTaskSessionState directly rather than
-		// setSessionWaitingForInput because the latter also flips the task to
-		// TaskStateReview, which would be wrong here — auto_start_agent will
-		// run next and should leave the task as IN_PROGRESS.
-		canFlip := (session.State == models.TaskSessionStateRunning ||
-			session.State == models.TaskSessionStateStarting) &&
-			!(isPassthrough && step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent))
-		if canFlip {
-			s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
-			session.State = models.TaskSessionStateWaitingForInput
-		}
+		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
 	}
 
 	hasAutoStart := false
@@ -862,6 +835,43 @@ func (s *Service) queueAutoStartPrompt(
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	return nil
+}
+
+// markIdleAfterReset flips a freshly-reset session to WAITING_FOR_INPUT so a
+// following auto_start_agent sends the prompt directly instead of queueing
+// against a stale RUNNING state. processOnEnter runs from handleAgentReady,
+// which loads the session before the turn finishes — the in-memory pointer
+// still reads RUNNING even though the agent is now idle. Without this flip,
+// queueAutoStartPromptIfRunning queues the message and PromptTask later
+// rejects the drained queued send because the DB row also still reads RUNNING.
+//
+// Skip the flip when:
+//   - state was not RUNNING/STARTING (e.g. CREATED, where resetAgentContext
+//     early-returns true without restarting and autoStartStepPrompt routes
+//     the prompt through StartCreatedSession);
+//   - the session is passthrough AND auto_start_agent will write to PTY stdin
+//     next (the agent is actively processing, not idle).
+//
+// Uses updateTaskSessionState directly rather than setSessionWaitingForInput
+// because the helper would also flip the task to TaskStateReview, which would
+// be wrong here — auto_start_agent runs next and should leave the task as
+// IN_PROGRESS.
+func (s *Service) markIdleAfterReset(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	isPassthrough bool,
+) {
+	if session.State != models.TaskSessionStateRunning &&
+		session.State != models.TaskSessionStateStarting {
+		return
+	}
+	if isPassthrough && step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+		return
+	}
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+	session.State = models.TaskSessionStateWaitingForInput
 }
 
 // resetAgentContext restarts the agent subprocess with a fresh ACP session, clearing
