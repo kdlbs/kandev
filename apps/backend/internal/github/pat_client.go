@@ -133,6 +133,29 @@ func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, c
 	return prs, nil
 }
 
+func (c *PATClient) ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+	query := buildIssueSearchQuery(filter, customQuery)
+	var result struct {
+		Items []issueSearchItem `json:"items"`
+	}
+	endpoint := "/search/issues?q=" + url.QueryEscape(query) + "&per_page=50"
+	if err := c.get(ctx, endpoint, &result); err != nil {
+		return nil, fmt.Errorf("search issues: %w", err)
+	}
+	return parseIssueSearchResults(result.Items), nil
+}
+
+func (c *PATClient) GetIssueState(ctx context.Context, owner, repo string, number int) (string, error) {
+	var result struct {
+		State string `json:"state"`
+	}
+	endpoint := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.get(ctx, endpoint, &result); err != nil {
+		return "", fmt.Errorf("get issue state: %w", err)
+	}
+	return result.State, nil
+}
+
 func (c *PATClient) ListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 	var raw []struct {
 		Login     string `json:"login"`

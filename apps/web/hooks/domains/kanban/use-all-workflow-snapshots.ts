@@ -90,6 +90,7 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
     updatedAt: task.updated_at,
     createdAt: task.created_at,
     isPRReview: isPRReviewFromMetadata(task.metadata),
+    ...issueFieldsFromMetadata(task.metadata),
   } as KanbanTask;
 }
 
@@ -97,6 +98,17 @@ function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
   if (!metadata || typeof metadata !== "object") return false;
   const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
   return typeof watchId === "string" && watchId.length > 0;
+}
+
+function issueFieldsFromMetadata(
+  metadata: Task["metadata"],
+): { issueUrl?: string; issueNumber?: number } {
+  if (!metadata || typeof metadata !== "object") return {};
+  const m = metadata as Record<string, unknown>;
+  const url = typeof m["issue_url"] === "string" ? m["issue_url"] : undefined;
+  const num = typeof m["issue_number"] === "number" ? m["issue_number"] : undefined;
+  if (!url && !num) return {};
+  return { issueUrl: url, issueNumber: num };
 }
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {

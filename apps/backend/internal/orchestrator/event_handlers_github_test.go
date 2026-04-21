@@ -91,6 +91,15 @@ func (m *mockGitHubService) ReleaseReviewPRTask(_ context.Context, _, _, _ strin
 	m.releaseCalls++
 	return nil
 }
+func (m *mockGitHubService) ReserveIssueWatchTask(_ context.Context, _, _, _ string, _ int, _ string) (bool, error) {
+	return true, nil
+}
+func (m *mockGitHubService) AssignIssueWatchTaskID(_ context.Context, _, _, _ string, _ int, _ string) error {
+	return nil
+}
+func (m *mockGitHubService) ReleaseIssueWatchTask(_ context.Context, _, _, _ string, _ int) error {
+	return nil
+}
 
 func TestInterpolateReviewPrompt(t *testing.T) {
 	pr := &github.PR{

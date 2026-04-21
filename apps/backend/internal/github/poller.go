@@ -15,6 +15,7 @@ import (
 const (
 	defaultPRPollInterval     = 30 * time.Second
 	defaultReviewPollInterval = 5 * time.Minute
+	defaultIssuePollInterval  = 5 * time.Minute
 )
 
 // TaskBranchInfo describes a task+session that may need a PR watch.
@@ -64,9 +65,10 @@ func (p *Poller) Start(ctx context.Context) {
 	p.started = true
 	ctx, p.cancel = context.WithCancel(ctx)
 
-	p.wg.Add(2) //nolint:mnd
+	p.wg.Add(3) //nolint:mnd
 	go p.prMonitorLoop(ctx)
 	go p.reviewQueueLoop(ctx)
+	go p.issueWatchLoop(ctx)
 
 	p.logger.Info("GitHub poller started")
 }
@@ -354,6 +356,71 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Error(err))
 		} else if cleaned > 0 {
 			p.logger.Info("cleaned up merged review tasks",
+				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
+		}
+	}
+}
+
+// issueWatchLoop polls issue watches for new GitHub issues.
+func (p *Poller) issueWatchLoop(ctx context.Context) {
+	defer p.wg.Done()
+
+	// Run an initial check immediately so existing watches are evaluated on startup.
+	p.checkIssueWatches(ctx)
+
+	ticker := time.NewTicker(defaultIssuePollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.checkIssueWatches(ctx)
+		}
+	}
+}
+
+func (p *Poller) checkIssueWatches(ctx context.Context) {
+	watches, err := p.service.store.ListEnabledIssueWatches(ctx)
+	if err != nil {
+		p.logger.Error("failed to list issue watches", zap.Error(err))
+		return
+	}
+	if len(watches) == 0 {
+		return
+	}
+	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
+	for _, watch := range watches {
+		p.logger.Debug("polling issue watch",
+			zap.String("watch_id", watch.ID),
+			zap.String("workspace_id", watch.WorkspaceID),
+			zap.String("custom_query", watch.CustomQuery),
+			zap.Int("repo_filters", len(watch.Repos)))
+
+		newIssues, err := p.service.CheckIssueWatch(ctx, watch)
+		if err != nil {
+			p.logger.Debug("failed to check issue watch",
+				zap.String("id", watch.ID), zap.Error(err))
+			continue
+		}
+		p.logger.Debug("issue watch checked",
+			zap.String("watch_id", watch.ID),
+			zap.Int("new_issues", len(newIssues)))
+		for _, issue := range newIssues {
+			p.logger.Info("new issue found for watch",
+				zap.String("watch_id", watch.ID),
+				zap.String("repo", issue.RepoOwner+"/"+issue.RepoName),
+				zap.Int("issue_number", issue.Number),
+				zap.String("title", issue.Title))
+			p.service.publishNewIssueEvent(ctx, watch, issue)
+		}
+		// Clean up tasks for closed issues that the user hasn't opened.
+		if cleaned, err := p.service.CleanupClosedIssueTasks(ctx, watch); err != nil {
+			p.logger.Warn("failed to cleanup closed issue tasks",
+				zap.String("watch_id", watch.ID), zap.Error(err))
+		} else if cleaned > 0 {
+			p.logger.Info("cleaned up closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
 	}

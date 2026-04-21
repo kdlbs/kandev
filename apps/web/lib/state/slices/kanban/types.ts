@@ -41,6 +41,8 @@ export type KanbanState = {
     updatedAt?: string;
     createdAt?: string;
     isPRReview?: boolean;
+    issueUrl?: string;
+    issueNumber?: number;
   }>;
   isLoading?: boolean;
 };

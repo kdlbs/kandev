@@ -35,6 +35,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,
         updatedAt: task.updated_at,
+        ...issueFieldsFromMetadata(task.metadata),
       } as KanbanTask;
     })
     .filter((task): task is KanbanTask => task !== null);
@@ -87,4 +88,16 @@ export function taskToState(
           }
         : undefined,
   };
+}
+
+
+function issueFieldsFromMetadata(
+  metadata: Task["metadata"],
+): { issueUrl?: string; issueNumber?: number } {
+  if (!metadata || typeof metadata !== "object") return {};
+  const m = metadata as Record<string, unknown>;
+  const url = typeof m["issue_url"] === "string" ? m["issue_url"] : undefined;
+  const num = typeof m["issue_number"] === "number" ? m["issue_number"] : undefined;
+  if (!url && !num) return {};
+  return { issueUrl: url, issueNumber: num };
 }

@@ -14,6 +14,7 @@ import type {
   TaskPR,
   PRWatch,
   ReviewWatch as GitHubReviewWatch,
+  IssueWatch as GitHubIssueWatch,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -130,6 +131,7 @@ export type {
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,
+  IssueWatchesState,
 } from "./slices";
 
 // Combined AppState type
@@ -197,6 +199,7 @@ export type AppState = {
   taskPRs: (typeof defaultGitHubState)["taskPRs"];
   prWatches: (typeof defaultGitHubState)["prWatches"];
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
+  issueWatches: (typeof defaultGitHubState)["issueWatches"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -229,6 +232,11 @@ export type AppState = {
   addReviewWatch: (watch: GitHubReviewWatch) => void;
   updateReviewWatch: (watch: GitHubReviewWatch) => void;
   removeReviewWatch: (id: string) => void;
+  setIssueWatches: (watches: GitHubIssueWatch[]) => void;
+  setIssueWatchesLoading: (loading: boolean) => void;
+  addIssueWatch: (watch: GitHubIssueWatch) => void;
+  updateIssueWatch: (watch: GitHubIssueWatch) => void;
+  removeIssueWatch: (id: string) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -497,6 +505,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       taskPRs: merged.taskPRs,
       prWatches: merged.prWatches,
       reviewWatches: merged.reviewWatches,
+      issueWatches: merged.issueWatches,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

@@ -80,3 +80,11 @@ func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBr
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
 	return ErrNoClient
 }
+
+func (c *NoopClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetIssueState(context.Context, string, string, int) (string, error) {
+	return "", ErrNoClient
+}

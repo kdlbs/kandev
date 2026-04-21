@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -89,6 +90,9 @@ func provideOrchestrator(
 
 	// Wire review task creator for auto-creating tasks from review watch PRs
 	orchestratorSvc.SetReviewTaskCreator(&reviewTaskCreatorAdapter{svc: taskSvc})
+
+	// Wire issue task creator for auto-creating tasks from issue watch events
+	orchestratorSvc.SetIssueTaskCreator(&issueTaskCreatorAdapter{svc: taskSvc})
 
 	// Wire repository resolver for auto-cloning repos during review task creation
 	if repoCloner != nil {
@@ -214,6 +218,31 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 	})
 }
 
+// issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
+type issueTaskCreatorAdapter struct {
+	svc *taskservice.Service
+}
+
+// CreateIssueTask implements orchestrator.IssueTaskCreator.
+func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orchestrator.IssueTaskRequest) (*taskmodels.Task, error) {
+	var repos []taskservice.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, taskservice.TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    req.WorkspaceID,
+		WorkflowID:     req.WorkflowID,
+		WorkflowStepID: req.WorkflowStepID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Metadata:       req.Metadata,
+		Repositories:   repos,
+	})
+}
+
 // repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.
 type repoLocalPathUpdater struct {
 	svc *taskservice.Service
@@ -267,5 +296,41 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
 	}
+	// When no default branch is known (e.g. issue watch with no PR context),
+	// detect it from the cloned repo's HEAD.
+	if baseBranch == "" && localPath != "" {
+		if detected := detectGitDefaultBranch(localPath); detected != "" {
+			baseBranch = detected
+			// Persist so future lookups don't need detection.
+			if repo.DefaultBranch == "" {
+				db := repo.DefaultBranch
+				repo.DefaultBranch = detected
+				if _, updateErr := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
+					DefaultBranch: &detected,
+				}); updateErr != nil {
+					repo.DefaultBranch = db // revert on failure
+					a.logger.Warn("failed to persist detected default branch",
+						zap.String("repository_id", repo.ID),
+						zap.String("branch", detected),
+						zap.Error(updateErr))
+				}
+			}
+		}
+	}
 	return repo.ID, baseBranch, nil
+}
+
+// detectGitDefaultBranch reads HEAD of a git repository to determine the default branch.
+// Returns empty string on any failure.
+func detectGitDefaultBranch(repoPath string) string {
+	headPath := filepath.Join(repoPath, ".git", "HEAD")
+	content, err := os.ReadFile(headPath)
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(content))
+	if after, ok := strings.CutPrefix(trimmed, "ref: refs/heads/"); ok {
+		return after
+	}
+	return ""
 }

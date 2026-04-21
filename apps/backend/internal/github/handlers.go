@@ -47,6 +47,14 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
+
+	// Issue watch handlers
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchesList, wsListIssueWatches(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchCreate, wsCreateIssueWatch(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchUpdate, wsUpdateIssueWatch(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchDelete, wsDeleteIssueWatch(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueTrigger, wsTriggerIssueWatch(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubIssueTriggerAll, wsTriggerAllIssueChecks(svc, log))
 }
 
 // parseMap parses the WS message payload into a map for simple field lookups.
@@ -337,5 +345,97 @@ func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, ms
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commits": commits})
+	}
+}
+
+// --- Issue watch WS handlers ---
+
+func wsListIssueWatches(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsWithField("workspace_id", func(ctx context.Context, workspaceID string) (interface{}, error) {
+		return svc.ListIssueWatches(ctx, workspaceID)
+	})
+}
+
+func wsCreateIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		var req CreateIssueWatchRequest
+		if err := msg.ParsePayload(&req); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+		}
+		iw, err := svc.CreateIssueWatch(ctx, &req)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, iw)
+	}
+}
+
+func wsUpdateIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		var payload struct {
+			ID string `json:"id"`
+			UpdateIssueWatchRequest
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+		}
+		if payload.ID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
+		}
+		req := payload.UpdateIssueWatchRequest
+		if err := svc.UpdateIssueWatch(ctx, payload.ID, &req); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"updated": true})
+	}
+}
+
+func wsDeleteIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsDeleteByID(svc.DeleteIssueWatch)
+}
+
+func wsTriggerIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+parseErr.Error(), nil)
+		}
+		id, _ := payload["id"].(string)
+		if id == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
+		}
+		watch, err := svc.GetIssueWatch(ctx, id)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if watch == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "issue watch not found", nil)
+		}
+		newIssues, err := svc.CheckIssueWatch(ctx, watch)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		for _, issue := range newIssues {
+			svc.publishNewIssueEvent(ctx, watch, issue)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_issues": len(newIssues), "issues": newIssues})
+	}
+}
+
+func wsTriggerAllIssueChecks(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+parseErr.Error(), nil)
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		count, err := svc.TriggerAllIssueChecks(ctx, workspaceID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]int{"new_issues_found": count})
 	}
 }

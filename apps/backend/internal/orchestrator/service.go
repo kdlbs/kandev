@@ -200,6 +200,9 @@ type Service struct {
 	// Review task creator for auto-creating tasks from review watch PRs
 	reviewTaskCreator ReviewTaskCreator
 
+	// Issue task creator for auto-creating tasks from issue watch events
+	issueTaskCreator IssueTaskCreator
+
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
