@@ -20,9 +20,7 @@ export function IssueTaskIcon({ issueInfo }: { issueInfo: IssueInfo }) {
           <IconCircleDot className="h-3.5 w-3.5" />
         </a>
       </TooltipTrigger>
-      <TooltipContent>
-        Issue #{issueInfo.number}
-      </TooltipContent>
+      <TooltipContent>Issue #{issueInfo.number}</TooltipContent>
     </Tooltip>
   );
 }

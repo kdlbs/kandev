@@ -299,25 +299,32 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	// When no default branch is known (e.g. issue watch with no PR context),
 	// detect it from the cloned repo's HEAD.
 	if baseBranch == "" && localPath != "" {
-		if detected := detectGitDefaultBranch(localPath); detected != "" {
-			baseBranch = detected
-			// Persist so future lookups don't need detection.
-			if repo.DefaultBranch == "" {
-				db := repo.DefaultBranch
-				repo.DefaultBranch = detected
-				if _, updateErr := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
-					DefaultBranch: &detected,
-				}); updateErr != nil {
-					repo.DefaultBranch = db // revert on failure
-					a.logger.Warn("failed to persist detected default branch",
-						zap.String("repository_id", repo.ID),
-						zap.String("branch", detected),
-						zap.Error(updateErr))
-				}
-			}
-		}
+		baseBranch = a.detectAndPersistDefaultBranch(ctx, repo, localPath)
 	}
 	return repo.ID, baseBranch, nil
+}
+
+// detectAndPersistDefaultBranch reads the default branch from the local clone
+// and persists it to the repository record for future lookups.
+func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
+	ctx context.Context, repo *taskmodels.Repository, localPath string,
+) string {
+	detected := detectGitDefaultBranch(localPath)
+	if detected == "" {
+		return ""
+	}
+	if repo.DefaultBranch != "" {
+		return detected
+	}
+	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
+		DefaultBranch: &detected,
+	}); err != nil {
+		a.logger.Warn("failed to persist detected default branch",
+			zap.String("repository_id", repo.ID),
+			zap.String("branch", detected),
+			zap.Error(err))
+	}
+	return detected
 }
 
 // detectGitDefaultBranch reads HEAD of a git repository to determine the default branch.

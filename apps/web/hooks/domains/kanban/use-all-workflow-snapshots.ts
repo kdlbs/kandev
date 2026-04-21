@@ -100,9 +100,10 @@ function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
   return typeof watchId === "string" && watchId.length > 0;
 }
 
-function issueFieldsFromMetadata(
-  metadata: Task["metadata"],
-): { issueUrl?: string; issueNumber?: number } {
+function issueFieldsFromMetadata(metadata: Task["metadata"]): {
+  issueUrl?: string;
+  issueNumber?: number;
+} {
   if (!metadata || typeof metadata !== "object") return {};
   const m = metadata as Record<string, unknown>;
   const url = typeof m["issue_url"] === "string" ? m["issue_url"] : undefined;

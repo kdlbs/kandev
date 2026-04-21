@@ -138,7 +138,7 @@ func (m *MockClient) ListIssues(context.Context, string, string) ([]*Issue, erro
 }
 
 func (m *MockClient) GetIssueState(context.Context, string, string, int) (string, error) {
-	return "open", nil
+	return defaultPRState, nil
 }
 
 func (m *MockClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {

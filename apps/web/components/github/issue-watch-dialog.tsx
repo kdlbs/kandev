@@ -417,9 +417,7 @@ function SelectField(props: {
   return (
     <div className="space-y-1.5">
       <Label>{props.label}</Label>
-      {props.description && (
-        <p className="text-xs text-muted-foreground">{props.description}</p>
-      )}
+      {props.description && <p className="text-xs text-muted-foreground">{props.description}</p>}
       <Select value={props.value || undefined} onValueChange={props.onChange}>
         <SelectTrigger className="cursor-pointer">
           <SelectValue placeholder={props.placeholder} />

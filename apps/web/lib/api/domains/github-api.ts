@@ -188,7 +188,6 @@ export async function fetchGitHubStats(
   return fetchJson<PRStatsResponse>(`/api/v1/github/stats${suffix ? `?${suffix}` : ""}`, options);
 }
 
-
 // Issue watches
 export async function listIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
   const query = new URLSearchParams({ workspace_id: workspaceId });

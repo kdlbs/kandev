@@ -1216,6 +1216,8 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 }
 
 // UpdateIssueWatch updates an issue watch.
+//
+//nolint:dupl // mirrors UpdateReviewWatch — different types, same structure
 func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) error {
 	iw, err := s.store.GetIssueWatch(ctx, id)
 	if err != nil {
@@ -1379,6 +1381,8 @@ func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, repoOwner,
 }
 
 // TriggerAllIssueChecks triggers all issue watches for a workspace.
+//
+//nolint:dupl // mirrors TriggerAllReviewChecks — different types, same structure
 func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string) (int, error) {
 	watches, err := s.store.ListIssueWatches(ctx, workspaceID)
 	if err != nil {
@@ -1419,6 +1423,8 @@ func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string)
 
 // CleanupClosedIssueTasks checks issues tracked by a watch and deletes
 // tasks whose issues are closed and the user hasn't interacted with.
+//
+//nolint:dupl // mirrors CleanupMergedReviewTasks — different types, same structure
 func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
