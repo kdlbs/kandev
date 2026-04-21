@@ -802,10 +802,20 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	return err
 }
 
-// DeleteIssueWatch deletes an issue watch.
+// DeleteIssueWatch deletes an issue watch and all its associated dedup task rows.
 func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM github_issue_watches WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_issue_watches WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Issue Watch Task deduplication ---
