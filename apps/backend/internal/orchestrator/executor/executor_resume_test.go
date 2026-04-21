@@ -294,7 +294,9 @@ func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 // TestResumeSession_FailedStateForceCleansUpStaleState covers the FAILED-task
 // resume scenario where agentctl wrongly reports "starting" and the executionStore
 // still tracks a stale AgentExecution. The pre-launch cleanup should wipe stale
-// state so the fresh LaunchAgent succeeds without hitting the "resume race" path.
+// state so the fresh LaunchAgent succeeds without hitting the "resume race" path —
+// and crucially without probing IsAgentRunningForSession (which would return true
+// for the stale status).
 func TestResumeSession_FailedStateForceCleansUpStaleState(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -307,10 +309,8 @@ func TestResumeSession_FailedStateForceCleansUpStaleState(t *testing.T) {
 				Status:           v1.AgentStatusStarting,
 			}, nil
 		},
-		// Stale agentctl status still reports "starting" for the dead agent.
-		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
-			return true
-		},
+		// Returns true if accidentally called; the assertion below proves it is not.
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return true },
 	}
 	exec := newTestExecutor(t, agentMgr, repo)
 
@@ -327,6 +327,12 @@ func TestResumeSession_FailedStateForceCleansUpStaleState(t *testing.T) {
 	}
 	if agentMgr.launchAgentCallCount != 1 {
 		t.Errorf("expected LaunchAgent called once (no retry), got %d", agentMgr.launchAgentCallCount)
+	}
+	// Terminal-state resume must bypass the stale "starting" liveness probe
+	// entirely — otherwise it would wrongly re-trigger ErrExecutionAlreadyRunning.
+	if len(agentMgr.isAgentRunningForSessionCallArgs) != 0 {
+		t.Errorf("expected IsAgentRunningForSession NOT called for terminal-state resume, got %v",
+			agentMgr.isAgentRunningForSessionCallArgs)
 	}
 }
 
@@ -353,6 +359,99 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 	if agentMgr.cleanupStaleExecutionCallCount != 1 {
 		t.Errorf("expected stale-cleanup called once, got %d", agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if len(agentMgr.isAgentRunningForSessionCallArgs) != 0 {
+		t.Errorf("expected IsAgentRunningForSession NOT called for CANCELLED resume, got %v",
+			agentMgr.isAgentRunningForSessionCallArgs)
+	}
+}
+
+// TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback covers the
+// residual path where the preemptive CleanupStaleExecutionBySessionID is not
+// enough (e.g. the first LaunchAgent still returns "already has an agent running"
+// because a stale executionStore entry survived). For terminal-state sessions
+// the fallback block MUST skip the IsAgentRunningForSession probe and go
+// straight to cleanup+retry, otherwise a stale agentctl "starting" status
+// silently regresses to ErrExecutionAlreadyRunning — the original bug.
+func TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	var launchCalls int
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchCalls++
+			if launchCalls == 1 {
+				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+			}
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		// Live-probe would return true (stale "starting") — if we wrongly call
+		// it, the test fails because err is ErrExecutionAlreadyRunning.
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	execution, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("expected success after fallback cleanup+retry, got: %v", err)
+	}
+	if execution == nil || execution.AgentExecutionID != "exec-new" {
+		t.Fatalf("expected fresh execution exec-new, got %+v", execution)
+	}
+	if agentMgr.launchAgentCallCount != 2 {
+		t.Errorf("expected LaunchAgent called twice (first fails, second succeeds), got %d", agentMgr.launchAgentCallCount)
+	}
+	// 1 preemptive + 1 fallback cleanup.
+	if agentMgr.cleanupStaleExecutionCallCount != 2 {
+		t.Errorf("expected stale-cleanup called twice, got %d", agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if len(agentMgr.isAgentRunningForSessionCallArgs) != 0 {
+		t.Errorf("expected IsAgentRunningForSession NOT called for terminal-state fallback, got %v",
+			agentMgr.isAgentRunningForSessionCallArgs)
+	}
+}
+
+// TestResumeSession_ConcurrentResumeReReadsFreshState exercises the concurrent-
+// resume race: the caller's session object has a stale State=FAILED, but a
+// concurrent resume already transitioned the DB to STARTING. validateAndLockResume
+// MUST re-read the session state inside the lock — otherwise isTerminalSessionState
+// wrongly bypasses the live-execution guard, CleanupStaleExecutionBySessionID
+// wipes the live AgentExecution, and LaunchAgent launches a duplicate agent.
+func TestResumeSession_ConcurrentResumeReReadsFreshState(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+
+	// Caller's in-memory session carries a stale FAILED state.
+	callerSession := *repo.sessions["sess-1"]
+	callerSession.State = models.TaskSessionStateFailed
+
+	// DB truth: a concurrent resume already transitioned this session to STARTING.
+	repo.sessions["sess-1"].State = models.TaskSessionStateStarting
+	repo.sessions["sess-1"].UpdatedAt = time.Now().UTC()
+	repo.sessions["sess-1"].AgentExecutionID = "exec-live"
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			t.Fatal("LaunchAgent must not be called — the live execution guard must reject the duplicate resume")
+			return nil, nil
+		},
+		// Live execution was registered by the first resume; probe returns true.
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), &callerSession, true)
+	if !errors.Is(err, ErrExecutionAlreadyRunning) {
+		t.Fatalf("expected ErrExecutionAlreadyRunning (live agent protected), got: %v", err)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 0 {
+		t.Errorf("cleanup must NOT be called when a live execution is detected, got %d",
+			agentMgr.cleanupStaleExecutionCallCount)
 	}
 }
 

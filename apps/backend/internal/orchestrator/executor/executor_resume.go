@@ -273,8 +273,11 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		// "already has an agent running" fires both for live executions (a concurrent
 		// resume raced us) and stale ones (agent never started or exited without
 		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
-		// healthy agent mid-prompt.
-		if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		// healthy agent mid-prompt. For terminal states the agent is dead by definition,
+		// so skip the probe and go straight to cleanup+retry — this avoids a silent
+		// regression to ErrExecutionAlreadyRunning if the preemptive cleanup above
+		// failed and agentctl still reports a stale "starting" status.
+		if !isTerminalSessionState(session.State) && e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
@@ -368,6 +371,16 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 			zap.String("task_id", session.TaskID),
 			zap.String("session_id", session.ID))
 		return nil, func() {}, ErrNoAgentProfileID
+	}
+
+	// Re-read session state after acquiring the lock. The caller fetched the
+	// session before the lock, so on concurrent resumes the state may be stale —
+	// the first request could have already transitioned FAILED → STARTING, and
+	// a stale FAILED state here would wrongly make isTerminalSessionState bypass
+	// the live-execution guard and cleanup the live agent the first request just
+	// registered, launching a duplicate.
+	if fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID); fetchErr == nil && fresh != nil {
+		session.State = fresh.State
 	}
 
 	// Skip the "already running" rejection for terminal-state sessions — the agent
