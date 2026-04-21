@@ -28,6 +28,9 @@ const (
 // systemTagRegex matches <kandev-system>...</kandev-system> content including the tags.
 var systemTagRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>\s*`)
 
+// placeholderRegex matches {key} placeholders in prompt templates.
+var placeholderRegex = regexp.MustCompile(`\{([A-Za-z0-9_]+)\}`)
+
 // StripSystemContent removes all <kandev-system>...</kandev-system> blocks from text.
 // This is used to hide system-injected content from the frontend UI.
 func StripSystemContent(text string) string {
@@ -117,12 +120,18 @@ func InjectSessionHandover(sessionCount int, planSection, prompt string) string 
 // with the corresponding values from vars. Every placeholder in the template
 // should have a corresponding entry in vars; unreplaced placeholders are left
 // as-is and passed through to the caller.
+//
+// Replacement is single-pass: values that themselves contain placeholder-like
+// text (e.g. a plan section containing "{session_count}") are never re-processed.
 func Resolve(name string, vars map[string]string) string {
-	result := prompts.Get(name)
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "{"+k+"}", v)
-	}
-	return result
+	template := prompts.Get(name)
+	return placeholderRegex.ReplaceAllStringFunc(template, func(placeholder string) string {
+		key := placeholder[1 : len(placeholder)-1]
+		if value, ok := vars[key]; ok {
+			return value
+		}
+		return placeholder
+	})
 }
 
 // InterpolatePlaceholders replaces placeholders in prompt templates with actual values.

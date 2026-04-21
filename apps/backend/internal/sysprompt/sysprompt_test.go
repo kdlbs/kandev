@@ -203,6 +203,14 @@ func TestInjectSessionHandover_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, "Do the work", stripped)
 }
 
+func TestFormatSessionHandover_ValueWithPlaceholderLikeText(t *testing.T) {
+	// Verify single-pass replacement: a plan section containing {session_count}
+	// must not be re-processed.
+	result := FormatSessionHandover(2, "Plan mentions {session_count} literally")
+	assert.Contains(t, result, "2 previous session(s)")
+	assert.Contains(t, result, "Plan mentions {session_count} literally")
+}
+
 // --- InterpolatePlaceholders tests ---
 
 func TestInterpolatePlaceholders_TaskID(t *testing.T) {
