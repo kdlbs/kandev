@@ -455,6 +455,50 @@ func TestResumeSession_ConcurrentResumeReReadsFreshState(t *testing.T) {
 	}
 }
 
+// TestResumeSession_AbortsIfSessionReReadFails locks down the abort-on-error
+// behavior of the in-lock session re-read. If GetTaskSession fails transiently,
+// silently falling back to the caller's (potentially stale) session.State would
+// reintroduce the concurrent-resume duplicate-launch race. The resume MUST
+// return the fetch error without calling LaunchAgent or CleanupStaleExecutionBySessionID.
+func TestResumeSession_AbortsIfSessionReReadFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	wantErr := fmt.Errorf("transient DB error")
+	var callCount int
+	repo.getTaskSessionFunc = func(_ context.Context, _ string) (*models.TaskSession, error) {
+		callCount++
+		// First call is the caller's pre-lock fetch (via the service, not
+		// reached directly in this test). The re-read inside the lock is the
+		// only GetTaskSession the executor makes, so fail it unconditionally.
+		return nil, wantErr
+	}
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			t.Fatal("LaunchAgent must not be called when the session re-read fails")
+			return nil, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected transient DB error to be returned, got: %v", err)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Errorf("expected LaunchAgent NOT called, got %d", agentMgr.launchAgentCallCount)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 0 {
+		t.Errorf("expected CleanupStaleExecutionBySessionID NOT called, got %d",
+			agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if callCount == 0 {
+		t.Error("expected the in-lock session re-read to be called at least once")
+	}
+}
+
 // TestIsTerminalSessionState is a small unit test for the helper that drives
 // both the preemptive cleanup and the validateAndLockResume carve-out.
 func TestIsTerminalSessionState(t *testing.T) {

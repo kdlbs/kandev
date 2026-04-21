@@ -378,8 +378,18 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	// the first request could have already transitioned FAILED → STARTING, and
 	// a stale FAILED state here would wrongly make isTerminalSessionState bypass
 	// the live-execution guard and cleanup the live agent the first request just
-	// registered, launching a duplicate.
-	if fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID); fetchErr == nil && fresh != nil {
+	// registered, launching a duplicate. If the re-read fails, abort rather than
+	// proceeding with uncertain state — silently falling back to the stale state
+	// would reintroduce the exact race this re-read prevents.
+	fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID)
+	if fetchErr != nil {
+		unlock()
+		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
+			zap.String("session_id", session.ID),
+			zap.Error(fetchErr))
+		return nil, func() {}, fetchErr
+	}
+	if fresh != nil {
 		session.State = fresh.State
 	}
 
