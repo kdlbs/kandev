@@ -519,7 +519,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 
 	if planMode && !stepHasPlanMode {
 		var parts []string
-		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(sysprompt.DefaultPlanPrefix, taskID)))
+		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(sysprompt.DefaultPlanPrefix(), taskID)))
 		parts = append(parts, effectivePrompt)
 		effectivePrompt = strings.Join(parts, "\n\n")
 	}
