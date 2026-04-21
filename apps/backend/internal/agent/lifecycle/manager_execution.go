@@ -354,7 +354,6 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 		zap.String("secret_id", secret.ID))
 }
 
-
 // truncateID safely truncates an ID string to maxLen characters.
 func truncateID(id string, maxLen int) string {
 	if len(id) <= maxLen {
