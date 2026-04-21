@@ -175,6 +175,34 @@ func TestInjectPlanMode_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, testPlanPrompt, stripped)
 }
 
+// --- SessionHandover tests ---
+
+func TestSessionHandoverContext_HasPlaceholders(t *testing.T) {
+	ctx := SessionHandoverContext()
+	assert.Contains(t, ctx, "{session_count}")
+	assert.Contains(t, ctx, "{plan_section}")
+}
+
+func TestFormatSessionHandover_InjectsValues(t *testing.T) {
+	result := FormatSessionHandover(3, "PLAN: do the thing")
+	assert.Contains(t, result, "3 previous session(s)")
+	assert.Contains(t, result, "PLAN: do the thing")
+	assert.NotContains(t, result, "{session_count}")
+	assert.NotContains(t, result, "{plan_section}")
+}
+
+func TestInjectSessionHandover_WrapsInSystemTags(t *testing.T) {
+	result := InjectSessionHandover(2, "", "Do the work")
+	assert.True(t, strings.HasPrefix(result, TagStart))
+	assert.Contains(t, result, "Do the work")
+}
+
+func TestInjectSessionHandover_SystemContentStrippable(t *testing.T) {
+	result := InjectSessionHandover(2, "", "Do the work")
+	stripped := StripSystemContent(result)
+	assert.Equal(t, "Do the work", stripped)
+}
+
 // --- InterpolatePlaceholders tests ---
 
 func TestInterpolatePlaceholders_TaskID(t *testing.T) {

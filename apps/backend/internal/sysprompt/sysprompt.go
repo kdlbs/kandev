@@ -114,7 +114,9 @@ func InjectSessionHandover(sessionCount int, planSection, prompt string) string 
 }
 
 // Resolve loads a prompt template by name and replaces all {key} placeholders
-// with the corresponding values from vars.
+// with the corresponding values from vars. Every placeholder in the template
+// should have a corresponding entry in vars; unreplaced placeholders are left
+// as-is and passed through to the caller.
 func Resolve(name string, vars map[string]string) string {
 	result := prompts.Get(name)
 	for k, v := range vars {
