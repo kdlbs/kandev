@@ -1255,7 +1255,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	}
 	if req.PollIntervalSeconds != nil {
 		v := *req.PollIntervalSeconds
-		if v > 0 && v < minWatchPollIntervalSec {
+		if v <= 0 {
+			v = defaultWatchPollIntervalSec
+		}
+		if v < minWatchPollIntervalSec {
 			v = minWatchPollIntervalSec
 		}
 		iw.PollIntervalSeconds = v

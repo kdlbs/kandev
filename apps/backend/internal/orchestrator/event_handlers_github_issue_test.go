@@ -37,7 +37,6 @@ func TestInterpolateIssuePrompt(t *testing.T) {
 				"**Repository:** acme/widget\n" +
 				"**Author:** bob\n" +
 				"**Labels:** bug, priority:high\n\n" +
-				"## Issue Description\n\nLogin fails on mobile\n\n" +
 				"## Instructions\n\n" +
 				"1. Read the issue description carefully and understand the requirements.\n" +
 				"2. Explore the codebase to understand the relevant code and architecture.\n" +

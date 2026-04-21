@@ -6,10 +6,6 @@ You have been assigned a GitHub issue to work on.
 **Author:** {{issue.author}}
 **Labels:** {{issue.labels}}
 
-## Issue Description
-
-{{issue.body}}
-
 ## Instructions
 
 1. Read the issue description carefully and understand the requirements.
