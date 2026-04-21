@@ -327,9 +327,19 @@ func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
 	return detected
 }
 
-// detectGitDefaultBranch reads HEAD of a git repository to determine the default branch.
-// Returns empty string on any failure.
+// detectGitDefaultBranch reads the default branch of a git repository.
+// It first checks refs/remotes/origin/HEAD (set by `git clone`), then
+// falls back to .git/HEAD. Returns empty string on any failure.
 func detectGitDefaultBranch(repoPath string) string {
+	// Prefer the remote default branch pointer set by `git clone`.
+	originHead := filepath.Join(repoPath, ".git", "refs", "remotes", "origin", "HEAD")
+	if content, err := os.ReadFile(originHead); err == nil {
+		trimmed := strings.TrimSpace(string(content))
+		if after, ok := strings.CutPrefix(trimmed, "ref: refs/remotes/origin/"); ok {
+			return after
+		}
+	}
+	// Fall back to the local HEAD (works for fresh clones that lack origin/HEAD).
 	headPath := filepath.Join(repoPath, ".git", "HEAD")
 	content, err := os.ReadFile(headPath)
 	if err != nil {

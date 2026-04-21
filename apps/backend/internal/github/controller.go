@@ -451,7 +451,10 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		c.service.publishNewIssueEvent(ctx.Request.Context(), watch, issue)
 	}
 	// Clean up tasks for closed issues that haven't been started.
-	cleaned, _ := c.service.CleanupClosedIssueTasks(ctx.Request.Context(), watch)
+	cleaned, cleanErr := c.service.CleanupClosedIssueTasks(ctx.Request.Context(), watch)
+	if cleanErr != nil {
+		c.service.logger.Warn("cleanup closed issue tasks failed", zap.String("watch_id", id), zap.Error(cleanErr))
+	}
 	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": len(newIssues), "issues": newIssues, "cleaned": cleaned})
 }
 

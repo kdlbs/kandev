@@ -400,7 +400,7 @@ func wsDeleteIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context
 	return wsDeleteByID(svc.DeleteIssueWatch)
 }
 
-func wsTriggerIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+func wsTriggerIssueWatch(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		payload, parseErr := parseMap(msg)
 		if parseErr != nil {
@@ -424,7 +424,10 @@ func wsTriggerIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Contex
 		for _, issue := range newIssues {
 			svc.publishNewIssueEvent(ctx, watch, issue)
 		}
-		cleaned, _ := svc.CleanupClosedIssueTasks(ctx, watch)
+		cleaned, cleanErr := svc.CleanupClosedIssueTasks(ctx, watch)
+		if cleanErr != nil {
+			log.Warn("cleanup closed issue tasks failed", zap.String("watch_id", id), zap.Error(cleanErr))
+		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_issues_found": len(newIssues), "issues": newIssues, "cleaned": cleaned})
 	}
 }

@@ -1254,7 +1254,11 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		iw.Enabled = *req.Enabled
 	}
 	if req.PollIntervalSeconds != nil {
-		iw.PollIntervalSeconds = *req.PollIntervalSeconds
+		v := *req.PollIntervalSeconds
+		if v > 0 && v < minWatchPollIntervalSec {
+			v = minWatchPollIntervalSec
+		}
+		iw.PollIntervalSeconds = v
 	}
 	return s.store.UpdateIssueWatch(ctx, iw)
 }
@@ -1418,6 +1422,10 @@ func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string)
 			s.publishNewIssueEvent(ctx, watch, issue)
 		}
 		totalNew += len(newIssues)
+		if _, cleanErr := s.CleanupClosedIssueTasks(ctx, watch); cleanErr != nil {
+			s.logger.Warn("cleanup closed issue tasks failed",
+				zap.String("watch_id", watch.ID), zap.Error(cleanErr))
+		}
 	}
 	s.logger.Info("issue checks completed",
 		zap.String("workspace_id", workspaceID),
@@ -1430,7 +1438,7 @@ func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string)
 //
 //nolint:dupl // mirrors CleanupMergedReviewTasks — different types, same structure
 func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch) (int, error) {
-	if s.client == nil || s.taskDeleter == nil {
+	if s.client == nil || s.taskDeleter == nil || s.taskSessionChecker == nil {
 		return 0, nil
 	}
 	issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, watch.ID)
