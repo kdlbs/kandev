@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
@@ -305,10 +306,13 @@ type AgentProfileInfo struct {
 	AgentName           string // e.g., "auggie", "claude", "codex"
 	Model               string // applied via ACP session/set_model at session start
 	Mode                string // applied via ACP session/set_mode at session start (empty = use agent default)
-	AllowIndexing       bool   // auggie-only CLI flag
+	AllowIndexing       bool   // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume
 	SupportsMCP         bool
+	// CLIFlags is the resolved user-configurable list of CLI flags for this
+	// profile. Passed verbatim to cliflags.Resolve at launch time.
+	CLIFlags []settingsmodels.CLIFlag
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.

@@ -220,6 +220,15 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		return
 	}
 
+	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
+	for i, att := range queuedMsg.Attachments {
+		attachments[i] = v1.MessageAttachment{
+			Type:     att.Type,
+			Data:     att.Data,
+			MimeType: att.MimeType,
+		}
+	}
+
 	// Create user message for the queued message (so it appears in chat history)
 	if s.messageCreator != nil {
 		turnID := s.getActiveTurnID(queuedMsg.SessionID)
@@ -229,9 +238,9 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			turnID = s.getActiveTurnID(queuedMsg.SessionID)
 		}
 
-		// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
-		// This matches the behavior of direct prompts
-		meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
+		meta := NewUserMessageMeta().
+			WithPlanMode(queuedMsg.PlanMode).
+			WithAttachments(attachments)
 		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
 		if err != nil {
 			s.logger.Error("failed to create user message for queued message",
@@ -246,16 +255,6 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// workflow transitions (e.g. move_to_next) to fire on auto-started prompts.
 	if session, sErr := s.repo.GetTaskSession(promptCtx, queuedMsg.SessionID); sErr == nil {
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
-	}
-
-	// Convert queue attachments to v1 attachments
-	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
-	for i, att := range queuedMsg.Attachments {
-		attachments[i] = v1.MessageAttachment{
-			Type:     att.Type,
-			Data:     att.Data,
-			MimeType: att.MimeType,
-		}
 	}
 
 	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,

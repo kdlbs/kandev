@@ -24,6 +24,9 @@ steps:
 
       {{task_prompt}}
 
+      STEP 0: CREATE A TASK LIST
+      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
+
       STEP 1: UNDERSTAND THE REQUIREMENTS
       If anything is unclear or ambiguous, ask the user clarifying questions using the ask_user_question_kandev tool before proceeding.
 

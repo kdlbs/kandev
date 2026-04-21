@@ -10,6 +10,7 @@ const baseProfile: AgentProfile = {
   model: "mock-fast",
   mode: "default",
   allow_indexing: false,
+  cli_flags: [],
   cli_passthrough: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
@@ -19,6 +20,8 @@ const draftFrom = (saved: AgentProfile, overrides: Partial<DraftProfile> = {}): 
   ...saved,
   ...overrides,
 });
+
+const ALLOW_ALL_TOOLS_FLAG = "--allow-all-tools";
 
 describe("isProfileDirty", () => {
   it("returns false when draft equals saved", () => {
@@ -50,5 +53,30 @@ describe("isProfileDirty", () => {
 
   it("returns true when there is no saved profile", () => {
     expect(isProfileDirty(draftFrom(baseProfile))).toBe(true);
+  });
+
+  it("returns true when cli_flags list changes", () => {
+    const draft = draftFrom(baseProfile, {
+      cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
+    });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("returns true when a cli_flag enabled state changes", () => {
+    const saved: AgentProfile = {
+      ...baseProfile,
+      cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: false, description: "" }],
+    };
+    const draft = draftFrom(saved, {
+      cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
+    });
+    expect(isProfileDirty(draft, saved)).toBe(true);
+  });
+
+  it("returns false when cli_flags are equal", () => {
+    const flags = [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "desc" }];
+    const saved: AgentProfile = { ...baseProfile, cli_flags: flags };
+    const draft = draftFrom(saved, { cli_flags: [...flags] });
+    expect(isProfileDirty(draft, saved)).toBe(false);
   });
 });

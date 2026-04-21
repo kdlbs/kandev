@@ -83,6 +83,7 @@ function buildAgentSettings(
       name: string;
       model?: string | null;
       cli_passthrough?: boolean | null;
+      cli_flags?: AgentProfile["cli_flags"] | null;
     }[];
   }[],
 ): Record<string, AgentSetting> {
@@ -102,6 +103,7 @@ function buildAgentSettings(
           model: profile.model || aa.model_config.default_model,
           mode: (profile as { mode?: string }).mode ?? aa.model_config.current_mode_id ?? "",
           cli_passthrough: profile.cli_passthrough ?? false,
+          cli_flags: profile.cli_flags ?? [],
           ...perms,
         },
         dirty: false,
@@ -228,6 +230,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             model: s.formData.model,
             ...permissionsToProfilePatch(s.formData),
             cli_passthrough: s.formData.cli_passthrough,
+            cli_flags: s.formData.cli_flags,
           }),
         ),
     );

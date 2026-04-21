@@ -25,7 +25,9 @@ import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
+import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import type {
+  CLIFlag,
   CommandEntry,
   ModelConfig,
   ModeEntry,
@@ -39,6 +41,7 @@ export type ProfileFormData = {
   model: string;
   mode: string;
   cli_passthrough: boolean;
+  cli_flags: CLIFlag[];
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -53,6 +56,12 @@ export type ProfileFormFieldsProps = {
   variant?: "default" | "compact";
   hideNameField?: boolean;
   lockPassthrough?: boolean;
+  /**
+   * When true, the custom-flag list + Add form on CLIFlagsField is
+   * hidden. Curated predefined toggles still render. Used by the
+   * onboarding flow to keep the first-run UI narrow.
+   */
+  hideCustomCLIFlags?: boolean;
 };
 
 type PermissionToggleProps = {
@@ -81,6 +90,7 @@ function PermissionToggles({
         {PERMISSION_KEYS.map((key) => {
           const setting = permissionSettings[key];
           if (!setting?.supported) return null;
+          if (setting.apply_method === "cli_flag") return null;
           return (
             <div key={key} className="flex items-center justify-between gap-2">
               <div className="space-y-0.5">
@@ -122,6 +132,7 @@ function PermissionToggles({
       {PERMISSION_KEYS.map((key) => {
         const setting = permissionSettings[key];
         if (!setting?.supported) return null;
+        if (setting.apply_method === "cli_flag") return null;
         return (
           <div key={key} className="flex items-center justify-between rounded-md border p-3">
             <div className="space-y-1">
@@ -515,6 +526,7 @@ export function ProfileFormFields({
   variant = "default",
   hideNameField = false,
   lockPassthrough = false,
+  hideCustomCLIFlags = false,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
   const caps = useAgentCapabilities(agentName, modelConfig);
@@ -553,6 +565,14 @@ export function ProfileFormFields({
         passthroughConfig={passthroughConfig}
         variant={variant}
         lockPassthrough={lockPassthrough}
+      />
+
+      <CLIFlagsField
+        flags={profile.cli_flags}
+        onChange={(next) => onChange({ cli_flags: next })}
+        permissionSettings={permissionSettings}
+        variant={variant}
+        hideCustomFlags={hideCustomCLIFlags}
       />
     </div>
   );

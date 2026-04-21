@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,6 +102,36 @@ const createTablesSQL = `
 		task_id TEXT NOT NULL,
 		created_at DATETIME NOT NULL,
 		UNIQUE(review_watch_id, repo_owner, repo_name, pr_number)
+	);
+
+	CREATE TABLE IF NOT EXISTS github_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repos TEXT NOT NULL DEFAULT '[]',
+		agent_profile_id TEXT NOT NULL,
+		executor_profile_id TEXT NOT NULL,
+		prompt TEXT DEFAULT '',
+		labels TEXT NOT NULL DEFAULT '[]',
+		custom_query TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN DEFAULT 1,
+		poll_interval_seconds INTEGER DEFAULT 300,
+		last_polled_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS github_issue_watch_tasks (
+		id TEXT PRIMARY KEY,
+		issue_watch_id TEXT NOT NULL,
+		repo_owner TEXT NOT NULL DEFAULT '',
+		repo_name TEXT NOT NULL DEFAULT '',
+		issue_number INTEGER NOT NULL,
+		issue_url TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(issue_watch_id, repo_owner, repo_name, issue_number)
 	);
 `
 
@@ -371,7 +402,7 @@ func hydrateReviewWatchRepos(rw *ReviewWatch) {
 	if rw.ReposJSON != "" {
 		if err := json.Unmarshal([]byte(rw.ReposJSON), &rw.Repos); err != nil {
 			// Log but don't fail — the watch can still function with no repo filter.
-			fmt.Printf("WARN: failed to unmarshal repos JSON for review watch %s: %v\n", rw.ID, err)
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal repos JSON for review watch %s: %v\n", rw.ID, err)
 		}
 	}
 	if rw.Repos == nil {
@@ -650,4 +681,210 @@ func (s *Store) fetchApprovalRate(ctx context.Context, q *prStatsQuery, stats *P
 		stats.ApprovalRate = float64(approved) / float64(totalReviewed)
 	}
 	return nil
+}
+
+// --- Issue Watch operations ---
+
+// hydrateIssueWatch unmarshals JSON fields into their Go slices.
+func hydrateIssueWatch(iw *IssueWatch) {
+	if iw.ReposJSON != "" {
+		if err := json.Unmarshal([]byte(iw.ReposJSON), &iw.Repos); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal repos JSON for issue watch %s: %v\n", iw.ID, err)
+		}
+	}
+	if iw.Repos == nil {
+		iw.Repos = []RepoFilter{}
+	}
+	if iw.LabelsJSON != "" {
+		if err := json.Unmarshal([]byte(iw.LabelsJSON), &iw.Labels); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN: failed to unmarshal labels JSON for issue watch %s: %v\n", iw.ID, err)
+		}
+	}
+	if iw.Labels == nil {
+		iw.Labels = []string{}
+	}
+}
+
+// CreateIssueWatch creates a new issue watch configuration.
+func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
+	if iw.ID == "" {
+		iw.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	iw.CreatedAt = now
+	iw.UpdatedAt = now
+	reposJSON, err := json.Marshal(iw.Repos)
+	if err != nil {
+		return fmt.Errorf("marshal repos: %w", err)
+	}
+	iw.ReposJSON = string(reposJSON)
+	labelsJSON, err := json.Marshal(iw.Labels)
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+	iw.LabelsJSON = string(labelsJSON)
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO github_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
+			agent_profile_id, executor_profile_id, prompt, labels, custom_query,
+			enabled, poll_interval_seconds, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		iw.ID, iw.WorkspaceID, iw.WorkflowID, iw.WorkflowStepID, iw.ReposJSON,
+		iw.AgentProfileID, iw.ExecutorProfileID, iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
+		iw.Enabled, iw.PollIntervalSeconds, iw.CreatedAt, iw.UpdatedAt)
+	return err
+}
+
+// GetIssueWatch returns an issue watch by ID.
+func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
+	var iw IssueWatch
+	err := s.ro.GetContext(ctx, &iw, `SELECT * FROM github_issue_watches WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	hydrateIssueWatch(&iw)
+	return &iw, nil
+}
+
+// ListIssueWatches returns all issue watches for a workspace.
+func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	var watches []*IssueWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_issue_watches WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range watches {
+		hydrateIssueWatch(w)
+	}
+	return watches, nil
+}
+
+// ListEnabledIssueWatches returns all enabled issue watches.
+func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	var watches []*IssueWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_issue_watches WHERE enabled = 1 ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range watches {
+		hydrateIssueWatch(w)
+	}
+	return watches, nil
+}
+
+// UpdateIssueWatch updates an issue watch.
+func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
+	iw.UpdatedAt = time.Now().UTC()
+	reposJSON, err := json.Marshal(iw.Repos)
+	if err != nil {
+		return fmt.Errorf("marshal repos: %w", err)
+	}
+	iw.ReposJSON = string(reposJSON)
+	labelsJSON, err := json.Marshal(iw.Labels)
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+	iw.LabelsJSON = string(labelsJSON)
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE github_issue_watches SET workflow_id = ?, workflow_step_id = ?, repos = ?,
+			agent_profile_id = ?, executor_profile_id = ?,
+			prompt = ?, labels = ?, custom_query = ?,
+			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+		WHERE id = ?`,
+		iw.WorkflowID, iw.WorkflowStepID, iw.ReposJSON,
+		iw.AgentProfileID, iw.ExecutorProfileID,
+		iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
+		iw.Enabled, iw.PollIntervalSeconds, iw.LastPolledAt, iw.UpdatedAt, iw.ID)
+	return err
+}
+
+// DeleteIssueWatch deletes an issue watch and all its associated dedup task rows.
+func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_issue_watches WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// --- Issue Watch Task deduplication ---
+
+// ReserveIssueWatchTask atomically claims a slot for a (watch, repo, issue) tuple.
+// Returns true if this caller won the race and should proceed to create the task.
+func (s *Store) ReserveIssueWatchTask(ctx context.Context, issueWatchID, repoOwner, repoName string, issueNumber int, issueURL string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO github_issue_watch_tasks (id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), issueWatchID, repoOwner, repoName, issueNumber, issueURL, "", time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
+// AssignIssueWatchTaskID sets the task_id on a reserved dedup row.
+func (s *Store) AssignIssueWatchTaskID(ctx context.Context, issueWatchID, repoOwner, repoName string, issueNumber int, taskID string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE github_issue_watch_tasks SET task_id = ?
+		WHERE issue_watch_id = ? AND repo_owner = ? AND repo_name = ? AND issue_number = ?`,
+		taskID, issueWatchID, repoOwner, repoName, issueNumber)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("assign task ID: reservation row not found for watch=%s issue=%d", issueWatchID, issueNumber)
+	}
+	return nil
+}
+
+// ReleaseIssueWatchTask removes a reservation for a (watch, repo, issue) tuple.
+func (s *Store) ReleaseIssueWatchTask(ctx context.Context, issueWatchID, repoOwner, repoName string, issueNumber int) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM github_issue_watch_tasks
+		WHERE issue_watch_id = ? AND repo_owner = ? AND repo_name = ? AND issue_number = ?`,
+		issueWatchID, repoOwner, repoName, issueNumber)
+	return err
+}
+
+// HasIssueWatchTask checks if a task was already created for an issue in an issue watch.
+func (s *Store) HasIssueWatchTask(ctx context.Context, issueWatchID, repoOwner, repoName string, issueNumber int) (bool, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM github_issue_watch_tasks WHERE issue_watch_id = ? AND repo_owner = ? AND repo_name = ? AND issue_number = ?`,
+		issueWatchID, repoOwner, repoName, issueNumber)
+	return count > 0, err
+}
+
+// ListIssueWatchTasksByWatch lists all dedup records for a given issue watch.
+func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) ([]*IssueWatchTask, error) {
+	var tasks []*IssueWatchTask
+	err := s.ro.SelectContext(ctx, &tasks,
+		`SELECT id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at
+		 FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	return tasks, err
+}
+
+// DeleteIssueWatchTask deletes a dedup record by ID.
+func (s *Store) DeleteIssueWatchTask(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM github_issue_watch_tasks WHERE id = ?`, id)
+	return err
 }

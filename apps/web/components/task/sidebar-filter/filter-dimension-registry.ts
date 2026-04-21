@@ -29,6 +29,14 @@ export const DIMENSION_METAS: DimensionMeta[] = [
     defaultValue: true,
   },
   {
+    dimension: "isIssueWatch",
+    label: "Issue watch",
+    valueKind: "boolean",
+    ops: ["is", "is_not"],
+    defaultOp: "is",
+    defaultValue: true,
+  },
+  {
     dimension: "archived",
     label: "Archived",
     valueKind: "boolean",

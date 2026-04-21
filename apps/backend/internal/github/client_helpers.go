@@ -304,6 +304,90 @@ func convertSearchItemToPR(
 	}
 }
 
+// buildIssueSearchQuery assembles a GitHub search query for issues.
+// When customQuery is non-empty, it is used verbatim as the entire query.
+// Otherwise a query is built from optional filter qualifiers.
+func buildIssueSearchQuery(filter, customQuery string) string {
+	if customQuery != "" {
+		return customQuery
+	}
+	base := "type:issue state:open"
+	if filter != "" {
+		base += " " + filter
+	}
+	return base
+}
+
+// issueSearchItem is an issue item from the GitHub search API.
+type issueSearchItem struct {
+	Number        int       `json:"number"`
+	Title         string    `json:"title"`
+	Body          string    `json:"body"`
+	HTMLURL       string    `json:"html_url"`
+	State         string    `json:"state"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	ClosedAt      *string   `json:"closed_at"`
+	RepositoryURL string    `json:"repository_url"`
+	User          struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	PullRequest *struct {
+		URL string `json:"url"`
+	} `json:"pull_request"`
+}
+
+// convertSearchItemToIssue converts a search API item into an Issue struct.
+func convertSearchItemToIssue(item issueSearchItem) *Issue {
+	owner, repo := parseRepoURL(item.RepositoryURL)
+	labels := make([]string, len(item.Labels))
+	for i, l := range item.Labels {
+		labels[i] = l.Name
+	}
+	assignees := make([]string, len(item.Assignees))
+	for i, a := range item.Assignees {
+		assignees[i] = a.Login
+	}
+	issue := &Issue{
+		Number:      item.Number,
+		Title:       item.Title,
+		Body:        item.Body,
+		HTMLURL:     item.HTMLURL,
+		State:       item.State,
+		AuthorLogin: item.User.Login,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		Labels:      labels,
+		Assignees:   assignees,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
+	}
+	if item.ClosedAt != nil {
+		issue.ClosedAt = parseTimePtr(*item.ClosedAt)
+	}
+	return issue
+}
+
+// parseIssueSearchResults parses GitHub search API response items into Issue structs,
+// filtering out any pull requests (which also appear in search/issues results).
+func parseIssueSearchResults(items []issueSearchItem) []*Issue {
+	var issues []*Issue
+	for _, item := range items {
+		// GitHub search/issues returns both issues and PRs; skip PRs
+		if item.PullRequest != nil {
+			continue
+		}
+		issues = append(issues, convertSearchItemToIssue(item))
+	}
+	return issues
+}
+
 // latestReviewByAuthor returns a map of the most recent review per author.
 func latestReviewByAuthor(reviews []PRReview) map[string]PRReview {
 	latest := make(map[string]PRReview)

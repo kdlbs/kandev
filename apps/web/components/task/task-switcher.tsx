@@ -49,6 +49,8 @@ export type TaskSwitcherItem = {
   parentTaskId?: string;
   prInfo?: { number: number; state: string };
   isPRReview?: boolean;
+  isIssueWatch?: boolean;
+  issueInfo?: { url: string; number: number };
 };
 
 type StepDef = { id: string; title: string; color?: string };
@@ -182,6 +184,7 @@ function GroupSection({
           updatedAt={task.updatedAt}
           repositories={task.repositories}
           prInfo={task.prInfo}
+          issueInfo={task.issueInfo}
           isSubTask={isSubTask}
           onClick={() => onSelectTask(task.id)}
           isDeleting={deletingTaskId === task.id}

@@ -586,8 +586,23 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 
 	sessionID := execution.SessionID
 
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+
 	// Wait a bit for the old process to be cleaned up from the process map
 	time.Sleep(cleanupDelay)
+
+	// Shutdown may have started during cleanupDelay; re-check before emitting
+	// the "attempting auto-restart" log and the terminal banner, which would
+	// otherwise mislead the user during a clean shutdown.
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
 
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
@@ -622,6 +637,14 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 
 	// Delay before restart
 	time.Sleep(restartDelay)
+
+	// Shutdown may have started during the sleep; re-check before touching
+	// state that the teardown is racing to remove.
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
 
 	// Check WebSocket is still connected after delay (use session-level tracking)
 	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {

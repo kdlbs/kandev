@@ -2,6 +2,25 @@
 
 All notable changes to Kandev.
 
+## 0.36 - 2026-04-20
+
+### Features
+
+- session tabs on kanban preview panel ([#648](https://github.com/kdlbs/kandev/pull/648))
+
+### Bug Fixes
+
+- prevent kanban topbar search from overlapping right buttons ([#661](https://github.com/kdlbs/kandev/pull/661))
+- enable Start task button when workflow provides agent override ([#665](https://github.com/kdlbs/kandev/pull/665))
+- default dev mode db to <repo>/.kandev-dev/data ([#664](https://github.com/kdlbs/kandev/pull/664))
+- stop "Preparing workspace" flashing on step move and refresh stale chats ([#663](https://github.com/kdlbs/kandev/pull/663))
+- detect standalone server.js at non-default path ([#660](https://github.com/kdlbs/kandev/pull/660))
+- persist attachments on queued message when dequeued ([#659](https://github.com/kdlbs/kandev/pull/659))
+- silence spurious errors during Ctrl+C shutdown ([#658](https://github.com/kdlbs/kandev/pull/658))
+- exclude ephemeral tasks from stats page queries ([#656](https://github.com/kdlbs/kandev/pull/656))
+- add edit icon hint to utility agent rows ([#657](https://github.com/kdlbs/kandev/pull/657))
+- tighten default template prompts for commits, todos, and PR review ([#655](https://github.com/kdlbs/kandev/pull/655))
+
 ## 0.35 - 2026-04-20
 
 ### Features

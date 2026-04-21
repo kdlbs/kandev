@@ -110,5 +110,6 @@ export type {
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,
+  IssueWatchesState,
 } from "./github/types";
 export type { Repository, Branch } from "@/lib/types/http";

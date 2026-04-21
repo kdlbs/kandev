@@ -376,8 +376,10 @@ func startGatewayAndServe(
 	// Long-lived per-agent-type agentctl instances for boot-time capability
 	// probes, on-demand refresh via settings, and sessionless utility prompts
 	// (e.g. "enhance prompt" before a task/session exists).
-	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log)
+	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
+		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
+	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -407,8 +409,6 @@ func startGatewayAndServe(
 	log.Info("Orchestrator initialized")
 
 	services.Task.StartAutoArchiveLoop(ctx)
-
-	subscribeEventBusHandlers(eventBus, gateway, log)
 
 	// ============================================
 	// HTTP SERVER
@@ -496,32 +496,6 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
-	}
-}
-
-// subscribeEventBusHandlers subscribes WebSocket broadcast handlers to the event bus.
-func subscribeEventBusHandlers(eventBus bus.EventBus, gateway *gateways.Gateway, log *logger.Logger) {
-	if _, err := eventBus.Subscribe(events.MessageAdded, newMessageAddedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.added events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
-	}
-	if _, err := eventBus.Subscribe(events.MessageUpdated, newMessageUpdatedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
-	}
-	if _, err := eventBus.Subscribe(events.TaskSessionStateChanged, newSessionStateChangedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
-	}
-
-	// GitHub task-PR update broadcasts
-	if _, err := eventBus.Subscribe(events.GitHubTaskPRUpdated, newGitHubTaskPRUpdatedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to github.task_pr.updated events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to github.task_pr.updated events for WebSocket broadcasting")
 	}
 }
 

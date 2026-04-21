@@ -1,5 +1,10 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
+import {
+  isPRReviewFromMetadata,
+  isIssueWatchFromMetadata,
+  issueFieldsFromMetadata,
+} from "@/lib/metadata-utils";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -35,6 +40,9 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,
         updatedAt: task.updated_at,
+        isPRReview: isPRReviewFromMetadata(task.metadata),
+        isIssueWatch: isIssueWatchFromMetadata(task.metadata),
+        ...issueFieldsFromMetadata(task.metadata),
       } as KanbanTask;
     })
     .filter((task): task is KanbanTask => task !== null);

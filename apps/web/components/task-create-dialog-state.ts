@@ -524,11 +524,22 @@ export function useDialogComputed({
   repositories,
   workflows,
 }: DialogComputedArgs): DialogComputedValues {
-  const isPassthroughProfile = useMemo(
-    () => computePassthroughProfile(fs.agentProfileId, agentProfiles),
-    [fs.agentProfileId, agentProfiles],
-  );
   const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId;
+  // Compute workflow agent lock directly from data — avoids effect timing issues.
+  const workflowAgentProfileId = (() => {
+    const wfId = effectiveWorkflowId;
+    if (!wfId) return "";
+    const wf = workflows.find((w) => w.id === wfId);
+    return wf?.agent_profile_id ?? "";
+  })();
+  const workflowAgentLocked = Boolean(workflowAgentProfileId);
+  // fs.agentProfileId lags behind the workflow override on dialog re-open
+  // (effect deps don't change), so fall back to the synchronous value.
+  const effectiveAgentProfileId = fs.agentProfileId || workflowAgentProfileId;
+  const isPassthroughProfile = useMemo(
+    () => computePassthroughProfile(effectiveAgentProfileId, agentProfiles),
+    [effectiveAgentProfileId, agentProfiles],
+  );
   const effectiveDefaultStepId = computeEffectiveStepId(
     fs.selectedWorkflowId,
     workflowId,
@@ -563,14 +574,6 @@ export function useDialogComputed({
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
-  // Compute workflow agent lock directly from data — avoids effect timing issues.
-  const workflowAgentProfileId = (() => {
-    const wfId = effectiveWorkflowId;
-    if (!wfId) return "";
-    const wf = workflows.find((w) => w.id === wfId);
-    return wf?.agent_profile_id ?? "";
-  })();
-  const workflowAgentLocked = Boolean(workflowAgentProfileId);
   return {
     isPassthroughProfile,
     effectiveWorkflowId,
@@ -587,6 +590,7 @@ export function useDialogComputed({
     executorsLoading,
     workflowAgentLocked,
     workflowAgentProfileId,
+    effectiveAgentProfileId,
   };
 }
 

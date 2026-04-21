@@ -6,6 +6,7 @@ export const defaultGitHubState: GitHubSliceState = {
   taskPRs: { byTaskId: {}, loaded: false, loading: false },
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
+  issueWatches: { items: [], loaded: false, loading: false },
 };
 
 type ImmerSet = Parameters<
@@ -64,6 +65,11 @@ function createWatchActions(
   | "addReviewWatch"
   | "updateReviewWatch"
   | "removeReviewWatch"
+  | "setIssueWatches"
+  | "setIssueWatchesLoading"
+  | "addIssueWatch"
+  | "updateIssueWatch"
+  | "removeIssueWatch"
 > {
   return {
     setPRWatches: (watches) =>
@@ -106,6 +112,34 @@ function createWatchActions(
     removeReviewWatch: (id) =>
       set((draft) => {
         draft.reviewWatches.items = draft.reviewWatches.items.filter((w) => w.id !== id);
+      }),
+    setIssueWatches: (watches) =>
+      set((draft) => {
+        draft.issueWatches.items = watches;
+        draft.issueWatches.loaded = true;
+      }),
+    setIssueWatchesLoading: (loading) =>
+      set((draft) => {
+        draft.issueWatches.loading = loading;
+      }),
+    addIssueWatch: (watch) =>
+      set((draft) => {
+        draft.issueWatches.items = [
+          ...draft.issueWatches.items.filter((w) => w.id !== watch.id),
+          watch,
+        ];
+        draft.issueWatches.loaded = true;
+      }),
+    updateIssueWatch: (watch) =>
+      set((draft) => {
+        const idx = draft.issueWatches.items.findIndex((w) => w.id === watch.id);
+        if (idx >= 0) {
+          draft.issueWatches.items[idx] = watch;
+        }
+      }),
+    removeIssueWatch: (id) =>
+      set((draft) => {
+        draft.issueWatches.items = draft.issueWatches.items.filter((w) => w.id !== id);
       }),
   };
 }

@@ -18,10 +18,16 @@ func NewCommandBuilder() *CommandBuilder {
 	return &CommandBuilder{}
 }
 
-// BuildCommand builds a Command from agent config and options.
-// Delegates to the Agent.BuildCommand method.
+// BuildCommand builds a Command from agent config and options. Delegates to
+// the Agent.BuildCommand method and then appends the user-configured CLI
+// flag tokens so every agent participates in the cli_flags feature without
+// each BuildCommand needing to remember to opt in.
 func (cb *CommandBuilder) BuildCommand(ag agents.Agent, opts agents.CommandOptions) agents.Command {
-	return ag.BuildCommand(opts)
+	cmd := ag.BuildCommand(opts)
+	if len(opts.CLIFlagTokens) == 0 {
+		return cmd
+	}
+	return cmd.With().Flag(opts.CLIFlagTokens...).Build()
 }
 
 // BuildCommandString builds a command as a single string (for standalone mode)
@@ -44,6 +50,7 @@ func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agent
 	cmd := sessionCfg.ContinueSessionCmd.With().
 		Model(ag.Runtime().ModelFlag, opts.Model).
 		Settings(ag.PermissionSettings(), opts.PermissionValues).
+		Flag(opts.CLIFlagTokens...).
 		Build()
 
 	return strings.Join(cmd.Args(), " ")

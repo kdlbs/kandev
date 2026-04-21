@@ -25,6 +25,9 @@ steps:
 
       {{task_prompt}}
 
+      STEP 0: CREATE A TASK LIST
+      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
+
       STEP 1: UNDERSTAND THE REQUIREMENTS
       If anything is unclear or ambiguous, ask the user clarifying questions using the ask_user_question_kandev tool before proceeding.
 
@@ -63,6 +66,9 @@ steps:
 
       {{task_prompt}}
 
+      STEP 0: CREATE A TASK LIST
+      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
+
       STEP 1: RETRIEVE THE PLAN
       Before starting, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.
       Review the plan carefully, including any edits the user may have made.
@@ -85,6 +91,12 @@ steps:
       - If you hit a blocker (missing dependency, unclear requirement, test fails repeatedly): stop and ask the user.
       - If a fix requires an architectural change (new DB table, new service layer, switching libraries): stop and ask.
       - After 3 failed fix attempts on the same issue: stop, question the approach, ask the user.
+
+      STEP 4: ENSURE EVERYTHING IS COMMITTED
+      Before finishing this phase:
+      - Run `git status` to confirm there are no uncommitted or untracked changes that belong to this task.
+      - If anything is left, stage and commit it with a descriptive message.
+      - The phase is only complete when `git status` shows a clean tree on the task branch.
     events:
       on_enter:
         - type: auto_start_agent

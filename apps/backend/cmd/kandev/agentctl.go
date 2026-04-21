@@ -31,6 +31,8 @@ func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logge
 			zap.Int("actual_port", actualPort))
 		cfg.Agent.StandalonePort = actualPort
 	}
+	// Store the per-launch auth token so downstream clients can authenticate
+	cfg.Agent.StandaloneAuthToken = l.AuthToken()
 	return cleanup, nil
 }
 

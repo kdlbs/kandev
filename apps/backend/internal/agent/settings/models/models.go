@@ -44,9 +44,18 @@ type AgentProfile struct {
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough"`
 
-	// AllowIndexing is kept as an auggie-only CLI flag (no ACP equivalent).
-	// Ignored for all other agents.
+	// AllowIndexing is retained for backward compatibility with existing
+	// auggie profiles. The launch path no longer consults it — it is read
+	// only by the legacy migration shim that seeds CLIFlags on the first
+	// post-migration read. New code should use CLIFlags instead.
 	AllowIndexing bool `json:"allow_indexing"`
+
+	// CLIFlags is the user-configurable list of CLI flags passed to the agent
+	// subprocess. At profile creation the list is seeded from the agent's
+	// PermissionSettings(); users can toggle entries on/off, remove them, or
+	// add custom entries via the settings UI. Only entries with Enabled=true
+	// reach the subprocess argv.
+	CLIFlags []CLIFlag `json:"cli_flags"`
 
 	// Deprecated legacy permission fields: retained in the DB schema so rows
 	// load cleanly, but no longer read by the launch path. ACP session modes
@@ -58,4 +67,13 @@ type AgentProfile struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+}
+
+// CLIFlag is a single user-configurable CLI argument on an AgentProfile.
+// The raw Flag string is shell-tokenised at launch time: a single entry
+// like "--add-dir /shared" becomes two argv tokens.
+type CLIFlag struct {
+	Description string `json:"description"`
+	Flag        string `json:"flag"`
+	Enabled     bool   `json:"enabled"`
 }

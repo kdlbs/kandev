@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
+import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -140,6 +141,7 @@ function ProfileSettingsCard({
             mode: draft.mode ?? "",
             allow_indexing: draft.allow_indexing,
             cli_passthrough: draft.cli_passthrough,
+            cli_flags: draft.cli_flags ?? [],
           }}
           onChange={onDraftChange}
           modelConfig={modelConfig}
@@ -183,7 +185,8 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough,
+      draft.cli_passthrough !== savedProfile.cli_passthrough ||
+      !areCLIFlagsEqual(draft.cli_flags, savedProfile.cli_flags),
     [draft, savedProfile],
   );
 
@@ -236,6 +239,7 @@ function useProfileSave({
         mode: draft.mode,
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
+        cli_flags: draft.cli_flags,
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -385,6 +389,7 @@ function ProfileEditor({
           allow_indexing: draft.allow_indexing,
         }}
         cliPassthrough={draft.cli_passthrough}
+        cliFlags={draft.cli_flags ?? []}
       />
 
       <ProfileMcpConfigCard

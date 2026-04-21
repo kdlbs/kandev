@@ -3,6 +3,11 @@ import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
+import {
+  isPRReviewFromMetadata,
+  isIssueWatchFromMetadata,
+  issueFieldsFromMetadata,
+} from "@/lib/metadata-utils";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 
@@ -90,13 +95,9 @@ function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
     updatedAt: task.updated_at,
     createdAt: task.created_at,
     isPRReview: isPRReviewFromMetadata(task.metadata),
+    isIssueWatch: isIssueWatchFromMetadata(task.metadata),
+    ...issueFieldsFromMetadata(task.metadata),
   } as KanbanTask;
-}
-
-function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
-  if (!metadata || typeof metadata !== "object") return false;
-  const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
-  return typeof watchId === "string" && watchId.length > 0;
 }
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {

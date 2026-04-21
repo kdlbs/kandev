@@ -32,7 +32,7 @@ type CopilotACP struct {
 func NewCopilotACP() *CopilotACP {
 	return &CopilotACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: copilotPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:         true,
 				Label:             "CLI Passthrough",
@@ -105,7 +105,50 @@ func (a *CopilotACP) InstallScript() string {
 }
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return copilotPermSettings
+}
+
+// copilotPermSettings enumerates the GitHub Copilot CLI flags that benefit
+// from being surfaced as curated profile toggles. At profile-creation time
+// these seed the AgentProfile.CLIFlags list; the launch path then consults
+// the profile (not this map) so users can freely add/toggle/remove entries.
+//
+// The CLI's `--autopilot` flag is intentionally omitted: empirical testing
+// (see acp-debug captures) shows it does not suppress session/request_permission
+// frames. Only `--allow-all-tools` and the other `--allow-all-*` flags do.
+var copilotPermSettings = map[string]PermissionSetting{
+	"allow_all_tools": {
+		Supported:   true,
+		Default:     false,
+		Label:       "Allow all tools",
+		Description: "Skip confirmation for every tool call (--allow-all-tools)",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--allow-all-tools",
+	},
+	"allow_all_paths": {
+		Supported:   true,
+		Default:     false,
+		Label:       "Allow all paths",
+		Description: "Allow file access outside the workspace (--allow-all-paths)",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--allow-all-paths",
+	},
+	"allow_all_urls": {
+		Supported:   true,
+		Default:     false,
+		Label:       "Allow all URLs",
+		Description: "Allow network access to any URL (--allow-all-urls)",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--allow-all-urls",
+	},
+	"no_ask_user": {
+		Supported:   true,
+		Default:     false,
+		Label:       "Disable ask_user tool",
+		Description: "Agent works autonomously without asking clarifying questions (--no-ask-user)",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--no-ask-user",
+	},
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
