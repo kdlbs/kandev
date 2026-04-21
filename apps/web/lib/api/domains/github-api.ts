@@ -219,7 +219,7 @@ export async function updateIssueWatch(
 }
 
 export async function deleteIssueWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ success: boolean }>(`/api/v1/github/watches/issue/${id}`, {
+  return fetchJson<{ deleted: boolean }>(`/api/v1/github/watches/issue/${id}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
