@@ -89,25 +89,14 @@ func TestBearerTokenAuth_NonExemptPathRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestBearerTokenAuth_QueryParamFallback(t *testing.T) {
+func TestBearerTokenAuth_QueryParamIgnored(t *testing.T) {
 	r := setupRouter("test-secret-token")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/status?token=test-secret-token", nil)
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 with query param token, got %d", w.Code)
-	}
-}
-
-func TestBearerTokenAuth_InvalidQueryParam(t *testing.T) {
-	r := setupRouter("test-secret-token")
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/status?token=wrong", nil)
-	r.ServeHTTP(w, req)
-
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 with wrong query param token, got %d", w.Code)
+		t.Fatalf("expected 401 — query param tokens must be ignored, got %d", w.Code)
 	}
 }
 

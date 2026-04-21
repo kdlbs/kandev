@@ -46,17 +46,13 @@ func bearerTokenAuth(expectedToken string, exemptPaths ...string) gin.HandlerFun
 	}
 }
 
-// extractBearerToken extracts the token from the Authorization header
-// or from the "token" query parameter (for WebSocket clients).
+// extractBearerToken extracts the token from the Authorization header.
 func extractBearerToken(r *http.Request) string {
-	if auth := r.Header.Get("Authorization"); auth != "" {
-		const prefix = "Bearer "
-		if strings.HasPrefix(auth, prefix) {
-			return auth[len(prefix):]
-		}
+	const prefix = "Bearer "
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, prefix) {
+		return auth[len(prefix):]
 	}
-	// Fallback for WebSocket clients that cannot set headers
-	return r.URL.Query().Get("token")
+	return ""
 }
 
 // tokenEqual compares two tokens in constant time to prevent timing attacks.

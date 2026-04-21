@@ -106,6 +106,7 @@ func (c *ControlClient) AuthToken() string {
 
 // SetAuthToken sets the Bearer token for future requests.
 // Used after a successful Handshake to authenticate subsequent calls.
+// Must not be called concurrently with HTTP requests on the same client.
 func (c *ControlClient) SetAuthToken(token string) {
 	c.authToken = token
 	c.httpClient.Transport = &authTransport{token: token}
