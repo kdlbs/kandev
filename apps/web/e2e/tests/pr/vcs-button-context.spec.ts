@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -114,14 +115,7 @@ test.describe("VCS split button context", () => {
 
     // Set up git with a remote so we can get "ahead" status
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = {
-      ...process.env,
-      HOME: backend.tmpDir,
-      GIT_AUTHOR_NAME: "E2E Test",
-      GIT_AUTHOR_EMAIL: "e2e@test.local",
-      GIT_COMMITTER_NAME: "E2E Test",
-      GIT_COMMITTER_EMAIL: "e2e@test.local",
-    };
+    const gitEnv = makeGitEnv(backend.tmpDir);
     const git = new GitHelper(repoDir, gitEnv);
     git.setupRemote(backend.tmpDir);
 
@@ -179,14 +173,7 @@ test.describe("VCS split button context", () => {
 
     // Set up git with a remote
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = {
-      ...process.env,
-      HOME: backend.tmpDir,
-      GIT_AUTHOR_NAME: "E2E Test",
-      GIT_AUTHOR_EMAIL: "e2e@test.local",
-      GIT_COMMITTER_NAME: "E2E Test",
-      GIT_COMMITTER_EMAIL: "e2e@test.local",
-    };
+    const gitEnv = makeGitEnv(backend.tmpDir);
     const git = new GitHelper(repoDir, gitEnv);
 
     // Only set up remote if not already configured

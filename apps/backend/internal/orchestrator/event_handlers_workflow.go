@@ -511,7 +511,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	// Promote the new session to primary so it's loaded when navigating back to this task.
-	if err := s.repo.SetSessionPrimary(ctx, newSession.ID); err != nil {
+	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
+	// event — the frontend reads primarySessionId from the task to render the star icon.
+	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
 		s.logger.Warn("failed to set new session as primary",
 			zap.String("session_id", newSession.ID), zap.Error(err))
 	}
@@ -526,8 +528,12 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	// Mark the current session as completed.
-	currentSession.State = models.TaskSessionStateCompleted
+	// Use updateTaskSessionState to publish a session.state_changed WS event so the
+	// frontend learns the old session is terminal and can adopt the new one.
+	s.updateTaskSessionState(ctx, taskID, currentSession.ID, models.TaskSessionStateCompleted, "", false)
+	// Also set CompletedAt timestamp for bookkeeping (updateTaskSessionState only sets state).
 	now := time.Now().UTC()
+	currentSession.State = models.TaskSessionStateCompleted
 	currentSession.CompletedAt = &now
 	currentSession.UpdatedAt = now
 	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
@@ -542,6 +548,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 
 // maybySwitchSessionForProfile checks whether the step requires a different agent profile
 // and switches the session if so. Passthrough sessions are returned unchanged.
+// When the step has no agent_profile override, falls back to the task's original
+// agent profile (from task metadata) so that moving to a "plain" step reverts
+// to the default agent instead of keeping the previous step's override.
 // Returns the effective session (new or original) and whether processing should continue.
 // A false return means the switch failed; the caller should return immediately.
 func (s *Service) maybySwitchSessionForProfile(
@@ -551,6 +560,18 @@ func (s *Service) maybySwitchSessionForProfile(
 		return session, true
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+
+	// When the step has no override, fall back to the task's original agent profile
+	// so that moving to a step without an agent_profile reverts to the default.
+	if effectiveProfile == "" {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err == nil && task.Metadata != nil {
+			if pid, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && pid != "" {
+				effectiveProfile = pid
+			}
+		}
+	}
+
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		return session, true
 	}

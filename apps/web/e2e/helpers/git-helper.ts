@@ -62,9 +62,22 @@ export class GitHelper {
   }
 }
 
+/**
+ * Strip GIT_CONFIG_* environment variables that can inject global git hooks
+ * into fresh git repos, breaking E2E test setup.
+ */
+function stripGitConfigOverrides(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (/^GIT_CONFIG_(KEY|VALUE|COUNT|PARAMETERS)/i.test(key)) continue;
+    clean[key] = value;
+  }
+  return clean;
+}
+
 export function makeGitEnv(tmpDir: string): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...stripGitConfigOverrides(process.env),
     HOME: tmpDir,
     GIT_AUTHOR_NAME: "E2E Test",
     GIT_AUTHOR_EMAIL: "e2e@test.local",
