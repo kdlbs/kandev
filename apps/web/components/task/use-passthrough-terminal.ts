@@ -124,23 +124,33 @@ function initTerminalInstance(
   // Defer WebGL addon loading to the next animation frame so the initial
   // synchronous work (Terminal + FitAddon + open) stays within the browser's
   // frame budget and avoids "Violation: 'setTimeout' handler took Xms" warnings.
-  requestAnimationFrame(() => {
-    const term = refs.xtermRef.current;
-    if (!term || refs.webglAddonRef.current) return;
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        log("WebGL context lost");
-        webglAddon.dispose();
-        refs.webglAddonRef.current = null;
-      });
-      term.loadAddon(webglAddon);
-      refs.webglAddonRef.current = webglAddon;
-      log("WebGL addon loaded");
-    } catch (e) {
-      log("WebGL failed, using canvas:", e);
-    }
-  });
+  //
+  // Skip WebGL on Firefox: its canvas fingerprinting protection silently
+  // poisons readback data (no exception thrown), which corrupts the glyph
+  // texture atlas and renders garbled characters.  The default canvas
+  // renderer is visually identical and works fine everywhere.
+  const isFirefox = typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
+  if (!isFirefox) {
+    requestAnimationFrame(() => {
+      const term = refs.xtermRef.current;
+      if (!term || refs.webglAddonRef.current) return;
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => {
+          log("WebGL context lost");
+          webglAddon.dispose();
+          refs.webglAddonRef.current = null;
+        });
+        term.loadAddon(webglAddon);
+        refs.webglAddonRef.current = webglAddon;
+        log("WebGL addon loaded");
+      } catch (e) {
+        log("WebGL failed, using canvas:", e);
+      }
+    });
+  } else {
+    log("Skipping WebGL addon on Firefox (canvas fingerprinting protection)");
+  }
   exposeBufferReader(termContainer, terminal);
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();

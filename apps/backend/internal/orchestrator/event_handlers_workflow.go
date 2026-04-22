@@ -629,18 +629,17 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	case hasAutoStart:
 		// ACP path: build prompt from step configuration.
-		// Run auto-start inline so queue state is visible before handleAgentReady
-		// checks for queued messages.
+		// processOnEnter is already launched in a goroutine from applyEngineTransition
+		// (to avoid blocking the stream reader), so this call can be synchronous.
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
-		planMode := hasPlanMode
-		err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
-		if err != nil {
+		if err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", step.Name),
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		}
 
 	default:
@@ -650,19 +649,25 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		if sessionSwitched && step.Prompt != "" {
 			effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 			planMode := hasPlanMode
+			stepName := step.Name
+			stepID := step.ID
 			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
-				zap.String("step_name", step.Name))
-			err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
-			if err != nil {
-				s.logger.Error("failed to launch agent after profile switch",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-				s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-			}
+				zap.String("step_name", stepName))
+			// Launch asynchronously for the same reason as hasAutoStart above.
+			go func() {
+				asyncCtx := context.Background()
+				err := s.autoStartStepPrompt(asyncCtx, taskID, session, stepName, effectivePrompt, planMode, true)
+				if err != nil {
+					s.logger.Error("failed to launch agent after profile switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
+					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
+				}
+			}()
 			return
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
@@ -1232,7 +1237,13 @@ func (s *Service) applyEngineTransition(
 		return true
 	}
 
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.
+	// When triggered from on_turn_complete, the entire call chain runs in the WebSocket
+	// stream reader goroutine (G_reader). processOnEnter may call resetAgentContext →
+	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
+	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
+	// The DB transition is already persisted above, so it's safe to process on_enter async.
+	go s.processOnEnter(context.Background(), taskID, session, targetStep, taskDescription)
 	return true
 }
 

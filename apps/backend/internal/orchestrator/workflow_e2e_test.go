@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -244,6 +245,12 @@ func runSingleEvent(
 		t.Fatalf("unsupported trigger: %s", ev.Trigger)
 	}
 
+	// processOnEnter runs asynchronously (goroutine) after engine transitions.
+	// Give it time to complete before checking side effects.
+	if transitioned {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if transitioned != ev.ExpectTransitioned {
 		t.Errorf("transitioned = %v, want %v", transitioned, ev.ExpectTransitioned)
 	}
@@ -364,13 +371,23 @@ func assertQueueState(t *testing.T, ctx context.Context, svc *Service, sessionID
 }
 
 // assertSessionState verifies the session's current state.
+// Polls briefly because processOnEnter runs asynchronously (goroutine) and
+// the state change may not be visible immediately after the trigger returns.
 func assertSessionState(t *testing.T, ctx context.Context, repo sessionExecutorStore, sessionID string, expect models.TaskSessionState) {
 	t.Helper()
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
-	if session.State != expect {
-		t.Errorf("session state = %q, want %q", session.State, expect)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
+		}
+		if session.State == expect {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("session state = %q, want %q (after polling)", session.State, expect)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
