@@ -241,14 +241,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
-	// Publish task updated event
-	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated,
-			"orchestrator",
-			buildTaskEventPayload(task),
-		))
-	}
+	// Publish task updated event via the task service so the payload carries
+	// the full context (session counts, primary session, repositories).
+	s.publishTaskUpdated(ctx, task)
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),

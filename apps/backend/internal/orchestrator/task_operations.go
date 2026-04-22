@@ -13,8 +13,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -462,13 +460,9 @@ func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowSt
 			zap.String("task_id", taskID),
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
-	} else if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated,
-			"orchestrator",
-			buildTaskEventPayload(dbTask),
-		))
+		return
 	}
+	s.publishTaskUpdated(ctx, dbTask)
 }
 
 // postLaunchStart records the initial message and sets plan mode after a successful launch.
@@ -1194,6 +1188,8 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	}
 
 	// Broadcast task.updated so frontend updates the primary star indicator.
+	// The task service's publisher loads primary-session info from the DB,
+	// which already reflects the SetSessionPrimary write above.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
@@ -1204,14 +1200,7 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
 		return nil
 	}
-	if s.eventBus != nil {
-		payload := buildTaskEventPayload(task)
-		payload["primary_session_id"] = sessionID
-		payload["primary_session_state"] = string(session.State)
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated, "orchestrator", payload,
-		))
-	}
+	s.publishTaskUpdated(ctx, task)
 	return nil
 }
 

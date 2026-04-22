@@ -58,6 +58,22 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 			if sessionInfo.State != "" {
 				data["primary_session_state"] = string(sessionInfo.State)
 			}
+			if sessionInfo.ExecutorID != "" {
+				data["primary_executor_id"] = sessionInfo.ExecutorID
+			}
+			var execType string
+			if sessionInfo.ExecutorSnapshot != nil {
+				if t, ok := sessionInfo.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
+					execType = t
+					data["primary_executor_type"] = t
+				}
+				if n, ok := sessionInfo.ExecutorSnapshot["executor_name"].(string); ok && n != "" {
+					data["primary_executor_name"] = n
+				}
+			}
+			if execType != "" {
+				data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
+			}
 		}
 	}
 

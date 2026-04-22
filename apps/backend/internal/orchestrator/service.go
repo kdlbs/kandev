@@ -452,7 +452,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.eventBus, s.logger)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks)
