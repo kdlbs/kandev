@@ -1262,6 +1262,17 @@ func (s *Service) applyEngineTransition(
 		return true
 	}
 
+	// When triggered from on_turn_complete, the agent has finished its turn but
+	// handleAgentReady returns early without setting WAITING_FOR_INPUT (because the
+	// transition already occurred). The session is still RUNNING in the DB.
+	// Flip to WAITING_FOR_INPUT so that autoStartStepPrompt in processOnEnter sends
+	// the prompt directly instead of queueing it — the queue would never be drained
+	// because handleAgentReady already returned.
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
+		session.State = models.TaskSessionStateWaitingForInput
+	}
+
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.
 	// When triggered from on_turn_complete, the entire call chain runs in the WebSocket
 	// stream reader goroutine (G_reader). processOnEnter may call resetAgentContext →
