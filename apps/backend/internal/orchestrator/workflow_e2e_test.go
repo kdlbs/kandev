@@ -112,9 +112,13 @@ var workflowTestCases = []workflowTestCase{
 		WorkflowJSON: developmentWorkflowJSON,
 		StartStep:    "Backlog",
 		Events: []testEvent{
-			// Agent finishes at Backlog → In Progress (auto_start queues)
+			// Agent finishes at Backlog → In Progress (auto_start_agent on_enter).
+			// applyEngineTransition flips RUNNING → WAITING_FOR_INPUT before the
+			// async processOnEnter goroutine, so autoStartStepPrompt attempts a
+			// direct send instead of queueing. In this mock environment the send
+			// fails (no executor), so the message is NOT queued.
 			{Trigger: engine.TriggerOnTurnComplete, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 0},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 0},
 			// Agent finishes at In Progress → New Context (reset + auto_start).
 			// After reset_agent_context, processOnEnter flips session state to
 			// WAITING_FOR_INPUT so auto_start sends directly instead of queueing

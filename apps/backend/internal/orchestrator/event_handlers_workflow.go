@@ -652,8 +652,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	case hasAutoStart:
 		// ACP path: build prompt from step configuration.
-		// processOnEnter is already launched in a goroutine from applyEngineTransition
-		// (to avoid blocking the stream reader), so this call can be synchronous.
+		// When called from applyEngineTransition (on_turn_complete), processOnEnter
+		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
+		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
