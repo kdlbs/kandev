@@ -532,8 +532,10 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	// frontend learns the old session is terminal and can adopt the new one.
 	s.updateTaskSessionState(ctx, taskID, currentSession.ID, models.TaskSessionStateCompleted, "", false)
 	// Also set CompletedAt timestamp for bookkeeping (updateTaskSessionState only sets state).
+	// Clear IsPrimary to avoid overwriting the SetPrimarySession call above when writing back.
 	now := time.Now().UTC()
 	currentSession.State = models.TaskSessionStateCompleted
+	currentSession.IsPrimary = false
 	currentSession.CompletedAt = &now
 	currentSession.UpdatedAt = now
 	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {

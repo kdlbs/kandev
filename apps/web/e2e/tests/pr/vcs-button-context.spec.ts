@@ -238,14 +238,7 @@ test.describe("VCS split button context", () => {
 
     // Create an uncommitted file
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, {
-      ...process.env,
-      HOME: backend.tmpDir,
-      GIT_AUTHOR_NAME: "E2E Test",
-      GIT_AUTHOR_EMAIL: "e2e@test.local",
-      GIT_COMMITTER_NAME: "E2E Test",
-      GIT_COMMITTER_EMAIL: "e2e@test.local",
-    });
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     git.createFile("uncommitted.txt", "uncommitted content");
 
     // Even with open PR, uncommitted files → "Commit" takes priority
