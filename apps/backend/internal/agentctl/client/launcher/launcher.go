@@ -51,7 +51,7 @@ type Launcher struct {
 type Config struct {
 	BinaryPath string // Path to agentctl binary (auto-detected if empty)
 	Host       string // Host to bind to (default: localhost)
-	Port       int    // Control port (default: 9999)
+	Port       int    // Control port (default: 39429)
 }
 
 // New creates a new Launcher.
@@ -60,7 +60,7 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 		cfg.Host = "localhost"
 	}
 	if cfg.Port == 0 {
-		cfg.Port = 9999
+		cfg.Port = 39429
 	}
 	if cfg.BinaryPath == "" {
 		cfg.BinaryPath = findAgentctlBinary()

@@ -7,7 +7,7 @@ export const STORAGE_KEYS = {
   LAST_EXECUTOR_PROFILE_ID: "kandev.dialog.lastExecutorProfileId",
 } as const;
 
-export const DEFAULT_BACKEND_URL = "http://localhost:8080";
+export const DEFAULT_BACKEND_URL = "http://localhost:38429";
 
 // Kanban Preview Panel Settings
 export const PREVIEW_PANEL = {

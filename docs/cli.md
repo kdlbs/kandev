@@ -112,7 +112,7 @@ npx kandev start
 | Option | Description | Example |
 |--------|-------------|---------|
 | `--version <tag>` | Use a specific release version | `--version v0.1.0` |
-| `--backend-port <port>` | Override backend port | `--backend-port 8080` |
+| `--backend-port <port>` | Override backend port | `--backend-port 38429` |
 | `--web-port <port>` | Override web port | `--web-port 37429` |
 | `--help`, `-h` | Show help | `--help` |
 
@@ -126,7 +126,7 @@ npx kandev --version v0.1.0
 npx kandev --backend-port 18080 --web-port 13000
 
 # Dev mode with custom ports
-npx kandev dev --backend-port 8080 --web-port 13000
+npx kandev dev --backend-port 38429 --web-port 13000
 ```
 
 ## Port Selection
@@ -135,10 +135,10 @@ By default, the CLI automatically finds available ports:
 
 | Service | Default Port | Fallback |
 |---------|--------------|----------|
-| Backend | 8080 | Auto-selects from 10000-60000 |
+| Backend | 38429 | Auto-selects from 10000-60000 |
 | Web | 37429 | Auto-selects from 10000-60000 |
-| AgentCtl | 9999 | Auto-selects from 10000-60000 |
-| MCP Server | 9090 | Auto-selects from 10000-60000 |
+| AgentCtl | 39429 | Auto-selects from 10000-60000 |
+| MCP Server | 40429 | Auto-selects from 10000-60000 |
 
 If the default port is in use, the CLI finds the next available port automatically.
 
@@ -186,7 +186,7 @@ See `make help` for all available commands.
 The CLI automatically finds available ports. If you need a specific port:
 
 ```bash
-npx kandev --backend-port 8080 --web-port 37429
+npx kandev --backend-port 38429 --web-port 37429
 ```
 
 ### Backend Takes Too Long to Start

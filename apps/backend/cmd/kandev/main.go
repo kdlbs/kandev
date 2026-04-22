@@ -61,7 +61,7 @@ import (
 
 // Command-line flags
 var (
-	flagPort     = flag.Int("port", 0, "HTTP server port (default: 8080)")
+	flagPort     = flag.Int("port", 0, "HTTP server port (default: 38429)")
 	flagLogLevel = flag.String("log-level", "", "Log level: debug, info, warn, error")
 	flagHelp     = flag.Bool("help", false, "Show help message")
 	flagVersion  = flag.Bool("version", false, "Show version information")
@@ -418,7 +418,7 @@ func startGatewayAndServe(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = 8080
+		port = 38429
 	}
 	go func() {
 		log.Info("WebSocket server listening", zap.Int("port", port))
@@ -489,7 +489,7 @@ func buildHTTPServer(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = 8080
+		port = 38429
 	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),

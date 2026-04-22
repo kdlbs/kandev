@@ -144,7 +144,7 @@ apps/
 make dev
 
 # Or run separately
-make dev-backend    # Backend on :8080
+make dev-backend    # Backend on :38429
 make dev-web        # Frontend on :37429
 ```
 

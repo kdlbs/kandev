@@ -16,6 +16,6 @@ if ! command -v codex &> /dev/null; then
 fi
 
 # Run agentctl HTTP server
-echo "Starting agentctl on port ${AGENTCTL_PORT:-9999}..."
+echo "Starting agentctl on port ${AGENTCTL_PORT:-39429}..."
 exec /usr/local/bin/agentctl
 

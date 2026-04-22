@@ -181,7 +181,7 @@ export function getWsBaseUrl(): string {
     const protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${url.host}`;
   } catch {
-    return "ws://localhost:8080";
+    return "ws://localhost:38429";
   }
 }
 

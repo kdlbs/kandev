@@ -22,7 +22,7 @@ spec:
           image: kandev:latest
           ports:
             - name: backend
-              containerPort: 8080
+              containerPort: 38429
               protocol: TCP
           envFrom:
             - configMapRef:

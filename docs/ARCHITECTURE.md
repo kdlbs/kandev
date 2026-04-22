@@ -26,7 +26,7 @@ Kandev uses an event-driven architecture with **Agent Communication Protocol (AC
 
 ```mermaid
 flowchart TB
-    subgraph Binary["Kandev Binary (Port 8080)"]
+    subgraph Binary["Kandev Binary (Port 38429)"]
         Task["Task Service"]
         Agent["Agent Manager"]
         Orch["Orchestrator Service"]
