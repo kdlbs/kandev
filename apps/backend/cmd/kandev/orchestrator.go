@@ -70,6 +70,11 @@ func provideOrchestrator(
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
+	// Route orchestrator task.updated events through the task service, which
+	// owns the canonical rich payload. Covers workflow transitions, workflow
+	// step moves, and the primary-session-set callback below.
+	orchestratorSvc.SetTaskEventPublisher(taskSvc)
+
 	// Publish task.updated when the first session is marked primary so the
 	// frontend receives primary_session_id for newly created tasks.
 	orchestratorSvc.SetOnPrimarySessionSet(func(ctx context.Context, taskID, _ string) {
