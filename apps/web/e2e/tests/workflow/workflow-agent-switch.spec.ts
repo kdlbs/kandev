@@ -298,9 +298,7 @@ test.describe("Workflow agent profile switching", () => {
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
-          const step2Session = sessions.find(
-            (s) => s.agent_profile_id === profileB.id,
-          );
+          const step2Session = sessions.find((s) => s.agent_profile_id === profileB.id);
           if (!step2Session || step2Session.state === "CREATED") return "CREATED";
           return step2Session.state;
         },
@@ -599,9 +597,7 @@ test.describe("Workflow agent profile switching", () => {
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
     // The Profile B tab should become active
-    const activeTab = testPage.locator(
-      '.dv-tab.dv-active-tab [data-testid^="session-tab-"]',
-    );
+    const activeTab = testPage.locator('.dv-tab.dv-active-tab [data-testid^="session-tab-"]');
     await expect(activeTab).toContainText("Profile B", { timeout: 30_000 });
 
     // The star icon should be visible inside the active tab (no reload needed)
@@ -673,9 +669,7 @@ test.describe("Workflow agent profile switching", () => {
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
     // The active tab should show Profile A (the task's default agent)
-    const activeTab = testPage.locator(
-      '.dv-tab.dv-active-tab [data-testid^="session-tab-"]',
-    );
+    const activeTab = testPage.locator('.dv-tab.dv-active-tab [data-testid^="session-tab-"]');
     await expect(activeTab).toContainText("Profile A", { timeout: 30_000 });
   });
 

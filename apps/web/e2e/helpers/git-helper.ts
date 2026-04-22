@@ -69,7 +69,7 @@ export class GitHelper {
 function stripGitConfigOverrides(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const clean: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
-    if (/^GIT_CONFIG_(KEY|VALUE|COUNT|PARAMETERS)/i.test(key)) continue;
+    if (/^GIT_CONFIG_(KEY|VALUE|COUNT|PARAMETERS|GLOBAL|SYSTEM)/i.test(key)) continue;
     clean[key] = value;
   }
   return clean;

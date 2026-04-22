@@ -285,7 +285,14 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 			zap.String("new_profile", effectiveProfileID))
 		session.AgentProfileID = effectiveProfileID
 		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
-		if profileInfo, err := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); err == nil && profileInfo != nil {
+		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
+		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
+		if profileInfo, err := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); err != nil {
+			s.logger.Warn("failed to resolve agent profile snapshot for workflow step override",
+				zap.String("session_id", sessionID),
+				zap.String("profile_id", effectiveProfileID),
+				zap.Error(err))
+		} else if profileInfo != nil {
 			session.AgentProfileSnapshot = map[string]interface{}{
 				"id":         profileInfo.ProfileID,
 				"name":       profileInfo.ProfileName,
@@ -511,7 +518,7 @@ func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowSt
 // workspace default the frontend sends.
 func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, workflowStepID, callerProfileID string) string {
 	if s.workflowStepGetter == nil {
-		s.logger.Warn("resolveEffectiveAgentProfile: no workflowStepGetter, using caller profile",
+		s.logger.Debug("resolveEffectiveAgentProfile: no workflowStepGetter, using caller profile",
 			zap.String("task_id", taskID),
 			zap.String("caller_profile", callerProfileID))
 		return callerProfileID
@@ -522,16 +529,16 @@ func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, work
 	if effectiveStepID == "" {
 		dbTask, err := s.repo.GetTask(ctx, taskID)
 		if err != nil {
-			s.logger.Warn("resolveEffectiveAgentProfile: failed to load task from DB",
+			s.logger.Debug("resolveEffectiveAgentProfile: failed to load task from DB",
 				zap.String("task_id", taskID),
 				zap.Error(err))
 			return callerProfileID
 		}
-		s.logger.Warn("resolveEffectiveAgentProfile: loaded task from DB",
+		s.logger.Debug("resolveEffectiveAgentProfile: loaded task from DB",
 			zap.String("task_id", taskID),
 			zap.String("db_workflow_step_id", dbTask.WorkflowStepID))
 		if dbTask.WorkflowStepID == "" {
-			s.logger.Warn("resolveEffectiveAgentProfile: task has no workflow step, using caller profile",
+			s.logger.Debug("resolveEffectiveAgentProfile: task has no workflow step, using caller profile",
 				zap.String("task_id", taskID))
 			return callerProfileID
 		}
@@ -540,14 +547,14 @@ func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, work
 
 	step, err := s.workflowStepGetter.GetStep(ctx, effectiveStepID)
 	if err != nil || step == nil {
-		s.logger.Warn("resolveEffectiveAgentProfile: failed to load step",
+		s.logger.Debug("resolveEffectiveAgentProfile: failed to load step",
 			zap.String("task_id", taskID),
 			zap.String("step_id", effectiveStepID),
 			zap.Error(err))
 		return callerProfileID
 	}
 
-	s.logger.Warn("resolveEffectiveAgentProfile: loaded step",
+	s.logger.Debug("resolveEffectiveAgentProfile: loaded step",
 		zap.String("task_id", taskID),
 		zap.String("step_id", effectiveStepID),
 		zap.String("step_name", step.Name),
@@ -555,7 +562,7 @@ func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, work
 		zap.String("step_workflow_id", step.WorkflowID))
 
 	stepProfile := s.resolveStepAgentProfile(ctx, step)
-	s.logger.Warn("resolveEffectiveAgentProfile: resolved step profile",
+	s.logger.Debug("resolveEffectiveAgentProfile: resolved step profile",
 		zap.String("task_id", taskID),
 		zap.String("step_profile", stepProfile),
 		zap.String("caller_profile", callerProfileID))

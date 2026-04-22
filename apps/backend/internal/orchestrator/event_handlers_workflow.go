@@ -676,9 +676,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
-			// Launch asynchronously for the same reason as hasAutoStart above.
+			// Launch asynchronously because processOnEnter may also be called
+			// synchronously from finalizeStepEnter (manual task move). In that path,
+			// autoStartStepPrompt would block the caller's goroutine.
 			go func() {
-				asyncCtx := context.Background()
+				asyncCtx := context.WithoutCancel(ctx)
 				err := s.autoStartStepPrompt(asyncCtx, taskID, session, stepName, effectivePrompt, planMode, true)
 				if err != nil {
 					s.logger.Error("failed to launch agent after profile switch",
@@ -1264,7 +1266,7 @@ func (s *Service) applyEngineTransition(
 	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
 	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
 	// The DB transition is already persisted above, so it's safe to process on_enter async.
-	go s.processOnEnter(context.Background(), taskID, session, targetStep, taskDescription)
+	go s.processOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription)
 	return true
 }
 
