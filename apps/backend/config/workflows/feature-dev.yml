@@ -250,8 +250,8 @@ steps:
       Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
 
       STEP 1: PREPARE
-      - Run formatters and linters to ensure code is clean.
-      - Stage and commit any remaining changes.
+      - Run formatters and linters. If they touch files unrelated to your task, selectively restore them with `git checkout -- <specific-paths>` (see GIT SAFETY) — never `git checkout -- .`.
+      - Stage and commit any remaining task-related changes using explicit paths — never `git add .`. Leave uncommitted or untracked files you did not create untouched; they are the user's work.
       - Push the branch to origin.
 
       STEP 2: CHECK FOR PR TEMPLATE
