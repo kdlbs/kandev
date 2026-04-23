@@ -16,6 +16,9 @@ import type {
   CommentForEditor,
 } from "@/components/editors/tiptap/tiptap-plan-editor";
 import type { Editor } from "@tiptap/core";
+import { PanelSearchBar } from "@/components/search/panel-search-bar";
+import { usePanelSearch } from "@/hooks/use-panel-search";
+import { planSearchPluginKey } from "@/components/editors/tiptap/search-highlight-extension";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -142,6 +145,9 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   // Ctrl+S to save immediately
   useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
 
+  // Ctrl+F in-document find
+  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstanceRef);
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -169,6 +175,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
         className={cn("relative transition-colors cursor-text", isAgentBusy && "bg-background")}
         ref={editorWrapperRef}
         onClick={handleEmptyStateClick}
+        data-panel-kind="plan"
       >
         <PlanEditor
           key={`${taskId}-${editorKey}`}
@@ -188,6 +195,16 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
           isAgentCreatingPlan={isAgentCreatingPlan}
           onClick={handleEmptyStateClick}
         />
+        {planSearch.isOpen && (
+          <PanelSearchBar
+            value={planSearch.query}
+            onChange={planSearch.setQuery}
+            onNext={planSearch.findNext}
+            onPrev={planSearch.findPrev}
+            onClose={planSearch.close}
+            matchInfo={planSearch.matchInfo}
+          />
+        )}
       </PanelBody>
 
       <PlanSelectionPopoverWrapper
@@ -418,6 +435,64 @@ function usePlanSelection(
   }, [commentState]);
 
   return { textSelection, setTextSelection, handleCommentHighlightClick, handleSelectionClose };
+}
+
+/** Ctrl+F find-in-plan shortcut + editor wiring */
+function usePlanFindShortcut(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+  editorRef: React.RefObject<Editor | null>,
+) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
+
+  const readMatchInfo = useCallback(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const s = planSearchPluginKey.getState(ed.state);
+    if (!s) return;
+    setMatchInfo({
+      current: s.matches.length ? s.current + 1 : 0,
+      total: s.matches.length,
+    });
+  }, [editorRef]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const handler = () => readMatchInfo();
+    ed.on("transaction", handler);
+    return () => {
+      ed.off("transaction", handler);
+    };
+  }, [editorRef, readMatchInfo]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (!isOpen) return;
+    ed.commands.setPlanSearchQuery(query);
+  }, [query, isOpen, editorRef]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.commands.clearPlanSearch();
+  }, [isOpen, editorRef]);
+
+  const open = useCallback(() => setIsOpen(true), []);
+  const close = useCallback(() => setIsOpen(false), []);
+  const findNext = useCallback(() => {
+    editorRef.current?.commands.planSearchNext();
+  }, [editorRef]);
+  const findPrev = useCallback(() => {
+    editorRef.current?.commands.planSearchPrev();
+  }, [editorRef]);
+
+  usePanelSearch({ containerRef: wrapperRef, isOpen, onOpen: open, onClose: close });
+
+  return { isOpen, open, close, query, setQuery, findNext, findPrev, matchInfo };
 }
 
 /** Ctrl+S save shortcut */
