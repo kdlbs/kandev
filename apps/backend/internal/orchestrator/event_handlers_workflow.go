@@ -345,11 +345,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
-	// Launch StartTask asynchronously so the event handler returns immediately.
-	// The handleTaskMoved handler runs synchronously inside the in-memory event
-	// bus Publish call — if StartTask blocks (e.g., waiting for the agent turn),
-	// the MoveTask HTTP handler that published the event also blocks, causing the
-	// browser request to time out with ERR_EMPTY_RESPONSE.
+	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
 		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
