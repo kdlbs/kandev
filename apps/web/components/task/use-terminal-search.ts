@@ -36,6 +36,62 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
+/**
+ * Load the SearchAddon when the terminal becomes ready.
+ * Tracks addon readiness via state so effects waiting on the addon re-run
+ * after the dynamic import resolves (avoids a race where the user's query
+ * is silently dropped because addonRef was still null).
+ */
+function useSearchAddon(
+  xtermRef: React.RefObject<Terminal | null>,
+  isTerminalReady: boolean,
+  onResults: (info: { current: number; total: number }) => void,
+): { addon: SearchAddon | null } {
+  const [addon, setAddon] = useState<SearchAddon | null>(null);
+  const onResultsRef = useRef(onResults);
+  useEffect(() => {
+    onResultsRef.current = onResults;
+  });
+
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (!isTerminalReady || !term) return;
+    let cancelled = false;
+    let loaded: SearchAddon | null = null;
+    let resultsSub: { dispose: () => void } | null = null;
+    // Dynamic import keeps the UMD bundle (which touches `self`) out of SSR.
+    import("@xterm/addon-search")
+      .then(({ SearchAddon }) => {
+        if (cancelled) return;
+        const a = new SearchAddon();
+        try {
+          term.loadAddon(a);
+        } catch {
+          return;
+        }
+        loaded = a;
+        resultsSub = a.onDidChangeResults(({ resultIndex, resultCount }) => {
+          onResultsRef.current({
+            current: resultIndex >= 0 ? resultIndex + 1 : 0,
+            total: resultCount,
+          });
+        });
+        setAddon(a);
+      })
+      .catch(() => {
+        /* addon failed to load; search remains disabled */
+      });
+    return () => {
+      cancelled = true;
+      resultsSub?.dispose();
+      loaded?.dispose();
+      setAddon(null);
+    };
+  }, [xtermRef, isTerminalReady]);
+
+  return { addon };
+}
+
 export function useTerminalSearch({
   xtermRef,
   isTerminalReady,
@@ -46,44 +102,14 @@ export function useTerminalSearch({
   const [regex, setRegex] = useState(false);
   const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
 
-  const addonRef = useRef<SearchAddon | null>(null);
-
-  useEffect(() => {
-    const term = xtermRef.current;
-    if (!isTerminalReady || !term || addonRef.current) return;
-    let cancelled = false;
-    let disposables: { dispose: () => void } | null = null;
-    let loaded: SearchAddon | null = null;
-    // Dynamic import so @xterm/addon-search (UMD bundle touching `self`) does
-    // not evaluate during SSR.
-    import("@xterm/addon-search")
-      .then(({ SearchAddon }) => {
-        if (cancelled || addonRef.current) return;
-        const addon = new SearchAddon();
-        try {
-          term.loadAddon(addon);
-        } catch {
-          return;
-        }
-        addonRef.current = addon;
-        loaded = addon;
-        disposables = addon.onDidChangeResults(({ resultIndex, resultCount }) => {
-          setMatchInfo({
-            current: resultIndex >= 0 ? resultIndex + 1 : 0,
-            total: resultCount,
-          });
-        });
-      })
-      .catch(() => {
-        /* addon failed to load; search simply remains disabled */
-      });
-    return () => {
-      cancelled = true;
-      disposables?.dispose();
-      loaded?.dispose();
-      addonRef.current = null;
-    };
-  }, [xtermRef, isTerminalReady]);
+  const handleResults = useCallback(
+    (info: { current: number; total: number }) =>
+      setMatchInfo((prev) =>
+        prev.current === info.current && prev.total === info.total ? prev : info,
+      ),
+    [],
+  );
+  const { addon } = useSearchAddon(xtermRef, isTerminalReady, handleResults);
 
   const hasError = regex && query.length > 0 && !isValidRegex(query);
   const errorText = hasError ? "Invalid regex" : undefined;
@@ -105,33 +131,33 @@ export function useTerminalSearch({
   );
 
   const findNext = useCallback(() => {
-    if (!addonRef.current || !query || hasError) return;
-    addonRef.current.findNext(query, { ...buildOptions(), incremental: true });
-  }, [query, hasError, buildOptions]);
+    if (!addon || !query || hasError) return;
+    addon.findNext(query, { ...buildOptions(), incremental: true });
+  }, [addon, query, hasError, buildOptions]);
 
   const findPrev = useCallback(() => {
-    if (!addonRef.current || !query || hasError) return;
-    addonRef.current.findPrevious(query, buildOptions());
-  }, [query, hasError, buildOptions]);
+    if (!addon || !query || hasError) return;
+    addon.findPrevious(query, buildOptions());
+  }, [addon, query, hasError, buildOptions]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !addon) return;
     if (!query) {
-      addonRef.current?.clearDecorations();
+      addon.clearDecorations();
       // clearDecorations does not fire onDidChangeResults; reset counter manually.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMatchInfo({ current: 0, total: 0 });
       return;
     }
     if (hasError) return;
-    addonRef.current?.findNext(query, { ...buildOptions(), incremental: true });
-  }, [isOpen, query, caseSensitive, regex, hasError, buildOptions]);
+    addon.findNext(query, { ...buildOptions(), incremental: true });
+  }, [isOpen, query, caseSensitive, regex, hasError, buildOptions, addon]);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => {
     setIsOpen(false);
-    addonRef.current?.clearDecorations();
-  }, []);
+    addon?.clearDecorations();
+  }, [addon]);
 
   return {
     isOpen,
