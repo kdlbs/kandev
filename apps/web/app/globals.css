@@ -1369,3 +1369,25 @@
 .debug {
   border: 1px solid red !important;
 }
+
+/* Panel search highlights */
+.search-highlight {
+  background: color-mix(in srgb, var(--color-yellow-300, #fde047) 65%, transparent);
+  border-radius: 2px;
+}
+.search-highlight-current {
+  background: var(--color-orange-400, #fb923c);
+  outline: 1px solid var(--color-orange-600, #ea580c);
+  border-radius: 2px;
+}
+.search-flash {
+  animation: search-flash 1.2s ease-out;
+}
+@keyframes search-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--color-orange-300, #fdba74) 70%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}

@@ -15,13 +15,16 @@ type PanelRootProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 /** Fills the dockview content slot. Use as the outermost element in every panel. */
-export function PanelRoot({ children, className, ...rest }: PanelRootProps) {
+export const PanelRoot = forwardRef<HTMLDivElement, PanelRootProps>(function PanelRoot(
+  { children, className, ...rest },
+  ref,
+) {
   return (
-    <div className={cn("h-full flex flex-col min-h-0", className)} {...rest}>
+    <div ref={ref} className={cn("h-full flex flex-col min-h-0", className)} {...rest}>
       {children}
     </div>
   );
-}
+});
 
 type PanelBodyProps = Omit<HTMLAttributes<HTMLDivElement>, "className"> & {
   children: ReactNode;
