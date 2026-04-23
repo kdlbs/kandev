@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
@@ -18,6 +18,7 @@ import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useAppStore } from "@/components/state-provider";
 
 type QueuedOverlayProps = {
   isQueued: boolean;
@@ -65,8 +66,12 @@ function useClarificationKey(agentMessageCount: number) {
 
 function SessionSearchOverlay({
   search,
+  agentLabel,
+  agentName,
 }: {
   search: ReturnType<typeof useSessionSearch>;
+  agentLabel: string | null;
+  agentName: string | null;
 }) {
   const currentIdx = search.activeHitId
     ? search.hits.findIndex((h) => h.id === search.activeHitId)
@@ -102,9 +107,41 @@ function SessionSearchOverlay({
         activeHitId={search.activeHitId}
         onSelect={search.setActiveHit}
         isSearching={search.isSearching}
+        agentLabel={agentLabel}
+        agentName={agentName}
       />
     </div>
   );
+}
+
+/** Returns the AgentProfileOption for the session's profile, or null. Uses
+ * primitive profile id to avoid getSnapshot-cache errors from returning
+ * fresh objects on every selector call. */
+function useSessionAgentProfile(sessionId: string | null | undefined) {
+  const profileId = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.agent_profile_id ?? null) : null,
+  );
+  return useAppStore((state) =>
+    profileId
+      ? (state.agentProfiles.items.find((p: { id: string }) => p.id === profileId) ?? null)
+      : null,
+  );
+}
+
+/** Resolves the agent profile name + registry slug for the given session.
+ * Label is "Profile Name" from the "Agent • Profile Name" store label; slug
+ * feeds <AgentLogo> which fetches the logo by agent type. */
+function useSessionAgentIdentity(sessionId: string | null | undefined): {
+  label: string | null;
+  name: string | null;
+} {
+  const profile = useSessionAgentProfile(sessionId);
+  return useMemo(() => {
+    if (!profile) return { label: null, name: null };
+    const parts = profile.label.split(" \u2022 ");
+    const label = parts[1] || parts[0] || profile.label;
+    return { label, name: profile.agent_name ?? null };
+  }, [profile]);
 }
 
 type TaskChatPanelProps = {
@@ -165,6 +202,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const { loadMore } = useLazyLoadMessages(resolvedSessionId);
   const search = useSessionSearch(resolvedSessionId, loadMore);
+  const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
     isOpen: search.isOpen,
@@ -210,7 +248,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           worktreePath={session?.worktree_path}
           onOpenFile={onOpenFile}
         />
-        <SessionSearchOverlay search={search} />
+        <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {pendingClarification && !isArchived && (
         <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">

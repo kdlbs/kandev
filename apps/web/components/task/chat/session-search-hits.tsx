@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { AgentLogo } from "@/components/agent-logo";
 import type { MessageSearchHit } from "@/lib/api/domains/session-api";
 
 type SessionSearchHitsProps = {
@@ -10,6 +11,10 @@ type SessionSearchHitsProps = {
   activeHitId: string | null;
   onSelect: (id: string) => void;
   isSearching: boolean;
+  /** Display name for agent hits (e.g. the profile name). Falls back to "Agent". */
+  agentLabel?: string | null;
+  /** Agent registry slug (e.g. "claude-code") used to fetch the profile logo. */
+  agentName?: string | null;
 };
 
 function formatTime(iso: string): string {
@@ -63,12 +68,39 @@ function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   );
 }
 
+function HitAuthor({
+  authorType,
+  agentLabel,
+  agentName,
+}: {
+  authorType: string;
+  agentLabel?: string | null;
+  agentName?: string | null;
+}) {
+  if (authorType === "user") {
+    return (
+      <span className="text-[0.6875rem] uppercase tracking-wide font-medium text-primary/80 truncate">
+        You
+      </span>
+    );
+  }
+  const label = agentLabel?.trim() || "Agent";
+  return (
+    <span className="text-[0.6875rem] uppercase tracking-wide font-medium text-muted-foreground inline-flex items-center gap-1.5 min-w-0">
+      {agentName && <AgentLogo agentName={agentName} size={12} className="shrink-0" />}
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 export function SessionSearchHits({
   hits,
   query,
   activeHitId,
   onSelect,
   isSearching,
+  agentLabel,
+  agentName,
 }: SessionSearchHitsProps) {
   if (!query.trim()) return null;
   return (
@@ -90,15 +122,12 @@ export function SessionSearchHits({
           )}
         >
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <span
-              className={cn(
-                "text-[0.6875rem] uppercase tracking-wide font-medium",
-                hit.author_type === "agent" ? "text-blue-600" : "text-green-600",
-              )}
-            >
-              {hit.author_type}
-            </span>
-            <span className="text-[0.6875rem] text-muted-foreground">
+            <HitAuthor
+              authorType={hit.author_type}
+              agentLabel={agentLabel}
+              agentName={agentName}
+            />
+            <span className="text-[0.6875rem] text-muted-foreground/70 shrink-0">
               {formatTime(hit.created_at)}
             </span>
           </div>
