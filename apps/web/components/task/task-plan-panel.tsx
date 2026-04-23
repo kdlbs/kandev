@@ -53,6 +53,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const editorInstanceRef = useRef<Editor | null>(null);
+  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
   const {
     draftContent,
     setDraftContent,
@@ -66,6 +67,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 
   const handleEditorReady = useCallback((editor: Editor) => {
     editorInstanceRef.current = editor;
+    setEditorInstance(editor);
   }, []);
 
   const handleCommentDeleted = useCallback(
@@ -111,6 +113,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
+    editorInstance,
   };
 }
 
@@ -140,13 +143,14 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
+    editorInstance,
   } = state;
 
   // Ctrl+S to save immediately
   useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
 
   // Ctrl+F in-document find
-  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstanceRef);
+  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
 
   if (isLoading) {
     return (
@@ -440,55 +444,51 @@ function usePlanSelection(
 /** Ctrl+F find-in-plan shortcut + editor wiring */
 function usePlanFindShortcut(
   wrapperRef: React.RefObject<HTMLDivElement | null>,
-  editorRef: React.RefObject<Editor | null>,
+  editor: Editor | null,
 ) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
 
   const readMatchInfo = useCallback(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const s = planSearchPluginKey.getState(ed.state);
+    if (!editor) return;
+    const s = planSearchPluginKey.getState(editor.state);
     if (!s) return;
     setMatchInfo({
       current: s.matches.length ? s.current + 1 : 0,
       total: s.matches.length,
     });
-  }, [editorRef]);
+  }, [editor]);
 
   useEffect(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
+    if (!editor) return;
     const handler = () => readMatchInfo();
-    ed.on("transaction", handler);
+    editor.on("transaction", handler);
     return () => {
-      ed.off("transaction", handler);
+      editor.off("transaction", handler);
     };
-  }, [editorRef, readMatchInfo]);
+  }, [editor, readMatchInfo]);
 
   useEffect(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
+    if (!editor) return;
     if (!isOpen) return;
-    ed.commands.setPlanSearchQuery(query);
-  }, [query, isOpen, editorRef]);
+    editor.commands.setPlanSearchQuery(query);
+  }, [query, isOpen, editor]);
 
   useEffect(() => {
     if (isOpen) return;
-    const ed = editorRef.current;
-    if (!ed) return;
-    ed.commands.clearPlanSearch();
-  }, [isOpen, editorRef]);
+    if (!editor) return;
+    editor.commands.clearPlanSearch();
+  }, [isOpen, editor]);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
   const findNext = useCallback(() => {
-    editorRef.current?.commands.planSearchNext();
-  }, [editorRef]);
+    editor?.commands.planSearchNext();
+  }, [editor]);
   const findPrev = useCallback(() => {
-    editorRef.current?.commands.planSearchPrev();
-  }, [editorRef]);
+    editor?.commands.planSearchPrev();
+  }, [editor]);
 
   usePanelSearch({ containerRef: wrapperRef, isOpen, onOpen: open, onClose: close });
 
