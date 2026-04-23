@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout = 90 * time.Second
-	defaultGitPullTimeout  = 60 * time.Second
-	gitNoTags              = "--no-tags"
+	defaultGitFetchTimeout   = 90 * time.Second
+	defaultGitPullTimeout    = 60 * time.Second
+	defaultGitInspectTimeout = 10 * time.Second
+	gitNoTags                = "--no-tags"
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -241,8 +242,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	// Get repository lock for safe concurrent access
 	repoLock := m.getRepoLock(req.RepositoryPath)
 	repoLock.Lock()
+	lockAcquired := time.Now()
 	defer func() {
 		repoLock.Unlock()
+		m.logger.Debug("released worktree repo lock",
+			zap.String("repository_path", req.RepositoryPath),
+			zap.Duration("held", time.Since(lockAcquired)))
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
 
@@ -252,7 +257,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 
 	// Check base branch exists
-	if !m.branchExists(req.RepositoryPath, baseRef) {
+	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
 
@@ -473,7 +478,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 			zap.Error(err))
 
 		// Fall back to local branch if it exists.
-		if !m.branchExists(repoPath, branch) {
+		if !m.branchExists(ctx, repoPath, branch) {
 			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 		}
 
@@ -1227,16 +1232,19 @@ func (m *Manager) isGitRepo(path string) bool {
 }
 
 // branchExists checks if a branch exists in the repository.
-func (m *Manager) branchExists(repoPath, branch string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", branch)
-	cmd.Dir = repoPath
-	err := cmd.Run()
-	return err == nil
+// Bounded by defaultGitInspectTimeout so a hung git (credential prompt, stuck
+// filter, filesystem stall) cannot deadlock the caller while holding repoLock.
+func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) bool {
+	inspectCtx, cancel := context.WithTimeout(ctx, defaultGitInspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
+	return cmd.Run() == nil
 }
 
-func (m *Manager) currentBranch(repoPath string) string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoPath
+func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
+	inspectCtx, cancel := context.WithTimeout(ctx, defaultGitInspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -1346,10 +1354,10 @@ func (m *Manager) resolveLocalBaseRef(
 	onProgress SyncProgressCallback,
 ) string {
 	remoteRef := "origin/" + localBranch
-	if m.currentBranch(repoPath) == baseBranch {
+	if m.currentBranch(ctx, repoPath) == baseBranch {
 		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
-	if m.branchExists(repoPath, remoteRef) {
+	if m.branchExists(ctx, repoPath, remoteRef) {
 		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
 		return remoteRef
 	}
