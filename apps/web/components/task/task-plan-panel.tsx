@@ -454,10 +454,16 @@ function usePlanFindShortcut(
     if (!editor) return;
     const s = planSearchPluginKey.getState(editor.state);
     if (!s) return;
-    setMatchInfo({
+    const next = {
       current: s.matches.length ? s.current + 1 : 0,
       total: s.matches.length,
-    });
+    };
+    // Bail out when nothing changed — TipTap fires `transaction` on every cursor
+    // move, and allocating a new object identity would re-render this hook on
+    // every keystroke / click in the editor (and can cascade into update loops).
+    setMatchInfo((prev) =>
+      prev.current === next.current && prev.total === next.total ? prev : next,
+    );
   }, [editor]);
 
   useEffect(() => {
