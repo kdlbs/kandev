@@ -192,3 +192,189 @@ func TestPlanService_DeletePlanNotFound(t *testing.T) {
 		t.Errorf("expected ErrTaskPlanNotFound, got %v", err)
 	}
 }
+
+func TestPlanService_CreatesInitialRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-rev")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-rev", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-rev")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(list))
+	}
+	if list[0].AuthorName != "Claude" || list[0].AuthorKind != "agent" {
+		t.Errorf("unexpected author: %+v", list[0])
+	}
+	if list[0].RevisionNumber != 1 {
+		t.Errorf("expected rev #1, got %d", list[0].RevisionNumber)
+	}
+}
+
+func TestPlanService_CoalescesWithinWindow(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-co")
+	svc.coalesceWindow = 10 * time.Minute // force generous window
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-co", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-co", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+
+	list, _ := svc.ListRevisions(ctx, "task-co")
+	if len(list) != 1 {
+		t.Fatalf("expected coalesced to 1, got %d", len(list))
+	}
+	if list[0].Content != "v2" {
+		t.Errorf("expected merged content v2, got %q", list[0].Content)
+	}
+}
+
+func TestPlanService_AppendsWhenWindowExpired(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-win")
+	svc.coalesceWindow = 0 // disable coalescing
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-win", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-win", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+
+	list, _ := svc.ListRevisions(ctx, "task-win")
+	if len(list) != 2 {
+		t.Fatalf("expected 2 separate revisions, got %d", len(list))
+	}
+}
+
+func TestPlanService_AuthorSwitchBreaksCoalesce(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-sw")
+	svc.coalesceWindow = 10 * time.Minute
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-sw", Content: "agent-wrote",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-sw", Content: "user-edited",
+		AuthorKind: "user", AuthorName: "Alice",
+	})
+
+	list, _ := svc.ListRevisions(ctx, "task-sw")
+	if len(list) != 2 {
+		t.Fatalf("expected 2 revisions (author switch breaks coalesce), got %d", len(list))
+	}
+	if list[0].AuthorKind != "user" || list[1].AuthorKind != "agent" {
+		t.Errorf("unexpected order: [%s, %s]", list[0].AuthorKind, list[1].AuthorKind)
+	}
+}
+
+func TestPlanService_RevertToEarlierRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-rv")
+	svc.coalesceWindow = 0
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-rv", Content: "v1", AuthorKind: "agent", AuthorName: "Claude"})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-rv", Content: "v2", AuthorKind: "agent", AuthorName: "Claude"})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-rv", Content: "v3", AuthorKind: "agent", AuthorName: "Claude"})
+
+	list, _ := svc.ListRevisions(ctx, "task-rv")
+	if len(list) != 3 {
+		t.Fatalf("expected 3 before revert, got %d", len(list))
+	}
+	v1 := list[2]
+
+	revert, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: "task-rv", TargetRevisionID: v1.ID, AuthorName: "Alice",
+	})
+	if err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+	if revert.RevertOfRevisionID == nil || *revert.RevertOfRevisionID != v1.ID {
+		t.Errorf("revert_of_revision_id mismatch: %v", revert.RevertOfRevisionID)
+	}
+	if revert.AuthorKind != "user" || revert.AuthorName != "Alice" {
+		t.Errorf("expected user/Alice, got %s/%s", revert.AuthorKind, revert.AuthorName)
+	}
+	if revert.RevisionNumber != 4 {
+		t.Errorf("expected rev #4, got %d", revert.RevisionNumber)
+	}
+
+	head, _ := svc.GetPlan(ctx, "task-rv")
+	if head.Content != "v1" {
+		t.Errorf("expected HEAD content v1, got %q", head.Content)
+	}
+}
+
+func TestPlanService_RevertNeverCoalesces(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-rvc")
+	svc.coalesceWindow = 10 * time.Minute
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-rvc", Content: "v1", AuthorKind: "agent", AuthorName: "Claude"})
+	list, _ := svc.ListRevisions(ctx, "task-rvc")
+	v1 := list[0]
+
+	// Two reverts by the same user in quick succession must remain separate rows.
+	_, _ = svc.RevertPlan(ctx, RevertPlanRequest{TaskID: "task-rvc", TargetRevisionID: v1.ID, AuthorName: "Alice"})
+	_, _ = svc.RevertPlan(ctx, RevertPlanRequest{TaskID: "task-rvc", TargetRevisionID: v1.ID, AuthorName: "Alice"})
+
+	list, _ = svc.ListRevisions(ctx, "task-rvc")
+	if len(list) != 3 {
+		t.Fatalf("expected 3 revisions (1 original + 2 reverts), got %d", len(list))
+	}
+}
+
+func TestPlanService_RevertRejectsWrongTask(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-x")
+	_ = repo.CreateTask(ctx, &models.Task{
+		ID: "task-y", WorkspaceID: "ws-plan", WorkflowID: "wf-plan", Title: "Y",
+		State: v1.TaskStateCreated, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-x", Content: "x", AuthorKind: "agent"})
+	xList, _ := svc.ListRevisions(ctx, "task-x")
+	xRev := xList[0]
+
+	_, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: "task-y", TargetRevisionID: xRev.ID, AuthorName: "Alice",
+	})
+	if err != ErrRevisionTaskMismatch {
+		t.Errorf("expected ErrRevisionTaskMismatch, got %v", err)
+	}
+}
+
+func TestPlanService_RevertMissingRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-mr")
+
+	_, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: "task-mr", TargetRevisionID: "does-not-exist", AuthorName: "Alice",
+	})
+	if err != ErrRevisionNotFound {
+		t.Errorf("expected ErrRevisionNotFound, got %v", err)
+	}
+}

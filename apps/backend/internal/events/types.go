@@ -49,9 +49,11 @@ const (
 
 // Event types for task plans
 const (
-	TaskPlanCreated = "task_plan.created"
-	TaskPlanUpdated = "task_plan.updated"
-	TaskPlanDeleted = "task_plan.deleted"
+	TaskPlanCreated         = "task_plan.created"
+	TaskPlanUpdated         = "task_plan.updated"
+	TaskPlanDeleted         = "task_plan.deleted"
+	TaskPlanRevisionCreated = "task_plan.revision.created"
+	TaskPlanReverted        = "task_plan.reverted"
 )
 
 // Event types for session turns
