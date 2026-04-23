@@ -221,6 +221,38 @@ func scanMessageRows(rows interface {
 	return result, false, nil
 }
 
+// SearchMessages returns messages in a session whose content matches the query
+// (case-insensitive substring). Newest-first ordering. Limit is capped.
+func (r *Repository) SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error) {
+	query := strings.TrimSpace(opts.Query)
+	if query == "" {
+		return nil, nil
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	like := dialect.Like(r.ro.DriverName())
+	pattern := "%" + query + "%"
+	sql := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages
+		WHERE task_session_id = ? AND content %s ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, like)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(sql), sessionID, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result, _, err := scanMessageRows(rows, 0)
+	return result, err
+}
+
 // DeleteMessage deletes a message by ID
 func (r *Repository) DeleteMessage(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_messages WHERE id = ?`), id)

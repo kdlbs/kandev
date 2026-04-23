@@ -20,6 +20,12 @@ type ListMessagesOptions struct {
 	Sort   string
 }
 
+// SearchMessagesOptions defines options for searching a session's messages.
+type SearchMessagesOptions struct {
+	Query string
+	Limit int
+}
+
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
