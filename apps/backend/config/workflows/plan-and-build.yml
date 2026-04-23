@@ -97,11 +97,11 @@ steps:
       - If a fix requires an architectural change (new DB table, new service layer, switching libraries): stop and ask.
       - After 3 failed fix attempts on the same issue: stop, question the approach, ask the user.
 
-      STEP 4: ENSURE EVERYTHING IS COMMITTED
+      STEP 4: ENSURE YOUR OWN CHANGES ARE COMMITTED
       Before finishing this phase:
-      - Run `git status` to confirm there are no uncommitted or untracked changes that belong to this task.
-      - If anything is left, stage and commit it with a descriptive message.
-      - The phase is only complete when `git status` shows a clean tree on the task branch.
+      - Run `git status` to see what changed.
+      - Stage and commit every file YOU created or modified for this task, using explicit paths (see GIT SAFETY). Use descriptive messages.
+      - Any uncommitted or untracked changes you did not make are intentional user work — leave them as-is. Do not aim for an absolutely clean tree; aim for none of YOUR task-related edits to be uncommitted.
     events:
       on_enter:
         - type: auto_start_agent
