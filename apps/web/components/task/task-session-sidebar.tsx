@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
@@ -36,16 +36,15 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 function useStablePrimarySessionIds(
   allTasks: Array<{ primarySessionId?: string | null }>,
 ): string[] {
-  const prevRef = useRef<string[]>([]);
-  const ids = useMemo(
-    () => allTasks.map((t) => t.primarySessionId).filter((id): id is string => id != null),
+  const key = useMemo(
+    () =>
+      allTasks
+        .map((t) => t.primarySessionId)
+        .filter((id): id is string => id != null)
+        .join("\0"),
     [allTasks],
   );
-  if (ids.length === prevRef.current.length && ids.every((id, i) => id === prevRef.current[i])) {
-    return prevRef.current;
-  }
-  prevRef.current = ids;
-  return ids;
+  return useMemo(() => (key ? key.split("\0") : []), [key]);
 }
 
 /** Find a task across all workflow snapshots */
