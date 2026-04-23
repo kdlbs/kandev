@@ -66,6 +66,11 @@ steps:
 
       {{task_prompt}}
 
+      GIT SAFETY (read before running any git command)
+      - NEVER run `git checkout -- .`, `git checkout .`, `git reset --hard`, `git clean -fd`, or `git stash --include-untracked`. These wipe uncommitted work.
+      - When reverting files touched by formatters/linters, ALWAYS pass explicit paths (e.g. `git checkout -- path/to/file path/to/dir/`). Never use `.` or unscoped globs.
+      - Treat any uncommitted changes you did not make as intentional user work — leave them in place. Do not revert, stash, or overwrite them.
+
       STEP 0: CREATE A TASK LIST
       Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
 
