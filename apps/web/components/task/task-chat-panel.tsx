@@ -172,8 +172,28 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     onClose: search.close,
   });
 
+  // The message list has no focus-capturing child (unlike TipTap/xterm in the
+  // plan/terminal panels), so clicking a message leaves focus on <body>. Make
+  // the panel root itself focusable and route non-interactive clicks to it so
+  // Ctrl+F can detect focus within the session panel.
+  const handlePanelMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest("input, textarea, select, button, a, [contenteditable], [tabindex]")) {
+      return;
+    }
+    panelRef.current?.focus({ preventScroll: true });
+  }, []);
+
   return (
-    <PanelRoot ref={panelRef} data-testid="session-chat" data-panel-kind="session">
+    <PanelRoot
+      ref={panelRef}
+      data-testid="session-chat"
+      data-panel-kind="session"
+      tabIndex={-1}
+      onMouseDown={handlePanelMouseDown}
+      className="outline-none"
+    >
       <PanelBody padding={false} className="relative">
         <MessageList
           items={groupedItems}

@@ -14,12 +14,38 @@ type UsePanelSearchParams = {
   alwaysActive?: boolean;
 };
 
+/**
+ * Module-level tracker of the most recently interacted panel container.
+ * When focus is on `<body>` (no input focused — the typical state when a user
+ * is just scrolling/reading messages), the panel they last clicked into still
+ * "owns" the Ctrl+F shortcut. Without this, the chat panel could never claim
+ * Ctrl+F because the message list isn't focusable.
+ */
+let lastInteractedPanel: HTMLElement | null = null;
+
 function isFocusWithin(container: HTMLElement | null): boolean {
   if (!container) return false;
   const active = document.activeElement;
   if (!active) return false;
   if (container === active) return true;
   return container.contains(active);
+}
+
+/** True when nothing meaningful is focused (typically body or null). */
+function isAmbientFocus(): boolean {
+  const active = document.activeElement;
+  if (!active) return true;
+  if (active === document.body) return true;
+  if (active.tagName === "HTML") return true;
+  return false;
+}
+
+function shouldClaim(container: HTMLElement | null, alwaysActive: boolean): boolean {
+  if (alwaysActive) return true;
+  if (isFocusWithin(container)) return true;
+  // Fallback: focus is ambient — let the most recently clicked panel claim it.
+  if (container && isAmbientFocus() && lastInteractedPanel === container) return true;
+  return false;
 }
 
 export function usePanelSearch({
@@ -30,16 +56,40 @@ export function usePanelSearch({
   alwaysActive = false,
 }: UsePanelSearchParams): void {
   useEffect(() => {
+    if (alwaysActive) return;
+    let claimedContainer: HTMLElement | null = null;
+    // Attach at the window in capture phase so we see the event before any
+    // descendant can stopPropagation. Target-containment check avoids relying
+    // on the capture descent reaching the panel container.
+    const onPointerDown = (event: PointerEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const target = event.target;
+      if (target instanceof Node && container.contains(target)) {
+        lastInteractedPanel = container;
+        claimedContainer = container;
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      if (claimedContainer && lastInteractedPanel === claimedContainer) {
+        lastInteractedPanel = null;
+      }
+    };
+  }, [containerRef, alwaysActive]);
+
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (matchesShortcut(event, SHORTCUTS.FIND_IN_PANEL)) {
-        if (!alwaysActive && !isFocusWithin(containerRef.current)) return;
+        if (!shouldClaim(containerRef.current, alwaysActive)) return;
         event.preventDefault();
         event.stopPropagation();
         onOpen();
         return;
       }
       if (isOpen && event.key === "Escape") {
-        if (!alwaysActive && !isFocusWithin(containerRef.current)) return;
+        if (!shouldClaim(containerRef.current, alwaysActive)) return;
         event.preventDefault();
         event.stopPropagation();
         onClose();
