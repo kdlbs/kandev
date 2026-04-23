@@ -1,0 +1,339 @@
+import { type Page } from "@playwright/test";
+import { test, expect } from "../../fixtures/test-base";
+import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import { SessionPage } from "../../pages/session-page";
+
+// ---------------------------------------------------------------------------
+// Overview
+// ---------------------------------------------------------------------------
+//
+// Covers the plan checkpointing feature (task plan revisions + rewind/revert).
+//
+// Coalesce window is set to 2000ms by the backend fixture
+// (KANDEV_PLAN_COALESCE_WINDOW_MS=2000). Tests that cross the boundary use
+// e2e:delay(2500) inside the mock-agent script; tests that stay within use
+// e2e:delay(200).
+//
+// Agent-authored revisions are seeded through the MCP tool
+// (create_task_plan_kandev). User-authored revisions are produced by typing
+// into the plan editor and waiting for the 1500ms autosave debounce.
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Create a task with agent, navigate to session, wait for agent idle. */
+async function seedTaskAndWaitForIdle(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  description = "/e2e:simple-message",
+) {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description,
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await testPage.goto(`/t/${task.id}`);
+
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+  return { session, taskId: task.id, sessionId: task.session_id! };
+}
+
+/** Ensure the plan panel is visible by toggling plan mode. */
+async function openPlanPanel(session: SessionPage) {
+  await session.togglePlanMode();
+  await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+}
+
+/** Poll for the number of revision rows in the popover. */
+async function expectRevisionCount(session: SessionPage, count: number, timeout = 10_000) {
+  await expect(session.revisionRows()).toHaveCount(count, { timeout });
+}
+
+// MCP script building blocks — each emits one agent-authored plan revision.
+function mcpWrite(content: string): string {
+  const escaped = content.replace(/"/g, '\\"');
+  return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}"})`;
+}
+
+/** Build a mock-agent script that chains plan writes with inter-write delays. */
+function planWriteScript(writes: Array<{ content: string; delayMsAfter?: number }>): string {
+  const lines: string[] = ['e2e:thinking("Seeding plan revisions...")'];
+  for (const w of writes) {
+    lines.push(mcpWrite(w.content));
+    if (w.delayMsAfter) lines.push(`e2e:delay(${w.delayMsAfter})`);
+  }
+  lines.push('e2e:message("Revisions seeded.")');
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test.describe("Plan checkpointing — rewind UI", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("empty plan: rewind button is disabled when no revisions exist", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint empty",
+    );
+    await openPlanPanel(session);
+
+    await expect(session.rewindButton()).toBeVisible({ timeout: 5_000 });
+    // No plan yet → no revisions → button disabled.
+    await expect(session.rewindButton()).toBeDisabled();
+  });
+
+  test("single agent write: rewind exposes one revision with current badge", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const script = planWriteScript([{ content: "Initial plan" }]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint single",
+      script,
+    );
+    await openPlanPanel(session);
+    await expect(
+      session.planPanel.getByText("Initial plan", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await session.openRewind();
+    await expectRevisionCount(session, 1);
+    await expect(session.revisionRow(1).getByTestId("plan-revision-current-badge")).toBeVisible();
+  });
+
+  test("two agent writes within coalesce window: remain one revision", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const script = planWriteScript([
+      { content: "Draft v1", delayMsAfter: 200 },
+      { content: "Draft v2 (merged)" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint coalesce",
+      script,
+    );
+    await openPlanPanel(session);
+    await expect(
+      session.planPanel.getByText("Draft v2", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await session.openRewind();
+    await expectRevisionCount(session, 1);
+  });
+
+  test("two agent writes across coalesce window: produce two revisions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const script = planWriteScript([
+      { content: "First pass", delayMsAfter: 2500 },
+      { content: "Second pass" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint cross-window",
+      script,
+    );
+    await openPlanPanel(session);
+    await expect(
+      session.planPanel.getByText("Second pass", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+    // Newest first: v2 has current badge; v1 has revert button instead.
+    await expect(session.revisionRow(2).getByTestId("plan-revision-current-badge")).toBeVisible();
+    await expect(
+      session.revisionRow(1).getByTestId("plan-revision-current-badge"),
+    ).toHaveCount(0);
+    await expect(session.revisionRow(1).getByTestId("plan-revision-revert-button")).toBeVisible();
+  });
+
+  test("revert to earlier revision: HEAD updates and new revision appears", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const script = planWriteScript([
+      { content: "Agent draft A", delayMsAfter: 2500 },
+      { content: "Agent draft B" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint revert",
+      script,
+    );
+    await openPlanPanel(session);
+    await expect(
+      session.planPanel.getByText("Agent draft B", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+
+    // Revert to v1.
+    await session.revertToRevision(1);
+    // Toast indicates restore completed.
+    await expect(testPage.getByText(/Plan restored to v1/i)).toBeVisible({ timeout: 10_000 });
+
+    // HEAD content must now be the old v1 content.
+    await expect(
+      session.planPanel.getByText("Agent draft A", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // Reopen popover; expect 3 revisions with restore marker on v3.
+    await session.openRewind();
+    await expectRevisionCount(session, 3);
+    await expect(session.revisionRow(3).getByTestId("plan-revision-current-badge")).toBeVisible();
+    await expect(session.revisionRow(3).getByTestId("plan-revision-revert-marker")).toBeVisible();
+  });
+
+  test("revert confirm dialog: cancel leaves revisions untouched", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const script = planWriteScript([
+      { content: "First", delayMsAfter: 2500 },
+      { content: "Second" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint cancel",
+      script,
+    );
+    await openPlanPanel(session);
+
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+
+    // Click revert on v1 then cancel the dialog.
+    await session.revertButton(session.revisionRow(1)).click();
+    await expect(session.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await session.revertConfirmCancel().click();
+    await expect(session.revertConfirmDialog()).toBeHidden({ timeout: 5_000 });
+
+    // Popover still shows two revisions and HEAD is unchanged.
+    await expectRevisionCount(session, 2);
+    await expect(session.planPanel.getByText("Second", { exact: false })).toBeVisible();
+  });
+
+  test("author switch breaks coalesce: user edit creates a second revision", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const script = planWriteScript([{ content: "Agent wrote this" }]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint author switch",
+      script,
+    );
+    await openPlanPanel(session);
+    await expect(
+      session.planPanel.getByText("Agent wrote this", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // User types into the editor; autosave fires after 1500ms.
+    const editor = session.planEditor();
+    await editor.click();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+a`);
+    await testPage.keyboard.type("User overwrote it");
+    // Wait past autosave debounce + short settle time.
+    await testPage.waitForTimeout(2_000);
+
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+    // Newest row is user; oldest row is agent.
+    const v2Author = session.revisionRow(2).getByTestId("plan-revision-author");
+    const v1Author = session.revisionRow(1).getByTestId("plan-revision-author");
+    await expect(v2Author).not.toHaveText("Agent");
+    await expect(v1Author).toHaveText("Agent");
+  });
+
+  test("persistence across reload: revisions survive page refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const script = planWriteScript([
+      { content: "One", delayMsAfter: 2500 },
+      { content: "Two" },
+    ]);
+    const { session, taskId } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint reload",
+      script,
+    );
+    await openPlanPanel(session);
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+
+    // Reload and reopen the panel.
+    await testPage.goto(`/t/${taskId}`);
+    const freshSession = new SessionPage(testPage);
+    await freshSession.waitForLoad();
+    await openPlanPanel(freshSession);
+    await freshSession.openRewind();
+    await expectRevisionCount(freshSession, 2);
+  });
+});

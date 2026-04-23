@@ -695,4 +695,63 @@ export class SessionPage {
   changesBulkDiscardButton(variant: "unstaged" | "staged" = "unstaged"): Locator {
     return this.changes.getByTestId(`bulk-discard-${variant}`);
   }
+
+  // --- Plan revisions / rewind ---
+
+  /** Rewind button in the plan panel header (opens revision history popover). */
+  rewindButton(): Locator {
+    return this.planPanel.getByTestId("plan-rewind-button");
+  }
+
+  /** Plan revisions popover (opens after clicking rewind). */
+  revisionsPopover(): Locator {
+    return this.page.getByTestId("plan-revisions-popover");
+  }
+
+  /** All revision rows inside the popover, newest-first. */
+  revisionRows(): Locator {
+    return this.revisionsPopover().getByTestId("plan-revision-row");
+  }
+
+  /** Specific revision row by number. */
+  revisionRow(n: number): Locator {
+    return this.revisionsPopover().locator(`[data-revision-number="${n}"]`);
+  }
+
+  /** Revert button scoped to a given revision row. */
+  revertButton(row: Locator): Locator {
+    return row.getByTestId("plan-revision-revert-button");
+  }
+
+  /** Revert-confirm dialog. */
+  revertConfirmDialog(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-dialog");
+  }
+
+  revertConfirmOk(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-ok");
+  }
+
+  revertConfirmCancel(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-cancel");
+  }
+
+  /** TipTap editor inside the plan panel (for typing user edits). */
+  planEditor(): Locator {
+    return this.planPanel.locator(".ProseMirror");
+  }
+
+  /** Open the rewind popover and wait for it to render. */
+  async openRewind(): Promise<void> {
+    await this.rewindButton().click();
+    await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
+  }
+
+  /** Open rewind, click revert on the row with the given revision number, and confirm. */
+  async revertToRevision(n: number): Promise<void> {
+    await this.openRewind();
+    await this.revertButton(this.revisionRow(n)).click();
+    await expect(this.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await this.revertConfirmOk().click();
+  }
 }
