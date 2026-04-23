@@ -191,6 +191,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			TaskDescription: "test task",
 		})
 
+		// handleTaskMovedWithSession runs asynchronously — wait for it to complete.
+		time.Sleep(100 * time.Millisecond)
+
 		// Verify on_exit cleared plan_mode, then on_enter re-enabled it
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata == nil {
@@ -226,6 +229,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			ToStepID:        "step2",
 			TaskDescription: "test task",
 		})
+
+		// handleTaskMovedWithSession runs asynchronously — wait for it to complete.
+		time.Sleep(100 * time.Millisecond)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.ReviewStatus != nil && *updated.ReviewStatus != "" {
@@ -319,6 +325,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			ToStepID:        "step2",
 			TaskDescription: "test task",
 		})
+
+		// handleTaskMovedWithSession runs asynchronously — wait for it to complete.
+		time.Sleep(100 * time.Millisecond)
 	})
 
 	t.Run("handles missing to-step gracefully", func(t *testing.T) {
@@ -341,6 +350,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			ToStepID:        "nonexistent",
 			TaskDescription: "test task",
 		})
+
+		// handleTaskMovedWithSession runs asynchronously — wait for it to complete.
+		time.Sleep(100 * time.Millisecond)
 	})
 
 	t.Run("reset_agent_context processed on enter", func(t *testing.T) {
@@ -377,11 +389,17 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			TaskDescription: "test task",
 		})
 
-		if len(agentMgr.restartProcessCalls) != 1 {
-			t.Fatalf("expected 1 RestartAgentProcess call, got %d", len(agentMgr.restartProcessCalls))
+		// handleTaskMovedWithSession runs asynchronously — wait for it to complete.
+		time.Sleep(100 * time.Millisecond)
+
+		agentMgr.mu.Lock()
+		restartCalls := agentMgr.restartProcessCalls
+		agentMgr.mu.Unlock()
+		if len(restartCalls) != 1 {
+			t.Fatalf("expected 1 RestartAgentProcess call, got %d", len(restartCalls))
 		}
-		if agentMgr.restartProcessCalls[0] != "exec-123" {
-			t.Errorf("expected RestartAgentProcess called with 'exec-123', got %q", agentMgr.restartProcessCalls[0])
+		if restartCalls[0] != "exec-123" {
+			t.Errorf("expected RestartAgentProcess called with 'exec-123', got %q", restartCalls[0])
 		}
 
 		// Verify acp_session_id was cleared

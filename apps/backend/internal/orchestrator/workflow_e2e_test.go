@@ -360,7 +360,10 @@ func assertStepByName(t *testing.T, ctx context.Context, repo sessionExecutorSto
 // assertResetCalls verifies the cumulative count of RestartAgentProcess calls.
 func assertResetCalls(t *testing.T, agentMgr *mockAgentManager, expectCount int) {
 	t.Helper()
-	if got := len(agentMgr.restartProcessCalls); got != expectCount {
+	agentMgr.mu.Lock()
+	got := len(agentMgr.restartProcessCalls)
+	agentMgr.mu.Unlock()
+	if got != expectCount {
 		t.Errorf("restart calls = %d, want %d", got, expectCount)
 	}
 }

@@ -345,17 +345,30 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
-	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
-	if err != nil {
-		s.logger.Error("task.moved: failed to auto-start task",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// Launch StartTask asynchronously so the event handler returns immediately.
+	// The handleTaskMoved handler runs synchronously inside the in-memory event
+	// bus Publish call — if StartTask blocks (e.g., waiting for the agent turn),
+	// the MoveTask HTTP handler that published the event also blocks, causing the
+	// browser request to time out with ERR_EMPTY_RESPONSE.
+	go func() {
+		asyncCtx := context.WithoutCancel(ctx)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
+		if err != nil {
+			s.logger.Error("task.moved: failed to auto-start task",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		}
+	}()
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session
 // is moved between steps. It processes on_exit for the source step and on_enter
 // for the target step.
+//
+// The on_exit/on_enter processing is launched asynchronously because this handler
+// runs synchronously inside the in-memory event bus Publish call. If processOnEnter
+// blocks (e.g., auto_start_agent waiting for the agent turn), the MoveTask HTTP
+// handler that published the event also blocks, causing browser request timeouts.
 func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.TaskMovedEventData) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -365,7 +378,7 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 		return
 	}
 
-	s.processStepExitAndEnter(ctx, data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
+	go s.processStepExitAndEnter(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
 }
 
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
