@@ -663,3 +663,60 @@ func TestService_DeleteMessage(t *testing.T) {
 		t.Error("expected comment to be deleted")
 	}
 }
+
+// TestPublishTaskUpdated_FallbackRepositoryID exercises the DB fallback in
+// primaryRepositoryID: orchestrator-originated events load the task via the
+// raw repo.GetTask, which does not populate Repositories. The publisher must
+// still emit repository_id so the frontend doesn't lose the repo link on
+// workflow transitions or state changes.
+func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	// Seed workspace + workflow + repo + task with an association.
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-x", WorkspaceID: "ws-1", Name: "Repo"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		TaskID: "task-1", RepositoryID: "repo-x", BaseBranch: "main",
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	// Mimic the orchestrator path: pass a task with Repositories nil.
+	task := &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	}
+	if len(task.Repositories) != 0 {
+		t.Fatal("pre-condition: task.Repositories must be nil for this test")
+	}
+	svc.PublishTaskUpdated(ctx, task)
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 published event, got %d", len(events))
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event Data wrong type: %T", events[0].Data)
+	}
+	got, ok := data["repository_id"].(string)
+	if !ok {
+		t.Fatalf("repository_id missing from payload or wrong type: %#v", data["repository_id"])
+	}
+	if got != "repo-x" {
+		t.Fatalf("expected repository_id=repo-x via DB fallback, got %q", got)
+	}
+}

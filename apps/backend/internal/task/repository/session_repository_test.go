@@ -439,3 +439,41 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		t.Errorf("expected 0 affected rows on second call, got %d", affected2)
 	}
 }
+
+// TestGetPrimarySessionInfoByTaskIDs_PopulatesID locks in the SQL fix: the
+// SELECT now includes ts.id so session.ID is populated on the returned
+// TaskSession. Before the fix, publishTaskEvent saw sessionInfo.ID == "" and
+// emitted an empty primary_session_id in every WS payload.
+func TestGetPrimarySessionInfoByTaskIDs_PopulatesID(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	session := &models.TaskSession{
+		ID: "session-abc", TaskID: "task-1", State: models.TaskSessionStateRunning,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.SetSessionPrimary(ctx, "session-abc"); err != nil {
+		t.Fatalf("SetSessionPrimary: %v", err)
+	}
+
+	info, err := repo.GetPrimarySessionInfoByTaskIDs(ctx, []string{"task-1"})
+	if err != nil {
+		t.Fatalf("GetPrimarySessionInfoByTaskIDs: %v", err)
+	}
+	got, ok := info["task-1"]
+	if !ok || got == nil {
+		t.Fatalf("expected primary session info for task-1, got %#v", info)
+	}
+	if got.ID != "session-abc" {
+		t.Errorf("expected session ID %q, got %q (ts.id missing from SELECT?)", "session-abc", got.ID)
+	}
+}
