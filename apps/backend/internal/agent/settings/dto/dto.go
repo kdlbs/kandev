@@ -7,17 +7,27 @@ import (
 )
 
 type AgentProfileDTO struct {
-	ID               string    `json:"id"`
-	AgentID          string    `json:"agent_id"`
-	Name             string    `json:"name"`
-	AgentDisplayName string    `json:"agent_display_name"`
-	Model            string    `json:"model"`
-	Mode             string    `json:"mode,omitempty"`
-	AllowIndexing    bool      `json:"allow_indexing"`
-	CLIPassthrough   bool      `json:"cli_passthrough"`
-	UserModified     bool      `json:"user_modified"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string       `json:"id"`
+	AgentID          string       `json:"agent_id"`
+	Name             string       `json:"name"`
+	AgentDisplayName string       `json:"agent_display_name"`
+	Model            string       `json:"model"`
+	Mode             string       `json:"mode,omitempty"`
+	AllowIndexing    bool         `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	CLIFlags         []CLIFlagDTO `json:"cli_flags"`
+	CLIPassthrough   bool         `json:"cli_passthrough"`
+	UserModified     bool         `json:"user_modified"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
+}
+
+// CLIFlagDTO mirrors models.CLIFlag on the wire. Each entry is one user-facing
+// CLI argument on a profile; at launch time the `flag` string is shell-split
+// and only entries with `enabled:true` reach the agent subprocess argv.
+type CLIFlagDTO struct {
+	Description string `json:"description"`
+	Flag        string `json:"flag"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type TUIConfigDTO struct {

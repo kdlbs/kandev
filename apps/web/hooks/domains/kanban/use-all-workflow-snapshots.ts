@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
@@ -65,38 +66,9 @@ async function fetchAndWriteSnapshot(
   }
 }
 
-// eslint-disable-next-line complexity -- pure field mapping, no real branching logic
 function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
-  const workflowStepId = task.workflow_step_id;
-  if (!workflowStepId || !stepIds.has(workflowStepId)) return null;
-
-  return {
-    id: task.id,
-    workflowStepId,
-    title: task.title,
-    description: task.description ?? undefined,
-    position: task.position ?? 0,
-    state: task.state,
-    repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-    primarySessionId: task.primary_session_id ?? undefined,
-    primarySessionState: task.primary_session_state ?? undefined,
-    sessionCount: task.session_count ?? undefined,
-    reviewStatus: task.review_status ?? undefined,
-    primaryExecutorId: task.primary_executor_id ?? undefined,
-    primaryExecutorType: task.primary_executor_type ?? undefined,
-    primaryExecutorName: task.primary_executor_name ?? undefined,
-    isRemoteExecutor: task.is_remote_executor ?? false,
-    parentTaskId: task.parent_id ?? undefined,
-    updatedAt: task.updated_at,
-    createdAt: task.created_at,
-    isPRReview: isPRReviewFromMetadata(task.metadata),
-  } as KanbanTask;
-}
-
-function isPRReviewFromMetadata(metadata: Task["metadata"]): boolean {
-  if (!metadata || typeof metadata !== "object") return false;
-  const watchId = (metadata as Record<string, unknown>)["review_watch_id"];
-  return typeof watchId === "string" && watchId.length > 0;
+  if (!task.workflow_step_id || !stepIds.has(task.workflow_step_id)) return null;
+  return toKanbanTask(task);
 }
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {

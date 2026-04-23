@@ -36,6 +36,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
+	cs.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/auth/handshake"))
 
 	cs.setupRoutes()
 	return cs
@@ -50,6 +51,9 @@ func (m *ControlServer) setupRoutes() {
 	// Health check
 	m.router.GET("/health", m.handleHealth)
 
+	// Bootstrap handshake — nonce-authenticated, returns the self-generated auth token
+	m.router.POST("/auth/handshake", m.handleHandshake)
+
 	// Instance management API - same endpoints regardless of mode
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
@@ -63,6 +67,29 @@ func (m *ControlServer) handleHealth(c *gin.Context) {
 		"status":    "ok",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// handleHandshake validates a bootstrap nonce and returns the self-generated auth token.
+// This endpoint is only available when agentctl was started with AGENTCTL_BOOTSTRAP_NONCE.
+// The nonce is one-shot: after a successful handshake, further attempts are rejected.
+func (m *ControlServer) handleHandshake(c *gin.Context) {
+	var req struct {
+		Nonce string `json:"nonce" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing or invalid nonce"})
+		return
+	}
+
+	token := m.cfg.ConsumeNonce(req.Nonce)
+	if token == "" {
+		m.logger.Warn("handshake failed: invalid or already-consumed nonce")
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or already-consumed nonce"})
+		return
+	}
+
+	m.logger.Info("bootstrap handshake completed, auth token issued")
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 
 func (m *ControlServer) handleCreateInstance(c *gin.Context) {

@@ -66,6 +66,12 @@ func (s *stubClient) SubmitReview(context.Context, string, string, int, string, 
 func (s *stubClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
 	return nil, nil
 }
+func (s *stubClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+	return nil, nil
+}
+func (s *stubClient) GetIssueState(context.Context, string, string, int) (string, error) {
+	return defaultPRState, nil
+}
 func (s *stubClient) GetPRStatus(context.Context, string, string, int) (*PRStatus, error) {
 	return nil, nil
 }

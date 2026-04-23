@@ -51,30 +51,29 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 	}
 
 	for _, tool := range expectedTools {
-		assert.Contains(t, ConfigContext, tool, "ConfigContext should contain tool: %s", tool)
+		assert.Contains(t, ConfigContext(), tool, "ConfigContext should contain tool: %s", tool)
 	}
 }
 
 func TestConfigContext_ContainsSections(t *testing.T) {
-	assert.Contains(t, ConfigContext, "WORKFLOW TOOLS:")
-	assert.Contains(t, ConfigContext, "AGENT TOOLS:")
-	assert.Contains(t, ConfigContext, "EXECUTOR PROFILE TOOLS:")
-	assert.Contains(t, ConfigContext, "MCP CONFIG TOOLS:")
-	assert.Contains(t, ConfigContext, "TASK TOOLS:")
-	assert.Contains(t, ConfigContext, "INTERACTION:")
-	assert.Contains(t, ConfigContext, "EXAMPLE REQUESTS")
+	assert.Contains(t, ConfigContext(), "WORKFLOW TOOLS:")
+	assert.Contains(t, ConfigContext(), "AGENT TOOLS:")
+	assert.Contains(t, ConfigContext(), "EXECUTOR PROFILE TOOLS:")
+	assert.Contains(t, ConfigContext(), "MCP CONFIG TOOLS:")
+	assert.Contains(t, ConfigContext(), "TASK TOOLS:")
+	assert.Contains(t, ConfigContext(), "INTERACTION:")
+	assert.Contains(t, ConfigContext(), "EXAMPLE REQUESTS")
 }
 
 func TestConfigContext_HasExactlyOneSessionIDPlaceholder(t *testing.T) {
-	count := strings.Count(ConfigContext, "%s")
-	assert.Equal(t, 1, count, "ConfigContext should have exactly 1 %%s placeholder")
+	count := strings.Count(ConfigContext(), "{session_id}")
+	assert.Equal(t, 1, count, "ConfigContext should have exactly 1 {session_id} placeholder")
 }
 
 func TestFormatConfigContext_InjectsSessionID(t *testing.T) {
 	result := FormatConfigContext("session-abc-123")
 	assert.Contains(t, result, "Session ID: session-abc-123")
-	assert.NotContains(t, result, "%s")
-	assert.NotContains(t, result, "%!")
+	assert.NotContains(t, result, "{session_id}")
 }
 
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {
@@ -95,15 +94,19 @@ func TestInjectConfigContext_SystemContentStrippable(t *testing.T) {
 // --- KandevContext tests (existing, verify not broken) ---
 
 func TestKandevContext_HasExactlyTwoPlaceholders(t *testing.T) {
-	count := strings.Count(KandevContext, "%s")
-	assert.Equal(t, 2, count, "KandevContext should have exactly 2 %%s placeholders")
+	ctx := KandevContext()
+	taskCount := strings.Count(ctx, "{task_id}")
+	sessionCount := strings.Count(ctx, "{session_id}")
+	assert.Equal(t, 1, taskCount, "KandevContext should have exactly 1 {task_id} placeholder")
+	assert.Equal(t, 1, sessionCount, "KandevContext should have exactly 1 {session_id} placeholder")
 }
 
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 	result := FormatKandevContext("task-abc", "session-xyz")
 	assert.Contains(t, result, "Kandev Task ID: task-abc")
 	assert.Contains(t, result, "Session ID: session-xyz")
-	assert.NotContains(t, result, "%!")
+	assert.NotContains(t, result, "{task_id}")
+	assert.NotContains(t, result, "{session_id}")
 }
 
 func TestInjectKandevContext_WrapsInSystemTags(t *testing.T) {
@@ -172,6 +175,42 @@ func TestInjectPlanMode_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, testPlanPrompt, stripped)
 }
 
+// --- SessionHandover tests ---
+
+func TestSessionHandoverContext_HasPlaceholders(t *testing.T) {
+	ctx := SessionHandoverContext()
+	assert.Contains(t, ctx, "{session_count}")
+	assert.Contains(t, ctx, "{plan_section}")
+}
+
+func TestFormatSessionHandover_InjectsValues(t *testing.T) {
+	result := FormatSessionHandover(3, "PLAN: do the thing")
+	assert.Contains(t, result, "3 previous session(s)")
+	assert.Contains(t, result, "PLAN: do the thing")
+	assert.NotContains(t, result, "{session_count}")
+	assert.NotContains(t, result, "{plan_section}")
+}
+
+func TestInjectSessionHandover_WrapsInSystemTags(t *testing.T) {
+	result := InjectSessionHandover(2, "", "Do the work")
+	assert.True(t, strings.HasPrefix(result, TagStart))
+	assert.Contains(t, result, "Do the work")
+}
+
+func TestInjectSessionHandover_SystemContentStrippable(t *testing.T) {
+	result := InjectSessionHandover(2, "", "Do the work")
+	stripped := StripSystemContent(result)
+	assert.Equal(t, "Do the work", stripped)
+}
+
+func TestFormatSessionHandover_ValueWithPlaceholderLikeText(t *testing.T) {
+	// Verify single-pass replacement: a plan section containing {session_count}
+	// must not be re-processed.
+	result := FormatSessionHandover(2, "Plan mentions {session_count} literally")
+	assert.Contains(t, result, "2 previous session(s)")
+	assert.Contains(t, result, "Plan mentions {session_count} literally")
+}
+
 // --- InterpolatePlaceholders tests ---
 
 func TestInterpolatePlaceholders_TaskID(t *testing.T) {
@@ -192,15 +231,15 @@ func TestInterpolatePlaceholders_MultiplePlaceholders(t *testing.T) {
 // --- ConfigContext vs KandevContext distinction ---
 
 func TestConfigContext_DoesNotContainPlanTools(t *testing.T) {
-	assert.NotContains(t, ConfigContext, "create_task_plan_kandev")
-	assert.NotContains(t, ConfigContext, "get_task_plan_kandev")
-	assert.NotContains(t, ConfigContext, "update_task_plan_kandev")
-	assert.NotContains(t, ConfigContext, "delete_task_plan_kandev")
+	assert.NotContains(t, ConfigContext(), "create_task_plan_kandev")
+	assert.NotContains(t, ConfigContext(), "get_task_plan_kandev")
+	assert.NotContains(t, ConfigContext(), "update_task_plan_kandev")
+	assert.NotContains(t, ConfigContext(), "delete_task_plan_kandev")
 }
 
 func TestKandevContext_DoesNotContainConfigTools(t *testing.T) {
-	assert.NotContains(t, KandevContext, "create_workflow_step_kandev")
-	assert.NotContains(t, KandevContext, "update_workflow_step_kandev")
-	assert.NotContains(t, KandevContext, "list_agents_kandev")
-	assert.NotContains(t, KandevContext, "create_agent_kandev")
+	assert.NotContains(t, KandevContext(), "create_workflow_step_kandev")
+	assert.NotContains(t, KandevContext(), "update_workflow_step_kandev")
+	assert.NotContains(t, KandevContext(), "list_agents_kandev")
+	assert.NotContains(t, KandevContext(), "create_agent_kandev")
 }

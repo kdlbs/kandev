@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -57,6 +58,10 @@ type CreateAgentProfileRequest struct {
 	Name  string
 	Model string
 	Mode  string
+	// CLIFlags is the explicit list to persist. When nil the list is seeded
+	// from the agent's curated PermissionSettings() catalogue (all disabled
+	// by default) so a fresh profile opens with the agent's suggestions.
+	CLIFlags []dto.CLIFlagDTO
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -95,7 +100,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err := c.repo.CreateAgent(ctx, agent); err != nil {
 		return nil, err
 	}
-	profiles, err := c.createAgentProfiles(ctx, agent.ID, displayName, req.Profiles)
+	profiles, err := c.createAgentProfiles(ctx, agent.ID, displayName, req.Profiles, agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -132,15 +137,25 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 	return nil, fmt.Errorf("unknown agent: %s", name)
 }
 
-func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest) ([]*models.AgentProfile, error) {
+func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest, agentConfig agents.Agent) ([]*models.AgentProfile, error) {
 	profiles := make([]*models.AgentProfile, 0, len(profileReqs))
 	for _, profileReq := range profileReqs {
+		if profileReq.CLIFlags != nil {
+			if err := validateCLIFlagDTOs(profileReq.CLIFlags); err != nil {
+				return nil, err
+			}
+		}
+		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
+		if profileReq.CLIFlags == nil {
+			cliFlags = seedCLIFlags(agentConfig)
+		}
 		profile := &models.AgentProfile{
 			AgentID:          agentID,
 			Name:             profileReq.Name,
 			AgentDisplayName: displayName,
 			Model:            profileReq.Model,
 			Mode:             profileReq.Mode,
+			CLIFlags:         cliFlags,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

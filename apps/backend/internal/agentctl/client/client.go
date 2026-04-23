@@ -29,6 +29,7 @@ type Client struct {
 	logger                *logger.Logger
 	executionID           string
 	sessionID             string
+	authToken             string // shared secret for Bearer auth
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -61,6 +62,13 @@ func WithExecutionID(id string) ClientOption {
 func WithSessionID(id string) ClientOption {
 	return func(c *Client) {
 		c.sessionID = id
+	}
+}
+
+// WithAuthToken sets the Bearer token for authenticating requests to agentctl.
+func WithAuthToken(token string) ClientOption {
+	return func(c *Client) {
+		c.authToken = token
 	}
 }
 
@@ -113,7 +121,38 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 	for _, opt := range opts {
 		opt(c)
 	}
+	// Install auth transport after options are applied so WithAuthToken takes effect.
+	if c.authToken != "" {
+		c.httpClient.Transport = &authTransport{token: c.authToken, base: c.httpClient.Transport}
+		c.longRunningHTTPClient.Transport = &authTransport{token: c.authToken, base: c.longRunningHTTPClient.Transport}
+	}
 	return c
+}
+
+// authTransport is an http.RoundTripper that injects an Authorization header.
+type authTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(r)
+}
+
+// wsAuthHeaders returns HTTP headers for WebSocket dial calls.
+func (c *Client) wsAuthHeaders() http.Header {
+	if c.authToken == "" {
+		return nil
+	}
+	h := http.Header{}
+	h.Set("Authorization", "Bearer "+c.authToken)
+	return h
 }
 
 // Health checks if agentctl is healthy

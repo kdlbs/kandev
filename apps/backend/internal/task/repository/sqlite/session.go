@@ -992,7 +992,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state,
+		SELECT ts.id, ts.task_id, ts.review_status, ts.executor_id, ts.state,
 		       ts.agent_profile_snapshot, ts.repository_snapshot,
 		       e.type, e.name
 		FROM task_sessions ts
@@ -1008,6 +1008,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 
 	result := make(map[string]*models.TaskSession)
 	for rows.Next() {
+		var sessionID string
 		var taskID string
 		var reviewStatus sql.NullString
 		var executorID sql.NullString
@@ -1016,10 +1017,11 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		var repositorySnapshotJSON sql.NullString
 		var executorType sql.NullString
 		var executorName sql.NullString
-		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
+		if err := rows.Scan(&sessionID, &taskID, &reviewStatus, &executorID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
+			ID:     sessionID,
 			TaskID: taskID,
 		}
 		if sessionState.Valid {

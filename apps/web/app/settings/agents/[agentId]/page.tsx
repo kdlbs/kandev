@@ -51,6 +51,7 @@ const createDraftProfile = (
   model: defaultModel,
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cli_passthrough: false,
+  cli_flags: [],
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   isNew: true,

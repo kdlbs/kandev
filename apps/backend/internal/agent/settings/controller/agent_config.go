@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"go.uber.org/zap"
@@ -166,6 +167,7 @@ type CommandPreviewRequest struct {
 	Model              string
 	PermissionSettings map[string]bool
 	CLIPassthrough     bool
+	CLIFlags           []dto.CLIFlagDTO
 }
 
 // PreviewAgentCommand generates a preview of the CLI command that will be executed
@@ -175,6 +177,19 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		return nil, fmt.Errorf("agent type %q not found in registry", agentName)
 	}
 
+	// Resolve the user-configured cli_flags list into argv tokens. The
+	// launch path does the same via cliflags.Resolve; mirroring it here
+	// keeps the preview faithful to what the agent subprocess will see.
+	// Tolerate malformed entries silently — the preview is informational.
+	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
+
+	// Passthrough: BuildPassthroughCommand emits permission flags via Settings();
+	// the launch path (manager_passthrough.go) does not append CLIFlagTokens for
+	// passthrough, so the preview must match — otherwise permission flags that
+	// the legacy allow_indexing backfill also pushes into CLIFlags get rendered
+	// twice (e.g. Auggie's --allow-indexing).
+	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
+	// after the agent's BuildCommand.
 	var cmd agents.Command
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
@@ -185,7 +200,11 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		cmd = agentConfig.BuildCommand(agents.CommandOptions{
 			Model:            req.Model,
 			PermissionValues: req.PermissionSettings,
+			CLIFlagTokens:    cliFlagTokens,
 		})
+		if len(cliFlagTokens) > 0 {
+			cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		}
 	}
 
 	return &dto.CommandPreviewResponse{

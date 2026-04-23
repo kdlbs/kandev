@@ -149,9 +149,20 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
 	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
-	// ALWAYS check for queued messages after agent becomes ready, regardless of workflow transition
+	// When a workflow transition occurred (e.g. Work → Review), the new step's
+	// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
+	// Skip the queued-message check to avoid racing with that auto-start goroutine —
+	// both would try to call PromptTask and the loser's queued message would be lost.
+	if transitioned {
+		s.logger.Debug("workflow transition occurred, skipping queued message check",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+
+	// Check for queued messages when no workflow transition occurred.
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
 	s.logger.Info("checking for queued messages",
 		zap.String("session_id", data.SessionID),
@@ -220,6 +231,15 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		return
 	}
 
+	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
+	for i, att := range queuedMsg.Attachments {
+		attachments[i] = v1.MessageAttachment{
+			Type:     att.Type,
+			Data:     att.Data,
+			MimeType: att.MimeType,
+		}
+	}
+
 	// Create user message for the queued message (so it appears in chat history)
 	if s.messageCreator != nil {
 		turnID := s.getActiveTurnID(queuedMsg.SessionID)
@@ -229,9 +249,9 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			turnID = s.getActiveTurnID(queuedMsg.SessionID)
 		}
 
-		// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
-		// This matches the behavior of direct prompts
-		meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
+		meta := NewUserMessageMeta().
+			WithPlanMode(queuedMsg.PlanMode).
+			WithAttachments(attachments)
 		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
 		if err != nil {
 			s.logger.Error("failed to create user message for queued message",
@@ -246,16 +266,6 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// workflow transitions (e.g. move_to_next) to fire on auto-started prompts.
 	if session, sErr := s.repo.GetTaskSession(promptCtx, queuedMsg.SessionID); sErr == nil {
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
-	}
-
-	// Convert queue attachments to v1 attachments
-	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
-	for i, att := range queuedMsg.Attachments {
-		attachments[i] = v1.MessageAttachment{
-			Type:     att.Type,
-			Data:     att.Data,
-			MimeType: att.MimeType,
-		}
 	}
 
 	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,

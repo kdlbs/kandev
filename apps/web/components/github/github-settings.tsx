@@ -11,9 +11,12 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { GitHubStatusCard } from "./github-status";
 import { ReviewWatchTable } from "./review-watch-table";
 import { ReviewWatchDialog } from "./review-watch-dialog";
+import { IssueWatchTable } from "./issue-watch-table";
+import { IssueWatchDialog } from "./issue-watch-dialog";
 import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
-import type { ReviewWatch } from "@/lib/types/github";
+import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
+import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
 
 type GitHubSettingsProps = {
   workspaceId: string;
@@ -73,19 +76,61 @@ function useWatchActions(workspaceId: string | null) {
   return { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled };
 }
 
-export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
-  const { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled } =
-    useWatchActions(workspaceId);
+function useIssueWatchActions(workspaceId: string | null) {
+  const { items: watches, create, update, remove, trigger } = useIssueWatches(workspaceId);
   const { toast } = useToast();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await remove(id);
+        toast({ description: "Issue watch deleted", variant: "success" });
+      } catch {
+        toast({ description: "Failed to delete issue watch", variant: "error" });
+      }
+    },
+    [remove, toast],
+  );
 
-  const handleEdit = useCallback((watch: ReviewWatch) => {
-    setEditingWatch(watch);
-    setDialogOpen(true);
-  }, []);
+  const handleTrigger = useCallback(
+    async (id: string) => {
+      try {
+        const result = await trigger(id);
+        const count = result?.new_issues_found ?? 0;
+        if (count > 0) {
+          toast({
+            description: `Found ${count} new issue${count > 1 ? "s" : ""}`,
+            variant: "success",
+          });
+        } else {
+          toast({ description: "No new issues found" });
+        }
+      } catch {
+        toast({ description: "Failed to check for issues", variant: "error" });
+      }
+    },
+    [trigger, toast],
+  );
 
+  const handleToggleEnabled = useCallback(
+    async (watch: IssueWatch) => {
+      try {
+        await update(watch.id, { enabled: !watch.enabled });
+        toast({
+          description: watch.enabled ? "Watch paused" : "Watch enabled",
+          variant: "success",
+        });
+      } catch {
+        toast({ description: "Failed to update watch", variant: "error" });
+      }
+    },
+    [update, toast],
+  );
+
+  return { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled };
+}
+
+export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
   return (
     <TooltipProvider>
       <div className="space-y-8">
@@ -95,7 +140,7 @@ export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
             GitHub Integration
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Configure GitHub PR monitoring and review queue automation.
+            Configure GitHub PR monitoring, issue tracking, and review queue automation.
           </p>
         </div>
 
@@ -109,35 +154,8 @@ export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
           </Card>
         </SettingsSection>
 
-        <SettingsSection
-          title="Review Watches"
-          description="Automatically create tasks for PRs that need your review."
-          action={
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditingWatch(null);
-                setDialogOpen(true);
-              }}
-              className="cursor-pointer"
-            >
-              <IconPlus className="h-4 w-4 mr-1" />
-              Add Watch
-            </Button>
-          }
-        >
-          <Card>
-            <CardContent className="p-0">
-              <ReviewWatchTable
-                watches={watches}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onTrigger={handleTrigger}
-                onToggleEnabled={handleToggleEnabled}
-              />
-            </CardContent>
-          </Card>
-        </SettingsSection>
+        <ReviewWatchSection workspaceId={workspaceId} />
+        <IssueWatchSection workspaceId={workspaceId} />
 
         <SettingsSection
           title="PR Analytics"
@@ -145,22 +163,128 @@ export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
         >
           <PRStatsPanel workspaceId={workspaceId} />
         </SettingsSection>
-
-        <ReviewWatchDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          watch={editingWatch}
-          workspaceId={workspaceId}
-          onCreate={async (req) => {
-            await create(req);
-            toast({ description: "Review watch created", variant: "success" });
-          }}
-          onUpdate={async (id, req) => {
-            await update(id, req);
-            toast({ description: "Review watch updated", variant: "success" });
-          }}
-        />
       </div>
     </TooltipProvider>
+  );
+}
+
+function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
+  const { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled } =
+    useWatchActions(workspaceId);
+  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
+
+  const handleEdit = useCallback((watch: ReviewWatch) => {
+    setEditingWatch(watch);
+    setDialogOpen(true);
+  }, []);
+
+  return (
+    <>
+      <SettingsSection
+        title="Review Watches"
+        description="Automatically create tasks for PRs that need your review."
+        action={
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingWatch(null);
+              setDialogOpen(true);
+            }}
+            className="cursor-pointer"
+          >
+            <IconPlus className="h-4 w-4 mr-1" />
+            Add Watch
+          </Button>
+        }
+      >
+        <Card>
+          <CardContent className="p-0">
+            <ReviewWatchTable
+              watches={watches}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onTrigger={handleTrigger}
+              onToggleEnabled={handleToggleEnabled}
+            />
+          </CardContent>
+        </Card>
+      </SettingsSection>
+      <ReviewWatchDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        watch={editingWatch}
+        workspaceId={workspaceId}
+        onCreate={async (req) => {
+          await create(req);
+          toast({ description: "Review watch created", variant: "success" });
+        }}
+        onUpdate={async (id, req) => {
+          await update(id, req);
+          toast({ description: "Review watch updated", variant: "success" });
+        }}
+      />
+    </>
+  );
+}
+
+function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
+  const issueActions = useIssueWatchActions(workspaceId);
+  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
+
+  const handleEdit = useCallback((watch: IssueWatch) => {
+    setEditingIssueWatch(watch);
+    setDialogOpen(true);
+  }, []);
+
+  return (
+    <>
+      <SettingsSection
+        title="Issue Watches"
+        description="Automatically create tasks for GitHub issues matching your criteria."
+        action={
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingIssueWatch(null);
+              setDialogOpen(true);
+            }}
+            className="cursor-pointer"
+          >
+            <IconPlus className="h-4 w-4 mr-1" />
+            Add Watch
+          </Button>
+        }
+      >
+        <Card>
+          <CardContent className="p-0">
+            <IssueWatchTable
+              watches={issueActions.watches}
+              onEdit={handleEdit}
+              onDelete={issueActions.handleDelete}
+              onTrigger={issueActions.handleTrigger}
+              onToggleEnabled={issueActions.handleToggleEnabled}
+            />
+          </CardContent>
+        </Card>
+      </SettingsSection>
+      <IssueWatchDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        watch={editingWatch}
+        workspaceId={workspaceId}
+        onCreate={async (req) => {
+          await issueActions.create(req);
+          toast({ description: "Issue watch created", variant: "success" });
+        }}
+        onUpdate={async (id, req) => {
+          await issueActions.update(id, req);
+          toast({ description: "Issue watch updated", variant: "success" });
+        }}
+      />
+    </>
   );
 }

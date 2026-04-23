@@ -54,6 +54,11 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	// Exempt paths from auth:
+	// - /health: liveness probe
+	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
+	//   runs in the same trust boundary but does not possess the auth token.
+	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
 
 	s.setupRoutes()
 	return s

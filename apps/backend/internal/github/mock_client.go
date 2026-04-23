@@ -133,6 +133,14 @@ func (m *MockClient) ListReviewRequestedPRs(context.Context, string, string, str
 	return result, nil
 }
 
+func (m *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+	return nil, nil
+}
+
+func (m *MockClient) GetIssueState(context.Context, string, string, int) (string, error) {
+	return defaultPRState, nil
+}
+
 func (m *MockClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

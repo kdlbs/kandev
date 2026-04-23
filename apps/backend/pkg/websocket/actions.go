@@ -368,6 +368,15 @@ const (
 	ActionGitHubTaskPRSync        = "github.task_pr.sync"
 	ActionGitHubStats             = "github.stats"
 	ActionGitHubCheckSessionPR    = "github.check_session_pr"
+
+	// Issue watch actions
+	ActionGitHubIssueWatchesList = "github.issue_watches.list"
+	ActionGitHubIssueWatchCreate = "github.issue_watches.create"
+	ActionGitHubIssueWatchUpdate = "github.issue_watches.update"
+	ActionGitHubIssueWatchDelete = "github.issue_watches.delete"
+	ActionGitHubIssueTrigger     = "github.issue_watches.trigger"
+	ActionGitHubIssueTriggerAll  = "github.issue_watches.trigger_all"
+	ActionGitHubNewIssueNotify   = "github.new_issue.notify" // Notification
 )
 
 // Error codes

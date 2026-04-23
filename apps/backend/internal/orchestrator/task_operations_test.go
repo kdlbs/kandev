@@ -615,6 +615,56 @@ func TestResumeTaskSession_ArchivedDuringLaunch(t *testing.T) {
 	}
 }
 
+// TestResumeTaskSession_FailedKeepsResumeToken verifies that resuming a FAILED
+// session preserves the ACP resume token so the relaunched agent restores the
+// prior conversation via ACP session/load (for native-resume agents).
+// Regression test for the "Resume blocked by stale state" bug where FAILED sessions
+// couldn't be restarted at all; the fix also changes policy to keep the token
+// (previously it was cleared to force a fresh agent).
+func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	// Agent launch succeeds so the resume path does not unwind and mark the task
+	// FAILED, which would exercise a separate state-mutation code path.
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+	session, _ := repo.GetTaskSession(ctx, "session1")
+	session.AgentProfileID = "profile-1"
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	now := time.Now().UTC()
+	_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1",
+		ResumeToken: "acp-session-xyz",
+		Resumable:   true,
+		CreatedAt:   now, UpdatedAt: now,
+	})
+
+	if _, err := svc.ResumeTaskSession(ctx, "task1", "session1"); err != nil {
+		t.Fatalf("ResumeTaskSession on FAILED session returned: %v", err)
+	}
+
+	er, err := repo.GetExecutorRunningBySessionID(ctx, "session1")
+	if err != nil || er == nil {
+		t.Fatalf("ExecutorRunning lookup failed: %v (nil=%v)", err, er == nil)
+	}
+	if er.ResumeToken != "acp-session-xyz" {
+		t.Errorf("expected resume token to be preserved on FAILED resume, got %q", er.ResumeToken)
+	}
+}
+
 // --- CompleteTask ---
 
 func TestCompleteTask_UpdatesTaskState(t *testing.T) {

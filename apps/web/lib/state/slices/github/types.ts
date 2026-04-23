@@ -1,4 +1,4 @@
-import type { GitHubStatus, TaskPR, PRWatch, ReviewWatch } from "@/lib/types/github";
+import type { GitHubStatus, TaskPR, PRWatch, ReviewWatch, IssueWatch } from "@/lib/types/github";
 
 export type GitHubStatusState = {
   status: GitHubStatus | null;
@@ -24,11 +24,18 @@ export type ReviewWatchesState = {
   loading: boolean;
 };
 
+export type IssueWatchesState = {
+  items: IssueWatch[];
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
   taskPRs: TaskPRsState;
   prWatches: PRWatchesState;
   reviewWatches: ReviewWatchesState;
+  issueWatches: IssueWatchesState;
 };
 
 export type GitHubSliceActions = {
@@ -46,6 +53,11 @@ export type GitHubSliceActions = {
   addReviewWatch: (watch: ReviewWatch) => void;
   updateReviewWatch: (watch: ReviewWatch) => void;
   removeReviewWatch: (id: string) => void;
+  setIssueWatches: (watches: IssueWatch[]) => void;
+  setIssueWatchesLoading: (loading: boolean) => void;
+  addIssueWatch: (watch: IssueWatch) => void;
+  updateIssueWatch: (watch: IssueWatch) => void;
+  removeIssueWatch: (id: string) => void;
 };
 
 export type GitHubSlice = GitHubSliceState & GitHubSliceActions;

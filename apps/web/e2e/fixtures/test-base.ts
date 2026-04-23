@@ -5,6 +5,7 @@ import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
+import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
 
 export type SeedData = {
@@ -48,14 +49,7 @@ export const test = backendFixture.extend<
       // This ensures discoveryRoots() allows the path for branch listing.
       const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
       fs.mkdirSync(repoDir, { recursive: true });
-      const gitEnv = {
-        ...process.env,
-        HOME: backend.tmpDir,
-        GIT_AUTHOR_NAME: "E2E Test",
-        GIT_AUTHOR_EMAIL: "e2e@test.local",
-        GIT_COMMITTER_NAME: "E2E Test",
-        GIT_COMMITTER_EMAIL: "e2e@test.local",
-      };
+      const gitEnv = makeGitEnv(backend.tmpDir);
       execSync("git init -b main", { cwd: repoDir, env: gitEnv });
       execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);

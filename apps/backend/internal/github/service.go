@@ -1149,6 +1149,389 @@ func (s *Service) publishNewReviewPREvent(ctx context.Context, watch *ReviewWatc
 	}
 }
 
+// --- Issue Watch service methods ---
+
+// CreateIssueWatch creates a new issue watch and triggers an initial poll.
+func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchRequest) (*IssueWatch, error) {
+	if req.PollIntervalSeconds <= 0 {
+		req.PollIntervalSeconds = defaultWatchPollIntervalSec
+	}
+	if req.PollIntervalSeconds < minWatchPollIntervalSec {
+		req.PollIntervalSeconds = minWatchPollIntervalSec
+	}
+	repos := req.Repos
+	if repos == nil {
+		repos = []RepoFilter{}
+	}
+	labels := req.Labels
+	if labels == nil {
+		labels = []string{}
+	}
+	iw := &IssueWatch{
+		WorkspaceID:         req.WorkspaceID,
+		WorkflowID:          req.WorkflowID,
+		WorkflowStepID:      req.WorkflowStepID,
+		Repos:               repos,
+		AgentProfileID:      req.AgentProfileID,
+		ExecutorProfileID:   req.ExecutorProfileID,
+		Prompt:              req.Prompt,
+		Labels:              labels,
+		CustomQuery:         req.CustomQuery,
+		Enabled:             true,
+		PollIntervalSeconds: req.PollIntervalSeconds,
+	}
+	if err := s.store.CreateIssueWatch(ctx, iw); err != nil {
+		return nil, fmt.Errorf("create issue watch: %w", err)
+	}
+	go s.initialIssueCheck(context.Background(), iw)
+	return iw, nil
+}
+
+// initialIssueCheck runs a single poll for a newly created issue watch.
+func (s *Service) initialIssueCheck(ctx context.Context, watch *IssueWatch) {
+	newIssues, err := s.CheckIssueWatch(ctx, watch)
+	if err != nil {
+		s.logger.Debug("initial issue check failed",
+			zap.String("watch_id", watch.ID), zap.Error(err))
+		return
+	}
+	for _, issue := range newIssues {
+		s.publishNewIssueEvent(ctx, watch, issue)
+	}
+	if len(newIssues) > 0 {
+		s.logger.Info("initial issue check found issues",
+			zap.String("watch_id", watch.ID),
+			zap.Int("new_issues", len(newIssues)))
+	}
+}
+
+// GetIssueWatch returns a single issue watch by ID.
+func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
+	return s.store.GetIssueWatch(ctx, id)
+}
+
+// ListIssueWatches returns all issue watches for a workspace.
+func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	return s.store.ListIssueWatches(ctx, workspaceID)
+}
+
+// UpdateIssueWatch updates an issue watch.
+//
+//nolint:dupl // mirrors UpdateReviewWatch — different types, same structure
+func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) error {
+	iw, err := s.store.GetIssueWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if iw == nil {
+		return fmt.Errorf("issue watch not found: %s", id)
+	}
+	if req.WorkflowID != nil {
+		iw.WorkflowID = *req.WorkflowID
+	}
+	if req.WorkflowStepID != nil {
+		iw.WorkflowStepID = *req.WorkflowStepID
+	}
+	if req.Repos != nil {
+		iw.Repos = *req.Repos
+	}
+	if req.AgentProfileID != nil {
+		iw.AgentProfileID = *req.AgentProfileID
+	}
+	if req.ExecutorProfileID != nil {
+		iw.ExecutorProfileID = *req.ExecutorProfileID
+	}
+	if req.Prompt != nil {
+		iw.Prompt = *req.Prompt
+	}
+	if req.Labels != nil {
+		iw.Labels = *req.Labels
+	}
+	if req.CustomQuery != nil {
+		iw.CustomQuery = *req.CustomQuery
+	}
+	if req.Enabled != nil {
+		iw.Enabled = *req.Enabled
+	}
+	if req.PollIntervalSeconds != nil {
+		v := *req.PollIntervalSeconds
+		if v <= 0 {
+			v = defaultWatchPollIntervalSec
+		}
+		if v < minWatchPollIntervalSec {
+			v = minWatchPollIntervalSec
+		}
+		iw.PollIntervalSeconds = v
+	}
+	return s.store.UpdateIssueWatch(ctx, iw)
+}
+
+// DeleteIssueWatch deletes an issue watch.
+func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
+	return s.store.DeleteIssueWatch(ctx, id)
+}
+
+// CheckIssueWatch checks for new issues matching the watch and returns ones not yet tracked.
+func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Issue, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+
+	s.logger.Debug("checking issue watch for new issues",
+		zap.String("watch_id", watch.ID),
+		zap.Int("repo_filters", len(watch.Repos)),
+		zap.String("custom_query", watch.CustomQuery),
+		zap.Bool("enabled", watch.Enabled))
+
+	issues, err := s.fetchIssues(ctx, watch)
+	if err != nil {
+		return nil, err
+	}
+
+	var newIssues []*Issue
+	for _, issue := range issues {
+		exists, checkErr := s.store.HasIssueWatchTask(ctx, watch.ID, issue.RepoOwner, issue.RepoName, issue.Number)
+		if checkErr != nil {
+			s.logger.Error("failed to check issue watch task", zap.Error(checkErr))
+			continue
+		}
+		if !exists {
+			newIssues = append(newIssues, issue)
+		}
+	}
+
+	now := time.Now().UTC()
+	watch.LastPolledAt = &now
+	_ = s.store.UpdateIssueWatch(ctx, watch)
+
+	return newIssues, nil
+}
+
+// fetchIssues fetches issues based on the watch configuration.
+func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue, error) {
+	hasRepos := len(watch.Repos) > 0
+
+	if !hasRepos {
+		filter := s.buildIssueFilter(watch)
+		return s.client.ListIssues(ctx, filter, watch.CustomQuery)
+	}
+
+	return s.fetchIssuesWithRepoFilter(ctx, watch), nil
+}
+
+// buildIssueFilter builds the filter qualifier from watch labels.
+func (s *Service) buildIssueFilter(watch *IssueWatch) string {
+	var parts []string
+	for _, label := range watch.Labels {
+		if strings.ContainsRune(label, ' ') {
+			parts = append(parts, `label:"`+label+`"`)
+		} else {
+			parts = append(parts, "label:"+label)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// fetchIssuesWithRepoFilter queries each repo individually and deduplicates.
+func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, watch *IssueWatch) []*Issue {
+	var allIssues []*Issue
+	seen := make(map[string]bool)
+
+	labelFilter := s.buildIssueFilter(watch)
+
+	for _, repo := range watch.Repos {
+		qualifier := repoFilterToQualifier(repo)
+		filter := qualifier
+		if labelFilter != "" {
+			filter += " " + labelFilter
+		}
+
+		var issues []*Issue
+		var err error
+		if watch.CustomQuery != "" {
+			query := watch.CustomQuery + " " + qualifier
+			issues, err = s.client.ListIssues(ctx, "", query)
+		} else {
+			issues, err = s.client.ListIssues(ctx, filter, "")
+		}
+		if err != nil {
+			if isConnectivityError(err) {
+				s.logger.Warn("failed to list issues (connectivity)",
+					zap.String("filter", qualifier), zap.Error(err))
+			} else {
+				s.logger.Error("failed to list issues",
+					zap.String("filter", qualifier), zap.Error(err))
+			}
+			continue
+		}
+
+		for _, issue := range issues {
+			key := fmt.Sprintf("%s/%s#%d", issue.RepoOwner, issue.RepoName, issue.Number)
+			if !seen[key] {
+				seen[key] = true
+				allIssues = append(allIssues, issue)
+			}
+		}
+	}
+	return allIssues
+}
+
+// ReserveIssueWatchTask atomically claims a dedup slot.
+func (s *Service) ReserveIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, issueURL string) (bool, error) {
+	return s.store.ReserveIssueWatchTask(ctx, watchID, repoOwner, repoName, issueNumber, issueURL)
+}
+
+// AssignIssueWatchTaskID attaches a task ID to a previously reserved slot.
+func (s *Service) AssignIssueWatchTaskID(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, taskID string) error {
+	return s.store.AssignIssueWatchTaskID(ctx, watchID, repoOwner, repoName, issueNumber, taskID)
+}
+
+// ReleaseIssueWatchTask removes a reservation when task creation fails.
+func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int) error {
+	return s.store.ReleaseIssueWatchTask(ctx, watchID, repoOwner, repoName, issueNumber)
+}
+
+// TriggerAllIssueChecks triggers all issue watches for a workspace.
+//
+//nolint:dupl // mirrors TriggerAllReviewChecks — different types, same structure
+func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string) (int, error) {
+	watches, err := s.store.ListIssueWatches(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	enabled := 0
+	for _, w := range watches {
+		if w.Enabled {
+			enabled++
+		}
+	}
+	s.logger.Info("triggering issue checks",
+		zap.String("workspace_id", workspaceID),
+		zap.Int("total_watches", len(watches)),
+		zap.Int("enabled_watches", enabled))
+
+	totalNew := 0
+	for _, watch := range watches {
+		if !watch.Enabled {
+			continue
+		}
+		newIssues, checkErr := s.CheckIssueWatch(ctx, watch)
+		if checkErr != nil {
+			s.logger.Error("failed to check issue watch",
+				zap.String("watch_id", watch.ID), zap.Error(checkErr))
+			continue
+		}
+		for _, issue := range newIssues {
+			s.publishNewIssueEvent(ctx, watch, issue)
+		}
+		totalNew += len(newIssues)
+		if _, cleanErr := s.CleanupClosedIssueTasks(ctx, watch); cleanErr != nil {
+			s.logger.Warn("cleanup closed issue tasks failed",
+				zap.String("watch_id", watch.ID), zap.Error(cleanErr))
+		}
+	}
+	s.logger.Info("issue checks completed",
+		zap.String("workspace_id", workspaceID),
+		zap.Int("new_issues_found", totalNew))
+	return totalNew, nil
+}
+
+// CleanupClosedIssueTasks checks issues tracked by a watch and deletes
+// tasks whose issues are closed and the user hasn't interacted with.
+//
+//nolint:dupl // mirrors CleanupMergedReviewTasks — different types, same structure
+func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch) (int, error) {
+	if s.client == nil || s.taskDeleter == nil || s.taskSessionChecker == nil {
+		return 0, nil
+	}
+	issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, watch.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list issue watch tasks: %w", err)
+	}
+	deleted := 0
+	for _, it := range issueTasks {
+		// Orphan reservation: task_id is empty because the process was
+		// killed between Reserve and Assign. Clean up once the issue is closed.
+		if it.TaskID == "" {
+			if should, _ := s.shouldDeleteIssueTask(ctx, it); should {
+				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+				deleted++
+			}
+			continue
+		}
+		shouldDelete, reason := s.shouldDeleteIssueTask(ctx, it)
+		if !shouldDelete {
+			continue
+		}
+		if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+				deleted++
+				continue
+			}
+			s.logger.Warn("failed to delete issue task",
+				zap.String("task_id", it.TaskID), zap.Error(err))
+			continue
+		}
+		_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+		s.logger.Info("deleted issue task",
+			zap.String("task_id", it.TaskID),
+			zap.String("reason", reason),
+			zap.Int("issue_number", it.IssueNumber),
+			zap.String("repo", it.RepoOwner+"/"+it.RepoName))
+		deleted++
+	}
+	return deleted, nil
+}
+
+// shouldDeleteIssueTask checks if an issue task should be cleaned up.
+// Returns true + reason if the issue is closed AND the user hasn't interacted
+// with the task yet (no sessions).
+func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask) (bool, string) {
+	state, err := s.client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
+	if err != nil {
+		s.logger.Debug("failed to fetch issue state for cleanup",
+			zap.Int("issue_number", it.IssueNumber), zap.Error(err))
+		return false, ""
+	}
+	if state != "closed" {
+		return false, ""
+	}
+	reason := "issue_closed"
+	// Don't delete tasks the user has interacted with (has sessions).
+	if it.TaskID != "" {
+		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, it.TaskID)
+		if err != nil {
+			s.logger.Debug("failed to check task sessions",
+				zap.String("task_id", it.TaskID), zap.Error(err))
+			return false, ""
+		}
+		if hasSessions {
+			return false, ""
+		}
+	}
+	return true, reason
+}
+
+func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, issue *Issue) {
+	if s.eventBus == nil {
+		return
+	}
+	event := bus.NewEvent(events.GitHubNewIssue, "github", &NewIssueEvent{
+		IssueWatchID:      watch.ID,
+		WorkspaceID:       watch.WorkspaceID,
+		WorkflowID:        watch.WorkflowID,
+		WorkflowStepID:    watch.WorkflowStepID,
+		AgentProfileID:    watch.AgentProfileID,
+		ExecutorProfileID: watch.ExecutorProfileID,
+		Prompt:            watch.Prompt,
+		Issue:             issue,
+	})
+	if err := s.eventBus.Publish(ctx, events.GitHubNewIssue, event); err != nil {
+		s.logger.Debug("failed to publish new issue event", zap.Error(err))
+	}
+}
+
 func findLatestCommentTime(comments []PRComment) *time.Time {
 	var latest *time.Time
 	for _, c := range comments {

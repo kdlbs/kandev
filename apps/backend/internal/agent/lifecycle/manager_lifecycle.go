@@ -133,6 +133,14 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 	return result
 }
 
+// IsShuttingDown reports whether graceful shutdown has begun. Set by
+// StopAllAgents before it starts tearing down executions so concurrent
+// handlers (e.g. passthrough exit auto-restart, agentctl HTTP calls) can
+// skip or downgrade work that would otherwise race the teardown.
+func (m *Manager) IsShuttingDown() bool {
+	return m.shuttingDown.Load()
+}
+
 // Stop stops the lifecycle manager and releases resources held by executors.
 func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
@@ -150,6 +158,8 @@ func (m *Manager) Stop() error {
 
 // StopAllAgents attempts a graceful shutdown of all active agents concurrently.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
+	m.shuttingDown.Store(true)
+
 	executions := m.executionStore.List()
 	if len(executions) == 0 {
 		return nil

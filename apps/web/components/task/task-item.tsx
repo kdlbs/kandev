@@ -9,6 +9,7 @@ import {
   IconGitPullRequest,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { DEBUG_UI } from "@/lib/config";
@@ -50,6 +51,7 @@ type TaskItemProps = {
   onToggleSubtasks?: () => void;
   repositories?: string[];
   prInfo?: { number: number; state: string };
+  issueInfo?: { url: string; number: number };
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -209,6 +211,7 @@ function TaskItemContent({
   repositories,
   updatedAt,
   prInfo,
+  issueInfo,
   reserveMenuSpace,
 }: {
   title: string;
@@ -221,6 +224,7 @@ function TaskItemContent({
   repositories?: string[];
   updatedAt?: string;
   prInfo?: { number: number; state: string };
+  issueInfo?: { url: string; number: number };
   reserveMenuSpace: boolean;
 }) {
   return (
@@ -230,6 +234,7 @@ function TaskItemContent({
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
+        {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -276,6 +281,7 @@ export const TaskItem = memo(function TaskItem({
   onToggleSubtasks,
   repositories,
   prInfo,
+  issueInfo,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
@@ -319,6 +325,7 @@ export const TaskItem = memo(function TaskItem({
         repositories={repositories}
         updatedAt={updatedAt}
         prInfo={prInfo}
+        issueInfo={issueInfo}
         reserveMenuSpace={!hasDiffStats}
       />
       {showSubtaskToggle && (

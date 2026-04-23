@@ -13,7 +13,8 @@ import type {
   PermissionSetting,
   ModelConfig,
 } from "@/lib/types/http";
-import { permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { permissionsToProfilePatch, arePermissionsDirty } from "@/lib/agent-permissions";
+import { areCLIFlagsEqual } from "@/lib/cli-flags";
 
 type DraftMcpConfig = {
   enabled: boolean;
@@ -126,6 +127,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       mode: profile.mode,
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cli_passthrough ?? false,
+      cli_flags: profile.cli_flags,
     })),
   });
 
@@ -179,6 +181,7 @@ async function saveExistingProfiles(
         mode: profile.mode,
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cli_passthrough ?? false,
+        cli_flags: profile.cli_flags,
       });
       await saveMcpForProfile({
         draftProfile: profile,
@@ -194,6 +197,8 @@ async function saveExistingProfiles(
         model: profile.model,
         mode: profile.mode,
         ...permissionsToProfilePatch(profile),
+        cli_passthrough: profile.cli_passthrough ?? false,
+        cli_flags: profile.cli_flags,
       });
       nextProfiles.push(updatedProfile);
       continue;
@@ -251,8 +256,6 @@ export async function saveExistingAgent(
   }
 }
 
-import { arePermissionsDirty } from "@/lib/agent-permissions";
-
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {
   if (!saved) return true;
   return (
@@ -260,6 +263,7 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     draft.model !== saved.model ||
     (draft.mode ?? "") !== (saved.mode ?? "") ||
     arePermissionsDirty(draft, saved) ||
-    draft.cli_passthrough !== saved.cli_passthrough
+    draft.cli_passthrough !== saved.cli_passthrough ||
+    !areCLIFlagsEqual(draft.cli_flags, saved.cli_flags)
   );
 }

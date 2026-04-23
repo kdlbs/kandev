@@ -171,6 +171,33 @@ func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, cu
 	return c.parseSearchResults(out)
 }
 
+func (c *GHClient) ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+	query := buildIssueSearchQuery(filter, customQuery)
+	out, err := c.run(ctx, "api", "search/issues",
+		"-X", "GET",
+		"-f", "q="+query,
+		"-f", "per_page=50",
+		"--jq", ".items")
+	if err != nil {
+		return nil, fmt.Errorf("list issues: %w", err)
+	}
+	var items []issueSearchItem
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		return nil, fmt.Errorf("parse issue search results: %w", err)
+	}
+	return parseIssueSearchResults(items), nil
+}
+
+func (c *GHClient) GetIssueState(ctx context.Context, owner, repo string, number int) (string, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/issues/%d", owner, repo, number),
+		"--jq", ".state")
+	if err != nil {
+		return "", fmt.Errorf("get issue state: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func (c *GHClient) ListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 	out, err := c.run(ctx, "api", "user/orgs", "--paginate")
 	if err != nil {

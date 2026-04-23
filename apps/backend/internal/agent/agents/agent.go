@@ -111,6 +111,10 @@ type CommandOptions struct {
 	PermissionPolicy    string          // "autonomous", "supervised", "plan"
 	PermissionValues    map[string]bool // e.g. {"allow_indexing": true}
 	AgentType           string          // for --agent flag (e.g. "task" for subagent)
+	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
+	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
+	// verbatim to the built command by every agent's BuildCommand.
+	CLIFlagTokens []string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -175,6 +179,12 @@ func (c SessionConfig) SupportsRecovery() bool {
 	}
 	return *c.CanRecover
 }
+
+// PermissionApplyMethodCLIFlag is the PermissionSetting.ApplyMethod sentinel
+// for permission flags that map to a CLI argument on the agent subprocess.
+// A typo in any one caller (e.g. "cli-flag") silently breaks the seed and
+// filter chain across agents, so the literal lives in exactly one place.
+const PermissionApplyMethodCLIFlag = "cli_flag"
 
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {

@@ -229,6 +229,51 @@ export type CreateReviewWatchRequest = {
 
 export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "workspace_id">>;
 
+// Issue watch types
+
+export type IssueWatch = {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  workflow_step_id: string;
+  repos: RepoFilter[];
+  agent_profile_id: string;
+  executor_profile_id: string;
+  prompt: string;
+  labels: string[];
+  custom_query: string;
+  enabled: boolean;
+  poll_interval_seconds: number;
+  last_polled_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IssueWatchesResponse = {
+  watches: IssueWatch[];
+};
+
+export type TriggerIssueResponse = {
+  new_issues_found: number;
+};
+
+export type CreateIssueWatchRequest = {
+  workspace_id: string;
+  workflow_id: string;
+  workflow_step_id: string;
+  repos: RepoFilter[];
+  agent_profile_id: string;
+  executor_profile_id: string;
+  prompt?: string;
+  labels?: string[];
+  custom_query?: string;
+  poll_interval_seconds?: number;
+};
+
+export type UpdateIssueWatchRequest = Partial<Omit<CreateIssueWatchRequest, "workspace_id">> & {
+  enabled?: boolean;
+};
+
 // PR diff file (from GitHub API)
 export type PRDiffFile = {
   filename: string;

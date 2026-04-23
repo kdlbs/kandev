@@ -7,6 +7,7 @@ export type FilterDimension =
   | "repository"
   | "hasDiff"
   | "isPRReview"
+  | "isIssueWatch"
   | "titleMatch";
 
 export type FilterOp = "is" | "is_not" | "in" | "not_in" | "matches" | "not_matches";

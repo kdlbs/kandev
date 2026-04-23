@@ -49,6 +49,8 @@ export type TaskSwitcherItem = {
   parentTaskId?: string;
   prInfo?: { number: number; state: string };
   isPRReview?: boolean;
+  isIssueWatch?: boolean;
+  issueInfo?: { url: string; number: number };
 };
 
 type StepDef = { id: string; title: string; color?: string };
@@ -181,6 +183,7 @@ function TaskRow({
         updatedAt={task.updatedAt}
         repositories={task.repositories}
         prInfo={task.prInfo}
+        issueInfo={task.issueInfo}
         isSubTask={isSubTask}
         subtaskCount={subtaskToggle?.subtaskCount}
         subtasksCollapsed={subtaskToggle?.subtasksCollapsed}

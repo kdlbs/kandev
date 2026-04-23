@@ -18,6 +18,11 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+const (
+	issueWatchIDKey = "issue_watch_id"
+	issueNumberKey  = "issue_number"
+)
+
 // GitHubService is the interface the orchestrator uses for GitHub operations.
 type GitHubService interface {
 	Client() github.Client
@@ -33,11 +38,38 @@ type GitHubService interface {
 	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
 	AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error
 	ReleaseReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int) error
+
+	// Issue watch dedup operations
+	ReserveIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, issueURL string) (bool, error)
+	AssignIssueWatchTaskID(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, taskID string) error
+	ReleaseIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int) error
 }
 
 // ReviewTaskCreator creates tasks from review watch events.
 type ReviewTaskCreator interface {
 	CreateReviewTask(ctx context.Context, req *ReviewTaskRequest) (*models.Task, error)
+}
+
+// IssueTaskCreator creates tasks from issue watch events.
+type IssueTaskCreator interface {
+	CreateIssueTask(ctx context.Context, req *IssueTaskRequest) (*models.Task, error)
+}
+
+// IssueTaskRequest contains the data for creating a task from an issue watch event.
+type IssueTaskRequest struct {
+	WorkspaceID    string
+	WorkflowID     string
+	WorkflowStepID string
+	Title          string
+	Description    string
+	Metadata       map[string]interface{}
+	Repositories   []IssueTaskRepository
+}
+
+// IssueTaskRepository associates a repository with an issue task.
+type IssueTaskRepository struct {
+	RepositoryID string
+	BaseBranch   string
 }
 
 // RepositoryResolver resolves a GitHub repo to a local clone + Repository DB record.
@@ -76,6 +108,11 @@ func (s *Service) SetReviewTaskCreator(tc ReviewTaskCreator) {
 // SetRepositoryResolver sets the repository resolver for review task creation.
 func (s *Service) SetRepositoryResolver(rr RepositoryResolver) {
 	s.repositoryResolver = rr
+}
+
+// SetIssueTaskCreator sets the task creator for issue watch auto-task creation.
+func (s *Service) SetIssueTaskCreator(tc IssueTaskCreator) {
+	s.issueTaskCreator = tc
 }
 
 // handlePRFeedback logs PR feedback events. WS broadcasting is handled in main.go.
@@ -708,6 +745,189 @@ func (s *Service) subscribeGitHubEvents() {
 	if _, err := s.eventBus.Subscribe(events.GitHubNewReviewPR, s.handleNewReviewPR); err != nil {
 		s.logger.Error("failed to subscribe to github.new_pr_to_review events", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.GitHubNewIssue, s.handleNewIssue); err != nil {
+		s.logger.Error("failed to subscribe to github.new_issue events", zap.Error(err))
+	}
+}
+
+// handleNewIssue creates a task for a new GitHub issue matching an issue watch.
+func (s *Service) handleNewIssue(ctx context.Context, event *bus.Event) error {
+	issueEvt, ok := event.Data.(*github.NewIssueEvent)
+	if !ok {
+		return nil
+	}
+
+	issue := issueEvt.Issue
+	s.logger.Info("new issue detected from watch",
+		zap.String(issueWatchIDKey, issueEvt.IssueWatchID),
+		zap.String("repo", fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)),
+		zap.Int(issueNumberKey, issue.Number))
+
+	if s.issueTaskCreator == nil {
+		s.logger.Warn("issue task creator not configured, skipping task creation")
+		return nil
+	}
+
+	go s.createIssueTask(context.Background(), issueEvt)
+	return nil
+}
+
+func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent) {
+	issue := evt.Issue
+	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
+
+	if !s.reserveIssueWatch(ctx, evt) {
+		return
+	}
+
+	repositories := s.resolveIssueRepository(ctx, evt.WorkspaceID, issue)
+
+	req := &IssueTaskRequest{
+		WorkspaceID:    evt.WorkspaceID,
+		WorkflowID:     evt.WorkflowID,
+		WorkflowStepID: evt.WorkflowStepID,
+		Title:          fmt.Sprintf("Issue #%d: %s", issue.Number, issue.Title),
+		Description:    interpolateIssuePrompt(evt.Prompt, issue),
+		Metadata: map[string]interface{}{
+			issueWatchIDKey:       evt.IssueWatchID,
+			issueNumberKey:        issue.Number,
+			"issue_url":           issue.HTMLURL,
+			"issue_repo":          repoSlug,
+			"issue_author":        issue.AuthorLogin,
+			"agent_profile_id":    evt.AgentProfileID,
+			"executor_profile_id": evt.ExecutorProfileID,
+		},
+		Repositories: repositories,
+	}
+
+	task, err := s.issueTaskCreator.CreateIssueTask(ctx, req)
+	if err != nil {
+		s.logger.Error("failed to create issue task",
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number),
+			zap.Error(err))
+		s.releaseIssueWatch(ctx, evt)
+		return
+	}
+
+	s.attachIssueTaskToReservation(ctx, evt, task.ID)
+
+	s.logger.Info("created issue task",
+		zap.String("task_id", task.ID),
+		zap.Int(issueNumberKey, issue.Number),
+		zap.String("repo", repoSlug))
+
+	if !s.shouldAutoStartStep(ctx, evt.WorkflowStepID) {
+		return
+	}
+	s.autoStartIssueTask(ctx, evt, task)
+}
+
+func (s *Service) reserveIssueWatch(ctx context.Context, evt *github.NewIssueEvent) bool {
+	if s.githubService == nil {
+		return true
+	}
+	issue := evt.Issue
+	reserved, err := s.githubService.ReserveIssueWatchTask(
+		ctx, evt.IssueWatchID, issue.RepoOwner, issue.RepoName, issue.Number, issue.HTMLURL,
+	)
+	if err != nil {
+		s.logger.Error("failed to reserve issue watch slot",
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number),
+			zap.Error(err))
+		return false
+	}
+	if !reserved {
+		s.logger.Debug("issue already reserved by concurrent handler, skipping",
+			zap.String(issueWatchIDKey, evt.IssueWatchID),
+			zap.Int(issueNumberKey, issue.Number))
+		return false
+	}
+	return true
+}
+
+func (s *Service) releaseIssueWatch(ctx context.Context, evt *github.NewIssueEvent) {
+	if s.githubService == nil {
+		return
+	}
+	issue := evt.Issue
+	if err := s.githubService.ReleaseIssueWatchTask(
+		ctx, evt.IssueWatchID, issue.RepoOwner, issue.RepoName, issue.Number,
+	); err != nil {
+		s.logger.Warn("failed to release issue watch reservation after task-create failure",
+			zap.Int(issueNumberKey, issue.Number),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) attachIssueTaskToReservation(ctx context.Context, evt *github.NewIssueEvent, taskID string) {
+	if s.githubService == nil {
+		return
+	}
+	issue := evt.Issue
+	if err := s.githubService.AssignIssueWatchTaskID(
+		ctx, evt.IssueWatchID, issue.RepoOwner, issue.RepoName, issue.Number, taskID,
+	); err != nil {
+		s.logger.Error("failed to assign task ID to issue watch reservation",
+			zap.String("task_id", taskID),
+			zap.Int(issueNumberKey, issue.Number),
+			zap.Error(err))
+	}
+}
+
+// resolveIssueRepository attempts to resolve and clone the issue's repository.
+// Returns a slice with one entry on success, or nil on failure (graceful degradation).
+func (s *Service) resolveIssueRepository(ctx context.Context, workspaceID string, issue *github.Issue) []IssueTaskRepository {
+	if s.repositoryResolver == nil {
+		return nil
+	}
+	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
+	s.logger.Debug("resolving issue repository", zap.String("repo", repoSlug))
+
+	repoID, baseBranch, err := s.repositoryResolver.ResolveForReview(
+		ctx, workspaceID, "github", issue.RepoOwner, issue.RepoName, "",
+	)
+	if err != nil {
+		s.logger.Warn("failed to resolve repository for issue task (continuing without repo)",
+			zap.String("repo", repoSlug),
+			zap.Error(err))
+		return nil
+	}
+	if repoID == "" {
+		return nil
+	}
+	s.logger.Debug("resolved issue repository",
+		zap.String("repo", repoSlug),
+		zap.String("repo_id", repoID),
+		zap.String("base_branch", baseBranch))
+	return []IssueTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch}}
+}
+
+func (s *Service) autoStartIssueTask(
+	ctx context.Context, evt *github.NewIssueEvent, task *models.Task,
+) {
+	_, err := s.StartTask(
+		ctx,
+		task.ID,
+		evt.AgentProfileID,
+		"",
+		evt.ExecutorProfileID,
+		0,
+		task.Description,
+		evt.WorkflowStepID,
+		false,
+		nil,
+	)
+	if err != nil {
+		s.logger.Error("failed to auto-start issue task",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return
+	}
+	s.logger.Info("auto-started issue task",
+		zap.String("task_id", task.ID),
+		zap.Int(issueNumberKey, evt.Issue.Number))
 }
 
 // interpolateReviewPrompt replaces {{pr.*}} placeholders in the prompt template with actual PR values.
@@ -726,6 +946,25 @@ func interpolateReviewPrompt(promptTemplate string, pr *github.PR) string {
 		"{{pr.repo}}", repoSlug,
 		"{{pr.branch}}", pr.HeadBranch,
 		"{{pr.base_branch}}", pr.BaseBranch,
+	)
+	return replacer.Replace(promptTemplate)
+}
+
+// interpolateIssuePrompt replaces {{issue.*}} placeholders in the prompt template with actual issue values.
+func interpolateIssuePrompt(promptTemplate string, issue *github.Issue) string {
+	if promptTemplate == "" {
+		promptTemplate = promptcfg.Get("issue-watch-default")
+	}
+	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
+	labelsStr := strings.Join(issue.Labels, ", ")
+	replacer := strings.NewReplacer(
+		"{{issue.link}}", issue.HTMLURL,
+		"{{issue.number}}", strconv.Itoa(issue.Number),
+		"{{issue.title}}", issue.Title,
+		"{{issue.author}}", issue.AuthorLogin,
+		"{{issue.repo}}", repoSlug,
+		"{{issue.labels}}", labelsStr,
+		"{{issue.body}}", issue.Body,
 	)
 	return replacer.Replace(promptTemplate)
 }

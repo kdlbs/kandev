@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -71,6 +72,58 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 		cmds := mgr.buildAgentCommand(req, nil, ag)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
+	})
+}
+
+// cliFlagTestAgent is a minimal BuildCommand that produces a stable prefix
+// so tests can assert CLI flag tokens are appended after the agent's own
+// argv by CommandBuilder.BuildCommand (not by the agent itself).
+type cliFlagTestAgent struct{ testAgent }
+
+func (a *cliFlagTestAgent) BuildCommand(_ agents.CommandOptions) agents.Command {
+	return agents.Cmd("copilot", "--acp").Build()
+}
+
+func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
+	mgr := newTestManager()
+	ag := &cliFlagTestAgent{}
+
+	t.Run("enabled entries reach argv, disabled do not", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID: "p1",
+			CLIFlags: []settingsmodels.CLIFlag{
+				{Flag: "--allow-all-tools", Enabled: true},
+				{Flag: "--allow-all-paths", Enabled: false}, // must be skipped
+				{Flag: "--add-dir /shared", Enabled: true},  // must be split
+			},
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag)
+
+		require.Contains(t, cmds.initial, "--allow-all-tools")
+		require.NotContains(t, cmds.initial, "--allow-all-paths")
+		// The tokeniser splits "--add-dir /shared" into two argv elements,
+		// not one — confirm both are present.
+		require.Contains(t, cmds.initial, "--add-dir")
+		require.Contains(t, cmds.initial, "/shared")
+	})
+
+	t.Run("malformed flag does not abort launch — falls back to empty tokens", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID: "p2",
+			CLIFlags: []settingsmodels.CLIFlag{
+				{Flag: `--broken "unterminated`, Enabled: true},
+			},
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag)
+		// The bad flag is dropped entirely; the launch still produces the
+		// agent's base command so a user with a typo still gets their task
+		// to run, just without the flag they intended.
+		require.Equal(t, "copilot --acp", cmds.initial)
+	})
+
+	t.Run("nil profile produces bare command", func(t *testing.T) {
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag)
+		require.Equal(t, "copilot --acp", cmds.initial)
 	})
 }
 

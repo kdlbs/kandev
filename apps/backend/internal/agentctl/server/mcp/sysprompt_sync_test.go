@@ -83,13 +83,13 @@ func TestSyspromptToolNames_MatchMCPTaskMode(t *testing.T) {
 	}
 
 	referenced := make(map[string]struct{})
-	for name := range extractKandevTools(sysprompt.PlanMode) {
+	for name := range extractKandevTools(sysprompt.PlanMode()) {
 		referenced[name] = struct{}{}
 	}
-	for name := range extractKandevTools(sysprompt.KandevContext) {
+	for name := range extractKandevTools(sysprompt.KandevContext()) {
 		referenced[name] = struct{}{}
 	}
-	for name := range extractKandevTools(sysprompt.DefaultPlanPrefix) {
+	for name := range extractKandevTools(sysprompt.DefaultPlanPrefix()) {
 		referenced[name] = struct{}{}
 	}
 
@@ -118,7 +118,7 @@ func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {
 		registered[name] = struct{}{}
 	}
 
-	referenced := extractKandevTools(sysprompt.ConfigContext)
+	referenced := extractKandevTools(sysprompt.ConfigContext())
 	require.NotEmpty(t, referenced, "expected ConfigContext to reference at least one _kandev tool")
 
 	for name := range referenced {
@@ -154,10 +154,10 @@ func TestSyspromptToolNames_NoBareToolReferences(t *testing.T) {
 	bareNames := bareNamesOf(registered)
 
 	cases := map[string]string{
-		"PlanMode":          sysprompt.PlanMode,
-		"KandevContext":     sysprompt.KandevContext,
-		"DefaultPlanPrefix": sysprompt.DefaultPlanPrefix,
-		"ConfigContext":     sysprompt.ConfigContext,
+		"PlanMode":          sysprompt.PlanMode(),
+		"KandevContext":     sysprompt.KandevContext(),
+		"DefaultPlanPrefix": sysprompt.DefaultPlanPrefix(),
+		"ConfigContext":     sysprompt.ConfigContext(),
 	}
 
 	for name, prompt := range cases {

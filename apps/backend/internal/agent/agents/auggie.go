@@ -78,13 +78,10 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
 	// Model and mode are applied via ACP session/set_model and session/set_mode
-	// after session creation — no --model CLI flag.
-	// allow_indexing is auggie-only: apply the CLI flag if the profile enables it.
-	b := Cmd("npx", "-y", auggiePkg, "--acp")
-	if opts.PermissionValues != nil && opts.PermissionValues["allow_indexing"] {
-		b = b.Flag("--allow-indexing")
-	}
-	return b.Build()
+	// after session creation — no --model CLI flag. The --allow-indexing flag
+	// used to be applied here from PermissionValues; it now flows through
+	// AgentProfile.CLIFlags and is appended by CommandBuilder.BuildCommand.
+	return Cmd("npx", "-y", auggiePkg, "--acp").Build()
 }
 
 func (a *Auggie) Runtime() *RuntimeConfig {
@@ -154,6 +151,6 @@ func (a *Auggie) InferenceConfig() *InferenceConfig {
 var auggiePermSettings = map[string]PermissionSetting{
 	"allow_indexing": {
 		Supported: true, Default: true, Label: "Allow indexing", Description: "Enable workspace indexing without confirmation",
-		ApplyMethod: "cli_flag", CLIFlag: "--allow-indexing",
+		ApplyMethod: PermissionApplyMethodCLIFlag, CLIFlag: "--allow-indexing",
 	},
 }

@@ -16,6 +16,7 @@ type UseChatInputContainerParams = {
   sessionId: string | null;
   isSending: boolean;
   isStarting: boolean;
+  isMoving: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
   isAgentBusy: boolean;
@@ -71,6 +72,7 @@ function getInputPlaceholder(
 
 function computeDerivedState(params: {
   isStarting: boolean;
+  isMoving: boolean;
   isSending: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
@@ -84,7 +86,11 @@ function computeDerivedState(params: {
   hasAgentCommands: boolean;
 }) {
   const isDisabled =
-    params.isStarting || params.isSending || params.isFailed || params.needsRecovery;
+    params.isStarting ||
+    params.isMoving ||
+    params.isSending ||
+    params.isFailed ||
+    params.needsRecovery;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -113,6 +119,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     sessionId,
     isSending,
     isStarting,
+    isMoving,
     isFailed,
     needsRecovery,
     isAgentBusy,
@@ -181,6 +188,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
 
   const derived = computeDerivedState({
     isStarting,
+    isMoving,
     isSending,
     isFailed,
     needsRecovery,

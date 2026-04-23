@@ -3,10 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
@@ -18,6 +21,11 @@ type CreateProfileRequest struct {
 	Mode           string
 	AllowIndexing  bool
 	CLIPassthrough bool
+	// CLIFlags is the explicit list to persist. When nil, the profile is
+	// seeded from the agent's curated PermissionSettings() list so a fresh
+	// profile opens with the agent's recommended flags (all disabled by
+	// default unless the curated entry specifies Default: true).
+	CLIFlags []dto.CLIFlagDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -36,6 +44,12 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err != nil {
 		return nil, err
 	}
+	cliFlags := cliFlagsFromDTO(req.CLIFlags)
+	if req.CLIFlags == nil {
+		cliFlags = seedCLIFlags(agentConfig)
+	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -44,6 +58,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Mode:             req.Mode,
 		AllowIndexing:    req.AllowIndexing,
 		CLIPassthrough:   req.CLIPassthrough,
+		CLIFlags:         cliFlags,
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -53,6 +68,38 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	return &result, nil
 }
 
+// seedCLIFlags builds the default cli_flags list for a new profile from the
+// agent's curated PermissionSettings() catalogue. Only entries that target a
+// CLI flag are included; per-flag metadata (description, flag text, default
+// enabled) is copied into the row so the profile is self-contained.
+func seedCLIFlags(agent agents.Agent) []models.CLIFlag {
+	settings := agent.PermissionSettings()
+	flags := make([]models.CLIFlag, 0, len(settings))
+	for _, s := range settings {
+		if !s.Supported || s.ApplyMethod != agents.PermissionApplyMethodCLIFlag || s.CLIFlag == "" {
+			continue
+		}
+		flagText := s.CLIFlag
+		if s.CLIFlagValue != "" {
+			flagText = s.CLIFlag + " " + s.CLIFlagValue
+		}
+		flags = append(flags, models.CLIFlag{
+			Description: firstNonEmpty(s.Description, s.Label),
+			Flag:        flagText,
+			Enabled:     s.Default,
+		})
+	}
+	sort.Slice(flags, func(i, j int) bool { return flags[i].Flag < flags[j].Flag })
+	return flags
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 type UpdateProfileRequest struct {
 	ID             string
 	Name           *string
@@ -60,6 +107,9 @@ type UpdateProfileRequest struct {
 	Mode           *string
 	AllowIndexing  *bool
 	CLIPassthrough *bool
+	// CLIFlags replaces the entire list when non-nil. Nil means "leave
+	// unchanged" — the UI always sends the full desired list on save.
+	CLIFlags *[]dto.CLIFlagDTO
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -87,12 +137,46 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
 	}
+	if req.CLIFlags != nil {
+		if err := validateCLIFlagDTOs(*req.CLIFlags); err != nil {
+			return nil, err
+		}
+		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
 	return &result, nil
+}
+
+// validateCLIFlagDTOs rejects entries with an empty flag string or malformed
+// shell tokens (unterminated quotes, trailing backslash). Empty descriptions
+// are allowed (custom flags often don't have one). Tokenising here keeps the
+// launch path's cliflags.Resolve error branch unreachable in practice: a
+// single bad entry must not silently drop every other enabled flag at task
+// start, which is what would happen if we let it slip through to the
+// subprocess builder.
+func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
+	for i, f := range in {
+		if strings.TrimSpace(f.Flag) == "" {
+			return fmt.Errorf("cli_flags[%d].flag is required", i)
+		}
+		tokens, err := cliflags.Tokenise(f.Flag)
+		if err != nil {
+			return fmt.Errorf("cli_flags[%d]: %w", i, err)
+		}
+		// Reject entries where the primary token (the flag name itself) is
+		// empty — e.g. `""` or `''` passes TrimSpace but tokenises to a
+		// single blank argv element, which would reach the subprocess
+		// argv and likely confuse the agent. Secondary tokens can still
+		// be empty (`--empty ""` legitimately passes an empty value).
+		if len(tokens) == 0 || tokens[0] == "" {
+			return fmt.Errorf("cli_flags[%d].flag is required", i)
+		}
+	}
+	return nil
 }
 
 func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (*dto.AgentProfileDTO, error) {
@@ -192,11 +276,28 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Model:            profile.Model,
 		Mode:             profile.Mode,
 		AllowIndexing:    profile.AllowIndexing,
+		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		CLIPassthrough:   profile.CLIPassthrough,
 		UserModified:     profile.UserModified,
 		CreatedAt:        profile.CreatedAt,
 		UpdatedAt:        profile.UpdatedAt,
 	}
+}
+
+func cliFlagsToDTO(in []models.CLIFlag) []dto.CLIFlagDTO {
+	out := make([]dto.CLIFlagDTO, len(in))
+	for i, f := range in {
+		out[i] = dto.CLIFlagDTO{Description: f.Description, Flag: f.Flag, Enabled: f.Enabled}
+	}
+	return out
+}
+
+func cliFlagsFromDTO(in []dto.CLIFlagDTO) []models.CLIFlag {
+	out := make([]models.CLIFlag, len(in))
+	for i, f := range in {
+		out[i] = models.CLIFlag{Description: f.Description, Flag: f.Flag, Enabled: f.Enabled}
+	}
+	return out
 }
 
 // resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),

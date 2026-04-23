@@ -125,6 +125,26 @@ function useTerminalStateFetch(
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
 }
 
+// Silent WS disconnects (NAT timeout, laptop sleep, suspended tab) leave
+// connectionStatus stuck at "connected" and no resubscribe fires. Backfill
+// whenever the tab regains visibility to recover missed messages without
+// requiring a page refresh.
+export function useVisibilityBackfill(
+  taskSessionId: string | null,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  useEffect(() => {
+    if (!taskSessionId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [taskSessionId, store]);
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const messages = useAppStore((state) =>
@@ -206,6 +226,12 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     });
   }, [taskSessionId, connectionStatus, messages.length, store]);
 
+  // Bool flips exactly once when a freshly-adopted session leaves STARTING,
+  // so the subscription effect re-runs then (covering the backend race where
+  // session.subscribe arrives before the session is fully constructed) without
+  // churning on every subsequent RUNNING ↔ WAITING_FOR_INPUT transition.
+  const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
+
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
     const client = getWebSocketClient();
@@ -221,7 +247,9 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     return () => {
       unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store]);
+  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
+
+  useVisibilityBackfill(taskSessionId, store);
 
   const terminalFetchRefs = useMemo(
     () => ({

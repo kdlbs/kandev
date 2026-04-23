@@ -182,6 +182,10 @@ type mockRepository struct {
 	executors        map[string]*models.Executor
 	executorsRunning map[string]*models.ExecutorRunning
 
+	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
+	// transient DB error); if nil, the default map lookup is used.
+	getTaskSessionFunc func(ctx context.Context, id string) (*models.TaskSession, error)
+
 	// Track calls for verification
 	createTaskSessionCalls []*models.TaskSession
 	updateTaskSessionCalls []*models.TaskSession
@@ -227,6 +231,12 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	m.mu.Lock()
+	fn := m.getTaskSessionFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {

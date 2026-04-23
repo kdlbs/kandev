@@ -46,6 +46,13 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/watches/review/:id/trigger", c.httpTriggerReviewWatch)
 	api.POST("/watches/review/trigger-all", c.httpTriggerAllReviewChecks)
 
+	api.GET("/watches/issue", c.httpListIssueWatches)
+	api.POST("/watches/issue", c.httpCreateIssueWatch)
+	api.PUT("/watches/issue/:id", c.httpUpdateIssueWatch)
+	api.DELETE("/watches/issue/:id", c.httpDeleteIssueWatch)
+	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
+	api.POST("/watches/issue/trigger-all", c.httpTriggerAllIssueChecks)
+
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
@@ -364,4 +371,103 @@ func (c *Controller) httpGetStats(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, stats)
+}
+
+// --- Issue watch HTTP handlers ---
+
+func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	watches, err := c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watches": watches})
+}
+
+func (c *Controller) httpCreateIssueWatch(ctx *gin.Context) {
+	var req CreateIssueWatchRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	iw, err := c.service.CreateIssueWatch(ctx.Request.Context(), &req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusCreated, iw)
+}
+
+func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	var req UpdateIssueWatchRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := c.service.UpdateIssueWatch(ctx.Request.Context(), id, &req); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	iw, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, iw)
+}
+
+func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), id); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	watch, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if watch == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "issue watch not found"})
+		return
+	}
+	newIssues, err := c.service.CheckIssueWatch(ctx.Request.Context(), watch)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	for _, issue := range newIssues {
+		c.service.publishNewIssueEvent(ctx.Request.Context(), watch, issue)
+	}
+	// Clean up tasks for closed issues that haven't been started.
+	cleaned, cleanErr := c.service.CleanupClosedIssueTasks(ctx.Request.Context(), watch)
+	if cleanErr != nil {
+		c.service.logger.Warn("cleanup closed issue tasks failed", zap.String("watch_id", id), zap.Error(cleanErr))
+	}
+	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": len(newIssues), "issues": newIssues, "cleaned": cleaned})
+}
+
+func (c *Controller) httpTriggerAllIssueChecks(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	count, err := c.service.TriggerAllIssueChecks(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": count})
 }

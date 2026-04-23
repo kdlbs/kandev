@@ -729,4 +729,101 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
 		}
 	})
+
+	// Regression: on_turn_complete auto-transition enters processOnEnter with an
+	// in-memory session still marked RUNNING (loaded at the start of
+	// handleAgentReady before the turn finished). After reset_agent_context we
+	// must flip the session to WAITING_FOR_INPUT — otherwise a following
+	// auto_start_agent hits queueAutoStartPromptIfRunning (sees State=RUNNING)
+	// and queues the prompt instead of sending it, and PromptTask rejects the
+	// drained queued message for the same reason. The agent then sits idle
+	// until the user cancels. Both the in-memory pointer and the DB must be
+	// updated.
+	t.Run("reset_agent_context flips session to WAITING_FOR_INPUT for a running session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1") // seeds session.State = RUNNING
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.AgentExecutionID = "exec-abc"
+		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp"}
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review Step",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterResetAgentContext},
+				},
+			},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		if session.State != models.TaskSessionStateRunning {
+			t.Fatalf("precondition: seed should start session as RUNNING, got %q", session.State)
+		}
+
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
+
+		// In-memory session must also be updated — queueAutoStartPromptIfRunning
+		// (further down in processOnEnter when auto_start_agent is present)
+		// checks the pointer, not the DB.
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("in-memory session.State: want %q, got %q",
+				models.TaskSessionStateWaitingForInput, session.State)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("DB session.State: want %q, got %q",
+				models.TaskSessionStateWaitingForInput, updated.State)
+		}
+
+		if len(agentMgr.restartProcessCalls) != 1 {
+			t.Errorf("expected 1 RestartAgentProcess call, got %d", len(agentMgr.restartProcessCalls))
+		}
+	})
+
+	// Regression: passthrough sessions handle auto_start_agent by writing to
+	// PTY stdin via autoStartPassthroughPrompt — the agent is actively
+	// processing immediately after, not idle. We must NOT flip the session to
+	// WAITING_FOR_INPUT, otherwise WS subscribers see "ready for input" while
+	// the agent is mid-prompt.
+	t.Run("reset_agent_context preserves running state for passthrough+auto_start", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1") // RUNNING
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.AgentExecutionID = "exec-pt"
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review Step",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterResetAgentContext},
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
+
+		// Positive assertion: pin the expected state to RUNNING so any other
+		// unintended mutation (COMPLETED, FAILED, etc.) also fails the test,
+		// not just an erroneous flip to WAITING_FOR_INPUT.
+		if session.State != models.TaskSessionStateRunning {
+			t.Errorf("in-memory session.State should remain RUNNING for passthrough+auto_start, got %q", session.State)
+		}
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateRunning {
+			t.Errorf("DB session.State should remain RUNNING for passthrough+auto_start, got %q", updated.State)
+		}
+	})
 }

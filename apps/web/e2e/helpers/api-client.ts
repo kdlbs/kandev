@@ -5,7 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
 } from "../../lib/types/http";
-import type { Agent } from "../../lib/types/http-agents";
+import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 
 // --- GitHub Mock Types ---
 
@@ -246,19 +246,44 @@ export class ApiClient {
       model: string;
       mode?: string;
       cli_passthrough?: boolean;
+      cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
     },
-  ): Promise<{ id: string }> {
+  ): Promise<{
+    id: string;
+    cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
+  }> {
     return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
       mode: opts.mode,
       cli_passthrough: opts.cli_passthrough ?? false,
+      cli_flags: opts.cli_flags,
     });
+  }
+
+  async getAgentProfile(profileId: string): Promise<AgentProfile> {
+    // The profile does not have its own GET endpoint; fetch via listAgents
+    // and find the matching row. Keeps the helper surface small.
+    const { agents } = await this.listAgents();
+    for (const agent of agents) {
+      for (const profile of agent.profiles ?? []) {
+        if (profile.id === profileId) {
+          return profile;
+        }
+      }
+    }
+    throw new Error(`profile ${profileId} not found`);
   }
 
   async updateAgentProfile(
     profileId: string,
-    patch: { name?: string; model?: string; mode?: string; cli_passthrough?: boolean },
+    patch: {
+      name?: string;
+      model?: string;
+      mode?: string;
+      cli_passthrough?: boolean;
+      cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+    },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
   }

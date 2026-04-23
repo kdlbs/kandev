@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useRouter } from "next/navigation";
 import { KanbanBoard } from "./kanban-board";
 import { TaskPreviewPanel } from "./task-preview-panel";
@@ -35,6 +43,10 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
 
     if (selectedTaskId && selectedTaskSessionId) {
       url.searchParams.set("sessionId", selectedTaskSessionId);
+    } else if (selectedTaskId) {
+      // Task still open but no active session (e.g. all sessions deleted) —
+      // drop any stale sessionId from the URL.
+      url.searchParams.delete("sessionId");
     }
 
     window.history.replaceState({}, "", url.toString());
@@ -86,7 +98,49 @@ function useResizeHandler(
   );
 }
 
-export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
+// Holds the user's explicit session pick for the selected task, resetting to null
+// whenever the task changes. Uses React's "store previous props" pattern to avoid
+// a setState-in-effect cascade (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+function useSessionSelectionReset(
+  selectedTaskId: string | null | undefined,
+  initialValue: string | null = null,
+): [string | null, Dispatch<SetStateAction<string | null>>] {
+  const [value, setValue] = useState<string | null>(initialValue);
+  const [prevTaskId, setPrevTaskId] = useState<string | null>(selectedTaskId ?? null);
+  const currentTaskId = selectedTaskId ?? null;
+  if (prevTaskId !== currentTaskId) {
+    setPrevTaskId(currentTaskId);
+    // Only reset on a real task-to-task transition. When prevTaskId is null we
+    // are hydrating the initial task from the URL — preserve the seeded initialValue.
+    if (prevTaskId !== null) {
+      setValue(null);
+    }
+  }
+  return [value, setValue];
+}
+
+function useSelectedTask(
+  selectedTaskId: string | null | undefined,
+  kanbanTasks: KanbanState["tasks"],
+) {
+  return useMemo(() => {
+    if (!selectedTaskId || kanbanTasks.length === 0) return null;
+    const task = kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId);
+    if (!task) return null;
+    return {
+      id: task.id,
+      title: task.title,
+      workflowStepId: task.workflowStepId,
+      state: task.state,
+      description: task.description,
+      position: task.position,
+      repositoryId: task.repositoryId,
+      primarySessionId: task.primarySessionId,
+    };
+  }, [selectedTaskId, kanbanTasks]);
+}
+
+export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
 
@@ -105,27 +159,17 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
   const { sessionId: selectedTaskSessionId, isLoading } = useTaskSession(selectedTaskId ?? null);
 
+  // User-selected tab overrides the default primary session pick.
+  // Reset when the selected task changes.
+  const [userSelectedSessionId, setUserSelectedSessionId] = useSessionSelectionReset(
+    selectedTaskId,
+    initialSessionId ?? null,
+  );
+
   // Track resize state
   const isResizingRef = useRef(false);
 
-  // Compute selected task from kanbanTasks and selectedTaskId
-  const selectedTask = useMemo(() => {
-    if (!selectedTaskId || kanbanTasks.length === 0) return null;
-
-    const task = kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId);
-    if (!task) return null;
-
-    return {
-      id: task.id,
-      title: task.title,
-      workflowStepId: task.workflowStepId,
-      state: task.state,
-      description: task.description,
-      position: task.position,
-      repositoryId: task.repositoryId,
-      primarySessionId: task.primarySessionId,
-    };
-  }, [selectedTaskId, kanbanTasks]);
+  const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks);
 
   // Close panel if selected task no longer exists
   useEffect(() => {
@@ -154,7 +198,11 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     [router],
   );
 
-  useUrlSync(selectedTaskId ?? null, selectedTaskSessionId ?? null);
+  const activeSessionId = selectedTaskId
+    ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
+    : null;
+
+  useUrlSync(selectedTaskId ?? null, activeSessionId ?? null);
 
   const handlePreviewTaskWithData = useCallback(
     (task: Task) => {
@@ -170,10 +218,6 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   useEscapeKey(isOpen, close);
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
-
-  const activeSessionId = selectedTaskId
-    ? (selectedTask?.primarySessionId ?? selectedTaskSessionId)
-    : null;
 
   // On mobile, skip the preview panel entirely — card clicks navigate directly
   if (isMobile) {
@@ -195,6 +239,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
           onPreviewTask={handlePreviewTaskWithData}
           onNavigateToTask={handleNavigateToTask}
           onClose={close}
+          onSessionChange={setUserSelectedSessionId}
           onResizeMouseDown={handleResizeMouseDown}
         />
       ) : (
@@ -207,6 +252,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
           onPreviewTask={handlePreviewTaskWithData}
           onNavigateToTask={handleNavigateToTask}
           onClose={close}
+          onSessionChange={setUserSelectedSessionId}
           onResizeMouseDown={handleResizeMouseDown}
         />
       )}
@@ -234,6 +280,7 @@ type PreviewLayoutProps = {
   onPreviewTask: (task: Task) => void;
   onNavigateToTask: (task: Task) => void;
   onClose: () => void;
+  onSessionChange: (sessionId: string | null) => void;
   onResizeMouseDown: (e: React.MouseEvent) => void;
 };
 
@@ -245,6 +292,7 @@ function FloatingPreviewLayout({
   onPreviewTask,
   onNavigateToTask,
   onClose,
+  onSessionChange,
   onResizeMouseDown,
 }: PreviewLayoutProps) {
   return (
@@ -271,6 +319,7 @@ function FloatingPreviewLayout({
             sessionId={activeSessionId}
             onClose={onClose}
             onMaximize={(task) => onNavigateToTask(task)}
+            onSessionChange={onSessionChange}
           />
         </div>
       </div>
@@ -287,6 +336,7 @@ function InlinePreviewLayout({
   onPreviewTask,
   onNavigateToTask,
   onClose,
+  onSessionChange,
   onResizeMouseDown,
 }: PreviewLayoutProps & { isOpen: boolean }) {
   return (
@@ -306,6 +356,7 @@ function InlinePreviewLayout({
               sessionId={activeSessionId}
               onClose={onClose}
               onMaximize={(task) => onNavigateToTask(task)}
+              onSessionChange={onSessionChange}
             />
           </div>
         </div>

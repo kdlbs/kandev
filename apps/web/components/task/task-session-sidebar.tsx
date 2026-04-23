@@ -73,18 +73,29 @@ function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | u
 }
 
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
+type SidebarCtx = {
+  sessionsByTaskId: Record<string, TaskSession[]>;
+  gitStatusByEnvId: Record<string, GitStatusEntry>;
+  envIdBySessionId: Record<string, string>;
+  repositorySlugById: Map<string, string | undefined>;
+  taskPRsByTaskId: Record<string, TaskPR | undefined>;
+  titleById: Map<string, string>;
+  workflowNameById: Map<string, string>;
+  stepTitleById: Map<string, string>;
+};
+
+function toIssueInfo(
+  task: KanbanState["tasks"][number],
+): { url: string; number: number } | undefined {
+  return task.issueUrl && task.issueNumber
+    ? { url: task.issueUrl, number: task.issueNumber }
+    : undefined;
+}
+
+/** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
-  ctx: {
-    sessionsByTaskId: Record<string, TaskSession[]>;
-    gitStatusByEnvId: Record<string, GitStatusEntry>;
-    envIdBySessionId: Record<string, string>;
-    repositorySlugById: Map<string, string | undefined>;
-    taskPRsByTaskId: Record<string, TaskPR | undefined>;
-    titleById: Map<string, string>;
-    workflowNameById: Map<string, string>;
-    stepTitleById: Map<string, string>;
-  },
+  ctx: SidebarCtx,
 ) {
   const sessionInfo = getSessionInfoForTask(
     task.id,
@@ -129,6 +140,8 @@ function toSidebarItem(
     parentTaskId: task.parentTaskId ?? undefined,
     prInfo: toPrInfo(pr),
     isPRReview: task.isPRReview ?? false,
+    isIssueWatch: task.isIssueWatch ?? false,
+    issueInfo: toIssueInfo(task),
   };
 }
 
@@ -164,6 +177,8 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     parentTaskId: undefined,
     prInfo: undefined,
     isPRReview: false,
+    isIssueWatch: false,
+    issueInfo: undefined,
   };
 }
 

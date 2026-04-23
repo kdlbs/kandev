@@ -317,3 +317,97 @@ type DailyCount struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
 }
+
+// --- Issue Watch models ---
+
+// Issue represents a GitHub Issue (not a PR).
+type Issue struct {
+	Number      int        `json:"number"`
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	URL         string     `json:"url"`
+	HTMLURL     string     `json:"html_url"`
+	State       string     `json:"state"` // open, closed
+	AuthorLogin string     `json:"author_login"`
+	RepoOwner   string     `json:"repo_owner"`
+	RepoName    string     `json:"repo_name"`
+	Labels      []string   `json:"labels"`
+	Assignees   []string   `json:"assignees"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+}
+
+// IssueWatch configures periodic polling for GitHub issues matching a query.
+// Repos holds the list of repositories to monitor. An empty list means all repos.
+type IssueWatch struct {
+	ID                  string       `json:"id" db:"id"`
+	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
+	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID      string       `json:"workflow_step_id" db:"workflow_step_id"`
+	Repos               []RepoFilter `json:"repos" db:"-"`
+	ReposJSON           string       `json:"-" db:"repos"`
+	AgentProfileID      string       `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID   string       `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt              string       `json:"prompt" db:"prompt"`
+	Labels              []string     `json:"labels" db:"-"`
+	LabelsJSON          string       `json:"-" db:"labels"`
+	CustomQuery         string       `json:"custom_query" db:"custom_query"`
+	Enabled             bool         `json:"enabled" db:"enabled"`
+	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
+	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// IssueWatchTask records which issues have already had tasks created (deduplication).
+type IssueWatchTask struct {
+	ID           string    `json:"id" db:"id"`
+	IssueWatchID string    `json:"issue_watch_id" db:"issue_watch_id"`
+	RepoOwner    string    `json:"repo_owner" db:"repo_owner"`
+	RepoName     string    `json:"repo_name" db:"repo_name"`
+	IssueNumber  int       `json:"issue_number" db:"issue_number"`
+	IssueURL     string    `json:"issue_url" db:"issue_url"`
+	TaskID       string    `json:"task_id" db:"task_id"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+}
+
+// NewIssueEvent is published when a new issue matching a watch is found.
+type NewIssueEvent struct {
+	IssueWatchID      string `json:"issue_watch_id"`
+	WorkspaceID       string `json:"workspace_id"`
+	WorkflowID        string `json:"workflow_id"`
+	WorkflowStepID    string `json:"workflow_step_id"`
+	AgentProfileID    string `json:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
+	Prompt            string `json:"prompt"`
+	Issue             *Issue `json:"issue"`
+}
+
+// CreateIssueWatchRequest is the request body for creating an issue watch.
+type CreateIssueWatchRequest struct {
+	WorkspaceID         string       `json:"workspace_id"`
+	WorkflowID          string       `json:"workflow_id"`
+	WorkflowStepID      string       `json:"workflow_step_id"`
+	Repos               []RepoFilter `json:"repos"`
+	AgentProfileID      string       `json:"agent_profile_id"`
+	ExecutorProfileID   string       `json:"executor_profile_id"`
+	Prompt              string       `json:"prompt"`
+	Labels              []string     `json:"labels"`
+	CustomQuery         string       `json:"custom_query"`
+	PollIntervalSeconds int          `json:"poll_interval_seconds"`
+}
+
+// UpdateIssueWatchRequest is the request body for updating an issue watch.
+type UpdateIssueWatchRequest struct {
+	WorkflowID          *string       `json:"workflow_id,omitempty"`
+	WorkflowStepID      *string       `json:"workflow_step_id,omitempty"`
+	Repos               *[]RepoFilter `json:"repos,omitempty"`
+	AgentProfileID      *string       `json:"agent_profile_id,omitempty"`
+	ExecutorProfileID   *string       `json:"executor_profile_id,omitempty"`
+	Prompt              *string       `json:"prompt,omitempty"`
+	Labels              *[]string     `json:"labels,omitempty"`
+	CustomQuery         *string       `json:"custom_query,omitempty"`
+	Enabled             *bool         `json:"enabled,omitempty"`
+	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+}

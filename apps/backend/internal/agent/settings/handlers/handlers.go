@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -121,9 +122,10 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name  string `json:"name"`
-	Model string `json:"model"`
-	Mode  string `json:"mode,omitempty"`
+	Name     string           `json:"name"`
+	Model    string           `json:"model"`
+	Mode     string           `json:"mode,omitempty"`
+	CLIFlags []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -143,9 +145,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:  profile.Name,
-			Model: profile.Model,
-			Mode:  profile.Mode,
+			Name:     profile.Name,
+			Model:    profile.Model,
+			Mode:     profile.Mode,
+			CLIFlags: profile.CLIFlags,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -297,11 +300,12 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name           string `json:"name"`
-	Model          string `json:"model"`
-	Mode           string `json:"mode,omitempty"`
-	AllowIndexing  bool   `json:"allow_indexing"`
-	CLIPassthrough bool   `json:"cli_passthrough"`
+	Name           string           `json:"name"`
+	Model          string           `json:"model"`
+	Mode           string           `json:"mode,omitempty"`
+	AllowIndexing  bool             `json:"allow_indexing"`
+	CLIPassthrough bool             `json:"cli_passthrough"`
+	CLIFlags       []dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -321,6 +325,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
 		CLIPassthrough: body.CLIPassthrough,
+		CLIFlags:       body.CLIFlags,
 	})
 	if err != nil {
 		h.logger.Error("failed to create profile", zap.Error(err))
@@ -337,11 +342,12 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string `json:"name,omitempty"`
-	Model          *string `json:"model,omitempty"`
-	Mode           *string `json:"mode,omitempty"`
-	AllowIndexing  *bool   `json:"allow_indexing,omitempty"`
-	CLIPassthrough *bool   `json:"cli_passthrough,omitempty"`
+	Name           *string           `json:"name,omitempty"`
+	Model          *string           `json:"model,omitempty"`
+	Mode           *string           `json:"mode,omitempty"`
+	AllowIndexing  *bool             `json:"allow_indexing,omitempty"`
+	CLIPassthrough *bool             `json:"cli_passthrough,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO `json:"cli_flags,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -361,6 +367,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
 		CLIPassthrough: body.CLIPassthrough,
+		CLIFlags:       body.CLIFlags,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -410,9 +417,10 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string          `json:"model"`
-	PermissionSettings map[string]bool `json:"permission_settings"`
-	CLIPassthrough     bool            `json:"cli_passthrough"`
+	Model              string           `json:"model"`
+	PermissionSettings map[string]bool  `json:"permission_settings"`
+	CLIPassthrough     bool             `json:"cli_passthrough"`
+	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -432,6 +440,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		Model:              body.Model,
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
+		CLIFlags:           body.CLIFlags,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

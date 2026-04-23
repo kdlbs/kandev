@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -109,18 +112,29 @@ var workflowTestCases = []workflowTestCase{
 		WorkflowJSON: developmentWorkflowJSON,
 		StartStep:    "Backlog",
 		Events: []testEvent{
-			// Agent finishes at Backlog → In Progress (auto_start queues)
+			// Agent finishes at Backlog → In Progress (auto_start_agent on_enter).
+			// applyEngineTransition flips RUNNING → WAITING_FOR_INPUT before the
+			// async processOnEnter goroutine, so autoStartStepPrompt attempts a
+			// direct send instead of queueing. In this mock environment the send
+			// fails (no executor), so the message is NOT queued.
 			{Trigger: engine.TriggerOnTurnComplete, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 0},
-			// Agent finishes at In Progress → New Context (reset + auto_start)
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 0},
+			// Agent finishes at In Progress → New Context (reset + auto_start).
+			// After reset_agent_context, processOnEnter flips session state to
+			// WAITING_FOR_INPUT so auto_start sends directly instead of queueing
+			// against a stale RUNNING state. PromptTask then attempts the send —
+			// in this mock environment the executor has no running record for
+			// the session, so the send fails and autoStartStepPrompt's error
+			// path leaves the session at WAITING_FOR_INPUT. Crucially, the
+			// message is NOT sitting in the queue.
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 1},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
 			// Agent starts at New Context → on_turn_start → back to In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
-			// Agent finishes at In Progress → New Context again
+			// Agent finishes at In Progress → New Context again (same reset + auto_start path)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 2},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 2},
 			// Agent finishes at New Context → New Step (reset, no auto_start)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Step",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
@@ -235,6 +249,12 @@ func runSingleEvent(
 		t.Fatalf("unsupported trigger: %s", ev.Trigger)
 	}
 
+	// processOnEnter runs asynchronously (goroutine) after engine transitions.
+	// Give it time to complete before checking side effects.
+	if transitioned {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if transitioned != ev.ExpectTransitioned {
 		t.Errorf("transitioned = %v, want %v", transitioned, ev.ExpectTransitioned)
 	}
@@ -283,7 +303,7 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 }
 
 // createEngineService creates a Service with the workflow engine initialized.
-func createEngineService(t *testing.T, repo sessionExecutorStore, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
+func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
 	t.Helper()
 	log := testLogger()
 	svc := &Service{
@@ -292,6 +312,7 @@ func createEngineService(t *testing.T, repo sessionExecutorStore, sg *mockStepGe
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
 		messageQueue: messagequeue.NewService(log),
+		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 	}
 	svc.SetWorkflowStepGetter(sg)
 	return svc
@@ -339,7 +360,10 @@ func assertStepByName(t *testing.T, ctx context.Context, repo sessionExecutorSto
 // assertResetCalls verifies the cumulative count of RestartAgentProcess calls.
 func assertResetCalls(t *testing.T, agentMgr *mockAgentManager, expectCount int) {
 	t.Helper()
-	if got := len(agentMgr.restartProcessCalls); got != expectCount {
+	agentMgr.mu.Lock()
+	got := len(agentMgr.restartProcessCalls)
+	agentMgr.mu.Unlock()
+	if got != expectCount {
 		t.Errorf("restart calls = %d, want %d", got, expectCount)
 	}
 }
@@ -354,13 +378,23 @@ func assertQueueState(t *testing.T, ctx context.Context, svc *Service, sessionID
 }
 
 // assertSessionState verifies the session's current state.
+// Polls briefly because processOnEnter runs asynchronously (goroutine) and
+// the state change may not be visible immediately after the trigger returns.
 func assertSessionState(t *testing.T, ctx context.Context, repo sessionExecutorStore, sessionID string, expect models.TaskSessionState) {
 	t.Helper()
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
-	if session.State != expect {
-		t.Errorf("session state = %q, want %q", session.State, expect)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
+		}
+		if session.State == expect {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("session state = %q, want %q (after polling)", session.State, expect)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

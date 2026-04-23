@@ -9,12 +9,24 @@ export type AgentProfile = {
   model: string;
   /** Optional ACP session mode applied via session/set_mode at session start. */
   mode?: string;
-  /** Auggie-only CLI flag; ignored for all other agents. */
+  /** @deprecated Use cli_flags. Retained for legacy clients. */
   allow_indexing: boolean;
+  /**
+   * User-configurable CLI flags passed to the agent subprocess. Seeded
+   * from the agent's curated suggestions at profile creation; users
+   * toggle/edit entries in the profile editor.
+   */
+  cli_flags: CLIFlag[];
   cli_passthrough: boolean;
   user_modified?: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type CLIFlag = {
+  description: string;
+  flag: string;
+  enabled: boolean;
 };
 
 export type TUIConfig = {

@@ -14,7 +14,6 @@ import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import type { Workspace, Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { Badge } from "@kandev/ui/badge";
 
 function getRepositoryPlaceholder(
   repositoriesLoading: boolean,
@@ -151,9 +150,9 @@ export function KanbanDisplayDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" data-testid="display-button" className="cursor-pointer">
-          <IconAdjustmentsHorizontal className="h-4 w-4 mr-2" />
-          Display
+        <Button variant="outline" data-testid="display-button" className="cursor-pointer gap-2">
+          <IconAdjustmentsHorizontal className="h-4 w-4" />
+          <span className="hidden 2xl:inline">Display</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[280px] p-3">
@@ -186,12 +185,7 @@ export function KanbanDisplayDropdown() {
                   onTogglePreviewOnClick?.(!!checked);
                 }}
               />
-              <span className="text-sm text-foreground">
-                Open preview on click{" "}
-                <Badge variant="secondary" className="mr-1">
-                  beta
-                </Badge>
-              </span>
+              <span className="text-sm text-foreground">Open preview on click</span>
             </label>
             <p className="text-xs text-muted-foreground pl-6">
               When enabled, clicking a task opens the preview panel. When disabled, clicking

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -156,81 +157,89 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("processes on_exit and on_enter for step transition", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
 
-		// Set plan_mode on the session to verify on_exit clears it
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"plan_mode": true})
+			// Set plan_mode on the session to verify on_exit clears it
+			session, _ := repo.GetTaskSession(ctx, "s1")
+			_ = repo.UpdateTaskSession(ctx, session)
+			_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"plan_mode": true})
 
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnExit: []wfmodels.OnExitAction{
-					{Type: wfmodels.OnExitDisablePlanMode},
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+				Events: wfmodels.StepEvents{
+					OnExit: []wfmodels.OnExitAction{
+						{Type: wfmodels.OnExitDisablePlanMode},
+					},
 				},
-			},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{
-				OnEnter: []wfmodels.OnEnterAction{
-					{Type: wfmodels.OnEnterEnablePlanMode},
+			}
+			stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+				ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterEnablePlanMode},
+					},
 				},
-			},
-		}
+			}
 
-		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "step2",
-			TaskDescription: "test task",
+			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "step1",
+				ToStepID:        "step2",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
+
+			// Verify on_exit cleared plan_mode, then on_enter re-enabled it
+			updated, _ := repo.GetTaskSession(ctx, "s1")
+			if updated.Metadata == nil {
+				t.Fatal("expected metadata to be set")
+			}
+			if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+				t.Error("expected plan_mode to be true after on_enter re-enabled it")
+			}
 		})
-
-		// Verify on_exit cleared plan_mode, then on_enter re-enabled it
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata == nil {
-			t.Fatal("expected metadata to be set")
-		}
-		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to be true after on_enter re-enabled it")
-		}
 	})
 
 	t.Run("clears review status on step transition", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
 
-		// Set review status on the session
-		_ = repo.UpdateSessionReviewStatus(ctx, "s1", "pending")
+			// Set review status on the session
+			_ = repo.UpdateSessionReviewStatus(ctx, "s1", "pending")
 
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{},
-		}
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+				Events: wfmodels.StepEvents{},
+			}
+			stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+				ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+				Events: wfmodels.StepEvents{},
+			}
 
-		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "step2",
-			TaskDescription: "test task",
+			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "step1",
+				ToStepID:        "step2",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
+
+			updated, _ := repo.GetTaskSession(ctx, "s1")
+			if updated.ReviewStatus != nil && *updated.ReviewStatus != "" {
+				t.Errorf("expected review status to be cleared, got %q", *updated.ReviewStatus)
+			}
 		})
-
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.ReviewStatus != nil && *updated.ReviewStatus != "" {
-			t.Errorf("expected review status to be cleared, got %q", *updated.ReviewStatus)
-		}
 	})
 
 	t.Run("queues auto-start prompt on enter", func(t *testing.T) {
@@ -300,97 +309,112 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 	})
 
 	t.Run("handles missing from-step gracefully", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
 
-		stepGetter := newMockStepGetter()
-		// step1 intentionally NOT in stepGetter
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{},
-		}
+			stepGetter := newMockStepGetter()
+			// step1 intentionally NOT in stepGetter
+			stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+				ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+				Events: wfmodels.StepEvents{},
+			}
 
-		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		// Should not panic — from-step lookup failure is logged but processing continues
-		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "nonexistent",
-			ToStepID:        "step2",
-			TaskDescription: "test task",
+			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			// Should not panic — from-step lookup failure is logged but processing continues
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "nonexistent",
+				ToStepID:        "step2",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
 		})
 	})
 
 	t.Run("handles missing to-step gracefully", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
 
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{},
-		}
-		// step2 intentionally NOT in stepGetter
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+				Events: wfmodels.StepEvents{},
+			}
+			// step2 intentionally NOT in stepGetter
 
-		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		// Should not panic — to-step lookup failure causes early return
-		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "nonexistent",
-			TaskDescription: "test task",
+			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			// Should not panic — to-step lookup failure causes early return
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "step1",
+				ToStepID:        "nonexistent",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
 		})
 	})
 
 	t.Run("reset_agent_context processed on enter", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
 
-		// Set agent execution ID on the session
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.AgentExecutionID = "exec-123"
-		_ = repo.UpdateTaskSession(ctx, session)
-		_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"acp_session_id": "old-acp"})
+			// Set agent execution ID on the session
+			session, _ := repo.GetTaskSession(ctx, "s1")
+			session.AgentExecutionID = "exec-123"
+			_ = repo.UpdateTaskSession(ctx, session)
+			_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"acp_session_id": "old-acp"})
 
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,
-			Events: wfmodels.StepEvents{
-				OnEnter: []wfmodels.OnEnterAction{
-					{Type: wfmodels.OnEnterResetAgentContext},
-				},
-			},
-		}
-
-		agentMgr := &mockAgentManager{}
-		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
-			TaskID:          "t1",
-			SessionID:       "s1",
-			FromStepID:      "step1",
-			ToStepID:        "step2",
-			TaskDescription: "test task",
-		})
-
-		if len(agentMgr.restartProcessCalls) != 1 {
-			t.Fatalf("expected 1 RestartAgentProcess call, got %d", len(agentMgr.restartProcessCalls))
-		}
-		if agentMgr.restartProcessCalls[0] != "exec-123" {
-			t.Errorf("expected RestartAgentProcess called with 'exec-123', got %q", agentMgr.restartProcessCalls[0])
-		}
-
-		// Verify acp_session_id was cleared
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata != nil {
-			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
-				t.Error("expected acp_session_id to be cleared from session metadata")
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+				Events: wfmodels.StepEvents{},
 			}
-		}
+			stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+				ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterResetAgentContext},
+					},
+				},
+			}
+
+			agentMgr := &mockAgentManager{}
+			svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "step1",
+				ToStepID:        "step2",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
+
+			agentMgr.mu.Lock()
+			restartCalls := agentMgr.restartProcessCalls
+			agentMgr.mu.Unlock()
+			if len(restartCalls) != 1 {
+				t.Fatalf("expected 1 RestartAgentProcess call, got %d", len(restartCalls))
+			}
+			if restartCalls[0] != "exec-123" {
+				t.Errorf("expected RestartAgentProcess called with 'exec-123', got %q", restartCalls[0])
+			}
+
+			// Verify acp_session_id was cleared
+			updated, _ := repo.GetTaskSession(ctx, "s1")
+			if updated.Metadata != nil {
+				if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
+					t.Error("expected acp_session_id to be cleared from session metadata")
+				}
+			}
+		})
 	})
 }
 

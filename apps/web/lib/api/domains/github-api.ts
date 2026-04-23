@@ -14,6 +14,11 @@ import type {
   UpdateReviewWatchRequest,
   TriggerReviewResponse,
   PRStatsResponse,
+  IssueWatch,
+  IssueWatchesResponse,
+  CreateIssueWatchRequest,
+  UpdateIssueWatchRequest,
+  TriggerIssueResponse,
 } from "@/lib/types/github";
 
 // Status
@@ -181,4 +186,59 @@ export async function fetchGitHubStats(
   if (params?.end_date) query.set("end_date", params.end_date);
   const suffix = query.toString();
   return fetchJson<PRStatsResponse>(`/api/v1/github/stats${suffix ? `?${suffix}` : ""}`, options);
+}
+
+// Issue watches
+export async function listIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<IssueWatchesResponse>(
+    `/api/v1/github/watches/issue?${query.toString()}`,
+    options,
+  );
+}
+
+export async function createIssueWatch(
+  payload: CreateIssueWatchRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<IssueWatch>("/api/v1/github/watches/issue", {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateIssueWatch(
+  id: string,
+  payload: UpdateIssueWatchRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<IssueWatch>(`/api/v1/github/watches/issue/${id}`, {
+    ...options,
+    init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteIssueWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ deleted: boolean }>(`/api/v1/github/watches/issue/${id}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
+}
+
+export async function triggerIssueWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function triggerAllIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TriggerIssueResponse>(
+    `/api/v1/github/watches/issue/trigger-all?${query.toString()}`,
+    {
+      ...options,
+      init: { method: "POST", ...(options?.init ?? {}) },
+    },
+  );
 }

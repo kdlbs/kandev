@@ -11,9 +11,13 @@
 package config
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -41,6 +45,20 @@ type Config struct {
 
 	// VS Code server configuration
 	VscodeCommand string // Command to run code-server (default: "code-server")
+
+	// AuthToken is a shared secret for authenticating requests from the kandev backend.
+	// Generated internally when AGENTCTL_BOOTSTRAP_NONCE is present.
+	// Empty means authentication is disabled (e.g. dev/test without nonce).
+	AuthToken string
+
+	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
+	// When set (via AGENTCTL_BOOTSTRAP_NONCE), agentctl generates its own AuthToken.
+	// at startup and exposes POST /auth/handshake for the backend to retrieve it.
+	// The nonce is burned after a single successful handshake.
+	BootstrapNonce string
+
+	// mu protects BootstrapNonce from concurrent access during handshake.
+	mu sync.Mutex
 }
 
 // PortConfig defines port allocation for instances
@@ -169,11 +187,15 @@ type InstanceConfig struct {
 	// McpMode controls which MCP tools are registered for this instance.
 	// "task" (default) registers kanban/plan tools; "config" registers config tools.
 	McpMode string
+
+	// AuthToken is a shared secret for authenticating requests.
+	// Inherited from the parent Config at instance creation time.
+	AuthToken string
 }
 
 // Load loads the configuration from environment variables.
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		Port: getEnvInt("AGENTCTL_PORT", 9999),
 		Ports: PortConfig{
 			Base: getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 10001),
@@ -194,6 +216,44 @@ func Load() *Config {
 		McpLogFile:    getEnv("KANDEV_MCP_LOG_FILE", ""),
 		VscodeCommand: getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
 	}
+
+	// Bootstrap nonce mode: agentctl generates its own token and the backend
+	// retrieves it via handshake using the nonce as proof-of-parentage.
+	if nonce := os.Getenv("AGENTCTL_BOOTSTRAP_NONCE"); nonce != "" {
+		cfg.BootstrapNonce = nonce
+		cfg.AuthToken = generateSelfToken()
+	}
+
+	return cfg
+}
+
+// ConsumeNonce atomically validates and burns the bootstrap nonce.
+// Returns the auth token if the nonce matches, empty string otherwise.
+// The nonce is invalidated after a single successful call (one-shot).
+func (c *Config) ConsumeNonce(nonce string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.BootstrapNonce == "" || nonce == "" {
+		return ""
+	}
+	if subtle.ConstantTimeCompare([]byte(c.BootstrapNonce), []byte(nonce)) != 1 {
+		return ""
+	}
+
+	// Burn the nonce — only one handshake allowed
+	c.BootstrapNonce = ""
+	return c.AuthToken
+}
+
+// generateSelfToken creates a cryptographically random 32-byte hex-encoded token.
+func generateSelfToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback should never happen; crypto/rand rarely fails.
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // NewInstanceConfig creates an InstanceConfig from defaults with optional overrides.
@@ -212,6 +272,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
 		VscodeCommand:          c.VscodeCommand,
 		McpMode:                "task",
+		AuthToken:              c.AuthToken,
 	}
 
 	applyOverrides(cfg, overrides)

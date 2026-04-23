@@ -14,6 +14,7 @@ function buildProfileEntry(profile: any) {
     auto_approve: profile.auto_approve,
     dangerously_skip_permissions: profile.dangerously_skip_permissions,
     allow_indexing: profile.allow_indexing,
+    cli_flags: profile.cli_flags ?? [],
     cli_passthrough: profile.cli_passthrough ?? false,
     plan: profile.plan,
     created_at: profile.created_at ?? "",
@@ -67,6 +68,7 @@ function handleProfileUpdated(state: AppState, profile: any): Partial<AppState> 
                   auto_approve: profile.auto_approve,
                   dangerously_skip_permissions: profile.dangerously_skip_permissions,
                   allow_indexing: profile.allow_indexing,
+                  cli_flags: profile.cli_flags ?? p.cli_flags ?? [],
                   plan: profile.plan,
                   updated_at: profile.updated_at ?? p.updated_at,
                 }
