@@ -74,6 +74,7 @@ export const defaultState = {
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   bottomTerminal: defaultUIState.bottomTerminal,
   sidebarViews: defaultUIState.sidebarViews,
+  collapsedSubtaskParents: defaultUIState.collapsedSubtaskParents,
 };
 
 export type DefaultState = typeof defaultState;
@@ -155,5 +156,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
     sidebarViews: { ...defaultState.sidebarViews, ...initialState.sidebarViews },
+    collapsedSubtaskParents:
+      initialState.collapsedSubtaskParents ?? defaultState.collapsedSubtaskParents,
   };
 }

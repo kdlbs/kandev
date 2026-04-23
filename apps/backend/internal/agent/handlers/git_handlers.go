@@ -727,15 +727,25 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	agentClient, err := h.getAgentCtlClient(req.SessionID)
+	// Use GetOrEnsureExecution to recover workspace after backend restarts.
+	// This is a workspace-oriented operation that doesn't require a running agent process.
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		if isSessionNotReadyError(err) {
+		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
 			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 				"cumulative_diff": nil,
 				"ready":           false,
 			})
 		}
-		return nil, err
+		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)
+	}
+
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"cumulative_diff": nil,
+			"ready":           false,
+		})
 	}
 
 	// Look up base commit SHA from the session metadata

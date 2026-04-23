@@ -241,14 +241,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
-	// Publish task updated event
-	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated,
-			"orchestrator",
-			buildTaskEventPayload(task),
-		))
-	}
+	// Publish task updated event via the task service so the payload carries
+	// the full context (session counts, primary session, repositories).
+	s.publishTaskUpdated(ctx, task)
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
@@ -345,17 +340,26 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
-	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
-	if err != nil {
-		s.logger.Error("task.moved: failed to auto-start task",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
+	go func() {
+		asyncCtx := context.WithoutCancel(ctx)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
+		if err != nil {
+			s.logger.Error("task.moved: failed to auto-start task",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		}
+	}()
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session
 // is moved between steps. It processes on_exit for the source step and on_enter
 // for the target step.
+//
+// The on_exit/on_enter processing is launched asynchronously because this handler
+// runs synchronously inside the in-memory event bus Publish call. If processOnEnter
+// blocks (e.g., auto_start_agent waiting for the agent turn), the MoveTask HTTP
+// handler that published the event also blocks, causing browser request timeouts.
 func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.TaskMovedEventData) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -365,7 +369,7 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 		return
 	}
 
-	s.processStepExitAndEnter(ctx, data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
+	go s.processStepExitAndEnter(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
 }
 
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
@@ -511,7 +515,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	// Promote the new session to primary so it's loaded when navigating back to this task.
-	if err := s.repo.SetSessionPrimary(ctx, newSession.ID); err != nil {
+	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
+	// event — the frontend reads primarySessionId from the task to render the star icon.
+	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
 		s.logger.Warn("failed to set new session as primary",
 			zap.String("session_id", newSession.ID), zap.Error(err))
 	}
@@ -526,8 +532,14 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	// Mark the current session as completed.
-	currentSession.State = models.TaskSessionStateCompleted
+	// Use updateTaskSessionState to publish a session.state_changed WS event so the
+	// frontend learns the old session is terminal and can adopt the new one.
+	s.updateTaskSessionState(ctx, taskID, currentSession.ID, models.TaskSessionStateCompleted, "", false)
+	// Also set CompletedAt timestamp for bookkeeping (updateTaskSessionState only sets state).
+	// Clear IsPrimary to avoid overwriting the SetPrimarySession call above when writing back.
 	now := time.Now().UTC()
+	currentSession.State = models.TaskSessionStateCompleted
+	currentSession.IsPrimary = false
 	currentSession.CompletedAt = &now
 	currentSession.UpdatedAt = now
 	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
@@ -542,6 +554,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 
 // maybySwitchSessionForProfile checks whether the step requires a different agent profile
 // and switches the session if so. Passthrough sessions are returned unchanged.
+// When the step has no agent_profile override, falls back to the task's original
+// agent profile (from task metadata) so that moving to a "plain" step reverts
+// to the default agent instead of keeping the previous step's override.
 // Returns the effective session (new or original) and whether processing should continue.
 // A false return means the switch failed; the caller should return immediately.
 func (s *Service) maybySwitchSessionForProfile(
@@ -551,6 +566,18 @@ func (s *Service) maybySwitchSessionForProfile(
 		return session, true
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+
+	// When the step has no override, fall back to the task's original agent profile
+	// so that moving to a step without an agent_profile reverts to the default.
+	if effectiveProfile == "" {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err == nil && task.Metadata != nil {
+			if pid, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && pid != "" {
+				effectiveProfile = pid
+			}
+		}
+	}
+
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		return session, true
 	}
@@ -629,18 +656,18 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	case hasAutoStart:
 		// ACP path: build prompt from step configuration.
-		// Run auto-start inline so queue state is visible before handleAgentReady
-		// checks for queued messages.
+		// When called from applyEngineTransition (on_turn_complete), processOnEnter
+		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
+		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
-		planMode := hasPlanMode
-		err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
-		if err != nil {
+		if err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", step.Name),
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		}
 
 	default:
@@ -650,19 +677,27 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		if sessionSwitched && step.Prompt != "" {
 			effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 			planMode := hasPlanMode
+			stepName := step.Name
+			stepID := step.ID
 			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
-				zap.String("step_name", step.Name))
-			err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
-			if err != nil {
-				s.logger.Error("failed to launch agent after profile switch",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-				s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-			}
+				zap.String("step_name", stepName))
+			// Launch asynchronously because processOnEnter may also be called
+			// synchronously from finalizeStepEnter (manual task move). In that path,
+			// autoStartStepPrompt would block the caller's goroutine.
+			go func() {
+				asyncCtx := context.WithoutCancel(ctx)
+				err := s.autoStartStepPrompt(asyncCtx, taskID, session, stepName, effectivePrompt, planMode, true)
+				if err != nil {
+					s.logger.Error("failed to launch agent after profile switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
+					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
+				}
+			}()
 			return
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
@@ -1232,7 +1267,24 @@ func (s *Service) applyEngineTransition(
 		return true
 	}
 
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	// When triggered from on_turn_complete, the agent has finished its turn but
+	// handleAgentReady returns early without setting WAITING_FOR_INPUT (because the
+	// transition already occurred). The session is still RUNNING in the DB.
+	// Flip to WAITING_FOR_INPUT so that autoStartStepPrompt in processOnEnter sends
+	// the prompt directly instead of queueing it — the queue would never be drained
+	// because handleAgentReady already returned.
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
+		session.State = models.TaskSessionStateWaitingForInput
+	}
+
+	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.
+	// When triggered from on_turn_complete, the entire call chain runs in the WebSocket
+	// stream reader goroutine (G_reader). processOnEnter may call resetAgentContext →
+	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
+	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
+	// The DB transition is already persisted above, so it's safe to process on_enter async.
+	go s.processOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription)
 	return true
 }
 

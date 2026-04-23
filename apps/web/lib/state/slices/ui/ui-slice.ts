@@ -1,11 +1,13 @@
 import type { StateCreator } from "zustand";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
+  getStoredCollapsedSubtaskParents,
   getStoredSidebarActiveViewId,
   getStoredSidebarDraft,
   getStoredSidebarUserViews,
   removeStoredSidebarDraft,
   setLocalStorage,
+  setStoredCollapsedSubtaskParents,
   setStoredSidebarActiveViewId,
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
@@ -19,6 +21,7 @@ import type {
   SortSpec,
 } from "./sidebar-view-types";
 import { toApiSidebarView } from "./sidebar-view-wire";
+import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
@@ -90,6 +93,7 @@ export const defaultUIState: UISliceState = {
   sessionFailureNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: loadSidebarState(),
+  collapsedSubtaskParents: [],
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -388,6 +392,42 @@ function cloneView(v: SidebarView): SidebarView {
   };
 }
 
+function buildSystemHealthActions(set: ImmerSet) {
+  return {
+    setSystemHealth: (response: SystemHealthResponse) =>
+      set((draft) => {
+        draft.systemHealth.issues = response.issues;
+        draft.systemHealth.healthy = response.healthy;
+        draft.systemHealth.loaded = true;
+      }),
+    setSystemHealthLoading: (loading: boolean) =>
+      set((draft) => {
+        draft.systemHealth.loading = loading;
+      }),
+    invalidateSystemHealth: () =>
+      set((draft) => {
+        draft.systemHealth.loaded = false;
+      }),
+  };
+}
+
+function buildCollapsedSubtaskActions(set: ImmerSet, get: () => UISlice) {
+  return {
+    // Tab-scoped collapse of a parent task's subtasks. Persisted via
+    // sessionStorage (survives reload / task switch within the tab, resets on
+    // tab close). Not per-view and not synced to the backend — purely visual.
+    toggleSubtaskCollapsed: (parentTaskId: string) => {
+      set((draft) => {
+        const list = draft.collapsedSubtaskParents;
+        const idx = list.indexOf(parentTaskId);
+        if (idx === -1) list.push(parentTaskId);
+        else list.splice(idx, 1);
+      });
+      setStoredCollapsedSubtaskParents(get().collapsedSubtaskParents);
+    },
+  };
+}
+
 function buildConfigChatActions(set: ImmerSet) {
   return {
     openConfigChat: (sessionId: string, workspaceId: string) =>
@@ -445,11 +485,16 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   get,
 ) => ({
   ...defaultUIState,
+  // Hydrate from sessionStorage at slice creation (runs in the browser, after
+  // the default static state) so tests and SSR both see a fresh read.
+  collapsedSubtaskParents: getStoredCollapsedSubtaskParents(),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
   ...buildConfigChatActions(set),
   ...buildSidebarViewActions(set, get),
+  ...buildCollapsedSubtaskActions(set, get),
+  ...buildSystemHealthActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -468,20 +513,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
       setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
-    }),
-  setSystemHealth: (response) =>
-    set((draft) => {
-      draft.systemHealth.issues = response.issues;
-      draft.systemHealth.healthy = response.healthy;
-      draft.systemHealth.loaded = true;
-    }),
-  setSystemHealthLoading: (loading) =>
-    set((draft) => {
-      draft.systemHealth.loading = loading;
-    }),
-  invalidateSystemHealth: () =>
-    set((draft) => {
-      draft.systemHealth.loaded = false;
     }),
   openQuickChat: (sessionId, workspaceId) =>
     set((draft) => {

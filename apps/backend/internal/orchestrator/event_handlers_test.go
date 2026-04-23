@@ -81,6 +81,7 @@ func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.
 type mockTaskRepo struct {
+	mu            sync.Mutex
 	tasks         map[string]*v1.Task
 	updatedStates map[string]v1.TaskState
 	getTaskErr    error // if set, GetTask returns this error
@@ -94,6 +95,8 @@ func newMockTaskRepo() *mockTaskRepo {
 }
 
 func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.getTaskErr != nil {
 		return nil, m.getTaskErr
 	}
@@ -104,6 +107,8 @@ func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, erro
 }
 
 func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v1.TaskState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
 	return nil
 }
@@ -183,6 +188,8 @@ func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*ex
 	}, nil
 }
 func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecutionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.restartProcessCalls = append(m.restartProcessCalls, agentExecutionID)
 	return m.restartProcessErr
 }

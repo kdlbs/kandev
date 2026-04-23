@@ -96,6 +96,16 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
   // would discard the current ones without restoring the target session's.
   if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
 
+  // Capture the outgoing session tab's group BEFORE removing it so we can
+  // place the new session tab in the same group. Without this, the lookup
+  // after removeEphemeralPanels finds no chat/session panels and falls
+  // through to a sidebar split — putting the new tab in a new group while
+  // the PR panel stays in the old center group.
+  const outgoingSessionPanel = api.panels.find(
+    (p) => p.id.startsWith("session:") || p.api.component === "chat",
+  );
+  const outgoingGroupId = outgoingSessionPanel?.group?.id;
+
   // Fast path: keep the grid structure, clean up ephemeral panels and any
   // session chat tabs that belong to a different session (cross-task switch).
   // Session-scoped portals (browser, vscode, etc.) will be re-acquired
@@ -106,13 +116,10 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
   // old tab and creating the new one. useAutoSessionTab will detect the panel
   // already exists and skip creation.
   if (!api.getPanel(`session:${newSessionId}`)) {
-    const chatPanel = api.panels.find(
-      (p) => p.id.startsWith("session:") || p.api.component === "chat",
-    );
     const sidebarPanel = api.getPanel("sidebar");
     let position: import("dockview-react").AddPanelOptions["position"];
-    if (chatPanel) {
-      position = { referenceGroup: chatPanel.group.id };
+    if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
+      position = { referenceGroup: outgoingGroupId };
     } else if (sidebarPanel) {
       position = { direction: "right" as const, referencePanel: "sidebar" };
     }

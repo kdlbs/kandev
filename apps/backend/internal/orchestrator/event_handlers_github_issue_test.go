@@ -117,7 +117,6 @@ func setupIssueTaskTest(t *testing.T) (*Service, *mockStepGetter) {
 	return createTestService(repo, stepGetter, newMockTaskRepo()), stepGetter
 }
 
-
 func TestCreateIssueTask_SkipsWhenAlreadyReserved(t *testing.T) {
 	svc, _ := setupIssueTaskTest(t)
 	ghSvc := &mockGitHubService{issueReserveReturn: false}

@@ -128,10 +128,11 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		})
 	}
 
-	// When not starting the agent immediately, persist profile IDs in task metadata
-	// so handleTaskMovedNoSession can retrieve them when the task is later dragged
-	// to a step with auto_start_agent.
-	if !req.StartAgent && req.AgentProfileID != "" {
+	// Always persist profile IDs in task metadata so they can be used as the
+	// task's "default" agent profile. This is needed both for deferred agent start
+	// (handleTaskMovedNoSession) and for reverting to the default agent when a
+	// workflow step has no agent_profile override.
+	if req.AgentProfileID != "" {
 		if req.Metadata == nil {
 			req.Metadata = make(map[string]interface{})
 		}

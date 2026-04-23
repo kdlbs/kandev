@@ -110,6 +110,8 @@ export type UISliceState = {
   sessionFailureNotification: SessionFailureNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
+  /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
+  collapsedSubtaskParents: string[];
 };
 
 export type UISliceActions = {
@@ -157,6 +159,7 @@ export type UISliceActions = {
   renameSidebarView: (viewId: string, name: string) => void;
   duplicateSidebarView: (viewId: string, name: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
   migrateLocalViewsToBackend: () => void;
 };

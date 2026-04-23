@@ -17,8 +17,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Default agentctl port
-const AgentCtlPort = 9999
+// Default agentctl port. Clustered near the web port (37429) to avoid
+// collisions with commonly used ports (8080, 9090, 9999, etc.).
+const AgentCtlPort = 39429
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {

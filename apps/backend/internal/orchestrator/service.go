@@ -93,6 +93,15 @@ type TurnService interface {
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
+// TaskEventPublisher is the orchestrator's collaborator for publishing
+// task.updated events. Implemented by the task service (which owns the rich
+// payload build — session counts, primary session info, repositories,
+// metadata, parent_id). The orchestrator does not construct task.updated
+// payloads itself.
+type TaskEventPublisher interface {
+	PublishTaskUpdated(ctx context.Context, task *models.Task)
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -186,6 +195,10 @@ type Service struct {
 
 	// Turn service for managing session turns
 	turnService TurnService
+
+	// Task event publisher for emitting task.updated events.
+	// Task service owns the rich payload; orchestrator delegates.
+	taskEvents TaskEventPublisher
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
@@ -387,6 +400,30 @@ func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
 
+// SetTaskEventPublisher wires the publisher used for task.updated events.
+//
+// The task service is the canonical publisher: it loads session counts,
+// primary session info, repositories, metadata, and parent_id, and emits a
+// single rich payload. Orchestrator code paths that mutate a task (workflow
+// transitions, primary session assignment, workflow-step moves) delegate to
+// this publisher instead of constructing their own partial payloads.
+//
+// If not set: orchestrator task.updated publishers no-op (nothing is emitted
+// on those paths). Task service's own publishTaskEvent calls are unaffected.
+func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
+	s.taskEvents = publisher
+}
+
+// publishTaskUpdated forwards to the configured TaskEventPublisher.
+// No-op when the publisher isn't wired (tests, or before SetTaskEventPublisher
+// has been called during startup).
+func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	s.taskEvents.PublishTaskUpdated(ctx, task)
+}
+
 // SetWorkflowStepGetter sets the workflow step getter for prompt building.
 //
 // When workflow_step_id is provided to StartTask, the orchestrator uses this getter
@@ -415,7 +452,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.eventBus, s.logger)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks)

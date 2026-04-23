@@ -122,7 +122,8 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 		return nil, err
 	}
 
-	proxy := h.createProxy(cacheKey, target)
+	authToken := agentctlClient.AuthToken()
+	proxy := h.createProxy(cacheKey, target, authToken)
 	h.proxies[cacheKey] = &portProxyEntry{proxy: proxy, target: baseURL}
 
 	h.logger.Info("created port proxy",
@@ -133,12 +134,16 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 	return proxy, nil
 }
 
-func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL) *httputil.ReverseProxy {
+func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authToken string) *httputil.ReverseProxy {
 	proxy := &httputil.ReverseProxy{}
 	proxy.Rewrite = func(r *httputil.ProxyRequest) {
 		r.SetURL(target)
 		r.Out.URL.Path = r.In.URL.Path
 		r.Out.URL.RawPath = ""
+		// Inject agentctl auth token
+		if authToken != "" {
+			r.Out.Header.Set("Authorization", "Bearer "+authToken)
+		}
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")
 		}

@@ -3,7 +3,7 @@ export type AppConfig = {
 };
 
 // Server-side default (used during SSR - always localhost since SSR runs on same machine)
-const DEFAULT_API_BASE_URL = "http://localhost:8080";
+const DEFAULT_API_BASE_URL = "http://localhost:38429";
 
 export const DEBUG_UI =
   process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
@@ -18,7 +18,7 @@ export function getBackendConfig(): AppConfig {
   }
 
   // Client-side URL resolution:
-  // 1. Port-based URL via __KANDEV_API_PORT (dev mode: browser on :3000, API on :8080)
+  // 1. Port-based URL via __KANDEV_API_PORT (dev mode: browser on :37429, API on :38429)
   // 2. Same-origin (production: Go reverse-proxies Next.js on single port)
   //    Works for any hosting scenario: localhost, custom domain, Tailscale, etc.
   if (window.__KANDEV_API_PORT) {

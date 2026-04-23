@@ -216,6 +216,7 @@ export type AppState = {
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
+  collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -430,6 +431,7 @@ export type AppState = {
   renameSidebarView: UIA["renameSidebarView"];
   duplicateSidebarView: UIA["duplicateSidebarView"];
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
+  toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
 };
@@ -518,6 +520,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       quickChat: merged.quickChat,
       sessionFailureNotification: merged.sessionFailureNotification,
       bottomTerminal: merged.bottomTerminal,
+      // Note: collapsedSubtaskParents is intentionally not overridden here —
+      // createUISlice hydrates it from sessionStorage and we want that to win.
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

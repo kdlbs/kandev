@@ -54,7 +54,7 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  dev              Run backend + web via CLI (auto ports)"
-	@echo "  dev-backend      Run backend in development mode (port 8080)"
+	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
 	@echo ""
@@ -114,7 +114,7 @@ endif
 
 .PHONY: dev-backend
 dev-backend:
-	@echo "Starting backend on http://localhost:8080"
+	@echo "Starting backend on http://localhost:38429"
 	@trap 'stty sane 2>/dev/null || true' EXIT INT TERM; \
 	$(MAKE) -C $(BACKEND_DIR) run; \
 	stty sane 2>/dev/null || true
