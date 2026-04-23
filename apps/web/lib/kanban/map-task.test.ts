@@ -100,16 +100,23 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(ws).repositoryId).toBeUndefined();
   });
 
-  it("null/empty metadata yields false flags and no issue fields", () => {
-    const http = httpDTO({ metadata: null });
-    const ws = wsPayload({ metadata: {} });
-    const hOut = toKanbanTask(http);
-    const wOut = toKanbanTask(ws);
-    expect(hOut.isPRReview).toBe(false);
-    expect(hOut.isIssueWatch).toBe(false);
-    expect(hOut.issueUrl).toBeUndefined();
-    expect(hOut.issueNumber).toBeUndefined();
-    expect(wOut).toEqual(hOut);
+  it("null/empty/omitted metadata yields false flags and no issue fields", () => {
+    // WS omits the field entirely when Task.Metadata is nil; HTTP may send
+    // null/{}. All three must derive the same derived flags.
+    const cases: TaskLike[] = [
+      httpDTO({ metadata: null }),
+      wsPayload({ metadata: undefined }),
+      wsPayload({ metadata: {} }),
+    ];
+    const mapped = cases.map(toKanbanTask);
+    const first = mapped[0];
+    expect(first.isPRReview).toBe(false);
+    expect(first.isIssueWatch).toBe(false);
+    expect(first.issueUrl).toBeUndefined();
+    expect(first.issueNumber).toBeUndefined();
+    for (const out of mapped.slice(1)) {
+      expect(out).toEqual(first);
+    }
   });
 
   it("picks id from `id` (HTTP) or `task_id` (WS)", () => {

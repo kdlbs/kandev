@@ -88,8 +88,12 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	// Always include is_ephemeral field so frontend filters work correctly
 	data["is_ephemeral"] = task.IsEphemeral
 
-	if len(task.Repositories) > 0 {
-		data["repository_id"] = task.Repositories[0].RepositoryID
+	// Orchestrator-originated events fetch the task via the raw repo.GetTask,
+	// which does not populate Repositories. Load the primary on demand so the
+	// payload always carries repository_id — matching the HTTP DTO and
+	// preventing the frontend from losing repositoryId on WS updates.
+	if repoID := primaryRepositoryID(ctx, s, task); repoID != "" {
+		data["repository_id"] = repoID
 	}
 
 	if task.Metadata != nil {
@@ -109,6 +113,21 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}
+}
+
+// primaryRepositoryID returns the primary repository_id for the task. Prefers
+// the already-loaded Task.Repositories slice; falls back to a lookup so
+// publishers that pass a task without eagerly loaded repositories (e.g. the
+// orchestrator's raw repo.GetTask) still emit repository_id.
+func primaryRepositoryID(ctx context.Context, s *Service, task *models.Task) string {
+	if len(task.Repositories) > 0 {
+		return task.Repositories[0].RepositoryID
+	}
+	repo, err := s.taskRepos.GetPrimaryTaskRepository(ctx, task.ID)
+	if err != nil || repo == nil {
+		return ""
+	}
+	return repo.RepositoryID
 }
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process

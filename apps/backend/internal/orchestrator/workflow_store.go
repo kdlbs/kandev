@@ -107,9 +107,7 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
-	if s.publishTaskUpdated != nil {
-		s.publishTaskUpdated(ctx, task)
-	}
+	s.publishTaskUpdated(ctx, task)
 
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 		s.logger.Warn("failed to clear session review status",

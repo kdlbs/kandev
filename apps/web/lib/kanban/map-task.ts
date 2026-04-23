@@ -42,8 +42,7 @@ export type TaskLike = {
 };
 
 function pickRepositoryId(source: TaskLike): string | undefined {
-  if (source.repository_id) return source.repository_id;
-  return source.repositories?.[0]?.repository_id ?? undefined;
+  return source.repository_id ?? source.repositories?.[0]?.repository_id ?? undefined;
 }
 
 function pickId(source: TaskLike): string {

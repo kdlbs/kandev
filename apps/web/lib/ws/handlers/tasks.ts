@@ -33,15 +33,24 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
   };
 }
 
+type TaskEventPayload = TaskLike & {
+  workflow_id: string;
+  is_ephemeral?: boolean;
+  archived_at?: string | null;
+};
+
 /** Upsert a task in both single-kanban and multi-kanban snapshots. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function upsertTaskInBothKanbans(state: AppState, wfId: string, payload: any): AppState {
+function upsertTaskInBothKanbans(
+  state: AppState,
+  wfId: string,
+  payload: TaskEventPayload,
+): AppState {
   // Skip ephemeral tasks - they should never be added to kanban
   if (payload.is_ephemeral) {
     return state;
   }
 
-  const nextTask = toKanbanTask(payload as TaskLike);
+  const nextTask = toKanbanTask(payload);
   let next = state;
 
   if (state.kanban.workflowId === wfId) {
