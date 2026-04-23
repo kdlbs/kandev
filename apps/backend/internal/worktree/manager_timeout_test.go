@@ -3,17 +3,15 @@ package worktree
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 	"time"
 )
 
-// TestBranchExists_RespectsContextDeadline verifies that branchExists cancels
-// the underlying git subprocess when its context expires, rather than hanging
-// forever. Regression test for the worktree creation hang: see plan
-// "Fix worktree creation hang on 'Create worktree' step".
-func TestBranchExists_RespectsContextDeadline(t *testing.T) {
-	scriptDir := writeFakeGitScript(t, `
+// hangOnRevParseScript is the shared fake-git script body used by the timeout
+// regression tests. It sleeps indefinitely on `git rev-parse` and no-ops on
+// everything else (including `fetch`), so branchExists, currentBranch, and
+// the pullBaseBranch path that calls them all exercise the hang scenario.
+const hangOnRevParseScript = `
 case "${1:-}" in
   rev-parse)
     sleep 30
@@ -23,7 +21,12 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-`)
+`
+
+// TestBranchExists_RespectsContextDeadline verifies that branchExists cancels
+// the underlying git subprocess when its caller-provided context expires.
+func TestBranchExists_RespectsContextDeadline(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, hangOnRevParseScript)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := newTestConfig(t)
@@ -48,19 +51,9 @@ esac
 }
 
 // TestCurrentBranch_RespectsContextDeadline verifies that currentBranch
-// cancels the git subprocess when its context expires.
+// cancels the git subprocess when its caller-provided context expires.
 func TestCurrentBranch_RespectsContextDeadline(t *testing.T) {
-	scriptDir := writeFakeGitScript(t, `
-case "${1:-}" in
-  rev-parse)
-    sleep 30
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-`)
+	scriptDir := writeFakeGitScript(t, hangOnRevParseScript)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := newTestConfig(t)
@@ -84,6 +77,35 @@ esac
 	}
 }
 
+// TestBranchExists_BoundedWhenCallerHasNoDeadline pins the behaviour of the
+// Manager's internal inspectTimeout. With a background (never-cancelled)
+// caller ctx, branchExists must still return within m.inspectTimeout so a
+// future refactor that drops the wrapping timeout cannot silently regress
+// the fix. We shrink inspectTimeout for the test to keep it fast.
+func TestBranchExists_BoundedWhenCallerHasNoDeadline(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, hangOnRevParseScript)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.inspectTimeout = 300 * time.Millisecond
+
+	start := time.Now()
+	exists := mgr.branchExists(context.Background(), t.TempDir(), "main")
+	elapsed := time.Since(start)
+
+	if exists {
+		t.Fatalf("branchExists() = true, want false on hanging git")
+	}
+	// Budget = inspectTimeout + WaitDelay for subprocess pipe cleanup + slack.
+	if elapsed > 2*time.Second {
+		t.Fatalf("branchExists() took %v, want <2s (inspectTimeout not applied)", elapsed)
+	}
+}
+
 // TestCreate_HangingRevParseReleasesRepoLock is the core regression test for
 // the reported symptom: a hung git rev-parse during Create must not keep the
 // per-repo mutex locked indefinitely. Before the fix, branchExists and
@@ -91,20 +113,7 @@ esac
 // the lock. After the fix, ctx cancellation propagates to the git subprocess
 // and Create returns, releasing the lock for subsequent callers.
 func TestCreate_HangingRevParseReleasesRepoLock(t *testing.T) {
-	scriptDir := writeFakeGitScript(t, `
-case "${1:-}" in
-  rev-parse)
-    sleep 30
-    exit 0
-    ;;
-  fetch)
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-`)
+	scriptDir := writeFakeGitScript(t, hangOnRevParseScript)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := newTestConfig(t)
@@ -156,17 +165,13 @@ esac
 
 	lockStart := time.Now()
 	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer close(done)
 		_, _ = mgr.Create(lockCtx, req)
-		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatalf("second Create() stuck on repo lock (elapsed %v)", time.Since(lockStart))
 	}
-	wg.Wait()
 }
