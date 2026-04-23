@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan } from "@/lib/types/http";
+import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -67,6 +67,10 @@ export type TaskPlansState = {
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  revisionsByTaskId: Record<string, TaskPlanRevision[]>;
+  revisionsLoadingByTaskId: Record<string, boolean>;
+  revisionsLoadedByTaskId: Record<string, boolean>;
+  revisionContentCache: Record<string, string>; // revisionId -> content
 };
 
 export type QueuedMessage = {
@@ -141,6 +145,11 @@ export type SessionSliceActions = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  // Revision actions
+  setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
+  upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
+  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
+  cachePlanRevisionContent: (revisionId: string, content: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;

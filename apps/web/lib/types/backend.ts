@@ -7,6 +7,8 @@ export type BackendMessageType =
   | "task.plan.created"
   | "task.plan.updated"
   | "task.plan.deleted"
+  | "task.plan.revision.created"
+  | "task.plan.reverted"
   | "agent.updated"
   | "agent.available.updated"
   | "terminal.output"
@@ -477,6 +479,19 @@ export type TaskPlanEventPayload = {
   updated_at: string;
 };
 
+export type TaskPlanRevisionEventPayload = {
+  id: string;
+  task_id: string;
+  revision_number: number;
+  title: string;
+  author_kind: "agent" | "user";
+  author_name: string;
+  revert_of_revision_id?: string | null;
+  coalesced?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type QueuedMessagePayload = {
   content: string;
   model?: string;
@@ -501,6 +516,11 @@ export type BackendMessageMap = {
   "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
   "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
   "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
+  "task.plan.revision.created": BackendMessage<
+    "task.plan.revision.created",
+    TaskPlanRevisionEventPayload
+  >;
+  "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
   "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
   "agent.available.updated": BackendMessage<
     "agent.available.updated",

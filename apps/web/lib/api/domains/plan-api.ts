@@ -1,5 +1,5 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
-import type { TaskPlan } from "@/lib/types/http";
+import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
@@ -79,4 +79,50 @@ export async function deleteTaskPlan(taskId: string): Promise<void> {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   await client.request("task.plan.delete", { task_id: taskId });
+}
+
+/**
+ * List all revisions for a plan (metadata only, newest first).
+ */
+export async function listPlanRevisions(taskId: string): Promise<TaskPlanRevision[]> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  const response = await client.request("task.plan.revisions.list", { task_id: taskId });
+  const list = (response as { revisions?: TaskPlanRevision[] })?.revisions;
+  return list ?? [];
+}
+
+/**
+ * Fetch a single revision including its content (for diff/preview).
+ */
+export async function getPlanRevision(revisionId: string): Promise<TaskPlanRevision> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  const response = await client.request("task.plan.revision.get", { revision_id: revisionId });
+  return response as TaskPlanRevision;
+}
+
+/**
+ * Revert the plan to a previous revision. Server appends a new revision with the target's content.
+ */
+export async function revertPlanRevision(
+  taskId: string,
+  revisionId: string,
+  authorName?: string,
+): Promise<TaskPlanRevision> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  const payload: Record<string, string> = {
+    task_id: taskId,
+    revision_id: revisionId,
+  };
+  if (authorName) payload.author_name = authorName;
+  const response = await client.request("task.plan.revert", payload);
+  return response as TaskPlanRevision;
 }

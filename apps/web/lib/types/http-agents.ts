@@ -269,6 +269,21 @@ export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
 
+// A single revision in the task plan history. `content` is optional because
+// list responses/WS broadcasts omit it for size; fetch detail separately.
+export type TaskPlanRevision = {
+  id: string;
+  task_id: string;
+  revision_number: number;
+  title: string;
+  content?: string;
+  author_kind: "agent" | "user";
+  author_name: string;
+  revert_of_revision_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // Stats types
 export type TaskStatsDTO = {
   task_id: string;

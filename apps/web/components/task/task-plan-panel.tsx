@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { PanelRoot, PanelBody } from "./panel-primitives";
+import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
+import { TaskPlanRevisions } from "./task-plan-revisions";
 import dynamic from "next/dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -40,7 +41,16 @@ type TaskPlanPanelProps = {
 };
 
 function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
-  const { plan, isLoading, isSaving, savePlan } = useTaskPlan(taskId, { visible });
+  const {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    revertTo,
+  } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
@@ -108,6 +118,10 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    revertTo,
   };
 }
 
@@ -137,6 +151,10 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    revertTo,
   } = state;
 
   // Ctrl+S to save immediately
@@ -163,6 +181,15 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
 
   return (
     <PanelRoot data-testid="plan-panel">
+      <PlanPanelHeader
+        taskId={taskId}
+        title={plan?.title || "Plan"}
+        revisions={revisions}
+        isLoadingRevisions={isLoadingRevisions}
+        isSaving={isSaving}
+        onOpenRevisions={loadRevisions}
+        onRevert={revertTo}
+      />
       <PanelBody
         padding={false}
         scroll={false}
@@ -495,5 +522,41 @@ function PlanEmptyState({
         </div>
       </div>
     </div>
+  );
+}
+
+type PlanPanelHeaderProps = {
+  taskId: string;
+  title: string;
+  revisions: import("@/lib/types/http").TaskPlanRevision[];
+  isLoadingRevisions: boolean;
+  isSaving: boolean;
+  onOpenRevisions: () => void;
+  onRevert: (id: string) => Promise<import("@/lib/types/http").TaskPlanRevision | null>;
+};
+
+function PlanPanelHeader({
+  taskId,
+  title,
+  revisions,
+  isLoadingRevisions,
+  isSaving,
+  onOpenRevisions,
+  onRevert,
+}: PlanPanelHeaderProps) {
+  return (
+    <PanelHeaderBarSplit
+      left={<span className="text-xs font-medium truncate">{title}</span>}
+      right={
+        <TaskPlanRevisions
+          taskId={taskId}
+          revisions={revisions}
+          isLoading={isLoadingRevisions}
+          isSaving={isSaving}
+          onOpen={onOpenRevisions}
+          onRevert={onRevert}
+        />
+      }
+    />
   );
 }

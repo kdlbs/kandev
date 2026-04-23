@@ -5,8 +5,11 @@ import {
   createTaskPlan,
   updateTaskPlan,
   deleteTaskPlan,
+  listPlanRevisions,
+  getPlanRevision,
+  revertPlanRevision,
 } from "@/lib/api/domains/plan-api";
-import type { TaskPlan } from "@/lib/types/http";
+import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 /**
  * Hook to fetch and manage the plan for a task.
@@ -116,6 +119,8 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     }
   }, [taskId, setTaskPlan, setTaskPlanSaving]);
 
+  const revisionsBundle = useTaskPlanRevisions(taskId, setTaskPlanSaving, setError);
+
   return {
     plan: plan ?? null,
     isLoading,
@@ -124,5 +129,69 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     savePlan,
     deletePlan: removePlan,
     refetch: fetchPlan,
+    ...revisionsBundle,
   };
+}
+
+function useTaskPlanRevisions(
+  taskId: string | null,
+  setTaskPlanSaving: (taskId: string, saving: boolean) => void,
+  setError: (err: string | null) => void,
+) {
+  const revisions = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsByTaskId[taskId] ?? []) : [],
+  );
+  const isLoadingRevisions = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsLoadingByTaskId[taskId] ?? false) : false,
+  );
+  const revisionContentCache = useAppStore((state) => state.taskPlans.revisionContentCache);
+  const setPlanRevisions = useAppStore((state) => state.setPlanRevisions);
+  const setPlanRevisionsLoading = useAppStore((state) => state.setPlanRevisionsLoading);
+  const cachePlanRevisionContent = useAppStore((state) => state.cachePlanRevisionContent);
+
+  const loadRevisions = useCallback(async () => {
+    if (!taskId) return;
+    setPlanRevisionsLoading(taskId, true);
+    try {
+      const list = await listPlanRevisions(taskId);
+      setPlanRevisions(taskId, list);
+    } catch (err) {
+      console.error("Failed to load plan revisions:", err);
+      setError(err instanceof Error ? err.message : "Failed to load revisions");
+    } finally {
+      setPlanRevisionsLoading(taskId, false);
+    }
+  }, [taskId, setPlanRevisions, setPlanRevisionsLoading, setError]);
+
+  const loadRevisionContent = useCallback(
+    async (revisionId: string): Promise<string> => {
+      const cached = revisionContentCache[revisionId];
+      if (cached !== undefined) return cached;
+      const rev = await getPlanRevision(revisionId);
+      const content = rev.content ?? "";
+      cachePlanRevisionContent(revisionId, content);
+      return content;
+    },
+    [revisionContentCache, cachePlanRevisionContent],
+  );
+
+  const revertTo = useCallback(
+    async (revisionId: string, authorName?: string): Promise<TaskPlanRevision | null> => {
+      if (!taskId) return null;
+      setTaskPlanSaving(taskId, true);
+      setError(null);
+      try {
+        return await revertPlanRevision(taskId, revisionId, authorName);
+      } catch (err) {
+        console.error("Failed to revert plan:", err);
+        setError(err instanceof Error ? err.message : "Failed to revert plan");
+        return null;
+      } finally {
+        setTaskPlanSaving(taskId, false);
+      }
+    },
+    [taskId, setTaskPlanSaving, setError],
+  );
+
+  return { revisions, isLoadingRevisions, loadRevisions, loadRevisionContent, revertTo };
 }

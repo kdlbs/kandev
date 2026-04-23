@@ -74,7 +74,16 @@ export const defaultSessionState: SessionSliceState = {
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
-  taskPlans: { byTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {}, savingByTaskId: {} },
+  taskPlans: {
+    byTaskId: {},
+    loadingByTaskId: {},
+    loadedByTaskId: {},
+    savingByTaskId: {},
+    revisionsByTaskId: {},
+    revisionsLoadingByTaskId: {},
+    revisionsLoadedByTaskId: {},
+    revisionContentCache: {},
+  },
   queue: { bySessionId: {}, isLoading: {} },
 };
 
@@ -176,6 +185,43 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
+        delete draft.taskPlans.revisionsByTaskId[taskId];
+        delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
+        delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
+      }),
+    setPlanRevisions: (
+      taskId: string,
+      revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
+    ) =>
+      set((draft) => {
+        draft.taskPlans.revisionsByTaskId[taskId] = [...revisions].sort(
+          (a, b) => b.revision_number - a.revision_number,
+        );
+        draft.taskPlans.revisionsLoadedByTaskId[taskId] = true;
+        draft.taskPlans.revisionsLoadingByTaskId[taskId] = false;
+      }),
+    upsertPlanRevision: (
+      taskId: string,
+      revision: Parameters<SessionSlice["upsertPlanRevision"]>[1],
+    ) =>
+      set((draft) => {
+        const list = draft.taskPlans.revisionsByTaskId[taskId] ?? [];
+        const idx = list.findIndex((r) => r.id === revision.id);
+        if (idx === -1) {
+          list.unshift(revision);
+        } else {
+          list[idx] = { ...list[idx], ...revision };
+        }
+        list.sort((a, b) => b.revision_number - a.revision_number);
+        draft.taskPlans.revisionsByTaskId[taskId] = list;
+      }),
+    setPlanRevisionsLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskPlans.revisionsLoadingByTaskId[taskId] = loading;
+      }),
+    cachePlanRevisionContent: (revisionId: string, content: string) =>
+      set((draft) => {
+        draft.taskPlans.revisionContentCache[revisionId] = content;
       }),
   };
 }
