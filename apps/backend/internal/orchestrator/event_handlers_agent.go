@@ -149,9 +149,20 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
 	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
-	// ALWAYS check for queued messages after agent becomes ready, regardless of workflow transition
+	// When a workflow transition occurred (e.g. Work → Review), the new step's
+	// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
+	// Skip the queued-message check to avoid racing with that auto-start goroutine —
+	// both would try to call PromptTask and the loser's queued message would be lost.
+	if transitioned {
+		s.logger.Debug("workflow transition occurred, skipping queued message check",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+
+	// Check for queued messages when no workflow transition occurred.
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
 	s.logger.Info("checking for queued messages",
 		zap.String("session_id", data.SessionID),

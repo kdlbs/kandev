@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -111,9 +112,13 @@ var workflowTestCases = []workflowTestCase{
 		WorkflowJSON: developmentWorkflowJSON,
 		StartStep:    "Backlog",
 		Events: []testEvent{
-			// Agent finishes at Backlog → In Progress (auto_start queues)
+			// Agent finishes at Backlog → In Progress (auto_start_agent on_enter).
+			// applyEngineTransition flips RUNNING → WAITING_FOR_INPUT before the
+			// async processOnEnter goroutine, so autoStartStepPrompt attempts a
+			// direct send instead of queueing. In this mock environment the send
+			// fails (no executor), so the message is NOT queued.
 			{Trigger: engine.TriggerOnTurnComplete, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: true, ExpectResets: 0},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 0},
 			// Agent finishes at In Progress → New Context (reset + auto_start).
 			// After reset_agent_context, processOnEnter flips session state to
 			// WAITING_FOR_INPUT so auto_start sends directly instead of queueing
@@ -244,6 +249,12 @@ func runSingleEvent(
 		t.Fatalf("unsupported trigger: %s", ev.Trigger)
 	}
 
+	// processOnEnter runs asynchronously (goroutine) after engine transitions.
+	// Give it time to complete before checking side effects.
+	if transitioned {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if transitioned != ev.ExpectTransitioned {
 		t.Errorf("transitioned = %v, want %v", transitioned, ev.ExpectTransitioned)
 	}
@@ -364,13 +375,23 @@ func assertQueueState(t *testing.T, ctx context.Context, svc *Service, sessionID
 }
 
 // assertSessionState verifies the session's current state.
+// Polls briefly because processOnEnter runs asynchronously (goroutine) and
+// the state change may not be visible immediately after the trigger returns.
 func assertSessionState(t *testing.T, ctx context.Context, repo sessionExecutorStore, sessionID string, expect models.TaskSessionState) {
 	t.Helper()
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
-	if session.State != expect {
-		t.Errorf("session state = %q, want %q", session.State, expect)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
+		}
+		if session.State == expect {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("session state = %q, want %q (after polling)", session.State, expect)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
