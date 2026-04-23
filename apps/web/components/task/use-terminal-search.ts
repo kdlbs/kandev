@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { SearchAddon } from "@xterm/addon-search";
+import type { SearchAddon } from "@xterm/addon-search";
 
 type UseTerminalSearchOptions = {
   xtermRef: React.RefObject<Terminal | null>;
@@ -51,22 +51,36 @@ export function useTerminalSearch({
   useEffect(() => {
     const term = xtermRef.current;
     if (!isTerminalReady || !term || addonRef.current) return;
-    const addon = new SearchAddon();
-    try {
-      term.loadAddon(addon);
-    } catch {
-      return;
-    }
-    addonRef.current = addon;
-    const sub = addon.onDidChangeResults(({ resultIndex, resultCount }) => {
-      setMatchInfo({
-        current: resultIndex >= 0 ? resultIndex + 1 : 0,
-        total: resultCount,
+    let cancelled = false;
+    let disposables: { dispose: () => void } | null = null;
+    let loaded: SearchAddon | null = null;
+    // Dynamic import so @xterm/addon-search (UMD bundle touching `self`) does
+    // not evaluate during SSR.
+    import("@xterm/addon-search")
+      .then(({ SearchAddon }) => {
+        if (cancelled || addonRef.current) return;
+        const addon = new SearchAddon();
+        try {
+          term.loadAddon(addon);
+        } catch {
+          return;
+        }
+        addonRef.current = addon;
+        loaded = addon;
+        disposables = addon.onDidChangeResults(({ resultIndex, resultCount }) => {
+          setMatchInfo({
+            current: resultIndex >= 0 ? resultIndex + 1 : 0,
+            total: resultCount,
+          });
+        });
+      })
+      .catch(() => {
+        /* addon failed to load; search simply remains disabled */
       });
-    });
     return () => {
-      sub.dispose();
-      addon.dispose();
+      cancelled = true;
+      disposables?.dispose();
+      loaded?.dispose();
       addonRef.current = null;
     };
   }, [xtermRef, isTerminalReady]);
