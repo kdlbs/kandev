@@ -149,7 +149,8 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 		return nil, err
 	}
 
-	proxy := h.createProxy(sessionID, target)
+	authToken := agentctlClient.AuthToken()
+	proxy := h.createProxy(sessionID, target, authToken)
 	h.proxies[sessionID] = &proxyEntry{proxy: proxy, target: baseURL}
 
 	h.logger.Info("created vscode proxy for session",
@@ -161,13 +162,17 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 }
 
 // createProxy builds a reverse proxy for the given target URL.
-func (h *VscodeProxyHandler) createProxy(sessionID string, target *url.URL) *httputil.ReverseProxy {
+func (h *VscodeProxyHandler) createProxy(sessionID string, target *url.URL, authToken string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Allow WebSocket upgrades by preserving hop-by-hop headers
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
+		// Inject agentctl auth token
+		if authToken != "" {
+			req.Header.Set("Authorization", "Bearer "+authToken)
+		}
 		// Preserve WebSocket headers that SingleHostReverseProxy strips
 		if req.Header.Get("Upgrade") != "" {
 			req.Header.Set("Connection", "Upgrade")
