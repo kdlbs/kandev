@@ -8,6 +8,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { startReconnectLoop } from "./ws-reconnect";
 import { matchesShortcut } from "@/lib/keyboard/utils";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { exposeBufferReader, clearBufferReader } from "./terminal-buffer-reader";
 
@@ -38,28 +39,39 @@ type TerminalKeyHandlerOptions = {
   sendInput?: (data: string) => void;
   /** Ref to keyboard shortcut overrides so the handler always reads the latest value. */
   keyboardShortcutsRef?: React.MutableRefObject<StoredShortcutOverrides | undefined>;
+  /** Ref to handler called when Ctrl/Cmd+F is pressed inside the terminal. */
+  onFindInPanelRef?: React.MutableRefObject<(() => void) | undefined>;
 };
+
+function isCmdArrowLine(event: KeyboardEvent): boolean {
+  return (
+    event.type === "keydown" &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    (event.key === "ArrowLeft" || event.key === "ArrowRight")
+  );
+}
+
+function handleAppShortcuts(event: KeyboardEvent, options: TerminalKeyHandlerOptions): boolean {
+  if (matchesShortcut(event, SHORTCUTS.FIND_IN_PANEL)) {
+    event.preventDefault();
+    if (event.type === "keydown") options.onFindInPanelRef?.current?.();
+    return true;
+  }
+  if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))) {
+    event.preventDefault();
+    if (event.type === "keydown") options.onToggleBottomTerminal?.();
+    return true;
+  }
+  return false;
+}
 
 /** Handles app-level shortcuts and Cmd+Arrow→Home/End mapping for macOS. */
 function createKeyEventHandler(options: TerminalKeyHandlerOptions) {
   return (event: KeyboardEvent): boolean => {
-    if (
-      matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))
-    ) {
-      event.preventDefault();
-      if (event.type === "keydown" && options.onToggleBottomTerminal) {
-        options.onToggleBottomTerminal();
-      }
-      return false;
-    }
-    // Cmd+Arrow → beginning/end of line on macOS (same as iTerm2)
-    if (
-      event.type === "keydown" &&
-      event.metaKey &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      (event.key === "ArrowLeft" || event.key === "ArrowRight")
-    ) {
+    if (handleAppShortcuts(event, options)) return false;
+    if (isCmdArrowLine(event)) {
       event.preventDefault();
       // Ctrl+A (0x01) = beginning-of-line, Ctrl+E (0x05) = end-of-line
       // Works universally in bash/zsh emacs mode (the default)
@@ -195,6 +207,7 @@ export function useTerminalInit({
   onToggleBottomTerminal,
   sendInput,
   keyboardShortcutsRef,
+  onFindInPanelRef,
 }: TerminalInitHookOptions) {
   const refs = {
     xtermRef,
@@ -228,6 +241,7 @@ export function useTerminalInit({
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,
+          onFindInPanelRef,
         });
         onReady();
         return true;

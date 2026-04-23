@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -13,6 +13,11 @@ import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
 import { exposeBufferReader } from "./terminal-buffer-reader";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { matchesShortcut } from "@/lib/keyboard/utils";
+import { useTerminalSearch } from "./use-terminal-search";
+import { TerminalSearchBar } from "./terminal-search-bar";
+import { usePanelSearch } from "@/hooks/use-panel-search";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -37,6 +42,7 @@ type ShellTerminalInitOptions = {
   linkHandler?: (event: MouseEvent, uri: string) => void;
   fontFamily?: string;
   fontSize?: number;
+  onReady?: () => void;
 };
 
 function useTerminalInit({
@@ -47,6 +53,7 @@ function useTerminalInit({
   linkHandler,
   fontFamily,
   fontSize,
+  onReady,
 }: ShellTerminalInitOptions) {
   const { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef } = refs;
 
@@ -70,6 +77,7 @@ function useTerminalInit({
     fitAddon.fit();
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    onReady?.();
 
     if (isReadOnlyMode && outputRef.current) {
       terminal.write(outputRef.current);
@@ -118,6 +126,7 @@ function useTerminalInit({
     fitAddonRef,
     lastOutputLengthRef,
     outputRef,
+    onReady,
   ]);
 }
 
@@ -256,27 +265,44 @@ function useTerminalOutputWrite(
   }, [xtermRef, shellOutput, processOutput, isReadOnlyMode, lastOutputLengthRef]);
 }
 
-/** Cmd+Arrow → Home/End on macOS for the shell terminal. */
-function useCmdArrowHandler(
-  xtermRef: React.RefObject<Terminal | null>,
-  isReadOnlyMode: boolean,
-  sessionId: string | null | undefined,
-  send: (action: string, payload: Record<string, unknown>) => void,
-) {
+type ShellKeyHandlerOptions = {
+  xtermRef: React.RefObject<Terminal | null>;
+  isReadOnlyMode: boolean;
+  sessionId: string | null | undefined;
+  send: (action: string, payload: Record<string, unknown>) => void;
+  onFindInPanel: () => void;
+  isTerminalReady: boolean;
+};
+
+/** Custom xterm key handler: Ctrl/Cmd+F → open search; Cmd+Arrow → Home/End on macOS. */
+function useShellTerminalKeyHandler({
+  xtermRef,
+  isReadOnlyMode,
+  sessionId,
+  send,
+  onFindInPanel,
+  isTerminalReady,
+}: ShellKeyHandlerOptions) {
   // Use a ref so the handler (attached once) always reads the latest values
   // without needing cleanup (attachCustomKeyEventHandler has no dispose).
-  const stateRef = useRef({ sessionId, send });
+  const stateRef = useRef({ sessionId, send, onFindInPanel });
   useEffect(() => {
-    stateRef.current = { sessionId, send };
+    stateRef.current = { sessionId, send, onFindInPanel };
   });
 
   const attachedRef = useRef(false);
   useEffect(() => {
-    if (!xtermRef.current || isReadOnlyMode || !sessionId || attachedRef.current) return;
+    if (!xtermRef.current || !isTerminalReady || attachedRef.current) return;
     attachedRef.current = true;
     xtermRef.current.attachCustomKeyEventHandler((event) => {
-      const { sessionId: sid, send: sendFn } = stateRef.current;
+      const { sessionId: sid, send: sendFn, onFindInPanel: findFn } = stateRef.current;
+      if (matchesShortcut(event, SHORTCUTS.FIND_IN_PANEL)) {
+        event.preventDefault();
+        if (event.type === "keydown") findFn();
+        return false;
+      }
       if (
+        !isReadOnlyMode &&
         event.type === "keydown" &&
         event.metaKey &&
         !event.ctrlKey &&
@@ -291,7 +317,7 @@ function useCmdArrowHandler(
       }
       return true;
     });
-  }, [xtermRef, sessionId, send, isReadOnlyMode, stateRef]);
+  }, [xtermRef, isReadOnlyMode, isTerminalReady]);
 }
 
 /** Handles user input in interactive mode, filtering out cursor position responses. */
@@ -338,6 +364,7 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   return { sessionId, taskId, isSessionFailed, errorMessage, shellOutput, canSubscribe };
 }
 
+// eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function ShellTerminal({
   sessionId: propSessionId,
   processOutput,
@@ -375,6 +402,8 @@ export function ShellTerminal({
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
   const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const refs: TerminalRefs = { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef };
+  const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
   useTerminalInit({
     refs,
     isReadOnlyMode,
@@ -383,10 +412,27 @@ export function ShellTerminal({
     linkHandler,
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
+    onReady: onTerminalReady,
+  });
+
+  const search = useTerminalSearch({ xtermRef, isTerminalReady });
+  const containerRef = useRef<HTMLDivElement>(null);
+  usePanelSearch({
+    containerRef,
+    isOpen: search.isOpen,
+    onOpen: search.open,
+    onClose: search.close,
   });
 
   useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send });
-  useCmdArrowHandler(xtermRef, isReadOnlyMode, sessionId, send);
+  useShellTerminalKeyHandler({
+    xtermRef,
+    isReadOnlyMode,
+    sessionId,
+    send,
+    onFindInPanel: search.open,
+    isTerminalReady,
+  });
   useTerminalOutputWrite(xtermRef, isReadOnlyMode, processOutput, shellOutput, lastOutputLengthRef);
 
   useShellSubscription({
@@ -398,15 +444,22 @@ export function ShellTerminal({
     storeApi,
   });
 
+  const searchBar = <TerminalSearchBar search={search} />;
   if (isReadOnlyMode) {
     return (
-      <div className="h-full w-full bg-transparent relative">
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        data-panel-kind="terminal"
+        className="h-full w-full bg-transparent relative outline-none"
+      >
         <div className="p-1 pb-2 absolute inset-0">
           <div ref={terminalRef} className="h-full w-full" />
         </div>
         {isStopping && (
           <div className="absolute right-3 top-2 text-xs text-muted-foreground">Stopping…</div>
         )}
+        {searchBar}
       </div>
     );
   }
@@ -419,8 +472,14 @@ export function ShellTerminal({
     );
   }
   return (
-    <div className="h-full p-1 pb-2 w-full overflow-hidden bg-transparent">
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      data-panel-kind="terminal"
+      className="h-full p-1 pb-2 w-full overflow-hidden bg-transparent relative outline-none"
+    >
       <div ref={terminalRef} className="h-full w-full" />
+      {searchBar}
     </div>
   );
 }
