@@ -112,8 +112,8 @@ npx kandev start
 | Option | Description | Example |
 |--------|-------------|---------|
 | `--version <tag>` | Use a specific release version | `--version v0.1.0` |
-| `--backend-port <port>` | Override backend port | `--backend-port 38429` |
-| `--web-port <port>` | Override web port | `--web-port 37429` |
+| `--backend-port <port>` | Override backend port | `--backend-port 18080` |
+| `--web-port <port>` | Override web port | `--web-port 13000` |
 | `--help`, `-h` | Show help | `--help` |
 
 ### Examples
@@ -126,7 +126,7 @@ npx kandev --version v0.1.0
 npx kandev --backend-port 18080 --web-port 13000
 
 # Dev mode with custom ports
-npx kandev dev --backend-port 38429 --web-port 13000
+npx kandev dev --backend-port 18080 --web-port 13000
 ```
 
 ## Port Selection
@@ -186,7 +186,7 @@ See `make help` for all available commands.
 The CLI automatically finds available ports. If you need a specific port:
 
 ```bash
-npx kandev --backend-port 38429 --web-port 37429
+npx kandev --backend-port 18080 --web-port 13000
 ```
 
 ### Backend Takes Too Long to Start
