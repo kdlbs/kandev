@@ -13,6 +13,11 @@ import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+import { PanelSearchBar } from "@/components/search/panel-search-bar";
+import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
+import { usePanelSearch } from "@/hooks/use-panel-search";
+import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
+import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 
 type QueuedOverlayProps = {
   isQueued: boolean;
@@ -58,6 +63,50 @@ function useClarificationKey(agentMessageCount: number) {
   return { clarificationKey, handleClarificationResolved };
 }
 
+function SessionSearchOverlay({
+  search,
+}: {
+  search: ReturnType<typeof useSessionSearch>;
+}) {
+  const currentIdx = search.activeHitId
+    ? search.hits.findIndex((h) => h.id === search.activeHitId)
+    : -1;
+  const total = search.hits.length;
+  const handleNext = useCallback(() => {
+    if (!total) return;
+    const next = search.hits[(Math.max(currentIdx, -1) + 1) % total];
+    if (next) search.setActiveHit(next.id);
+  }, [search, currentIdx, total]);
+  const handlePrev = useCallback(() => {
+    if (!total) return;
+    const prevIdx = (Math.max(currentIdx, 0) - 1 + total) % total;
+    const prev = search.hits[prevIdx];
+    if (prev) search.setActiveHit(prev.id);
+  }, [search, currentIdx, total]);
+  if (!search.isOpen) return null;
+  return (
+    <div className="absolute top-2 right-2 z-20 flex flex-col items-end gap-1">
+      <PanelSearchBar
+        className="static"
+        value={search.query}
+        onChange={search.setQuery}
+        onNext={handleNext}
+        onPrev={handlePrev}
+        onClose={search.close}
+        matchInfo={{ current: currentIdx >= 0 ? currentIdx + 1 : 0, total }}
+        isLoading={search.isSearching}
+      />
+      <SessionSearchHits
+        hits={search.hits}
+        query={search.query}
+        activeHitId={search.activeHitId}
+        onSelect={search.setActiveHit}
+        isSearching={search.isSearching}
+      />
+    </div>
+  );
+}
+
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
@@ -70,6 +119,7 @@ type TaskChatPanelProps = {
   hideSessionsDropdown?: boolean;
 };
 
+// eslint-disable-next-line max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
@@ -112,9 +162,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { loadMore } = useLazyLoadMessages(resolvedSessionId);
+  const search = useSessionSearch(resolvedSessionId, loadMore);
+  usePanelSearch({
+    containerRef: panelRef,
+    isOpen: search.isOpen,
+    onOpen: search.open,
+    onClose: search.close,
+  });
+
   return (
-    <PanelRoot data-testid="session-chat">
-      <PanelBody padding={false}>
+    <PanelRoot ref={panelRef} data-testid="session-chat" data-panel-kind="session">
+      <PanelBody padding={false} className="relative">
         <MessageList
           items={groupedItems}
           messages={allMessages}
@@ -130,6 +190,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           worktreePath={session?.worktree_path}
           onOpenFile={onOpenFile}
         />
+        <SessionSearchOverlay search={search} />
       </PanelBody>
       {pendingClarification && !isArchived && (
         <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
