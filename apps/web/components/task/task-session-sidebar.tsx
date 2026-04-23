@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
@@ -26,6 +26,27 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+
+/**
+ * Stabilize a derived array of primary session IDs so the reference only
+ * changes when the actual contents change. This prevents the bulk-subscribe
+ * effect from tearing down and recreating all subscriptions on every kanban
+ * snapshot update.
+ */
+function useStablePrimarySessionIds(
+  allTasks: Array<{ primarySessionId?: string | null }>,
+): string[] {
+  const prevRef = useRef<string[]>([]);
+  const ids = useMemo(
+    () => allTasks.map((t) => t.primarySessionId).filter((id): id is string => id != null),
+    [allTasks],
+  );
+  if (ids.length === prevRef.current.length && ids.every((id, i) => id === prevRef.current[i])) {
+    return prevRef.current;
+  }
+  prevRef.current = ids;
+  return ids;
+}
 
 /** Find a task across all workflow snapshots */
 function findTaskInSnapshots(
@@ -264,10 +285,7 @@ function useSidebarData(workspaceId: string | null) {
 
   // Stable list of primary session IDs for the bulk-subscribe effect.
   // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
-  const primarySessionIds = useMemo(
-    () => allTasks.map((t) => t.primarySessionId).filter((id): id is string => id != null),
-    [allTasks],
-  );
+  const primarySessionIds = useStablePrimarySessionIds(allTasks);
 
   return {
     activeTaskId,
@@ -512,13 +530,18 @@ function useSidebarActions(store: StoreApi) {
 
 function useBulkGitStatusSubscription(primarySessionIds: string[]) {
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   useEffect(() => {
     if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
     const client = getWebSocketClient();
     if (!client) return;
-    const unsubscribes = primarySessionIds.map((id) => client.subscribeSession(id));
+    // Skip active session — it's already subscribed + focused by the task page hooks
+    const backgroundIds = activeSessionId
+      ? primarySessionIds.filter((id) => id !== activeSessionId)
+      : primarySessionIds;
+    const unsubscribes = backgroundIds.map((id) => client.subscribeSession(id));
     return () => unsubscribes.forEach((u) => u());
-  }, [primarySessionIds, connectionStatus]);
+  }, [primarySessionIds, connectionStatus, activeSessionId]);
 }
 
 function useEffectiveSidebarView() {
