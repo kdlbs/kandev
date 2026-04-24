@@ -181,6 +181,14 @@ function buildTaskPlanActions(set: ImmerSet) {
       }),
     clearTaskPlan: (taskId: string) =>
       set((draft) => {
+        // revisionContentCache is keyed by revisionId, so pick the IDs for this
+        // task before deleting the revisions list and drop their cache entries.
+        const revs = draft.taskPlans.revisionsByTaskId[taskId];
+        if (revs) {
+          for (const r of revs) {
+            delete draft.taskPlans.revisionContentCache[r.id];
+          }
+        }
         delete draft.taskPlans.byTaskId[taskId];
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];

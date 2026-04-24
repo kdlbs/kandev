@@ -93,11 +93,18 @@ export function TaskPlanRevisions({
         onCancel={() => setConfirmTarget(null)}
         onConfirm={async () => {
           if (!confirmTarget) return;
-          const result = await onRevert(confirmTarget.id);
-          setConfirmTarget(null);
-          if (result) {
-            toast.success(`Plan restored to v${confirmTarget.revision_number}`);
-            setOpen(false);
+          try {
+            const result = await onRevert(confirmTarget.id);
+            if (result) {
+              toast.success(`Plan restored to v${confirmTarget.revision_number}`);
+              setOpen(false);
+            }
+          } catch (err) {
+            // onRevert already surfaces the error via the store; make sure the user
+            // sees it and the dialog dismisses even if the promise rejects.
+            toast.error(err instanceof Error ? err.message : "Failed to restore plan");
+          } finally {
+            setConfirmTarget(null);
           }
         }}
       />
@@ -145,11 +152,14 @@ function RevisionRow({
   onRevertClick: (rev: TaskPlanRevision) => void;
 }) {
   const AuthorIcon = revision.author_kind === "agent" ? IconRobot : IconUser;
-  const [relative, setRelative] = useState(() => formatRelativeTime(revision.updated_at));
+  // Derive relative time on every render so prop changes (and the 30s tick)
+  // both refresh it. The tick state forces re-renders at a coarse cadence.
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setRelative(formatRelativeTime(revision.updated_at)), 30_000);
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(id);
-  }, [revision.updated_at]);
+  }, []);
+  const relative = formatRelativeTime(revision.updated_at);
 
   return (
     <li

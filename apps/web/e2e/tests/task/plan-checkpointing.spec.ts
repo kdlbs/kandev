@@ -76,7 +76,8 @@ async function expectRevisionCount(session: SessionPage, count: number, timeout 
 
 // MCP script building blocks — each emits one agent-authored plan revision.
 function mcpWrite(content: string): string {
-  const escaped = content.replace(/"/g, '\\"');
+  // JSON-string-escape content: handles backslashes, quotes, and control chars.
+  const escaped = JSON.stringify(content).slice(1, -1);
   return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}"})`;
 }
 
@@ -310,11 +311,13 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     await session.openRewind();
     await expectRevisionCount(session, 2);
-    // Newest row is user; oldest row is agent.
+    // Newest row is user; oldest row is agent. Assert v2 has a non-empty
+    // author that isn't "Agent" (so an empty/truncated render would fail too).
     const v2Author = session.revisionRow(2).getByTestId("plan-revision-author");
     const v1Author = session.revisionRow(1).getByTestId("plan-revision-author");
-    await expect(v2Author).not.toHaveText("Agent");
     await expect(v1Author).toHaveText("Agent");
+    await expect(v2Author).not.toHaveText("Agent");
+    await expect(v2Author).not.toBeEmpty();
   });
 
   test("persistence across reload: revisions survive page refresh", async ({

@@ -16,6 +16,7 @@ import type {
   TextSelection,
   CommentForEditor,
 } from "@/components/editors/tiptap/tiptap-plan-editor";
+import type { TaskPlanRevision } from "@/lib/types/http";
 import type { Editor } from "@tiptap/core";
 
 // Dynamic import to avoid SSR issues with TipTap
@@ -528,11 +529,11 @@ function PlanEmptyState({
 type PlanPanelHeaderProps = {
   taskId: string;
   title: string;
-  revisions: import("@/lib/types/http").TaskPlanRevision[];
+  revisions: TaskPlanRevision[];
   isLoadingRevisions: boolean;
   isSaving: boolean;
   onOpenRevisions: () => void;
-  onRevert: (id: string) => Promise<import("@/lib/types/http").TaskPlanRevision | null>;
+  onRevert: (id: string) => Promise<TaskPlanRevision | null>;
 };
 
 function PlanPanelHeader({
