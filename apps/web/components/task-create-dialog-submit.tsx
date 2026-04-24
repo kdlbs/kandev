@@ -82,6 +82,31 @@ export function useTaskSubmitHandlers({
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
     isFreshBranchActive ? { newBranchName, confirmDiscard: true, consentedDirtyFiles } : undefined;
 
+  const validateForCreate = useCallback(
+    (trimmedTitle: string) =>
+      validateCreateInputs({
+        trimmedTitle,
+        workspaceId,
+        effectiveWorkflowId,
+        repositoryId,
+        selectedLocalRepo,
+        githubUrl,
+        agentProfileId,
+        freshBranchEnabled: isFreshBranchActive,
+        newBranchName,
+      }),
+    [
+      workspaceId,
+      effectiveWorkflowId,
+      repositoryId,
+      selectedLocalRepo,
+      githubUrl,
+      agentProfileId,
+      isFreshBranchActive,
+      newBranchName,
+    ],
+  );
+
   const resetForm = useCallback(() => {
     setHasTitle(false);
     setHasDescription(false);
@@ -409,33 +434,31 @@ export function useTaskSubmitHandlers({
   ]);
 
   const handleCreateWithPlanMode = useCallback(async () => {
+    if (isEditMode) {
+      setIsCreatingTask(true);
+      try {
+        await performEditWithPlanMode();
+      } catch (error) {
+        toast({
+          title: "Failed to start task in plan mode",
+          description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+          variant: "error",
+        });
+      } finally {
+        setIsCreatingTask(false);
+      }
+      return;
+    }
+    const trimmedTitle = taskName.trim();
+    const description = descriptionInputRef.current?.getValue() ?? "";
+    const trimmedDescription = description.trim();
+    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
+    if (!validateForCreate(trimmedTitle)) return;
+    const consent = await ensureFreshBranchConsent();
+    if (consent === null) return;
     setIsCreatingTask(true);
     try {
-      if (isEditMode) {
-        await performEditWithPlanMode();
-      } else {
-        const trimmedTitle = taskName.trim();
-        const description = descriptionInputRef.current?.getValue() ?? "";
-        const trimmedDescription = description.trim();
-        const attachments = toMessageAttachments(
-          descriptionInputRef.current?.getAttachments() ?? [],
-        );
-        if (
-          !validateCreateInputs({
-            trimmedTitle,
-            workspaceId,
-            effectiveWorkflowId,
-            repositoryId,
-            selectedLocalRepo,
-            githubUrl,
-            agentProfileId,
-          })
-        )
-          return;
-        const consent = await ensureFreshBranchConsent();
-        if (consent === null) return;
-        await performCreateWithAgent(trimmedTitle, trimmedDescription, consent, true, attachments);
-      }
+      await performCreateWithAgent(trimmedTitle, trimmedDescription, consent, true, attachments);
     } catch (error) {
       toast({
         title: "Failed to start task in plan mode",
@@ -449,12 +472,7 @@ export function useTaskSubmitHandlers({
     isEditMode,
     performEditWithPlanMode,
     taskName,
-    workspaceId,
-    effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
-    githubUrl,
-    agentProfileId,
+    validateForCreate,
     ensureFreshBranchConsent,
     performCreateWithAgent,
     toast,
@@ -467,18 +485,7 @@ export function useTaskSubmitHandlers({
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
-    if (
-      !validateCreateInputs({
-        trimmedTitle,
-        workspaceId,
-        effectiveWorkflowId,
-        repositoryId,
-        selectedLocalRepo,
-        githubUrl,
-        agentProfileId,
-      })
-    )
-      return;
+    if (!validateForCreate(trimmedTitle)) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -505,13 +512,8 @@ export function useTaskSubmitHandlers({
     }
   }, [
     taskName,
-    workspaceId,
-    effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
-    githubUrl,
-    agentProfileId,
     isPassthroughProfile,
+    validateForCreate,
     ensureFreshBranchConsent,
     performCreateWithAgent,
     handleCreatePlanMode,
@@ -523,18 +525,7 @@ export function useTaskSubmitHandlers({
   const handleCreateWithoutAgent = useCallback(async () => {
     const trimmedTitle = taskName.trim();
     const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
-    if (
-      !validateCreateInputs({
-        trimmedTitle,
-        workspaceId,
-        effectiveWorkflowId,
-        repositoryId,
-        selectedLocalRepo,
-        githubUrl,
-        agentProfileId,
-      })
-    )
-      return;
+    if (!validateForCreate(trimmedTitle)) return;
     if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
       return;
 
@@ -575,13 +566,11 @@ export function useTaskSubmitHandlers({
     taskName,
     workspaceId,
     effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
-    githubUrl,
     agentProfileId,
     effectiveDefaultStepId,
     executorId,
     executorProfileId,
+    validateForCreate,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,

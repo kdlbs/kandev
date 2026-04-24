@@ -142,7 +142,10 @@ export function validateCreateInputs(inputs: {
   selectedLocalRepo: LocalRepository | null;
   githubUrl?: string;
   agentProfileId: string;
+  freshBranchEnabled?: boolean;
+  newBranchName?: string;
 }): boolean {
+  if (inputs.freshBranchEnabled && !(inputs.newBranchName ?? "").trim()) return false;
   return Boolean(
     inputs.trimmedTitle &&
     inputs.workspaceId &&

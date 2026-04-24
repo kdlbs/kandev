@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -14,6 +15,17 @@ import (
 // as a flag by `git fetch` / `git checkout` even though we pass refs as
 // positional argv entries.
 var gitRefRe = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./-]*$`)
+
+// ErrInvalidGitRef is returned by sanitizeGitRef when the supplied ref name
+// doesn't match the allowlist. Returned errors wrap this sentinel so the
+// HTTP layer can map it to a 400 response while preserving the descriptive
+// inner message.
+var ErrInvalidGitRef = errors.New("invalid git ref name")
+
+// ErrFreshBranchCheckout is returned when the underlying `git checkout`
+// fails (e.g. the requested NewBranch already exists or BaseBranch can't be
+// resolved). The caller can map this to a 4xx + the wrapped message.
+var ErrFreshBranchCheckout = errors.New("checkout failed")
 
 // FreshBranchRequest performs a destructive checkout on a local repository:
 // discard uncommitted changes, then create NewBranch from BaseBranch.
@@ -100,7 +112,7 @@ func (s *Service) PerformFreshBranch(ctx context.Context, req FreshBranchRequest
 	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", newBranch, baseBranch)
 	cmd.Dir = absPath
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("checkout %q from %q: %w (%s)", newBranch, baseBranch, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%w: %q from %q: %s", ErrFreshBranchCheckout, newBranch, baseBranch, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -110,13 +122,10 @@ func (s *Service) PerformFreshBranch(ctx context.Context, req FreshBranchRequest
 // should pass to git.
 func sanitizeGitRef(name, label string) (string, error) {
 	if name == "" {
-		return "", fmt.Errorf("%s is required", label)
+		return "", fmt.Errorf("%w: %s is required", ErrInvalidGitRef, label)
 	}
-	if !gitRefRe.MatchString(name) {
-		return "", fmt.Errorf("invalid %s name %q", label, name)
-	}
-	if strings.Contains(name, "..") {
-		return "", fmt.Errorf("invalid %s name %q", label, name)
+	if !gitRefRe.MatchString(name) || strings.Contains(name, "..") {
+		return "", fmt.Errorf("%w: %s %q", ErrInvalidGitRef, label, name)
 	}
 	return name, nil
 }

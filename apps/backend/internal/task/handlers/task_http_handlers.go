@@ -532,6 +532,20 @@ func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
 		})
 		return
 	}
+	if errors.Is(err, service.ErrPathNotAllowed) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not within an allowed root"})
+		return
+	}
+	if errors.Is(err, service.ErrInvalidGitRef) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrFreshBranchCheckout) {
+		// git checkout failure (e.g. branch already exists, base branch unknown).
+		// Surface the underlying message — it tells the user what to fix.
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
 	h.logger.Error("fresh branch checkout failed", zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare fresh branch"})
 }

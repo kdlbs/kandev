@@ -177,7 +177,7 @@ func (s *Service) LocalRepositoryCurrentBranch(ctx context.Context, path string)
 	if err != nil {
 		return "", err
 	}
-	return readGitCurrentBranch(absPath), nil
+	return readGitCurrentBranch(absPath, s.discoveryRoots()), nil
 }
 
 // LocalRepositoryStatus returns the current branch and dirty file list for a
@@ -193,7 +193,7 @@ func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (Local
 		return LocalRepoStatus{}, err
 	}
 	return LocalRepoStatus{
-		CurrentBranch: readGitCurrentBranch(absPath),
+		CurrentBranch: readGitCurrentBranch(absPath, s.discoveryRoots()),
 		DirtyFiles:    dirty,
 	}, nil
 }
@@ -438,15 +438,15 @@ func isWithinRoot(path string, root string) bool {
 
 // readGitCurrentBranch returns the currently checked-out branch by reading
 // .git/HEAD directly. Returns an empty string if HEAD is detached, the path
-// is not a clean absolute path, or HEAD is unreadable. We avoid
-// `git rev-parse --abbrev-ref HEAD` to skip the subprocess cost on the hot
-// path of branch discovery.
-func readGitCurrentBranch(repoPath string) string {
+// is not a clean absolute path, the resolved git dir escapes the allowed
+// roots, or HEAD is unreadable. We avoid `git rev-parse --abbrev-ref HEAD`
+// to skip the subprocess cost on the hot path of branch discovery.
+func readGitCurrentBranch(repoPath string, allowedRoots []string) string {
 	if !filepath.IsAbs(repoPath) {
 		return ""
 	}
 	cleanRepo := filepath.Clean(repoPath)
-	gitDir, err := resolveGitDir(cleanRepo)
+	gitDir, err := resolveGitDirWithin(cleanRepo, allowedRoots)
 	if err != nil {
 		return ""
 	}
@@ -533,6 +533,36 @@ func resolveGitDir(repoPath string) (string, error) {
 		return gitDir, nil
 	}
 	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
+}
+
+// resolveGitDirWithin is the trust-boundary-aware variant of resolveGitDir:
+// when `.git` is a file pointer (worktree case), the embedded `gitdir:` line
+// can point anywhere on disk. This wrapper rejects any resolved gitdir that
+// is not inside the repo path or one of the allowed discovery roots, so a
+// crafted `.git` file inside an otherwise-allowed directory cannot make the
+// caller read from outside the sandbox.
+func resolveGitDirWithin(repoPath string, allowedRoots []string) (string, error) {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(gitDir)
+	if !filepath.IsAbs(cleaned) {
+		abs, absErr := filepath.Abs(cleaned)
+		if absErr != nil {
+			return "", absErr
+		}
+		cleaned = abs
+	}
+	if isWithinRoot(cleaned, repoPath) {
+		return cleaned, nil
+	}
+	for _, root := range allowedRoots {
+		if root != "" && isWithinRoot(cleaned, root) {
+			return cleaned, nil
+		}
+	}
+	return "", ErrPathNotAllowed
 }
 
 func resolveCommonGitDir(gitDir string) string {
