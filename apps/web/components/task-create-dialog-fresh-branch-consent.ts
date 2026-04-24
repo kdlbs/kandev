@@ -13,7 +13,10 @@ export function dirtyFilesFromApiError(err: unknown): string[] | null {
   if (!(err instanceof ApiError) || err.status !== 409) return null;
   const body = err.body as { dirty_files?: unknown } | null;
   if (!body || !Array.isArray(body.dirty_files)) return null;
-  return body.dirty_files.filter((p): p is string => typeof p === "string");
+  // Backend should never send an empty list with 409, but guard anyway so a
+  // malformed response doesn't open the consent dialog with no files in it.
+  const files = body.dirty_files.filter((p): p is string => typeof p === "string");
+  return files.length > 0 ? files : null;
 }
 
 export type PendingDiscard = {

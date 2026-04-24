@@ -286,37 +286,38 @@ export function useTaskSubmitHandlers({
     }
   }, [performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
 
-  const performCreateWithAgent = useCallback(
-    async (
-      trimmedTitle: string,
-      trimmedDescription: string,
-      consented: string[],
-      planMode?: boolean,
-      attachments?: ReturnType<typeof toMessageAttachments>,
-    ) => {
+  const performCreate = useCallback(
+    async (opts: {
+      trimmedTitle: string;
+      trimmedDescription: string;
+      consented: string[];
+      withAgent: boolean;
+      planMode?: boolean;
+      attachments?: ReturnType<typeof toMessageAttachments>;
+    }) => {
       if (!workspaceId || !effectiveWorkflowId) return;
       const buildPayload = (c: string[]) =>
         buildCreateTaskPayload({
           workspaceId,
           effectiveWorkflowId,
-          trimmedTitle,
-          trimmedDescription,
+          trimmedTitle: opts.trimmedTitle,
+          trimmedDescription: opts.trimmedDescription,
           repositoriesPayload: getRepositoriesPayload(c),
           agentProfileId,
           executorId,
           executorProfileId,
-          withAgent: true,
-          planMode,
-          attachments,
+          withAgent: opts.withAgent,
+          planMode: opts.planMode,
+          attachments: opts.attachments,
           parentId: parentTaskId,
         });
-      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consented);
+      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
       clearDraft();
       onOpenChange(false);
-      if (planMode && newSessionId) {
+      if (opts.planMode && newSessionId) {
         activatePlanMode({
           sessionId: newSessionId,
           taskId: taskResponse.id,
@@ -324,7 +325,7 @@ export function useTaskSubmitHandlers({
           setPlanMode,
           router,
         });
-      } else if (isPassthroughProfile) {
+      } else if (opts.withAgent && isPassthroughProfile) {
         router.push(linkToTask(taskResponse.id));
       }
     },
@@ -348,54 +349,15 @@ export function useTaskSubmitHandlers({
   );
 
   const handleCreatePlanMode = useCallback(
-    async (trimmedTitle: string, consented: string[]) => {
-      if (!workspaceId || !effectiveWorkflowId) return;
-      const buildPayload = (c: string[]) =>
-        buildCreateTaskPayload({
-          workspaceId,
-          effectiveWorkflowId,
-          trimmedTitle,
-          trimmedDescription: "",
-          repositoriesPayload: getRepositoriesPayload(c),
-          agentProfileId,
-          executorId,
-          executorProfileId,
-          withAgent: false,
-          planMode: true,
-          parentId: parentTaskId,
-        });
-      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consented);
-      if (!taskResponse) return;
-      const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
-      clearDraft();
-      onOpenChange(false);
-      if (newSessionId) {
-        activatePlanMode({
-          sessionId: newSessionId,
-          taskId: taskResponse.id,
-          setActiveDocument,
-          setPlanMode,
-          router,
-        });
-      }
-    },
-    [
-      workspaceId,
-      effectiveWorkflowId,
-      agentProfileId,
-      executorId,
-      executorProfileId,
-      parentTaskId,
-      onSuccess,
-      onOpenChange,
-      clearDraft,
-      setActiveDocument,
-      setPlanMode,
-      router,
-      getRepositoriesPayload,
-      createTaskWithFreshBranchRetry,
-    ],
+    (trimmedTitle: string, consented: string[]) =>
+      performCreate({
+        trimmedTitle,
+        trimmedDescription: "",
+        consented,
+        withAgent: false,
+        planMode: true,
+      }),
+    [performCreate],
   );
 
   const performEditWithPlanMode = useCallback(async () => {
@@ -458,7 +420,14 @@ export function useTaskSubmitHandlers({
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
-      await performCreateWithAgent(trimmedTitle, trimmedDescription, consent, true, attachments);
+      await performCreate({
+        trimmedTitle,
+        trimmedDescription,
+        consented: consent,
+        withAgent: true,
+        planMode: true,
+        attachments,
+      });
     } catch (error) {
       toast({
         title: "Failed to start task in plan mode",
@@ -474,7 +443,7 @@ export function useTaskSubmitHandlers({
     taskName,
     validateForCreate,
     ensureFreshBranchConsent,
-    performCreateWithAgent,
+    performCreate,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -491,13 +460,13 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
-        await performCreateWithAgent(
+        await performCreate({
           trimmedTitle,
           trimmedDescription,
-          consent,
-          undefined,
+          consented: consent,
+          withAgent: true,
           attachments,
-        );
+        });
       } else {
         await handleCreatePlanMode(trimmedTitle, consent);
       }
@@ -515,7 +484,7 @@ export function useTaskSubmitHandlers({
     isPassthroughProfile,
     validateForCreate,
     ensureFreshBranchConsent,
-    performCreateWithAgent,
+    performCreate,
     handleCreatePlanMode,
     toast,
     descriptionInputRef,
