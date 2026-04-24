@@ -16,11 +16,14 @@ export function multiMessageScript(lines: string[], delayMs = 10): string {
 
 /** Builder for a plan-seeding script using the create_task_plan_kandev MCP tool. */
 export function planScript(content: string, title = "Search test plan"): string {
-  const escaped = content.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+  const escape = (s: string) =>
+    s.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+  const escapedContent = escape(content);
+  const escapedTitle = escape(title);
   return [
     'e2e:thinking("Seeding plan...")',
     "e2e:delay(50)",
-    `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}","title":"${title}"})`,
+    `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escapedContent}","title":"${escapedTitle}"})`,
     "e2e:delay(50)",
     'e2e:message("Plan seeded.")',
   ].join("\n");

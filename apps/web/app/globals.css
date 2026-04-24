@@ -427,7 +427,8 @@
   .animate-changes-flash,
   .chat-input-running,
   .chat-input-running-plan,
-  .chat-input-starting {
+  .chat-input-starting,
+  .search-flash {
     animation: none;
   }
 }

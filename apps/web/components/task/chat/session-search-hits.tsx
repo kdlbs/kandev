@@ -18,8 +18,11 @@ type SessionSearchHitsProps = {
 };
 
 function formatTime(iso: string): string {
+  const d = new Date(iso);
+  // Invalid Date doesn't throw — it silently produces NaN. Fall back to the
+  // raw ISO string instead of rendering "Invalid Date".
+  if (Number.isNaN(d.getTime())) return iso;
   try {
-    const d = new Date(iso);
     return d.toLocaleString(undefined, {
       month: "short",
       day: "numeric",
