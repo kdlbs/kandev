@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   IconEye,
@@ -82,7 +82,6 @@ export const ISSUE_TASK_PRESETS: TaskPreset[] = [
 ];
 
 type DialogState = {
-  open: boolean;
   title: string;
   description: string;
   repositoryId?: string;
@@ -123,10 +122,9 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   const description = payload.preset.prompt({ url: data.url, title: data.title });
   const title = `${payload.preset.label}: ${data.title}`;
   if (repo) {
-    return { open: true, title, description, repositoryId: repo.id, branch: data.branch };
+    return { title, description, repositoryId: repo.id, branch: data.branch };
   }
   return {
-    open: true,
     title,
     description,
     githubUrl: `github.com/${data.owner}/${data.name}`,
@@ -152,7 +150,6 @@ export function QuickTaskLauncher({
   onClose,
 }: QuickTaskLauncherProps) {
   const router = useRouter();
-  const [dialog, setDialog] = useState<DialogState>({ open: false, title: "", description: "" });
 
   const defaultWorkflow = workflows[0];
   const sortedStepsForWorkflow = useMemo(
@@ -168,28 +165,24 @@ export function QuickTaskLauncher({
     [sortedStepsForWorkflow],
   );
 
-  useEffect(() => {
-    if (payload) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync dialog state from launch prop
-      setDialog(buildDialogState(payload, repositories));
-    }
-  }, [payload, repositories]);
+  const dialog = useMemo(
+    () => (payload ? buildDialogState(payload, repositories) : null),
+    [payload, repositories],
+  );
 
   const handleOpenChange = (open: boolean) => {
-    setDialog((d) => ({ ...d, open }));
     if (!open) onClose();
   };
   const handleSuccess = (task: Task) => {
-    setDialog((d) => ({ ...d, open: false }));
     onClose();
     router.push(`/t/${task.id}`);
   };
 
-  if (!workspaceId || !defaultWorkflow || !defaultStep) return null;
+  if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;
 
   return (
     <TaskCreateDialog
-      open={dialog.open}
+      open={true}
       onOpenChange={handleOpenChange}
       mode="create"
       workspaceId={workspaceId}
