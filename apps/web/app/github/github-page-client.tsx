@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconArrowLeft, IconBrandGithub } from "@tabler/icons-react";
+import { IconBrandGithub } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
+import { PageTopbar } from "@/components/page-topbar";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
@@ -13,8 +14,16 @@ import {
   PresetsSidebar,
   type SidebarSelection,
 } from "@/components/github/my-github/presets-sidebar";
-import { PR_PRESETS, ISSUE_PRESETS } from "@/components/github/my-github/search-bar";
+import {
+  PR_PRESETS,
+  ISSUE_PRESETS,
+  type PresetOption,
+} from "@/components/github/my-github/search-bar";
 import { useGitHubSearch } from "@/components/github/my-github/use-github-search";
+import {
+  useDefaultQueryPresets,
+  resolvePresetOptions,
+} from "@/components/github/my-github/use-default-query-presets";
 import { useSavedPresets, type SavedPreset } from "@/components/github/my-github/use-saved-presets";
 import { useKnownRepos, resetKnownReposStore } from "@/components/github/my-github/use-known-repos";
 import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
@@ -41,16 +50,11 @@ type GitHubPageClientProps = {
 
 function PageHeader() {
   return (
-    <header className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
-      <Link href="/" className="text-muted-foreground hover:text-foreground cursor-pointer">
-        <IconArrowLeft className="h-4 w-4" />
-      </Link>
-      <IconBrandGithub className="h-5 w-5" />
-      <h1 className="text-lg font-semibold">My GitHub</h1>
-      <span className="text-xs text-muted-foreground ml-2">
-        Pull requests and issues across your repos.
-      </span>
-    </header>
+    <PageTopbar
+      title="GitHub"
+      subtitle="Pull requests and issues across your repos."
+      icon={<IconBrandGithub className="h-4 w-4" />}
+    />
   );
 }
 
@@ -81,11 +85,16 @@ function NoWorkspaceNotice() {
   );
 }
 
-function resolveTitle(selection: SidebarSelection, saved: SavedPreset[]): string {
+function resolveTitle(
+  selection: SidebarSelection,
+  saved: SavedPreset[],
+  prPresets: PresetOption[],
+  issuePresets: PresetOption[],
+): string {
   if (selection.source === "saved") {
     return saved.find((p) => p.id === selection.id)?.label ?? "Saved query";
   }
-  const presets = selection.kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
+  const presets = selection.kind === "pr" ? prPresets : issuePresets;
   return (
     presets.find((p) => p.value === selection.id)?.label ??
     (selection.kind === "pr" ? "Pull requests" : "Issues")
@@ -131,16 +140,6 @@ function ResultsList({
   );
 }
 
-function defaultSelection(kind: "pr" | "issue"): SidebarSelection {
-  const presets = kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
-  return { kind, source: "preset", id: presets[0]?.value ?? "" };
-}
-
-function defaultQuery(kind: "pr" | "issue"): string {
-  const presets = kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
-  return presets[0]?.filter ?? "";
-}
-
 type GitHubPageState = ReturnType<typeof useGitHubPageState>;
 
 function useRepoOptions(
@@ -168,15 +167,28 @@ function useRepoOptions(
   }, [knownRepos, repoFilter]);
 }
 
+function useResolvedQueryPresets() {
+  const { prPresets: storedPr, issuePresets: storedIssue } = useDefaultQueryPresets();
+  const pr = useMemo(() => resolvePresetOptions(storedPr, PR_PRESETS), [storedPr]);
+  const issue = useMemo(() => resolvePresetOptions(storedIssue, ISSUE_PRESETS), [storedIssue]);
+  return { pr, issue };
+}
+
 function useGitHubPageState() {
-  const [selection, setSelection] = useState<SidebarSelection>(() => defaultSelection("pr"));
+  const { pr: resolvedPrPresets, issue: resolvedIssuePresets } = useResolvedQueryPresets();
+
+  const [selection, setSelection] = useState<SidebarSelection>(() => ({
+    kind: "pr",
+    source: "preset",
+    id: resolvedPrPresets[0]?.value ?? "",
+  }));
   const {
     draft: customQuery,
     committed: committedQuery,
     setDraft: setCustomQuery,
     setImmediate: setQueryImmediate,
     commit: commitCustomQuery,
-  } = useCommittedQuery(defaultQuery("pr"));
+  } = useCommittedQuery(resolvedPrPresets[0]?.filter ?? "");
   const [repoFilter, setRepoFilter] = useState("");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const {
@@ -185,7 +197,7 @@ function useGitHubPageState() {
     remove: removeSavedPreset,
   } = useSavedPresets();
 
-  const presets = selection.kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
+  const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
   const search = useGitHubSearch<GitHubPR | GitHubIssue>(
     selection.kind,
     presets,
@@ -194,7 +206,10 @@ function useGitHubPageState() {
     repoFilter,
   );
   const repoOptions = useRepoOptions(selection, committedQuery, search.items, repoFilter);
-  const title = useMemo(() => resolveTitle(selection, savedPresets), [selection, savedPresets]);
+  const title = useMemo(
+    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
+    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
+  );
 
   const onSelect = useCallback(
     (s: SidebarSelection) => {
@@ -205,12 +220,12 @@ function useGitHubPageState() {
         setRepoFilter(found?.repoFilter ?? "");
         return;
       }
-      const presetList = s.kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
+      const presetList = s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
       const preset = presetList.find((p) => p.value === s.id);
       setQueryImmediate(preset?.filter ?? "");
       setRepoFilter("");
     },
-    [savedPresets, setQueryImmediate],
+    [savedPresets, setQueryImmediate, resolvedPrPresets, resolvedIssuePresets],
   );
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
@@ -225,8 +240,9 @@ function useGitHubPageState() {
   const onDeleteSaved = (id: string) => {
     removeSavedPreset(id);
     if (selection.source === "saved" && selection.id === id) {
-      setSelection(defaultSelection(selection.kind));
-      setQueryImmediate(defaultQuery(selection.kind));
+      const fallbackPresets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
+      setSelection({ kind: selection.kind, source: "preset", id: fallbackPresets[0]?.value ?? "" });
+      setQueryImmediate(fallbackPresets[0]?.filter ?? "");
       setRepoFilter("");
     }
   };
@@ -251,6 +267,8 @@ function useGitHubPageState() {
     onOpenSaveDialog,
     onConfirmSave,
     onDeleteSaved,
+    resolvedPrPresets,
+    resolvedIssuePresets,
   };
 }
 
@@ -278,6 +296,8 @@ function AuthenticatedLayout({
           onDeleteSaved={state.onDeleteSaved}
           canSaveCurrent={state.canSaveCurrent}
           onSaveCurrent={state.onOpenSaveDialog}
+          prPresets={state.resolvedPrPresets}
+          issuePresets={state.resolvedIssuePresets}
         />
       </aside>
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">

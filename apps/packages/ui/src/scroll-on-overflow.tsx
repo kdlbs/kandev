@@ -3,9 +3,8 @@
 import * as React from "react";
 import { cn } from "./lib/utils";
 
-interface ScrollOnOverflowProps {
+interface ScrollOnOverflowProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
   children: React.ReactNode;
-  className?: string;
   /** Scroll speed in pixels per second. Default 60. */
   speed?: number;
 }
@@ -16,7 +15,7 @@ interface ScrollOnOverflowProps {
  */
 const ScrollOnOverflow = React.memo(
   React.forwardRef<HTMLSpanElement, ScrollOnOverflowProps>(function ScrollOnOverflow(
-    { children, className, speed = 60 },
+    { children, className, speed = 60, ...rest },
     ref,
   ) {
     const outerRef = React.useRef<HTMLSpanElement>(null);
@@ -73,6 +72,7 @@ const ScrollOnOverflow = React.memo(
         className={cn("inline-block min-w-0 overflow-hidden", className)}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        {...rest}
       >
         <span ref={innerRef} className="inline-block whitespace-nowrap">
           {children}

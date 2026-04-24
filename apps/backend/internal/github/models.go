@@ -440,7 +440,7 @@ const (
 )
 
 // ActionPreset is a single configurable quick-task launcher entry.
-// PromptTemplate supports `{url}` and `{title}` placeholders which are
+// PromptTemplate supports `{{url}}` and `{{title}}` placeholders which are
 // substituted client-side when the dialog is opened.
 type ActionPreset struct {
 	ID             string `json:"id"`
@@ -474,21 +474,21 @@ func DefaultPRActionPresets() []ActionPreset {
 			Label:          "Review",
 			Hint:           "Read the diff, flag issues",
 			Icon:           "eye",
-			PromptTemplate: "Review the pull request at {url}. Provide feedback on code quality, correctness, and suggest improvements.",
+			PromptTemplate: "Review the pull request at {{url}}. Provide feedback on code quality, correctness, and suggest improvements.",
 		},
 		{
 			ID:             "address_feedback",
 			Label:          "Address feedback",
 			Hint:           "Apply review comments",
 			Icon:           "message",
-			PromptTemplate: "Address the review feedback on the pull request at {url}. Make the requested changes and push them.",
+			PromptTemplate: "Review the feedback on the pull request at {{url}}. Evaluate each comment critically — apply changes that improve the code, push back on suggestions that are unnecessary or harmful, and explain your reasoning. Push the changes when done.",
 		},
 		{
 			ID:             "fix_ci",
 			Label:          "Fix CI",
 			Hint:           "Diagnose failing checks",
 			Icon:           "tool",
-			PromptTemplate: "Investigate and fix the CI failures on the pull request at {url}. Run the failing checks locally, diagnose, and push fixes.",
+			PromptTemplate: "Investigate and fix the CI failures and merge conflicts on the pull request at {{url}}. Run the failing checks locally, resolve any conflicts, diagnose issues, and push fixes.",
 		},
 	}
 }
@@ -502,21 +502,21 @@ func DefaultIssueActionPresets() []ActionPreset {
 			Label:          "Implement",
 			Hint:           "Build and open a PR",
 			Icon:           "code",
-			PromptTemplate: `Implement the changes described in the GitHub issue at {url} (title: "{title}"). Open a pull request when complete.`,
+			PromptTemplate: `Implement the changes described in the GitHub issue at {{url}} (title: "{{title}}"). Open a pull request when complete.`,
 		},
 		{
 			ID:             "investigate",
 			Label:          "Investigate",
 			Hint:           "Find the root cause",
 			Icon:           "search",
-			PromptTemplate: `Investigate the GitHub issue at {url} (title: "{title}"). Identify root cause and summarize findings.`,
+			PromptTemplate: `Investigate the GitHub issue at {{url}} (title: "{{title}}"). Identify root cause and summarize findings.`,
 		},
 		{
 			ID:             "reproduce",
 			Label:          "Reproduce",
 			Hint:           "Document repro steps",
 			Icon:           "bug",
-			PromptTemplate: `Reproduce the bug described in the GitHub issue at {url} (title: "{title}"). Document the reproduction steps.`,
+			PromptTemplate: `Reproduce the bug described in the GitHub issue at {{url}} (title: "{{title}}"). Document the reproduction steps.`,
 		},
 	}
 }

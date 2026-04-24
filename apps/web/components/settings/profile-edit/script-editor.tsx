@@ -160,6 +160,7 @@ export function ScriptEditor({
         padding: { top: 8, bottom: 8 },
         renderLineHighlight: "none",
         overviewRulerLanes: 0,
+        fixedOverflowWidgets: true,
         wordBasedSuggestions: "off",
         scrollbar: {
           vertical: "auto",

@@ -36,16 +36,17 @@ export function iconForPresetKey(key: string | undefined): Icon {
   return ICON_BY_KEY[key] ?? IconSparkles;
 }
 
-// Interpolate `{url}` and `{title}` placeholders in a prompt template.
+// Interpolate `{{url}}` and `{{title}}` placeholders in a prompt template.
+// Also supports legacy single-brace `{url}` / `{title}` for backward compat.
 // Unknown placeholders are left untouched so the user sees what's broken.
 export function interpolatePromptTemplate(
   template: string,
   opts: { url: string; title: string },
 ): string {
-  return template.replace(/\{(url|title)\}/g, (_match, key) => {
+  return template.replace(/\{\{?(url|title)\}\}?/g, (_match, key) => {
     if (key === "url") return opts.url;
     if (key === "title") return opts.title;
-    return `{${key}}`;
+    return _match;
   });
 }
 
@@ -66,7 +67,7 @@ export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
     hint: "Read the diff, flag issues",
     icon: "eye",
     prompt_template:
-      "Review the pull request at {url}. Provide feedback on code quality, correctness, and suggest improvements.",
+      "Review the pull request at {{url}}. Provide feedback on code quality, correctness, and suggest improvements.",
   },
   {
     id: "address_feedback",
@@ -74,7 +75,7 @@ export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
     hint: "Apply review comments",
     icon: "message",
     prompt_template:
-      "Address the review feedback on the pull request at {url}. Make the requested changes and push them.",
+      "Review the feedback on the pull request at {{url}}. Evaluate each comment critically — apply changes that improve the code, push back on suggestions that are unnecessary or harmful, and explain your reasoning. Push the changes when done.",
   },
   {
     id: "fix_ci",
@@ -82,7 +83,7 @@ export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
     hint: "Diagnose failing checks",
     icon: "tool",
     prompt_template:
-      "Investigate and fix the CI failures on the pull request at {url}. Run the failing checks locally, diagnose, and push fixes.",
+      "Investigate and fix the CI failures and merge conflicts on the pull request at {{url}}. Run the failing checks locally, resolve any conflicts, diagnose issues, and push fixes.",
   },
 ];
 
@@ -93,7 +94,7 @@ export const DEFAULT_ISSUE_PRESETS: GitHubActionPreset[] = [
     hint: "Build and open a PR",
     icon: "code",
     prompt_template:
-      'Implement the changes described in the GitHub issue at {url} (title: "{title}"). Open a pull request when complete.',
+      'Implement the changes described in the GitHub issue at {{url}} (title: "{{title}}"). Open a pull request when complete.',
   },
   {
     id: "investigate",
@@ -101,7 +102,7 @@ export const DEFAULT_ISSUE_PRESETS: GitHubActionPreset[] = [
     hint: "Find the root cause",
     icon: "search",
     prompt_template:
-      'Investigate the GitHub issue at {url} (title: "{title}"). Identify root cause and summarize findings.',
+      'Investigate the GitHub issue at {{url}} (title: "{{title}}"). Identify root cause and summarize findings.',
   },
   {
     id: "reproduce",
@@ -109,7 +110,7 @@ export const DEFAULT_ISSUE_PRESETS: GitHubActionPreset[] = [
     hint: "Document repro steps",
     icon: "bug",
     prompt_template:
-      'Reproduce the bug described in the GitHub issue at {url} (title: "{title}"). Document the reproduction steps.',
+      'Reproduce the bug described in the GitHub issue at {{url}} (title: "{{title}}"). Document the reproduction steps.',
   },
 ];
 

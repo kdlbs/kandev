@@ -192,6 +192,7 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
       searchPlaceholder="Filter models..."
       emptyMessage="No models found."
       showSearch={modelOptions.length > 5}
+      dropdownLabel="Available Models"
       triggerClassName="h-7 gap-1 px-2 text-xs w-auto hover:bg-muted/40 whitespace-nowrap"
       className="min-w-[280px]"
       plainTrigger

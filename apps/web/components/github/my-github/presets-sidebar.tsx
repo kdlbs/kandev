@@ -19,6 +19,8 @@ type PresetsSidebarProps = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  prPresets?: PresetOption[];
+  issuePresets?: PresetOption[];
 };
 
 function KindToggle({
@@ -200,11 +202,13 @@ export function PresetsSidebar({
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  prPresets = PR_PRESETS,
+  issuePresets = ISSUE_PRESETS,
 }: PresetsSidebarProps) {
-  const presets = selected.kind === "pr" ? PR_PRESETS : ISSUE_PRESETS;
+  const presets = selected.kind === "pr" ? prPresets : issuePresets;
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
   const onKindChange = (kind: "pr" | "issue") => {
-    const fallback = (kind === "pr" ? PR_PRESETS : ISSUE_PRESETS)[0]?.value ?? "";
+    const fallback = (kind === "pr" ? prPresets : issuePresets)[0]?.value ?? "";
     onSelect({ kind, source: "preset", id: fallback });
   };
   return (

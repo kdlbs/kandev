@@ -4,7 +4,6 @@ import { createElement, useMemo, useState, useCallback } from "react";
 import { IconPlus, IconTrash, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
@@ -17,6 +16,26 @@ import {
   iconForPresetKey,
 } from "@/components/github/my-github/action-presets";
 import type { GitHubActionPreset } from "@/lib/types/github";
+import {
+  ScriptEditor,
+  computeEditorHeight,
+} from "@/components/settings/profile-edit/script-editor";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+
+const ACTION_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
+  {
+    key: "url",
+    description: "URL of the PR or issue",
+    example: "https://github.com/org/repo/pull/42",
+    executor_types: [],
+  },
+  {
+    key: "title",
+    description: "Title of the PR or issue",
+    example: "Fix login page crash",
+    executor_types: [],
+  },
+];
 
 function newPreset(): GitHubActionPreset {
   return {
@@ -31,7 +50,7 @@ function newPreset(): GitHubActionPreset {
 function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 cursor-pointer" aria-label="Icon">
+      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label="Icon">
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
@@ -68,21 +87,35 @@ function PresetRow({
 }) {
   return (
     <div className="rounded-md border">
-      <div className="flex items-center gap-2 p-2">
-        <PresetIconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
-        <Input
-          className="h-8 w-40"
-          value={preset.label}
-          placeholder="Label"
-          onChange={(e) => onPatch({ label: e.target.value })}
-        />
-        <Input
-          className="h-8 flex-1"
-          value={preset.hint}
-          placeholder="Hint (optional)"
-          onChange={(e) => onPatch({ hint: e.target.value })}
-        />
-        <Button variant="ghost" size="sm" className="h-8 cursor-pointer text-xs" onClick={onToggle}>
+      <div className="flex items-end gap-2 p-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-muted-foreground">Icon</span>
+          <PresetIconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-muted-foreground">Label</span>
+          <Input
+            className="h-8 w-40"
+            value={preset.label}
+            placeholder="Label"
+            onChange={(e) => onPatch({ label: e.target.value })}
+          />
+        </div>
+        <div className="flex flex-col gap-0.5 flex-1">
+          <span className="text-[10px] text-muted-foreground">Hint</span>
+          <Input
+            className="h-8"
+            value={preset.hint}
+            placeholder="Hint (optional)"
+            onChange={(e) => onPatch({ hint: e.target.value })}
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 cursor-pointer text-xs"
+          onClick={onToggle}
+        >
           {expanded ? "Hide prompt" : "Edit prompt"}
         </Button>
         <Button
@@ -96,14 +129,23 @@ function PresetRow({
         </Button>
       </div>
       {expanded && (
-        <div className="px-2 pb-2">
-          <Textarea
-            rows={3}
-            className="text-xs font-mono"
-            placeholder="Prompt template — {url} and {title} are substituted"
-            value={preset.prompt_template}
-            onChange={(e) => onPatch({ prompt_template: e.target.value })}
-          />
+        <div className="px-2 pb-2 space-y-1">
+          <div className="rounded-md border overflow-hidden">
+            <ScriptEditor
+              value={preset.prompt_template}
+              onChange={(v) => onPatch({ prompt_template: v })}
+              language="markdown"
+              height={computeEditorHeight(preset.prompt_template)}
+              lineNumbers="off"
+              placeholders={ACTION_PROMPT_PLACEHOLDERS}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground/60">
+            Type {"{{"} to see available placeholders.{" "}
+            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code> and{" "}
+            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code> are
+            substituted when the action runs.
+          </p>
         </div>
       )}
     </div>
