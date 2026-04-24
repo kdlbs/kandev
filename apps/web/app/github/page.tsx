@@ -23,6 +23,7 @@ export default async function GitHubPage() {
   let steps: WorkflowStep[] = [];
   let repositories: Repository[] = [];
   let workspaceId: string | undefined;
+  let workspaceDataLoaded = false;
   let userSettingsResponse: UserSettingsResponse | null = null;
 
   try {
@@ -43,6 +44,7 @@ export default async function GitHubPage() {
       workflows = workflowsRes.workflows;
       repositories = reposRes.repositories;
       steps = stepsRes.steps;
+      workspaceDataLoaded = true;
     }
   } catch (error) {
     console.error("Failed to load GitHub page data:", error);
@@ -64,7 +66,7 @@ export default async function GitHubPage() {
       activeId: workflows[0]?.id ?? null,
     },
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
-    ...(workspaceId
+    ...(workspaceId && workspaceDataLoaded
       ? {
           repositories: {
             itemsByWorkspaceId: { [workspaceId]: repositories },

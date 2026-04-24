@@ -116,8 +116,12 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 	return v, err
 }
 
+// searchCacheKey composes a cache key with length-prefixed string fields so
+// that user-controllable inputs (e.g. customQuery) cannot collide with other
+// keys by embedding the separator.
 func searchCacheKey(kind, filter, customQuery string, page, perPage int) string {
-	return fmt.Sprintf("%s|%s|%s|%d|%d", kind, filter, customQuery, page, perPage)
+	return fmt.Sprintf("%d:%s|%d:%s|%d:%s|%d|%d",
+		len(kind), kind, len(filter), filter, len(customQuery), customQuery, page, perPage)
 }
 
 func prStatusCacheKey(owner, repo string, number int) string {

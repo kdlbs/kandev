@@ -19,8 +19,13 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
 
   const key = prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",");
 
+  // We deliberately depend only on `key`: `prs` gets a new array identity on
+  // every render, and including it would cancel an in-flight request whose
+  // content hasn't actually changed. The composed `key` string is the
+  // authoritative content signal; when it matches we reuse the latest `prs`
+  // closure for building request refs.
   useEffect(() => {
-    if (prs.length === 0) return;
+    if (key === "") return;
     if (requestedKey.current === key) return;
     requestedKey.current = key;
     const refs: PRStatusRef[] = prs.map((p) => ({
@@ -41,7 +46,8 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
     return () => {
       cancelled = true;
     };
-  }, [key, prs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   return statuses;
 }

@@ -100,6 +100,19 @@ func TestSearchCacheKey_KeyIsolation(t *testing.T) {
 	if searchCacheKey("pr", "", "is:open", 1, 25) == searchCacheKey("pr", "", "is:closed", 1, 25) {
 		t.Fatal("customQuery should be part of key")
 	}
+	// A user-controllable customQuery must not be able to collide with
+	// adjacent fields by embedding the separator.
+	collisions := [][2][5]any{
+		{{"pr", "a", "b", 1, 25}, {"pr", "a|b", "", 1, 25}},
+		{{"pr", "", "a|b|1|25", 0, 0}, {"pr", "a", "b", 1, 25}},
+	}
+	for _, c := range collisions {
+		a := searchCacheKey(c[0][0].(string), c[0][1].(string), c[0][2].(string), c[0][3].(int), c[0][4].(int))
+		b := searchCacheKey(c[1][0].(string), c[1][1].(string), c[1][2].(string), c[1][3].(int), c[1][4].(int))
+		if a == b {
+			t.Fatalf("separator collision: %q == %q", a, b)
+		}
+	}
 }
 
 func TestTTLCache_Singleflight(t *testing.T) {

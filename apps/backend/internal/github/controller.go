@@ -397,7 +397,7 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 
 // httpSearchUserPRs searches for pull requests. Accepts:
 //   - query: the complete GitHub search query (e.g. "is:pr author:@me state:open")
-//   - filter: additional qualifiers appended to the default "type:pr state:open"
+//   - filter: additional qualifiers appended to the default `type:pr`
 //   - page: 1-indexed page (default 1)
 //   - per_page: items per page, clamped to 1..100 (default 50)
 //

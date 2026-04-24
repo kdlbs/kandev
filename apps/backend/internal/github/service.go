@@ -549,9 +549,9 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 }
 
 // GetPRStatus fetches lightweight PR status (review + checks + mergeable).
-// GetPRStatus fetches lightweight PR status. Cached briefly so repeat loads
-// of the same list (pagination, re-render, back-navigation) don't refetch.
-// The returned pointer is shared — callers must not mutate it.
+// Cached briefly so repeat loads of the same list (pagination, re-render,
+// back-navigation) don't refetch. The returned pointer is shared — callers
+// must not mutate it.
 func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
@@ -1042,8 +1042,9 @@ func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]R
 	return s.client.ListRepoBranches(ctx, owner, repo)
 }
 
-// SearchUserPRs searches for PRs using a filter or custom query.
-// When customQuery is empty, the default query is "type:pr state:open" plus filter.
+// SearchUserPRs searches for PRs using a filter or custom query. Unless the
+// caller already pins a type qualifier, `type:pr` is injected into the
+// composed query.
 func (s *Service) SearchUserPRs(ctx context.Context, filter, customQuery string) ([]*PR, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
@@ -1051,8 +1052,9 @@ func (s *Service) SearchUserPRs(ctx context.Context, filter, customQuery string)
 	return s.client.SearchPRs(ctx, filter, customQuery)
 }
 
-// SearchUserIssues searches for issues using a filter or custom query.
-// When customQuery is empty, the default query is "type:issue state:open" plus filter.
+// SearchUserIssues searches for issues using a filter or custom query. Unless
+// the caller already pins a type qualifier, `type:issue` is injected into the
+// composed query.
 func (s *Service) SearchUserIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
