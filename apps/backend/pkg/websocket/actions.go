@@ -140,9 +140,10 @@ const (
 	ActionUserUnsubscribe = "user.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd  = "message.add"
-	ActionMessageGet  = "message.get"
-	ActionMessageList = "message.list"
+	ActionMessageAdd    = "message.add"
+	ActionMessageGet    = "message.get"
+	ActionMessageList   = "message.list"
+	ActionMessageSearch = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress              = "acp.progress"

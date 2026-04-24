@@ -5,6 +5,36 @@ import type {
   ListMessagesResponse,
   ListTurnsResponse,
 } from "@/lib/types/http";
+import { getWebSocketClient } from "@/lib/ws/connection";
+
+export type MessageSearchHit = {
+  id: string;
+  turn_id?: string;
+  author_type: string;
+  type: string;
+  snippet: string;
+  created_at: string;
+};
+
+export type SearchMessagesResponse = {
+  hits: MessageSearchHit[];
+  total: number;
+};
+
+/** Search messages in a single session via WebSocket. */
+export async function searchSessionMessages(
+  sessionId: string,
+  query: string,
+  limit = 50,
+): Promise<SearchMessagesResponse> {
+  const client = getWebSocketClient();
+  if (!client) return { hits: [], total: 0 };
+  return client.request<SearchMessagesResponse>(
+    "message.search",
+    { session_id: sessionId, query, limit },
+    10000,
+  );
+}
 
 // Session operations
 export async function listTaskSessions(taskId: string, options?: ApiRequestOptions) {
