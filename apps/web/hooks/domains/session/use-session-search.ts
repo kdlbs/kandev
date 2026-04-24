@@ -21,23 +21,14 @@ export type SessionSearchHook = SessionSearchState & {
   setActiveHit: (id: string | null) => void;
 };
 
-export function useSessionSearch(
+/** Debounced fetch + request-ID cancellation. */
+function useDebouncedSearch(
   sessionId: string | null | undefined,
-  loadOlder?: () => Promise<number>,
-): SessionSearchHook {
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQueryState] = useState("");
-  const [hits, setHits] = useState<MessageSearchHit[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [activeHitId, setActiveHitIdState] = useState<string | null>(null);
+  setHits: (hits: MessageSearchHit[]) => void,
+  setIsSearching: (v: boolean) => void,
+) {
   const requestIdRef = useRef(0);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Generation counter for setActiveHit — lets an in-flight backfill loop
-  // bail out if the user clicks a newer hit while the old loop is awaiting
-  // loadOlder(), preventing a stale scroll/flash from overriding the user.
-  const activeHitGenRef = useRef(0);
-
-  const runSearch = useCallback(
+  return useCallback(
     async (q: string) => {
       if (!sessionId) return;
       const trimmed = q.trim();
@@ -60,8 +51,63 @@ export function useSessionSearch(
         if (requestIdRef.current === myId) setIsSearching(false);
       }
     },
-    [sessionId],
+    [sessionId, setHits, setIsSearching],
   );
+}
+
+/** Focus a hit in the DOM with scroll + flash animation. */
+function focusMessageElement(id: string): boolean {
+  const el = document.getElementById(`msg-${id}`);
+  if (!el) return false;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.remove("search-flash");
+  // Force reflow so animation replays when re-clicked
+  void el.offsetWidth;
+  el.classList.add("search-flash");
+  window.setTimeout(() => el.classList.remove("search-flash"), 1400);
+  return true;
+}
+
+/** setActiveHit + backfill loop with generation-based cancellation. */
+function useSetActiveHit(
+  loadOlder: (() => Promise<number>) | undefined,
+  setActiveHitIdState: (id: string | null) => void,
+  genRef: React.RefObject<number>,
+) {
+  return useCallback(
+    async (id: string | null) => {
+      setActiveHitIdState(id);
+      if (!id) return;
+      const myGen = ++genRef.current;
+      if (focusMessageElement(id)) return;
+      if (!loadOlder) return;
+      for (let i = 0; i < MAX_BACKFILL_ITERATIONS; i++) {
+        const loaded = await loadOlder();
+        // Superseded by a newer setActiveHit, or close/unmount bumped genRef.
+        if (genRef.current !== myGen) return;
+        if (loaded === 0) break;
+        if (focusMessageElement(id)) return;
+      }
+    },
+    [loadOlder, setActiveHitIdState, genRef],
+  );
+}
+
+export function useSessionSearch(
+  sessionId: string | null | undefined,
+  loadOlder?: () => Promise<number>,
+): SessionSearchHook {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQueryState] = useState("");
+  const [hits, setHits] = useState<MessageSearchHit[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [activeHitId, setActiveHitIdState] = useState<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Generation counter for setActiveHit — bumping it aborts any in-flight
+  // backfill loop (new click, search bar close, or component unmount).
+  const activeHitGenRef = useRef(0);
+
+  const runSearch = useDebouncedSearch(sessionId, setHits, setIsSearching);
 
   const setQuery = useCallback(
     (q: string) => {
@@ -73,52 +119,26 @@ export function useSessionSearch(
   );
 
   useEffect(() => {
+    const genRef = activeHitGenRef;
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      // Abort any in-flight setActiveHit backfill loop on unmount.
+      genRef.current++;
     };
   }, []);
 
-  useEffect(() => {
-    if (!isOpen) {
-      setHits([]);
-      setActiveHitIdState(null);
-      setQueryState("");
-      setIsSearching(false);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    }
-  }, [isOpen]);
-
   const open = useCallback(() => setIsOpen(true), []);
-  const close = useCallback(() => setIsOpen(false), []);
-
-  const setActiveHit = useCallback(
-    async (id: string | null) => {
-      setActiveHitIdState(id);
-      if (!id) return;
-      const myGen = ++activeHitGenRef.current;
-      const tryFocus = (): boolean => {
-        const el = document.getElementById(`msg-${id}`);
-        if (!el) return false;
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        el.classList.remove("search-flash");
-        // Force reflow so animation replays when re-clicked
-        void el.offsetWidth;
-        el.classList.add("search-flash");
-        window.setTimeout(() => el.classList.remove("search-flash"), 1400);
-        return true;
-      };
-      if (tryFocus()) return;
-      if (!loadOlder) return;
-      for (let i = 0; i < MAX_BACKFILL_ITERATIONS; i++) {
-        const loaded = await loadOlder();
-        // Superseded by a newer setActiveHit call (user clicked another hit).
-        if (activeHitGenRef.current !== myGen) return;
-        if (loaded === 0) break;
-        if (tryFocus()) return;
-      }
-    },
-    [loadOlder],
-  );
+  const close = useCallback(() => {
+    setIsOpen(false);
+    setHits([]);
+    setActiveHitIdState(null);
+    setQueryState("");
+    setIsSearching(false);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    // Abort any in-flight setActiveHit backfill loop.
+    activeHitGenRef.current++;
+  }, []);
+  const setActiveHit = useSetActiveHit(loadOlder, setActiveHitIdState, activeHitGenRef);
 
   return {
     isOpen,
