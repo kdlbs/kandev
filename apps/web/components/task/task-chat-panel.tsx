@@ -100,6 +100,9 @@ function SessionSearchOverlay({
         onClose={search.close}
         matchInfo={{ current: currentIdx >= 0 ? currentIdx + 1 : 0, total }}
         isLoading={search.isSearching}
+        // Session search already debounces in useDebouncedSearch; skip the
+        // bar's debounce so we don't stack 150ms + 180ms per keystroke.
+        debounceMs={0}
       />
       <SessionSearchHits
         hits={search.hits}
