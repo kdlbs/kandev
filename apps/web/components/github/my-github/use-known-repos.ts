@@ -48,6 +48,17 @@ export function recordForKey(key: string, repos: readonly string[]) {
   for (const l of listeners) l();
 }
 
+// resetKnownReposStore drops all accumulated repos and the reset-key anchor.
+// The /github page calls it on unmount so the store doesn't carry a stale
+// set across visits. Also used for test isolation.
+export function resetKnownReposStore() {
+  currentKey = null;
+  if (seen.size === 0 && snapshot.length === 0) return;
+  seen.clear();
+  snapshot = [];
+  for (const l of listeners) l();
+}
+
 export function useKnownRepos(resetKey: string, fromItems: readonly string[]): string[] {
   useEffect(() => {
     recordForKey(resetKey, fromItems);

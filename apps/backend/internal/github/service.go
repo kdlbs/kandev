@@ -1069,6 +1069,10 @@ func (s *Service) SearchUserPRsPaged(ctx context.Context, filter, customQuery st
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	// Clamp before composing the cache key so perPage=150 and perPage=100
+	// share the same cached page instead of creating two entries for
+	// identical results.
+	page, perPage = clampSearchPage(page, perPage)
 	key := searchCacheKey("pr", filter, customQuery, page, perPage)
 	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
 		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
@@ -1092,6 +1096,7 @@ func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	page, perPage = clampSearchPage(page, perPage)
 	key := searchCacheKey("issue", filter, customQuery, page, perPage)
 	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
 		result, err := s.client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)

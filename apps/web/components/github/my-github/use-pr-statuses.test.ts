@@ -110,7 +110,7 @@ describe("usePRStatuses", () => {
     await waitFor(() => expect(getPRStatusesBatch).toHaveBeenCalledTimes(2));
   });
 
-  it("leaves prior statuses in place when a fetch errors", async () => {
+  it("clears stale statuses when key changes and fetch fails", async () => {
     const pr = makePR("acme", "widget", 7);
     getPRStatusesBatch.mockResolvedValueOnce({
       statuses: { "acme/widget#7": makeStatus(pr) },
@@ -120,13 +120,11 @@ describe("usePRStatuses", () => {
     });
     await waitFor(() => expect(result.current.size).toBe(1));
 
-    // Next fetch rejects; statuses should be cleared (since the key changed)
-    // but the test verifies the hook survives the rejection without throwing.
+    // New key, then fetch rejects: the stale badges from pr #7 belong to the
+    // old key and would be misleading, so the catch handler clears them.
     const pr2 = makePR("acme", "widget", 8);
     getPRStatusesBatch.mockRejectedValueOnce(new Error("boom"));
     rerender({ prs: [pr2] });
-    // Wait for the rejection to propagate and the catch handler to clear
-    // the stale statuses.
     await waitFor(() => expect(result.current.size).toBe(0));
   });
 });

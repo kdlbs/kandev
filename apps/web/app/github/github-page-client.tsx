@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowLeft, IconBrandGithub } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -16,7 +16,10 @@ import {
 import { PR_PRESETS, ISSUE_PRESETS } from "@/components/github/my-github/search-bar";
 import { useGitHubSearch } from "@/components/github/my-github/use-github-search";
 import { useSavedPresets, type SavedPreset } from "@/components/github/my-github/use-saved-presets";
-import { useKnownRepos } from "@/components/github/my-github/use-known-repos";
+import {
+  useKnownRepos,
+  resetKnownReposStore,
+} from "@/components/github/my-github/use-known-repos";
 import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
 import { ListToolbar } from "@/components/github/my-github/list-toolbar";
 import { ResultsPagination } from "@/components/github/my-github/results-pagination";
@@ -300,6 +303,10 @@ export function GitHubPageClient({
   const { status, loaded } = useGitHubStatus();
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
   const state = useGitHubPageState();
+
+  // Drop the module-level repo accumulator on page unmount so a later visit
+  // doesn't inherit a stale set from the previous navigation.
+  useEffect(() => resetKnownReposStore, []);
 
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
