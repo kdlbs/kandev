@@ -80,8 +80,10 @@ function MergeableChip({
   if (prState === "merged") return <StatusChip Icon={IconGitMerge} label="Merged" tone="success" />;
   if (state === "draft")
     return <StatusChip Icon={IconGitPullRequestDraft} label="Draft" tone="neutral" />;
-  if (state === "dirty" || state === "blocked")
+  if (state === "dirty")
     return <StatusChip Icon={IconAlertTriangle} label="Conflicts" tone="failure" />;
+  if (state === "blocked")
+    return <StatusChip Icon={IconAlertTriangle} label="Blocked" tone="pending" />;
   if (state === "behind")
     return <StatusChip Icon={IconAlertTriangle} label="Behind base" tone="pending" />;
   return null;
