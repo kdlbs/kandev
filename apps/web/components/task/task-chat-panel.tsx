@@ -217,7 +217,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const handlePanelMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
     if (!target) return;
-    if (target.closest("input, textarea, select, button, a, [contenteditable], [tabindex]")) {
+    // Exclude `tabindex="-1"` so we don't match PanelRoot itself (which is
+    // marked focus-receivable but shouldn't short-circuit this handler).
+    if (
+      target.closest(
+        "input, textarea, select, button, a, [contenteditable], [tabindex]:not([tabindex='-1'])",
+      )
+    ) {
       return;
     }
     panelRef.current?.focus({ preventScroll: true });
