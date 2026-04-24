@@ -69,7 +69,7 @@ export const PlanSearchExtension = Extension.create({
             if (meta) {
               if (meta.kind === "setQuery") {
                 const matches = findMatches(newState.doc, meta.query);
-                next = { query: meta.query, matches, current: matches.length ? 0 : 0 };
+                next = { query: meta.query, matches, current: 0 };
               } else if (meta.kind === "clear") {
                 next = { query: "", matches: [], current: 0 };
               } else if (meta.kind === "step") {
