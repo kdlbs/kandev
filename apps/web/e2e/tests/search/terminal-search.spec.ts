@@ -64,13 +64,9 @@ test.describe("@search terminal panel search", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "terminal-search-basic",
-      seedMessagesDescription(["idle"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "terminal-search-basic", {
+      description: seedMessagesDescription(["idle"]),
+    });
     await seedTerminalOutput(testPage);
 
     const bufferBefore = await testPage.evaluate(() => {
@@ -106,13 +102,9 @@ test.describe("@search terminal panel search", () => {
 
   test("T4 case sensitivity toggle affects matches", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "terminal-search-case",
-      seedMessagesDescription(["idle"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "terminal-search-case", {
+      description: seedMessagesDescription(["idle"]),
+    });
     await seedTerminalOutput(testPage);
 
     await openPanelSearch(testPage, "terminal");
@@ -138,13 +130,9 @@ test.describe("@search terminal panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "terminal-search-regex",
-      seedMessagesDescription(["idle"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "terminal-search-regex", {
+      description: seedMessagesDescription(["idle"]),
+    });
     await seedTerminalOutput(testPage);
 
     await openPanelSearch(testPage, "terminal");
@@ -170,13 +158,9 @@ test.describe("@search terminal panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "terminal-search-esc",
-      seedMessagesDescription(["idle"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "terminal-search-esc", {
+      description: seedMessagesDescription(["idle"]),
+    });
     await seedTerminalOutput(testPage);
 
     // Capture buffer snapshot before opening search
@@ -202,13 +186,9 @@ test.describe("@search terminal panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "terminal-search-backspace",
-      seedMessagesDescription(["idle"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "terminal-search-backspace", {
+      description: seedMessagesDescription(["idle"]),
+    });
     await seedTerminalOutput(testPage);
 
     await openPanelSearch(testPage, "terminal");

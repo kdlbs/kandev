@@ -45,13 +45,9 @@ test.describe("@search plan panel search", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "plan-search-basic",
-      planScript(PLAN_CONTENT),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-basic", {
+      description: planScript(PLAN_CONTENT),
+    });
     await openPlanPanel(testPage, session);
 
     await openPanelSearch(testPage, "plan");
@@ -80,13 +76,9 @@ test.describe("@search plan panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "plan-search-nav",
-      planScript(PLAN_CONTENT),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-nav", {
+      description: planScript(PLAN_CONTENT),
+    });
     await openPlanPanel(testPage, session);
 
     await openPanelSearch(testPage, "plan");
@@ -129,13 +121,9 @@ test.describe("@search plan panel search", () => {
 
   test("P9 Close removes all highlights", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "plan-search-close",
-      planScript(PLAN_CONTENT),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-close", {
+      description: planScript(PLAN_CONTENT),
+    });
     await openPlanPanel(testPage, session);
 
     await openPanelSearch(testPage, "plan");
@@ -157,13 +145,9 @@ test.describe("@search plan panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "plan-search-toggles",
-      planScript(PLAN_CONTENT),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-toggles", {
+      description: planScript(PLAN_CONTENT),
+    });
     await openPlanPanel(testPage, session);
 
     await openPanelSearch(testPage, "plan");

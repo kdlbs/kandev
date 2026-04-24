@@ -13,15 +13,14 @@ export async function seedTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  description: string,
-  opts: { rendererOverride?: "native" | "virtuoso" } = {},
+  opts: { description: string; rendererOverride?: "native" | "virtuoso" },
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
     seedData.agentProfileId,
     {
-      description,
+      description: opts.description,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],

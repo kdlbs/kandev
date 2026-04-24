@@ -12,13 +12,9 @@ test.describe("@search panel-focus routing", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "focus-routing-session",
-      seedMessagesDescription(["alpha"]),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "focus-routing-session", {
+      description: seedMessagesDescription(["alpha"]),
+    });
     await expect(session.chat.getByText("alpha", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
@@ -37,13 +33,9 @@ test.describe("@search panel-focus routing", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "focus-routing-terminal",
-      seedMessagesDescription(["alpha"]),
-    );
+    await seedTask(testPage, apiClient, seedData, "focus-routing-terminal", {
+      description: seedMessagesDescription(["alpha"]),
+    });
 
     // Ensure terminal panel is mounted
     await expect(testPage.getByTestId("terminal-panel")).toBeVisible({ timeout: 15_000 });
@@ -63,13 +55,9 @@ test.describe("@search panel-focus routing", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "focus-routing-plan",
-      planScript("## Plan\nsome content here"),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "focus-routing-plan", {
+      description: planScript("## Plan\nsome content here"),
+    });
     await session.togglePlanMode();
     await expect(session.planPanel.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });
 

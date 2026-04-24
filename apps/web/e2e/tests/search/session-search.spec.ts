@@ -21,13 +21,9 @@ test.describe("@search session chat panel search", () => {
       "this line has no match",
       "third fox appearance here",
     ];
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-hits",
-      seedMessagesDescription(messages),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-hits", {
+      description: seedMessagesDescription(messages),
+    });
     // Wait for at least one agent message to have rendered
     await expect(session.chat.getByText("fox", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
@@ -50,13 +46,9 @@ test.describe("@search session chat panel search", () => {
 
   test("C2 unmatched query shows No matches", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-nomatch",
-      seedMessagesDescription(["hello world"]),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-nomatch", {
+      description: seedMessagesDescription(["hello world"]),
+    });
     await expect(session.chat.getByText("hello world", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
@@ -83,13 +75,9 @@ test.describe("@search session chat panel search", () => {
       lines.push(`line ${i} padding text`);
     }
 
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-scroll",
-      seedMessagesDescription(lines),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-scroll", {
+      description: seedMessagesDescription(lines),
+    });
     await expect(session.chat.getByText("padding text", { exact: false }).first()).toBeVisible({
       timeout: 60_000,
     });
@@ -148,13 +136,9 @@ test.describe("@search session chat panel search", () => {
       .toBe(true);
 
     // Now open task A and search for B's marker — should return no hits.
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-iso-A",
-      seedMessagesDescription([`hello with ${uniqueA} embedded`]),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-iso-A", {
+      description: seedMessagesDescription([`hello with ${uniqueA} embedded`]),
+    });
     await expect(session.chat.getByText(uniqueA, { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
@@ -171,13 +155,9 @@ test.describe("@search session chat panel search", () => {
 
   test("C10 close button clears the bar", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-close",
-      seedMessagesDescription(["foo"]),
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-close", {
+      description: seedMessagesDescription(["foo"]),
+    });
     await expect(session.chat.getByText("foo", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
@@ -195,14 +175,12 @@ test.describe("@search session chat panel search", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { session } = await seedTask(
-      testPage,
-      apiClient,
-      seedData,
-      "session-search-virtuoso",
-      seedMessagesDescription(["virtuoso fox alpha", "virtuoso fox beta"]),
-      { rendererOverride: "virtuoso" },
-    );
+    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-virtuoso", {
+      description: {
+        description: seedMessagesDescription(["virtuoso fox alpha", "virtuoso fox beta"]),
+        rendererOverride: "virtuoso",
+      },
+    });
     await expect(session.chat.getByText("virtuoso", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });

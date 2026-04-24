@@ -32,13 +32,9 @@ test.describe("@search panel search bar — shared contract", () => {
           kind === "plan"
             ? planScript("## Scratch\nnothing special here")
             : seedMessagesDescription(["hello world alpha", "hello world beta"]);
-        const { session } = await seedTask(
-          testPage,
-          apiClient,
-          seedData,
-          `shared-${kind}-S1`,
-          description,
-        );
+        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S1`, {
+          description: description,
+        });
         await preparePanel(session, kind, testPage);
 
         await openPanelSearch(testPage, kind);
@@ -53,13 +49,9 @@ test.describe("@search panel search bar — shared contract", () => {
         test.setTimeout(90_000);
         const description =
           kind === "plan" ? planScript("## Scratch\nnothing") : seedMessagesDescription(["hello"]);
-        const { session } = await seedTask(
-          testPage,
-          apiClient,
-          seedData,
-          `shared-${kind}-S3`,
-          description,
-        );
+        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S3`, {
+          description: description,
+        });
         await preparePanel(session, kind, testPage);
 
         await openPanelSearch(testPage, kind);
@@ -71,13 +63,9 @@ test.describe("@search panel search bar — shared contract", () => {
         test.setTimeout(90_000);
         const description =
           kind === "plan" ? planScript("## Scratch\ntext") : seedMessagesDescription(["foo"]);
-        const { session } = await seedTask(
-          testPage,
-          apiClient,
-          seedData,
-          `shared-${kind}-S4`,
-          description,
-        );
+        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S4`, {
+          description: description,
+        });
         await preparePanel(session, kind, testPage);
 
         await openPanelSearch(testPage, kind);
@@ -93,13 +81,9 @@ test.describe("@search panel search bar — shared contract", () => {
           kind === "plan"
             ? planScript("## Sample\nAlphaBetaGamma")
             : seedMessagesDescription(["AlphaBetaGamma"]);
-        const { session } = await seedTask(
-          testPage,
-          apiClient,
-          seedData,
-          `shared-${kind}-S5`,
-          description,
-        );
+        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S5`, {
+          description: description,
+        });
         await preparePanel(session, kind, testPage);
 
         await openPanelSearch(testPage, kind);
