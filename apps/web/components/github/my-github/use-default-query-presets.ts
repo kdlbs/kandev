@@ -21,7 +21,7 @@ type StoredDefaults = {
   issue: StoredQueryPreset[];
 };
 
-function toStored(presets: PresetOption[]): StoredQueryPreset[] {
+export function toStored(presets: PresetOption[]): StoredQueryPreset[] {
   return presets.map(({ value, label, filter, group }) => ({ value, label, filter, group }));
 }
 
@@ -58,7 +58,7 @@ function writeStorage(defaults: StoredDefaults | null) {
   }
 }
 
-let snapshot: StoredDefaults | null = null;
+let snapshot: StoredDefaults | null | undefined = undefined;
 const listeners = new Set<() => void>();
 
 function publish(next: StoredDefaults | null) {

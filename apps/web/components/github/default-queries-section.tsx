@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import {
   useDefaultQueryPresets,
+  toStored,
   type StoredQueryPreset,
 } from "@/components/github/my-github/use-default-query-presets";
 import {
@@ -124,10 +125,6 @@ function QueryEditor({
       </Button>
     </div>
   );
-}
-
-function toStored(presets: typeof BUILTIN_PR_PRESETS): StoredQueryPreset[] {
-  return presets.map(({ value, label, filter, group }) => ({ value, label, filter, group }));
 }
 
 export function DefaultQueriesSection() {
