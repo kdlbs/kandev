@@ -377,6 +377,11 @@ const (
 	ActionGitHubIssueTrigger     = "github.issue_watches.trigger"
 	ActionGitHubIssueTriggerAll  = "github.issue_watches.trigger_all"
 	ActionGitHubNewIssueNotify   = "github.new_issue.notify" // Notification
+
+	// Action preset actions for the /github page quick-launch prompts.
+	ActionGitHubActionPresetsList   = "github.action_presets.list"
+	ActionGitHubActionPresetsUpdate = "github.action_presets.update"
+	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
 )
 
 // Error codes

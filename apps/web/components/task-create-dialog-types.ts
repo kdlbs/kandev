@@ -29,6 +29,9 @@ export type TaskCreateDialogInitialValues = {
   description?: string;
   repositoryId?: string;
   branch?: string;
+  /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
+   * instead of creating a new branch off `branch`. */
+  checkoutBranch?: string;
   state?: Task["state"];
   /** When set, opens the dialog in GitHub URL mode pre-filled with this value
    * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */

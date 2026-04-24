@@ -13,6 +13,7 @@ import { ReviewWatchTable } from "./review-watch-table";
 import { ReviewWatchDialog } from "./review-watch-dialog";
 import { IssueWatchTable } from "./issue-watch-table";
 import { IssueWatchDialog } from "./issue-watch-dialog";
+import { ActionPresetsSection } from "./action-presets-section";
 import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
@@ -156,6 +157,7 @@ export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
 
         <ReviewWatchSection workspaceId={workspaceId} />
         <IssueWatchSection workspaceId={workspaceId} />
+        <ActionPresetsSection workspaceId={workspaceId} />
 
         <SettingsSection
           title="PR Analytics"

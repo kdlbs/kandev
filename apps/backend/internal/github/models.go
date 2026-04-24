@@ -430,3 +430,93 @@ type UpdateIssueWatchRequest struct {
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
 }
+
+// --- Action presets (quick-launch prompts on the /github page) ---
+
+// ActionPresetKind enumerates the two lists of quick-launch presets.
+const (
+	ActionPresetKindPR    = "pr"
+	ActionPresetKindIssue = "issue"
+)
+
+// ActionPreset is a single configurable quick-task launcher entry.
+// PromptTemplate supports `{url}` and `{title}` placeholders which are
+// substituted client-side when the dialog is opened.
+type ActionPreset struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	Hint           string `json:"hint"`
+	Icon           string `json:"icon"`
+	PromptTemplate string `json:"prompt_template"`
+}
+
+// ActionPresets groups the PR and Issue preset lists for a workspace.
+type ActionPresets struct {
+	WorkspaceID string         `json:"workspace_id"`
+	PR          []ActionPreset `json:"pr"`
+	Issue       []ActionPreset `json:"issue"`
+}
+
+// UpdateActionPresetsRequest replaces one or both preset lists for a workspace.
+// Nil fields are left unchanged.
+type UpdateActionPresetsRequest struct {
+	WorkspaceID string          `json:"workspace_id"`
+	PR          *[]ActionPreset `json:"pr,omitempty"`
+	Issue       *[]ActionPreset `json:"issue,omitempty"`
+}
+
+// DefaultPRActionPresets returns the built-in PR presets used when a workspace
+// has no stored overrides.
+func DefaultPRActionPresets() []ActionPreset {
+	return []ActionPreset{
+		{
+			ID:             "review",
+			Label:          "Review",
+			Hint:           "Read the diff, flag issues",
+			Icon:           "eye",
+			PromptTemplate: "Review the pull request at {url}. Provide feedback on code quality, correctness, and suggest improvements.",
+		},
+		{
+			ID:             "address_feedback",
+			Label:          "Address feedback",
+			Hint:           "Apply review comments",
+			Icon:           "message",
+			PromptTemplate: "Address the review feedback on the pull request at {url}. Make the requested changes and push them.",
+		},
+		{
+			ID:             "fix_ci",
+			Label:          "Fix CI",
+			Hint:           "Diagnose failing checks",
+			Icon:           "tool",
+			PromptTemplate: "Investigate and fix the CI failures on the pull request at {url}. Run the failing checks locally, diagnose, and push fixes.",
+		},
+	}
+}
+
+// DefaultIssueActionPresets returns the built-in Issue presets used when a
+// workspace has no stored overrides.
+func DefaultIssueActionPresets() []ActionPreset {
+	return []ActionPreset{
+		{
+			ID:             "implement",
+			Label:          "Implement",
+			Hint:           "Build and open a PR",
+			Icon:           "code",
+			PromptTemplate: `Implement the changes described in the GitHub issue at {url} (title: "{title}"). Open a pull request when complete.`,
+		},
+		{
+			ID:             "investigate",
+			Label:          "Investigate",
+			Hint:           "Find the root cause",
+			Icon:           "search",
+			PromptTemplate: `Investigate the GitHub issue at {url} (title: "{title}"). Identify root cause and summarize findings.`,
+		},
+		{
+			ID:             "reproduce",
+			Label:          "Reproduce",
+			Hint:           "Document repro steps",
+			Icon:           "bug",
+			PromptTemplate: `Reproduce the bug described in the GitHub issue at {url} (title: "{title}"). Document the reproduction steps.`,
+		},
+	}
+}

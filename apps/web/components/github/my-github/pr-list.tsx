@@ -19,7 +19,7 @@ import {
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
-import { PR_TASK_PRESETS, type LaunchPayload, type TaskPreset } from "./quick-task-launcher";
+import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
 import { PRStatusBadges } from "./pr-status-badges";
 import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
 
@@ -27,6 +27,7 @@ type PRListProps = {
   items: GitHubPR[];
   loading: boolean;
   error: string | null;
+  presets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
 };
 
@@ -41,9 +42,11 @@ function prStateIcon(pr: GitHubPR): { Icon: Icon; className: string } {
 
 function StartTaskMenu({
   pr,
+  presets,
   onStartTask,
 }: {
   pr: GitHubPR;
+  presets: TaskPreset[];
   onStartTask: PRListProps["onStartTask"];
 }) {
   const launch = (preset: TaskPreset) => onStartTask({ kind: "pr", pr, preset });
@@ -57,7 +60,7 @@ function StartTaskMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        {PR_TASK_PRESETS.map((p) => {
+        {presets.map((p) => {
           const ItemIcon = p.icon;
           return (
             <DropdownMenuItem
@@ -81,10 +84,12 @@ function StartTaskMenu({
 function PRRow({
   pr,
   status,
+  presets,
   onStartTask,
 }: {
   pr: GitHubPR;
   status: GitHubPRStatus | null | undefined;
+  presets: TaskPreset[];
   onStartTask: PRListProps["onStartTask"];
 }) {
   const { Icon: StateIcon, className: stateIconClass } = prStateIcon(pr);
@@ -112,13 +117,13 @@ function PRRow({
         </div>
       </div>
       <div className="shrink-0">
-        <StartTaskMenu pr={pr} onStartTask={onStartTask} />
+        <StartTaskMenu pr={pr} presets={presets} onStartTask={onStartTask} />
       </div>
     </div>
   );
 }
 
-function PRListBody({ loading, error, items, onStartTask }: PRListProps) {
+function PRListBody({ loading, error, items, presets, onStartTask }: PRListProps) {
   const statuses = usePRStatuses(items);
   if (loading) {
     return (
@@ -141,7 +146,15 @@ function PRListBody({ loading, error, items, onStartTask }: PRListProps) {
     <div className="divide-y">
       {items.map((pr) => {
         const key = prStatusKey(pr.repo_owner, pr.repo_name, pr.number);
-        return <PRRow key={key} pr={pr} status={statuses.get(key)} onStartTask={onStartTask} />;
+        return (
+          <PRRow
+            key={key}
+            pr={pr}
+            status={statuses.get(key)}
+            presets={presets}
+            onStartTask={onStartTask}
+          />
+        );
       })}
     </div>
   );

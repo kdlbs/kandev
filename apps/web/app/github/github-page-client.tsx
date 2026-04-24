@@ -24,7 +24,13 @@ import { SavePresetDialog } from "@/components/github/my-github/save-preset-dial
 import {
   QuickTaskLauncher,
   type LaunchPayload,
+  type TaskPreset,
 } from "@/components/github/my-github/quick-task-launcher";
+import {
+  resolvePRPresets,
+  resolveIssuePresets,
+} from "@/components/github/my-github/action-presets";
+import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -91,12 +97,16 @@ function ResultsList({
   items,
   loading,
   error,
+  prPresets,
+  issuePresets,
   onStartTask,
 }: {
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
   loading: boolean;
   error: string | null;
+  prPresets: TaskPreset[];
+  issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   if (selection.kind === "pr") {
@@ -105,6 +115,7 @@ function ResultsList({
         items={items as GitHubPR[]}
         loading={loading}
         error={error}
+        presets={prPresets}
         onStartTask={onStartTask}
       />
     );
@@ -114,6 +125,7 @@ function ResultsList({
       items={items as GitHubIssue[]}
       loading={loading}
       error={error}
+      presets={issuePresets}
       onStartTask={onStartTask}
     />
   );
@@ -245,10 +257,14 @@ function useGitHubPageState() {
 function AuthenticatedLayout({
   workspaceId,
   state,
+  prPresets,
+  issuePresets,
   onStartTask,
 }: {
   workspaceId: string | undefined;
   state: GitHubPageState;
+  prPresets: TaskPreset[];
+  issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   const { selection, search, repoOptions, title } = state;
@@ -286,6 +302,8 @@ function AuthenticatedLayout({
             items={search.items}
             loading={search.loading}
             error={search.error}
+            prPresets={prPresets}
+            issuePresets={issuePresets}
             onStartTask={onStartTask}
           />
         </div>
@@ -309,6 +327,9 @@ export function GitHubPageClient({
   const { status, loaded } = useGitHubStatus();
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
   const state = useGitHubPageState();
+  const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
+  const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
+  const issuePresets = useMemo(() => resolveIssuePresets(storedPresets), [storedPresets]);
 
   // Drop the module-level repo accumulator on page unmount so a later visit
   // doesn't inherit a stale set from the previous navigation.
@@ -328,7 +349,13 @@ export function GitHubPageClient({
         </div>
       )}
       {loaded && authed && (
-        <AuthenticatedLayout workspaceId={workspaceId} state={state} onStartTask={onStartTask} />
+        <AuthenticatedLayout
+          workspaceId={workspaceId}
+          state={state}
+          prPresets={prPresets}
+          issuePresets={issuePresets}
+          onStartTask={onStartTask}
+        />
       )}
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
