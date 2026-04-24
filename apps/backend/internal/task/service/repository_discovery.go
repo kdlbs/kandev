@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +15,14 @@ import (
 type RepositoryDiscoveryConfig struct {
 	Roots    []string
 	MaxDepth int
+}
+
+// LocalRepoStatus reports the current branch and dirty file paths for a
+// local repository on disk. Used by the task-create dialog to preflight the
+// fresh-branch flow.
+type LocalRepoStatus struct {
+	CurrentBranch string
+	DirtyFiles    []string
 }
 
 type LocalRepository struct {
@@ -153,24 +162,61 @@ func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]
 }
 
 func (s *Service) ListLocalRepositoryBranches(ctx context.Context, path string) ([]Branch, error) {
-	if path == "" {
-		return nil, fmt.Errorf("repository path is required")
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("invalid repository path: %w", err)
-	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return nil, ErrPathNotAllowed
-	}
-	info, err := os.Stat(absPath)
+	absPath, err := s.resolveAllowedLocalPath(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("repository path is not a directory")
-	}
 	return listGitBranches(absPath)
+}
+
+// LocalRepositoryCurrentBranch returns the currently checked-out branch for a
+// local repository on disk. Returns the branch name (e.g. "main") or an empty
+// string if HEAD is detached or unreadable.
+func (s *Service) LocalRepositoryCurrentBranch(ctx context.Context, path string) (string, error) {
+	absPath, err := s.resolveAllowedLocalPath(path)
+	if err != nil {
+		return "", err
+	}
+	return readGitCurrentBranch(absPath), nil
+}
+
+// LocalRepositoryStatus returns the current branch and dirty file list for a
+// local repository on disk. Used by the task-create dialog to preflight the
+// fresh-branch flow before committing to a destructive checkout.
+func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (LocalRepoStatus, error) {
+	absPath, err := s.resolveAllowedLocalPath(path)
+	if err != nil {
+		return LocalRepoStatus{}, err
+	}
+	dirty, err := readGitDirtyFiles(ctx, absPath)
+	if err != nil {
+		return LocalRepoStatus{}, err
+	}
+	return LocalRepoStatus{
+		CurrentBranch: readGitCurrentBranch(absPath),
+		DirtyFiles:    dirty,
+	}, nil
+}
+
+func (s *Service) resolveAllowedLocalPath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("repository path is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid repository path: %w", err)
+	}
+	if !isPathAllowed(absPath, s.discoveryRoots()) {
+		return "", ErrPathNotAllowed
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("repository path is not a directory")
+	}
+	return absPath, nil
 }
 
 func (s *Service) discoveryRoots() []string {
@@ -352,6 +398,48 @@ func isWithinRoot(path string, root string) bool {
 		absRoot += separator
 	}
 	return strings.HasPrefix(absPath, absRoot)
+}
+
+// readGitCurrentBranch returns the currently checked-out branch by reading
+// .git/HEAD directly. Returns an empty string if HEAD is detached or unreadable.
+// We avoid `git rev-parse --abbrev-ref HEAD` to skip the subprocess cost on
+// the hot path of branch discovery.
+func readGitCurrentBranch(repoPath string) string {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return ""
+	}
+	content, err := os.ReadFile(filepath.Join(gitDir, gitHEAD))
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(content))
+	ref, ok := strings.CutPrefix(trimmed, "ref: ")
+	if !ok {
+		return ""
+	}
+	return strings.TrimPrefix(ref, "refs/heads/")
+}
+
+// readGitDirtyFiles returns the list of dirty file paths in a repository, as
+// reported by `git status --porcelain`. Each returned entry is the relative
+// path with the two-char status flag stripped. Returns an empty slice for a
+// clean working tree.
+func readGitDirtyFiles(ctx context.Context, repoPath string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	var paths []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		paths = append(paths, line[3:])
+	}
+	return paths, nil
 }
 
 func readGitDefaultBranch(repoPath string) (string, error) {

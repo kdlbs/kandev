@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -317,6 +318,15 @@ type httpTaskRepositoryInput struct {
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
 	GitHubURL      string `json:"github_url"`
+
+	// Fresh-branch flow (local executor only): when FreshBranch is true the
+	// handler discards uncommitted changes in the local clone and creates
+	// NewBranchName from BaseBranch before the task is persisted.
+	// ConfirmDiscard must be true if the working tree is dirty; otherwise
+	// the request is rejected with 409 + the dirty file list.
+	FreshBranch    bool   `json:"fresh_branch,omitempty"`
+	NewBranchName  string `json:"new_branch_name,omitempty"`
+	ConfirmDiscard bool   `json:"confirm_discard,omitempty"`
 }
 
 type httpCreateTaskRequest struct {
@@ -408,6 +418,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
+	if !h.applyFreshBranch(c, body.Repositories, repos) {
+		return
+	}
+
 	// Always persist profile IDs in task metadata so they can be used as the
 	// task's "default" agent profile. This is needed both for deferred agent start
 	// (handleTaskMovedNoSession) and for reverting to the default agent when a
@@ -454,6 +468,66 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// applyFreshBranch executes the fresh-branch flow for any local-executor
+// repository inputs that opted in. Mutates `repos[i].BaseBranch` to the
+// newly-created branch on success so the persisted task uses it as the
+// effective base branch on every session resume. Writes the appropriate
+// HTTP error response and returns false on failure.
+func (h *TaskHandlers) applyFreshBranch(c *gin.Context, inputs []httpTaskRepositoryInput, repos []dto.TaskRepositoryInput) bool {
+	ctx := c.Request.Context()
+	for i, raw := range inputs {
+		if !raw.FreshBranch {
+			continue
+		}
+		repoPath, ok := h.resolveLocalRepoPath(c, raw)
+		if !ok {
+			return false
+		}
+		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
+			RepoPath:       repoPath,
+			BaseBranch:     raw.BaseBranch,
+			NewBranch:      raw.NewBranchName,
+			ConfirmDiscard: raw.ConfirmDiscard,
+		})
+		if err != nil {
+			h.respondFreshBranchError(c, err)
+			return false
+		}
+		repos[i].BaseBranch = raw.NewBranchName
+		repos[i].CheckoutBranch = ""
+	}
+	return true
+}
+
+func (h *TaskHandlers) resolveLocalRepoPath(c *gin.Context, raw httpTaskRepositoryInput) (string, bool) {
+	if raw.LocalPath != "" {
+		return raw.LocalPath, true
+	}
+	if raw.RepositoryID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "fresh_branch requires repository_id or local_path"})
+		return "", false
+	}
+	repo, err := h.service.GetRepository(c.Request.Context(), raw.RepositoryID)
+	if err != nil || repo == nil || repo.LocalPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository has no local path"})
+		return "", false
+	}
+	return repo.LocalPath, true
+}
+
+func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
+	var dirty *service.ErrDirtyWorkingTree
+	if errors.As(err, &dirty) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "working tree has uncommitted changes",
+			"dirty_files": dirty.DirtyFiles,
+		})
+		return
+	}
+	h.logger.Error("fresh branch checkout failed", zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare fresh branch"})
 }
 
 // convertCreateTaskRepositories converts httpTaskRepositoryInput slice to dto.TaskRepositoryInput slice.
