@@ -442,6 +442,7 @@ export class ApiClient {
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    sidebar_views?: unknown[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
