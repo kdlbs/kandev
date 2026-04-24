@@ -497,10 +497,11 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 		t.Errorf("Expected new execution ID 'new-exec-id', got %s", execution.AgentExecutionID)
 	}
 
-	// Database AgentExecutionID should have been cleared by startAgentOnExistingWorkspace
+	// DB should now hold the newly created execution ID, confirming the
+	// full LaunchAgent path ran and overwrote the stale value.
 	updatedSession := repo.sessions["session-123"]
-	if updatedSession.AgentExecutionID == "stale-exec-id" {
-		t.Error("Expected stale AgentExecutionID to be cleared from DB")
+	if updatedSession.AgentExecutionID != "new-exec-id" {
+		t.Errorf("Expected DB AgentExecutionID to be 'new-exec-id', got %q", updatedSession.AgentExecutionID)
 	}
 }
 

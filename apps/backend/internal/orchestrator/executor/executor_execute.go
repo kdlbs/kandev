@@ -567,19 +567,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	// value would cause "execution not found" errors.
 	executionID := session.AgentExecutionID
 	liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
-	if err == nil && liveID != "" && liveID != executionID {
-		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
-			zap.String("session_id", session.ID),
-			zap.String("stale_id", executionID),
-			zap.String("live_id", liveID))
-		executionID = liveID
-		session.AgentExecutionID = liveID
-		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
-			e.logger.Warn("failed to persist corrected execution ID",
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
-		}
-	} else if err != nil {
+	if err != nil {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
 		// Clear AgentExecutionID and return ErrStaleExecution so the caller falls through
 		// to the full LaunchAgent path, which creates a complete execution with agent
@@ -594,6 +582,19 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.Error(updateErr))
 		}
 		return nil, ErrStaleExecution
+	}
+	if liveID != "" && liveID != executionID {
+		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
+			zap.String("session_id", session.ID),
+			zap.String("stale_id", executionID),
+			zap.String("live_id", liveID))
+		executionID = liveID
+		session.AgentExecutionID = liveID
+		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+			e.logger.Warn("failed to persist corrected execution ID",
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
 	}
 
 	if !startAgent {
