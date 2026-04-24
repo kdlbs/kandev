@@ -11,6 +11,8 @@ import {
 } from "@/lib/api/domains/plan-api";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
+const EMPTY_REVISIONS: readonly TaskPlanRevision[] = Object.freeze([]);
+
 /**
  * Hook to fetch and manage the plan for a task.
  * Plans are task-scoped (one plan per task, shared across all sessions).
@@ -139,11 +141,15 @@ function useTaskPlanRevisions(
   setError: (err: string | null) => void,
 ) {
   const revisions = useAppStore((state) =>
-    taskId ? (state.taskPlans.revisionsByTaskId[taskId] ?? []) : [],
-  );
+    taskId ? (state.taskPlans.revisionsByTaskId[taskId] ?? EMPTY_REVISIONS) : EMPTY_REVISIONS,
+  ) as TaskPlanRevision[];
   const isLoadingRevisions = useAppStore((state) =>
     taskId ? (state.taskPlans.revisionsLoadingByTaskId[taskId] ?? false) : false,
   );
+  const isRevisionsLoaded = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsLoadedByTaskId[taskId] ?? false) : false,
+  );
+  const connectionStatus = useAppStore((state) => state.connection.status);
   const revisionContentCache = useAppStore((state) => state.taskPlans.revisionContentCache);
   const setPlanRevisions = useAppStore((state) => state.setPlanRevisions);
   const setPlanRevisionsLoading = useAppStore((state) => state.setPlanRevisionsLoading);
@@ -162,6 +168,13 @@ function useTaskPlanRevisions(
       setPlanRevisionsLoading(taskId, false);
     }
   }, [taskId, setPlanRevisions, setPlanRevisionsLoading, setError]);
+
+  // Load revisions once on mount — events may have fired before the WS connected.
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    if (!taskId || isRevisionsLoaded || isLoadingRevisions) return;
+    loadRevisions();
+  }, [taskId, connectionStatus, isRevisionsLoaded, isLoadingRevisions, loadRevisions]);
 
   const loadRevisionContent = useCallback(
     async (revisionId: string): Promise<string> => {

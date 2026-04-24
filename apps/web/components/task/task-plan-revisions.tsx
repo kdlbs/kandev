@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { IconHistory, IconRobot, IconUser, IconRestore, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
@@ -39,10 +39,14 @@ export function TaskPlanRevisions({
   const [open, setOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<TaskPlanRevision | null>(null);
 
+  const loadedRef = useRef(false);
   const handleOpenChange = useCallback(
     (next: boolean) => {
       setOpen(next);
-      if (next) onOpen();
+      if (next && !loadedRef.current) {
+        loadedRef.current = true;
+        onOpen();
+      }
     },
     [onOpen],
   );
