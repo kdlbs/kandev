@@ -223,8 +223,14 @@ function usePresetDrafts(workspaceId: string): {
   loading: boolean;
 } {
   const { presets, save, reset, loading } = useGitHubActionPresets(workspaceId);
-  const [prDraft, setPrDraft] = useState<GitHubActionPreset[]>(DEFAULT_PR_PRESETS);
-  const [issueDraft, setIssueDraft] = useState<GitHubActionPreset[]>(DEFAULT_ISSUE_PRESETS);
+  // Seed drafts from whatever the store has right now; on a warm mount this is
+  // the user's saved customisations, otherwise the built-in defaults.
+  const [prDraft, setPrDraft] = useState<GitHubActionPreset[]>(() =>
+    presets?.pr?.length ? presets.pr : DEFAULT_PR_PRESETS,
+  );
+  const [issueDraft, setIssueDraft] = useState<GitHubActionPreset[]>(() =>
+    presets?.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS,
+  );
   // When a new `presets` object arrives from the server, reset the editor drafts.
   // Render-time conditional setState is React's documented pattern for deriving
   // state from props with a reset; preferred over useEffect for sync updates.
@@ -273,6 +279,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   const { prDraft, issueDraft, setPrDraft, setIssueDraft, dirty, save, reset, loading } =
     usePresetDrafts(workspaceId);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -287,11 +294,14 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   };
 
   const handleReset = async () => {
+    setResetting(true);
     try {
       await reset();
       toast({ description: "Quick actions reset to defaults", variant: "success" });
     } catch {
       toast({ description: "Failed to reset quick actions", variant: "error" });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -305,7 +315,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
             size="sm"
             variant="outline"
             onClick={handleReset}
-            disabled={loading || saving}
+            disabled={loading || saving || resetting}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />

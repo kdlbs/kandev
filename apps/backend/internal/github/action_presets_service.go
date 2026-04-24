@@ -33,19 +33,22 @@ func (s *Service) GetActionPresets(ctx context.Context, workspaceID string) (*Ac
 }
 
 // UpdateActionPresets replaces the PR or Issue preset lists for a workspace.
-// Nil request fields leave that list untouched.
+// Nil request fields leave that list untouched. For any kind not in the
+// request, we persist whatever the store currently has (possibly empty)
+// rather than the resolved defaults — otherwise future default improvements
+// would never reach workspaces that have only customised one side.
 func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPresetsRequest) (*ActionPresets, error) {
 	if req == nil || req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
 	}
-	current, err := s.GetActionPresets(ctx, req.WorkspaceID)
+	stored, err := s.store.GetActionPresets(ctx, req.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	next := &ActionPresets{
-		WorkspaceID: req.WorkspaceID,
-		PR:          current.PR,
-		Issue:       current.Issue,
+	next := &ActionPresets{WorkspaceID: req.WorkspaceID}
+	if stored != nil {
+		next.PR = stored.PR
+		next.Issue = stored.Issue
 	}
 	if req.PR != nil {
 		next.PR = normalisePresets(*req.PR)
@@ -56,7 +59,7 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	if err := s.store.UpsertActionPresets(ctx, next); err != nil {
 		return nil, err
 	}
-	return next, nil
+	return s.GetActionPresets(ctx, req.WorkspaceID)
 }
 
 // ResetActionPresets drops any stored overrides so the defaults apply again.
