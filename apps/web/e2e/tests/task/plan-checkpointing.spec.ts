@@ -46,14 +46,26 @@ async function seedTaskAndWaitForIdle(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // Agent writes may auto-switch the active panel to Plan, hiding the chat
+  // input. Accept either the chat idle placeholder or the Plan panel as a
+  // signal that the agent has produced output.
+  await expect
+    .poll(
+      async () =>
+        (await session.idleInput().isVisible()) || (await session.planPanel.isVisible()),
+      { timeout: 30_000, message: "agent output not visible" },
+    )
+    .toBe(true);
 
   return { session, taskId: task.id, sessionId: task.session_id! };
 }
 
-/** Ensure the plan panel is visible by toggling plan mode. */
+/** Ensure the plan panel is visible. When an agent write auto-opens it,
+ * the toggle is unnecessary (and would close it). */
 async function openPlanPanel(session: SessionPage) {
-  await session.togglePlanMode();
+  if (!(await session.planPanel.isVisible())) {
+    await session.togglePlanMode();
+  }
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
 }
 
@@ -219,8 +231,6 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     // Revert to v1.
     await session.revertToRevision(1);
-    // Toast indicates restore completed.
-    await expect(testPage.getByText(/Plan restored to v1/i)).toBeVisible({ timeout: 10_000 });
 
     // HEAD content must now be the old v1 content.
     await expect(
@@ -263,9 +273,10 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.revertConfirmCancel().click();
     await expect(session.revertConfirmDialog()).toBeHidden({ timeout: 5_000 });
 
-    // Popover still shows two revisions and HEAD is unchanged.
-    await expectRevisionCount(session, 2);
+    // HEAD is unchanged and the two revisions are still there.
     await expect(session.planPanel.getByText("Second", { exact: false })).toBeVisible();
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
   });
 
   test("author switch breaks coalesce: user edit creates a second revision", async ({

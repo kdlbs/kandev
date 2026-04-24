@@ -741,8 +741,9 @@ export class SessionPage {
     return this.planPanel.locator(".ProseMirror");
   }
 
-  /** Open the rewind popover and wait for it to render. */
+  /** Open the rewind popover and wait for it to render. No-op when already open. */
   async openRewind(): Promise<void> {
+    if (await this.revisionsPopover().isVisible()) return;
     await this.rewindButton().click();
     await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
   }
