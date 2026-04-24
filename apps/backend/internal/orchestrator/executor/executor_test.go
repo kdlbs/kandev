@@ -504,7 +504,6 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 	}
 }
 
-
 func TestExecuteWithProfile_UsesPrepareThenLaunch(t *testing.T) {
 	repo := newMockRepository()
 
