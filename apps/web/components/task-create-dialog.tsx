@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -9,6 +9,8 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
+import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
+import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
   CreateEditSelectors,
   SessionSelectors,
@@ -16,16 +18,13 @@ import {
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
 import {
-  useRepositoryOptions,
   useBranchOptions,
   useAgentProfileOptions,
 } from "@/components/task-create-dialog-options";
 import {
-  RepositorySelector,
   BranchSelector,
   AgentSelector,
   ExecutorProfileSelector,
-  InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
 import { useToast } from "@/components/toast-provider";
@@ -74,164 +73,6 @@ interface TaskCreateDialogProps {
   parentTaskId?: string;
 }
 
-function getRepositoryPlaceholder(
-  workspaceId: string | null,
-  repositoriesLoading: boolean,
-  discoverReposLoading: boolean,
-) {
-  if (!workspaceId) return "Select workspace first";
-  if (repositoriesLoading || discoverReposLoading) return "Loading...";
-  return "Select repository";
-}
-
-type DialogHeaderContentProps = {
-  isCreateMode: boolean;
-  isEditMode: boolean;
-  isTaskStarted: boolean;
-  sessionRepoName?: string;
-  initialTitle?: string;
-  taskName: string;
-  repositoryId: string;
-  discoveredRepoPath: string;
-  workspaceId: string | null;
-  repositoriesLoading: boolean;
-  discoverReposLoading: boolean;
-  headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
-  onRepositoryChange: (v: string) => void;
-  onTaskNameChange: (v: string) => void;
-  useGitHubUrl: boolean;
-  githubUrl: string;
-  githubUrlError: string | null;
-  onToggleGitHubUrl: () => void;
-  onGitHubUrlChange: (v: string) => void;
-};
-
-function RepoSourceInput({
-  useGitHubUrl,
-  githubUrl,
-  githubUrlError,
-  onGitHubUrlChange,
-  isTaskStarted,
-  headerRepositoryOptions,
-  repositoryId,
-  discoveredRepoPath,
-  onRepositoryChange,
-  workspaceId,
-  repositoriesLoading,
-  discoverReposLoading,
-}: Pick<
-  DialogHeaderContentProps,
-  | "useGitHubUrl"
-  | "githubUrl"
-  | "githubUrlError"
-  | "onGitHubUrlChange"
-  | "isTaskStarted"
-  | "headerRepositoryOptions"
-  | "repositoryId"
-  | "discoveredRepoPath"
-  | "onRepositoryChange"
-  | "workspaceId"
-  | "repositoriesLoading"
-  | "discoverReposLoading"
->): React.ReactNode {
-  if (useGitHubUrl) {
-    return (
-      <div className="relative">
-        <input
-          type="text"
-          value={githubUrl}
-          onChange={(e) => onGitHubUrlChange(e.target.value)}
-          placeholder="github.com/owner/repo"
-          data-testid="github-url-input"
-          aria-label="GitHub repository URL"
-          aria-invalid={!!githubUrlError}
-          aria-describedby={githubUrlError ? "github-url-error" : undefined}
-          size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
-          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
-          disabled={isTaskStarted}
-          autoFocus
-        />
-        {githubUrlError && (
-          <div
-            id="github-url-error"
-            role="alert"
-            className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
-            data-testid="github-url-error"
-          >
-            {githubUrlError}
-          </div>
-        )}
-      </div>
-    );
-  }
-  return (
-    <RepositorySelector
-      options={headerRepositoryOptions}
-      value={repositoryId || discoveredRepoPath}
-      onValueChange={onRepositoryChange}
-      placeholder={getRepositoryPlaceholder(workspaceId, repositoriesLoading, discoverReposLoading)}
-      searchPlaceholder="Search repositories..."
-      emptyMessage={
-        repositoriesLoading || discoverReposLoading
-          ? "Loading repositories..."
-          : "No repositories found."
-      }
-      disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
-      triggerClassName="w-auto text-sm"
-    />
-  );
-}
-
-function DialogHeaderContent(props: DialogHeaderContentProps) {
-  const { isCreateMode, isEditMode, isTaskStarted, sessionRepoName, initialTitle } = props;
-  const { taskName, onTaskNameChange, useGitHubUrl, onToggleGitHubUrl } = props;
-
-  if (isCreateMode || isEditMode) {
-    return (
-      <>
-        <DialogTitle asChild>
-          <div className="flex items-center gap-1 text-sm font-medium min-w-0">
-            <RepoSourceInput {...props} />
-            <span className="text-muted-foreground mr-2">/</span>
-            <InlineTaskName
-              value={taskName}
-              onChange={onTaskNameChange}
-              autoFocus={!isEditMode && !useGitHubUrl}
-            />
-          </div>
-        </DialogTitle>
-        {!isTaskStarted && (
-          <div className="flex items-center gap-2 pl-2">
-            <button
-              type="button"
-              onClick={onToggleGitHubUrl}
-              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-              data-testid="toggle-github-url"
-            >
-              {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
-            </button>
-          </div>
-        )}
-      </>
-    );
-  }
-  return (
-    <DialogTitle asChild>
-      <div className="flex items-center gap-1 min-w-0 text-sm font-medium">
-        {sessionRepoName && (
-          <>
-            <span className="truncate text-muted-foreground">{sessionRepoName}</span>
-            <span className="text-muted-foreground mx-0.5">/</span>
-          </>
-        )}
-        <span className="truncate">{initialTitle || "Task"}</span>
-        <span className="text-muted-foreground mx-0.5">/</span>
-        <span className="text-muted-foreground whitespace-nowrap">new session</span>
-      </div>
-    </DialogTitle>
-  );
-}
-
 type DialogFormBodyProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
@@ -264,6 +105,8 @@ type DialogFormBodyProps = {
   isLocalExecutor: boolean;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
+  onToggleFreshBranch: (enabled: boolean) => void;
+  onNewBranchNameChange: (value: string) => void;
 };
 
 function DialogFormBody({
@@ -294,6 +137,8 @@ function DialogFormBody({
   isLocalExecutor,
   enhance,
   workflowAgentLocked,
+  onToggleFreshBranch,
+  onNewBranchNameChange,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -307,33 +152,26 @@ function DialogFormBody({
         handleKeyDown={handleKeyDown}
         enhance={enhance}
       />
-      {!isSessionMode && (
-        <CreateEditSelectors
-          isTaskStarted={isTaskStarted}
-          hasRepositorySelection={hasRepositorySelection}
-          branchOptions={branchOptions}
-          branch={fs.branch}
-          onBranchChange={onBranchChange}
-          branchesLoading={branchesLoading}
-          localBranchesLoading={fs.localBranchesLoading}
-          agentProfiles={agentProfiles}
-          agentProfilesLoading={agentProfilesLoading}
-          agentProfileOptions={agentProfileOptions}
-          agentProfileId={fs.agentProfileId}
-          onAgentProfileChange={onAgentProfileChange}
-          isCreatingSession={isCreatingSession}
-          executorProfileOptions={executorProfileOptions}
-          executorProfileId={fs.executorProfileId}
-          onExecutorProfileChange={onExecutorProfileChange}
-          executorsLoading={executorsLoading}
-          isLocalExecutor={isLocalExecutor}
-          useGitHubUrl={fs.useGitHubUrl}
-          workflowAgentLocked={workflowAgentLocked}
-          BranchSelectorComponent={BranchSelector}
-          AgentSelectorComponent={AgentSelector}
-          ExecutorProfileSelectorComponent={ExecutorProfileSelector}
-        />
-      )}
+      {!isSessionMode && renderCreateEditSelectors({
+          isTaskStarted,
+          hasRepositorySelection,
+          branchOptions,
+          branchesLoading,
+          agentProfiles,
+          agentProfilesLoading,
+          agentProfileOptions,
+          isCreatingSession,
+          executorProfileOptions,
+          executorsLoading,
+          isLocalExecutor,
+          workflowAgentLocked,
+          fs,
+          onBranchChange,
+          onAgentProfileChange,
+          onExecutorProfileChange,
+          onToggleFreshBranch,
+          onNewBranchNameChange,
+        })}
       <WorkflowSection
         isCreateMode={isCreateMode}
         isTaskStarted={isTaskStarted}
@@ -362,6 +200,64 @@ function DialogFormBody({
   );
 }
 
+type CreateEditSelectorsRenderArgs = Pick<
+  DialogFormBodyProps,
+  | "isTaskStarted"
+  | "hasRepositorySelection"
+  | "branchOptions"
+  | "branchesLoading"
+  | "agentProfiles"
+  | "agentProfilesLoading"
+  | "agentProfileOptions"
+  | "isCreatingSession"
+  | "executorProfileOptions"
+  | "executorsLoading"
+  | "isLocalExecutor"
+  | "workflowAgentLocked"
+  | "fs"
+  | "onBranchChange"
+  | "onAgentProfileChange"
+  | "onExecutorProfileChange"
+  | "onToggleFreshBranch"
+  | "onNewBranchNameChange"
+>;
+
+function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
+  const { fs } = args;
+  return (
+    <CreateEditSelectors
+      isTaskStarted={args.isTaskStarted}
+      hasRepositorySelection={args.hasRepositorySelection}
+      branchOptions={args.branchOptions}
+      branch={fs.branch}
+      onBranchChange={args.onBranchChange}
+      branchesLoading={args.branchesLoading}
+      localBranchesLoading={fs.localBranchesLoading}
+      agentProfiles={args.agentProfiles}
+      agentProfilesLoading={args.agentProfilesLoading}
+      agentProfileOptions={args.agentProfileOptions}
+      agentProfileId={fs.agentProfileId}
+      onAgentProfileChange={args.onAgentProfileChange}
+      isCreatingSession={args.isCreatingSession}
+      executorProfileOptions={args.executorProfileOptions}
+      executorProfileId={fs.executorProfileId}
+      onExecutorProfileChange={args.onExecutorProfileChange}
+      executorsLoading={args.executorsLoading}
+      isLocalExecutor={args.isLocalExecutor}
+      useGitHubUrl={fs.useGitHubUrl}
+      workflowAgentLocked={args.workflowAgentLocked}
+      freshBranchEnabled={fs.freshBranchEnabled}
+      onToggleFreshBranch={args.onToggleFreshBranch}
+      newBranchName={fs.newBranchName}
+      onNewBranchNameChange={args.onNewBranchNameChange}
+      currentLocalBranch={fs.currentLocalBranch}
+      BranchSelectorComponent={BranchSelector}
+      AgentSelectorComponent={AgentSelector}
+      ExecutorProfileSelectorComponent={ExecutorProfileSelector}
+    />
+  );
+}
+
 function useEnhanceForDialog(fs: DialogFormState) {
   const isConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
@@ -379,43 +275,27 @@ function useEnhanceForDialog(fs: DialogFormState) {
   return { onEnhance, isLoading: isEnhancingPrompt, isConfigured };
 }
 
-function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
-  const { open, onOpenChange, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const { editingTask, onSuccess, onCreateSession, initialValues, parentTaskId } = props;
+type SubmitWiringArgs = {
+  props: TaskCreateDialogProps;
+  fs: ReturnType<typeof useDialogFormState>;
+  computed: ReturnType<typeof useTaskCreateDialogData>["computed"];
+  repositoryLocalPath: string;
+  isSessionMode: boolean;
+  isEditMode: boolean;
+};
+
+function useSubmitHandlersWiring({
+  props,
+  fs,
+  computed,
+  repositoryLocalPath,
+  isSessionMode,
+  isEditMode,
+}: SubmitWiringArgs) {
+  const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
+  const { parentTaskId } = props;
   const taskId = props.taskId ?? null;
-  const isSessionMode = mode === "session";
-  const isEditMode = mode === "edit";
-  const isCreateMode = mode === "create";
-  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
-  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
-  const { toast } = useToast();
-  const sessionRepoName = useSessionRepoName(isSessionMode);
-  const {
-    workflows,
-    agentProfiles,
-    executors,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    branches,
-    branchesLoading,
-    computed,
-  } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
-  useTaskCreateDialogEffects(fs, {
-    open,
-    workspaceId,
-    workflowId,
-    repositories,
-    repositoriesLoading,
-    branches,
-    agentProfiles,
-    executors,
-    workspaceDefaults: computed.workspaceDefaults,
-    toast,
-    workflows,
-  });
-  const handlers = useDialogHandlers(fs, repositories);
-  const submitHandlers = useTaskSubmitHandlers({
+  return useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
     isPassthroughProfile: computed.isPassthroughProfile,
@@ -452,6 +332,63 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
     clearDraft: fs.clearDraft,
+    freshBranchEnabled: fs.freshBranchEnabled,
+    newBranchName: fs.newBranchName,
+    isLocalExecutor: computed.isLocalExecutor,
+    repositoryLocalPath,
+  });
+}
+
+function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
+  const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
+  const { editingTask, initialValues } = props;
+  const isSessionMode = mode === "session";
+  const isEditMode = mode === "edit";
+  const isCreateMode = mode === "create";
+  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
+  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
+  const { toast } = useToast();
+  const sessionRepoName = useSessionRepoName(isSessionMode);
+  const {
+    workflows,
+    agentProfiles,
+    executors,
+    snapshots,
+    repositories,
+    repositoriesLoading,
+    branches,
+    branchesLoading,
+    computed,
+  } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
+  const repositoryLocalPath = (() => {
+    if (fs.selectedLocalRepo) return fs.selectedLocalRepo.path;
+    if (fs.repositoryId) {
+      const repo = repositories.find((r) => r.id === fs.repositoryId);
+      return repo?.local_path ?? "";
+    }
+    return "";
+  })();
+  useTaskCreateDialogEffects(fs, {
+    open,
+    workspaceId,
+    workflowId,
+    repositories,
+    repositoriesLoading,
+    branches,
+    agentProfiles,
+    executors,
+    workspaceDefaults: computed.workspaceDefaults,
+    toast,
+    workflows,
+  });
+  const handlers = useDialogHandlers(fs, repositories);
+  const submitHandlers = useSubmitHandlersWiring({
+    props,
+    fs,
+    computed,
+    repositoryLocalPath,
+    isSessionMode,
+    isEditMode,
   });
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
@@ -542,6 +479,8 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             isLocalExecutor={computed.isLocalExecutor}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
+            onToggleFreshBranch={handlers.handleToggleFreshBranch}
+            onNewBranchNameChange={handlers.handleNewBranchNameChange}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter
@@ -567,7 +506,28 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             />
           </DialogFooter>
         </form>
+        <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PendingDiscardModal({
+  pending,
+}: {
+  pending: ReturnType<typeof useTaskSubmitHandlers>["pendingDiscard"];
+}) {
+  if (!pending) return null;
+  return (
+    <DiscardLocalChangesDialog
+      open
+      onOpenChange={(next) => {
+        if (!next) pending.resolve(false);
+      }}
+      dirtyFiles={pending.dirtyFiles}
+      repoPath={pending.repoPath}
+      onConfirm={() => pending.resolve(true)}
+      onCancel={() => pending.resolve(false)}
+    />
   );
 }

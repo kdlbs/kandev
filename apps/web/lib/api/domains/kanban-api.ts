@@ -53,6 +53,9 @@ export async function createTask(
       name?: string;
       default_branch?: string;
       github_url?: string;
+      fresh_branch?: boolean;
+      new_branch_name?: string;
+      confirm_discard?: boolean;
     }>;
     state?: Task["state"];
     start_agent?: boolean;

@@ -9,6 +9,10 @@ import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import {
+  FreshBranchControls,
+  computeBranchPlaceholder,
+} from "@/components/task-create-dialog-fresh-branch";
 
 type SelectorOption = {
   value: string;
@@ -66,107 +70,142 @@ type CreateEditSelectorsProps = {
   isLocalExecutor: boolean;
   useGitHubUrl: boolean;
   workflowAgentLocked: boolean;
+  freshBranchEnabled: boolean;
+  onToggleFreshBranch: (enabled: boolean) => void;
+  newBranchName: string;
+  onNewBranchNameChange: (value: string) => void;
+  currentLocalBranch: string;
 };
 
-export const CreateEditSelectors = memo(function CreateEditSelectors({
-  isTaskStarted,
-  hasRepositorySelection,
-  branchOptions,
-  branch,
-  onBranchChange,
-  branchesLoading,
-  localBranchesLoading,
+type AgentColumnProps = Pick<
+  CreateEditSelectorsProps,
+  | "agentProfiles"
+  | "agentProfilesLoading"
+  | "agentProfileOptions"
+  | "agentProfileId"
+  | "onAgentProfileChange"
+  | "isCreatingSession"
+  | "AgentSelectorComponent"
+  | "workflowAgentLocked"
+>;
+
+function AgentColumn({
   agentProfiles,
   agentProfilesLoading,
   agentProfileOptions,
   agentProfileId,
   onAgentProfileChange,
   isCreatingSession,
-  executorProfileOptions,
-  executorProfileId,
-  onExecutorProfileChange,
-  executorsLoading,
-  isLocalExecutor,
-  useGitHubUrl,
-  workflowAgentLocked,
-  BranchSelectorComponent,
   AgentSelectorComponent,
-  ExecutorProfileSelectorComponent,
-}: CreateEditSelectorsProps) {
-  if (isTaskStarted) return null;
+  workflowAgentLocked,
+}: AgentColumnProps) {
+  if (agentProfiles.length === 0 && !agentProfilesLoading) {
+    return (
+      <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
+        <span>No agents found.</span>
+        <Link href="/settings/agents" className="text-primary hover:underline">
+          Add agent
+        </Link>
+      </div>
+    );
+  }
+  const placeholder = agentProfilesLoading ? "Loading agents..." : "Select agent";
+  return (
+    <>
+      <AgentSelectorComponent
+        options={agentProfileOptions}
+        value={agentProfileId}
+        onValueChange={onAgentProfileChange}
+        placeholder={placeholder}
+        disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
+      />
+      {workflowAgentLocked && (
+        <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
+      )}
+    </>
+  );
+}
 
-  const agentLockedByWorkflow = workflowAgentLocked;
+export const CreateEditSelectors = memo(function CreateEditSelectors(props: CreateEditSelectorsProps) {
+  if (props.isTaskStarted) return null;
 
+  const {
+    hasRepositorySelection,
+    branchOptions,
+    branch,
+    onBranchChange,
+    branchesLoading,
+    localBranchesLoading,
+    executorProfileOptions,
+    executorProfileId,
+    onExecutorProfileChange,
+    executorsLoading,
+    isLocalExecutor,
+    useGitHubUrl,
+    freshBranchEnabled,
+    onToggleFreshBranch,
+    newBranchName,
+    onNewBranchNameChange,
+    currentLocalBranch,
+    BranchSelectorComponent,
+    ExecutorProfileSelectorComponent,
+  } = props;
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
-
-  const branchPlaceholder = (() => {
-    if (isLocalWithoutGitHubUrl) return "Uses current branch";
-    if (!hasRepositorySelection) return "Select repository first";
-    if (branchesLoading || localBranchesLoading) return "Loading branches...";
-    return branchOptions.length > 0 ? "Select branch" : "No branches found";
-  })();
-
+  const lockedToCurrentBranch = isLocalWithoutGitHubUrl && !freshBranchEnabled;
+  const branchPlaceholder = computeBranchPlaceholder({
+    lockedToCurrentBranch,
+    currentLocalBranch,
+    hasRepositorySelection,
+    loading: branchesLoading || localBranchesLoading,
+    optionCount: branchOptions.length,
+  });
   const branchDisabled =
-    isLocalWithoutGitHubUrl ||
+    lockedToCurrentBranch ||
     !hasRepositorySelection ||
     branchesLoading ||
     localBranchesLoading ||
     branchOptions.length === 0;
 
-  const agentPlaceholder = (() => {
-    if (agentProfilesLoading) return "Loading agents...";
-    if (agentProfiles.length === 0) return "No agents available";
-    return "Select agent";
-  })();
-
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-      <div>
-        <BranchSelectorComponent
-          options={branchOptions}
-          value={branch}
-          onValueChange={onBranchChange}
-          placeholder={branchPlaceholder}
-          searchPlaceholder="Search branches..."
-          emptyMessage="No branch found."
-          disabled={branchDisabled}
+    <div className="space-y-3">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+        <div>
+          <BranchSelectorComponent
+            options={branchOptions}
+            value={branch}
+            onValueChange={onBranchChange}
+            placeholder={branchPlaceholder}
+            searchPlaceholder="Search branches..."
+            emptyMessage="No branch found."
+            disabled={branchDisabled}
+          />
+        </div>
+        <div>
+          <AgentColumn {...props} />
+        </div>
+        <div>
+          <ExecutorProfileSelectorComponent
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+            disabled={executorsLoading}
+          />
+        </div>
+      </div>
+      {isLocalWithoutGitHubUrl && (
+        <FreshBranchControls
+          enabled={freshBranchEnabled}
+          onToggle={onToggleFreshBranch}
+          newBranchName={newBranchName}
+          onNewBranchNameChange={onNewBranchNameChange}
+          currentLocalBranch={currentLocalBranch}
         />
-      </div>
-      <div>
-        {agentProfiles.length === 0 && !agentProfilesLoading ? (
-          <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
-            <span>No agents found.</span>
-            <Link href="/settings/agents" className="text-primary hover:underline">
-              Add agent
-            </Link>
-          </div>
-        ) : (
-          <>
-            <AgentSelectorComponent
-              options={agentProfileOptions}
-              value={agentProfileId}
-              onValueChange={onAgentProfileChange}
-              placeholder={agentPlaceholder}
-              disabled={agentProfilesLoading || isCreatingSession || agentLockedByWorkflow}
-            />
-            {agentLockedByWorkflow && (
-              <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
-            )}
-          </>
-        )}
-      </div>
-      <div>
-        <ExecutorProfileSelectorComponent
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
-          disabled={executorsLoading}
-        />
-      </div>
+      )}
     </div>
   );
 });
+
 
 type SessionSelectorsProps = {
   agentProfileOptions: SelectorOption[];

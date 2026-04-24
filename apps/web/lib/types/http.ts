@@ -494,6 +494,12 @@ export type Branch = {
 export type RepositoryBranchesResponse = {
   branches: Branch[];
   total: number;
+  current_branch?: string;
+};
+
+export type LocalRepositoryStatusResponse = {
+  current_branch: string;
+  dirty_files: string[];
 };
 
 export type ListWorkspacesResponse = {

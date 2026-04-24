@@ -10,6 +10,7 @@ import type {
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
   RepositoryBranchesResponse,
+  LocalRepositoryStatusResponse,
   ListRepositoryScriptsResponse,
   ListWorkspacesResponse,
   RepositoryPathValidationResponse,
@@ -171,6 +172,16 @@ export async function listLocalRepositoryBranchesAction(
   const params = `?path=${encodeURIComponent(path)}`;
   return fetchJson<RepositoryBranchesResponse>(
     `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/branches${params}`,
+  );
+}
+
+export async function getLocalRepositoryStatusAction(
+  workspaceId: string,
+  path: string,
+): Promise<LocalRepositoryStatusResponse> {
+  const params = `?path=${encodeURIComponent(path)}`;
+  return fetchJson<LocalRepositoryStatusResponse>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/local-status${params}`,
   );
 }
 
