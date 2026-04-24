@@ -255,7 +255,9 @@ function useFormStateValues(
 ) {
   // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
   const [openCycle, setOpenCycle] = useState(0);
-  const prevOpenRef = useRef(open);
+  // Start as false so a fresh mount with open=true is detected as a rising edge
+  // (callers like QuickTaskLauncher conditionally mount the dialog already-open).
+  const prevOpenRef = useRef(false);
 
   // currentDefaults stores the loaded draft/initial values for this open cycle
   const [currentDefaults, setCurrentDefaults] = useState<{ name: string; description: string }>({
