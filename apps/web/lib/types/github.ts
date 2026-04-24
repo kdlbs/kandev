@@ -355,7 +355,9 @@ export type GitHubActionPreset = {
   id: string;
   label: string;
   hint: string;
-  icon: GitHubActionPresetIcon | string;
+  // `string & {}` preserves autocomplete for the known icon keys while still
+  // accepting custom strings for forward compatibility.
+  icon: GitHubActionPresetIcon | (string & {});
   prompt_template: string;
 };
 

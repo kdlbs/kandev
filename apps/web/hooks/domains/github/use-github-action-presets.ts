@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   fetchGitHubActionPresets,
   updateGitHubActionPresets,
   resetGitHubActionPresets,
 } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
-import type { GitHubActionPreset, UpdateGitHubActionPresetsRequest } from "@/lib/types/github";
+import type { UpdateGitHubActionPresetsRequest } from "@/lib/types/github";
 
 export function useGitHubActionPresets(workspaceId: string | null) {
   const presets = useAppStore((state) =>
@@ -18,22 +18,26 @@ export function useGitHubActionPresets(workspaceId: string | null) {
   );
   const setPresets = useAppStore((state) => state.setActionPresets);
   const setLoading = useAppStore((state) => state.setActionPresetsLoading);
+  // Tracks which workspaces we've already attempted a fetch for so a
+  // network failure does not cause the effect to re-fire indefinitely.
+  const attemptedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!workspaceId) return;
-    if (presets || loading) return;
+    if (presets || attemptedRef.current.has(workspaceId)) return;
+    attemptedRef.current.add(workspaceId);
     setLoading(workspaceId, true);
     fetchGitHubActionPresets(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (response) setPresets(workspaceId, response);
       })
       .catch(() => {
-        // Leave presets unset on failure; consumers can fall back to defaults.
+        // Leave presets unset on failure; consumers fall back to defaults.
       })
       .finally(() => {
         setLoading(workspaceId, false);
       });
-  }, [workspaceId, presets, loading, setPresets, setLoading]);
+  }, [workspaceId, presets, setPresets, setLoading]);
 
   const save = useCallback(
     async (payload: Omit<UpdateGitHubActionPresetsRequest, "workspace_id">) => {
@@ -52,16 +56,10 @@ export function useGitHubActionPresets(workspaceId: string | null) {
     return response;
   }, [workspaceId, setPresets]);
 
-  const savePR = useCallback(async (pr: GitHubActionPreset[]) => save({ pr }), [save]);
-
-  const saveIssue = useCallback(async (issue: GitHubActionPreset[]) => save({ issue }), [save]);
-
   return {
     presets,
     loading,
     save,
-    savePR,
-    saveIssue,
     reset,
   };
 }

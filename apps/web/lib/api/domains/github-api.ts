@@ -324,7 +324,7 @@ export async function updateGitHubActionPresets(
 ) {
   return fetchJson<GitHubActionPresets>("/api/v1/github/action-presets", {
     ...options,
-    init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
   });
 }
 
@@ -332,6 +332,6 @@ export async function resetGitHubActionPresets(workspaceId: string, options?: Ap
   const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<GitHubActionPresets>(`/api/v1/github/action-presets/reset?${query.toString()}`, {
     ...options,
-    init: { method: "POST", ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST" },
   });
 }

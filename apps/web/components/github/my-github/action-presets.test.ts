@@ -8,7 +8,7 @@ import {
   resolvePRPresets,
   toTaskPreset,
 } from "./action-presets";
-import { IconSparkles } from "@tabler/icons-react";
+import { IconEye, IconSparkles } from "@tabler/icons-react";
 
 describe("interpolatePromptTemplate", () => {
   it("replaces {url} and {title} placeholders", () => {
@@ -36,8 +36,7 @@ describe("interpolatePromptTemplate", () => {
 
 describe("iconForPresetKey", () => {
   it("returns the mapped Tabler icon for a known key", () => {
-    const icon = iconForPresetKey("eye");
-    expect(icon).toBeTypeOf("object");
+    expect(iconForPresetKey("eye")).toBe(IconEye);
   });
 
   it("falls back to sparkle for unknown or missing keys", () => {
