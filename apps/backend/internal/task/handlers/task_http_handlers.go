@@ -324,9 +324,14 @@ type httpTaskRepositoryInput struct {
 	// NewBranchName from BaseBranch before the task is persisted.
 	// ConfirmDiscard must be true if the working tree is dirty; otherwise
 	// the request is rejected with 409 + the dirty file list.
-	FreshBranch    bool   `json:"fresh_branch,omitempty"`
-	NewBranchName  string `json:"new_branch_name,omitempty"`
-	ConfirmDiscard bool   `json:"confirm_discard,omitempty"`
+	// ConsentedDirtyFiles is the dirty-file list the UI showed the user;
+	// the backend rejects with 409 if the live dirty set has any path
+	// that wasn't on this list, protecting against silent loss of files
+	// that became dirty between preflight and execution.
+	FreshBranch         bool     `json:"fresh_branch,omitempty"`
+	NewBranchName       string   `json:"new_branch_name,omitempty"`
+	ConfirmDiscard      bool     `json:"confirm_discard,omitempty"`
+	ConsentedDirtyFiles []string `json:"consented_dirty_files,omitempty"`
 }
 
 type httpCreateTaskRequest struct {
@@ -486,10 +491,11 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, inputs []httpTaskReposit
 			return false
 		}
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
-			RepoPath:       repoPath,
-			BaseBranch:     raw.BaseBranch,
-			NewBranch:      raw.NewBranchName,
-			ConfirmDiscard: raw.ConfirmDiscard,
+			RepoPath:            repoPath,
+			BaseBranch:          raw.BaseBranch,
+			NewBranch:           raw.NewBranchName,
+			ConfirmDiscard:      raw.ConfirmDiscard,
+			ConsentedDirtyFiles: raw.ConsentedDirtyFiles,
 		})
 		if err != nil {
 			h.respondFreshBranchError(c, err)

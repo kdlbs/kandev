@@ -56,6 +56,7 @@ export async function createTask(
       fresh_branch?: boolean;
       new_branch_name?: string;
       confirm_discard?: boolean;
+      consented_dirty_files?: string[];
     }>;
     state?: Task["state"];
     start_agent?: boolean;

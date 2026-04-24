@@ -69,10 +69,11 @@ func TestPerformFreshBranch_DirtyWithConfirm(t *testing.T) {
 
 	svc := newDiscoveryService(t, root)
 	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
-		RepoPath:       repoPath,
-		BaseBranch:     "main",
-		NewBranch:      "feature/x",
-		ConfirmDiscard: true,
+		RepoPath:            repoPath,
+		BaseBranch:          "main",
+		NewBranch:           "feature/x",
+		ConfirmDiscard:      true,
+		ConsentedDirtyFiles: []string{"untracked.txt"},
 	})
 	if err != nil {
 		t.Fatalf("PerformFreshBranch error: %v", err)
@@ -82,6 +83,88 @@ func TestPerformFreshBranch_DirtyWithConfirm(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoPath, "untracked.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected dirty file removed, got err=%v", err)
+	}
+}
+
+func TestPerformFreshBranch_DirtyWithExtraUnconsented(t *testing.T) {
+	isolateGitEnvForTest(t)
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	initRealGitRepo(t, repoPath)
+	writeDirty(t, repoPath, "consented.txt", "hi")
+	writeDirty(t, repoPath, "extra.txt", "hi")
+
+	svc := newDiscoveryService(t, root)
+	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
+		RepoPath:            repoPath,
+		BaseBranch:          "main",
+		NewBranch:           "feature/x",
+		ConfirmDiscard:      true,
+		ConsentedDirtyFiles: []string{"consented.txt"},
+	})
+	var dirty *ErrDirtyWorkingTree
+	if !errors.As(err, &dirty) {
+		t.Fatalf("expected ErrDirtyWorkingTree when extras present, got %v", err)
+	}
+	if len(dirty.DirtyFiles) != 2 {
+		t.Fatalf("expected 2 dirty files in error, got %d", len(dirty.DirtyFiles))
+	}
+	// Repo must NOT have been mutated when consent didn't cover all files.
+	if got := readCurrentBranch(t, repoPath); got != "main" {
+		t.Fatalf("expected branch unchanged, got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "extra.txt")); err != nil {
+		t.Fatalf("expected extra.txt preserved, got err=%v", err)
+	}
+}
+
+func TestPerformFreshBranch_RefusesExistingBranch(t *testing.T) {
+	isolateGitEnvForTest(t)
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	initRealGitRepo(t, repoPath)
+	// Create an existing branch with a unique commit.
+	env := isolatedGitEnv()
+	for _, args := range [][]string{
+		{"checkout", "-b", "feature/existing"},
+		{"commit", "--allow-empty", "-m", "important work"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoPath
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	svc := newDiscoveryService(t, root)
+	err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
+		RepoPath:   repoPath,
+		BaseBranch: "main",
+		NewBranch:  "feature/existing",
+	})
+	if err == nil {
+		t.Fatal("expected PerformFreshBranch to refuse overwriting an existing branch")
+	}
+}
+
+func TestPerformFreshBranch_RejectsFlagLikeRefs(t *testing.T) {
+	isolateGitEnvForTest(t)
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	initRealGitRepo(t, repoPath)
+
+	svc := newDiscoveryService(t, root)
+	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
+		RepoPath: repoPath, BaseBranch: "main", NewBranch: "--upload-pack=evil",
+	}); err == nil {
+		t.Fatal("expected rejection for ref starting with --")
+	}
+	if err := svc.PerformFreshBranch(context.Background(), FreshBranchRequest{
+		RepoPath: repoPath, BaseBranch: "-flag", NewBranch: "feature/x",
+	}); err == nil {
+		t.Fatal("expected rejection for ref starting with -")
 	}
 }
 

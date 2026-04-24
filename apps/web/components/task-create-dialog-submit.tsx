@@ -2,7 +2,7 @@
 
 import { useCallback, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { createTask, updateTask } from "@/lib/api";
+import { updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
@@ -17,7 +17,6 @@ import {
   buildRepositoriesPayload,
   validateCreateInputs,
   toMessageAttachments,
-  type CreateTaskParams,
 } from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
@@ -72,15 +71,18 @@ export function useTaskSubmitHandlers({
 
   const isFreshBranchActive =
     freshBranchEnabled && isLocalExecutor && !useGitHubUrl && repositoryLocalPath !== "";
-  const { pendingDiscard, ensureFreshBranchConsent } = useFreshBranchConsent({
-    isFreshBranchActive,
-    workspaceId,
-    repositoryLocalPath,
-    toast,
-  });
+  const { pendingDiscard, ensureFreshBranchConsent, createTaskWithFreshBranchRetry } =
+    useFreshBranchConsent({
+      isFreshBranchActive,
+      workspaceId,
+      repositoryLocalPath,
+      toast,
+    });
 
-  const buildFreshBranchPayload = (confirmDiscard: boolean) =>
-    isFreshBranchActive ? { newBranchName, confirmDiscard } : undefined;
+  const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
+    isFreshBranchActive
+      ? { newBranchName, confirmDiscard: true, consentedDirtyFiles }
+      : undefined;
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
@@ -107,7 +109,7 @@ export function useTaskSubmitHandlers({
   ]);
 
   const getRepositoriesPayload = useCallback(
-    (confirmDiscard = false) =>
+    (consentedDirtyFiles: string[] = []) =>
       buildRepositoriesPayload({
         useGitHubUrl,
         githubUrl,
@@ -115,7 +117,7 @@ export function useTaskSubmitHandlers({
         githubPrHeadBranch,
         repositoryId,
         selectedLocalRepo,
-        freshBranch: buildFreshBranchPayload(confirmDiscard),
+        freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       }),
     // buildFreshBranchPayload is intentionally a closure over current scope; lint exception kept narrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -265,18 +267,18 @@ export function useTaskSubmitHandlers({
     async (
       trimmedTitle: string,
       trimmedDescription: string,
-      repositoriesPayload: CreateTaskParams["repositories"],
+      consented: string[],
       planMode?: boolean,
       attachments?: ReturnType<typeof toMessageAttachments>,
     ) => {
       if (!workspaceId || !effectiveWorkflowId) return;
-      const taskResponse = await createTask(
+      const buildPayload = (c: string[]) =>
         buildCreateTaskPayload({
           workspaceId,
           effectiveWorkflowId,
           trimmedTitle,
           trimmedDescription,
-          repositoriesPayload,
+          repositoriesPayload: getRepositoriesPayload(c),
           agentProfileId,
           executorId,
           executorProfileId,
@@ -284,8 +286,9 @@ export function useTaskSubmitHandlers({
           planMode,
           attachments,
           parentId: parentTaskId,
-        }),
-      );
+        });
+      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consented);
+      if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
       clearDraft();
@@ -316,27 +319,30 @@ export function useTaskSubmitHandlers({
       setActiveDocument,
       setPlanMode,
       router,
+      getRepositoriesPayload,
+      createTaskWithFreshBranchRetry,
     ],
   );
 
   const handleCreatePlanMode = useCallback(
-    async (trimmedTitle: string, repositoriesPayload: CreateTaskParams["repositories"]) => {
+    async (trimmedTitle: string, consented: string[]) => {
       if (!workspaceId || !effectiveWorkflowId) return;
-      const taskResponse = await createTask(
+      const buildPayload = (c: string[]) =>
         buildCreateTaskPayload({
           workspaceId,
           effectiveWorkflowId,
           trimmedTitle,
           trimmedDescription: "",
-          repositoriesPayload,
+          repositoriesPayload: getRepositoriesPayload(c),
           agentProfileId,
           executorId,
           executorProfileId,
           withAgent: false,
           planMode: true,
           parentId: parentTaskId,
-        }),
-      );
+        });
+      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consented);
+      if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
       clearDraft();
@@ -364,6 +370,8 @@ export function useTaskSubmitHandlers({
       setActiveDocument,
       setPlanMode,
       router,
+      getRepositoriesPayload,
+      createTaskWithFreshBranchRetry,
     ],
   );
 
@@ -428,13 +436,7 @@ export function useTaskSubmitHandlers({
           return;
         const consent = await ensureFreshBranchConsent();
         if (consent === null) return;
-        await performCreateWithAgent(
-          trimmedTitle,
-          trimmedDescription,
-          getRepositoriesPayload(consent),
-          true,
-          attachments,
-        );
+        await performCreateWithAgent(trimmedTitle, trimmedDescription, consent, true, attachments);
       }
     } catch (error) {
       toast({
@@ -455,7 +457,6 @@ export function useTaskSubmitHandlers({
     selectedLocalRepo,
     githubUrl,
     agentProfileId,
-    getRepositoriesPayload,
     ensureFreshBranchConsent,
     performCreateWithAgent,
     toast,
@@ -482,19 +483,18 @@ export function useTaskSubmitHandlers({
       return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
-    const repositoriesPayload = getRepositoriesPayload(consent);
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
         await performCreateWithAgent(
           trimmedTitle,
           trimmedDescription,
-          repositoriesPayload,
+          consent,
           undefined,
           attachments,
         );
       } else {
-        await handleCreatePlanMode(trimmedTitle, repositoriesPayload);
+        await handleCreatePlanMode(trimmedTitle, consent);
       }
     } catch (error) {
       toast({
@@ -514,7 +514,6 @@ export function useTaskSubmitHandlers({
     githubUrl,
     agentProfileId,
     isPassthroughProfile,
-    getRepositoriesPayload,
     ensureFreshBranchConsent,
     performCreateWithAgent,
     handleCreatePlanMode,
@@ -545,19 +544,23 @@ export function useTaskSubmitHandlers({
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
-      const payload = buildCreateTaskPayload({
-        workspaceId,
-        effectiveWorkflowId,
-        trimmedTitle,
-        trimmedDescription,
-        repositoriesPayload: getRepositoriesPayload(consent),
-        agentProfileId,
-        executorId,
-        executorProfileId,
-        withAgent: false,
-      });
-      payload.workflow_step_id = effectiveDefaultStepId;
-      const taskResponse = await createTask(payload);
+      const buildPayload = (c: string[]) => {
+        const p = buildCreateTaskPayload({
+          workspaceId,
+          effectiveWorkflowId,
+          trimmedTitle,
+          trimmedDescription,
+          repositoriesPayload: getRepositoriesPayload(c),
+          agentProfileId,
+          executorId,
+          executorProfileId,
+          withAgent: false,
+        });
+        p.workflow_step_id = effectiveDefaultStepId;
+        return p;
+      };
+      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
+      if (!taskResponse) return;
       onSuccess?.(taskResponse, "create");
       clearDraft();
       onOpenChange(false);
@@ -583,6 +586,7 @@ export function useTaskSubmitHandlers({
     executorProfileId,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
+    createTaskWithFreshBranchRetry,
     onSuccess,
     onOpenChange,
     clearDraft,

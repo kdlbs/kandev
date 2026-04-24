@@ -202,32 +202,57 @@ func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
 	if repoPath == "" {
 		return "", fmt.Errorf("repository path is required")
 	}
-	cleaned := filepath.Clean(repoPath)
-	absPath, err := filepath.Abs(cleaned)
+	roots := s.discoveryRoots()
+	abs, err := filepath.Abs(filepath.Clean(repoPath))
 	if err != nil {
 		return "", fmt.Errorf("invalid repository path: %w", err)
 	}
-	roots := s.discoveryRoots()
-	if !isPathAllowed(absPath, roots) {
-		return "", ErrPathNotAllowed
-	}
-	// Resolve symlinks then re-validate so a symlink within a root cannot
-	// escape outside the allowed roots.
-	resolved, err := filepath.EvalSymlinks(absPath)
+	safe, err := pathWithinRoots(abs, roots)
 	if err != nil {
 		return "", err
 	}
-	if !isPathAllowed(resolved, roots) {
-		return "", ErrPathNotAllowed
+	// Resolve symlinks then re-validate so a symlink within a root cannot
+	// escape outside the allowed roots.
+	resolved, err := filepath.EvalSymlinks(safe)
+	if err != nil {
+		return "", err
 	}
-	info, err := os.Stat(resolved)
+	resolvedSafe, err := pathWithinRoots(filepath.Clean(resolved), roots)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolvedSafe)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("repository path is not a directory")
 	}
-	return resolved, nil
+	return resolvedSafe, nil
+}
+
+// pathWithinRoots returns abs only when it sits inside one of the allowed
+// roots after resolving relative segments. The returned string is the
+// trusted, validated path; callers should never use the original input for
+// subsequent file operations.
+func pathWithinRoots(abs string, roots []string) (string, error) {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		rel, err := filepath.Rel(root, abs)
+		if err != nil {
+			continue
+		}
+		if rel == "." {
+			return abs, nil
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		return abs, nil
+	}
+	return "", ErrPathNotAllowed
 }
 
 func (s *Service) discoveryRoots() []string {

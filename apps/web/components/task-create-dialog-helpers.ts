@@ -160,7 +160,7 @@ export function buildRepositoriesPayload(opts: {
   githubPrHeadBranch: string | null;
   repositoryId: string;
   selectedLocalRepo: LocalRepository | null;
-  freshBranch?: { newBranchName: string; confirmDiscard: boolean };
+  freshBranch?: { newBranchName: string; confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
   if (opts.useGitHubUrl && opts.githubUrl) {
     return [
@@ -177,6 +177,7 @@ export function buildRepositoriesPayload(opts: {
         fresh_branch: true,
         new_branch_name: opts.freshBranch.newBranchName,
         confirm_discard: opts.freshBranch.confirmDiscard,
+        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
       }
     : {};
   if (opts.repositoryId) {
