@@ -92,6 +92,25 @@ type PRStatus struct {
 	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
 	ReviewCount        int    `json:"review_count"`
 	PendingReviewCount int    `json:"pending_review_count"`
+	ChecksTotal        int    `json:"checks_total"`
+	ChecksPassing      int    `json:"checks_passing"`
+}
+
+// PRSearchPage is a paginated slice of PR search results, with the total
+// count reported by the GitHub Search API (capped at 1000).
+type PRSearchPage struct {
+	PRs        []*PR `json:"prs"`
+	TotalCount int   `json:"total_count"`
+	Page       int   `json:"page"`
+	PerPage    int   `json:"per_page"`
+}
+
+// IssueSearchPage is a paginated slice of Issue search results.
+type IssueSearchPage struct {
+	Issues     []*Issue `json:"issues"`
+	TotalCount int      `json:"total_count"`
+	Page       int      `json:"page"`
+	PerPage    int      `json:"per_page"`
 }
 
 // PRWatch tracks active PR monitoring (session → PR).

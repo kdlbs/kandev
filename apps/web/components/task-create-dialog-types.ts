@@ -30,6 +30,9 @@ export type TaskCreateDialogInitialValues = {
   repositoryId?: string;
   branch?: string;
   state?: Task["state"];
+  /** When set, opens the dialog in GitHub URL mode pre-filled with this value
+   * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */
+  githubUrl?: string;
 };
 
 export type StoreSelections = {

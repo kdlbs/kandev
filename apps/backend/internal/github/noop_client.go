@@ -85,6 +85,18 @@ func (c *NoopClient) ListIssues(context.Context, string, string) ([]*Issue, erro
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListIssuesPaged(context.Context, string, string, int, int) (*IssueSearchPage, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SearchPRs(context.Context, string, string) ([]*PR, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SearchPRsPaged(context.Context, string, string, int, int) (*PRSearchPage, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) GetIssueState(context.Context, string, string, int) (string, error) {
 	return "", ErrNoClient
 }

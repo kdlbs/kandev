@@ -89,3 +89,35 @@ func TestShouldDeleteIssueTask(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildIssueFilter_IncludesStateOpen(t *testing.T) {
+	svc := &Service{}
+	tests := []struct {
+		name  string
+		watch *IssueWatch
+		want  string
+	}{
+		{
+			name:  "no labels",
+			watch: &IssueWatch{},
+			want:  "state:open",
+		},
+		{
+			name:  "single label",
+			watch: &IssueWatch{Labels: []string{"bug"}},
+			want:  "state:open label:bug",
+		},
+		{
+			name:  "label with space is quoted",
+			watch: &IssueWatch{Labels: []string{"good first issue"}},
+			want:  `state:open label:"good first issue"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := svc.buildIssueFilter(tt.watch); got != tt.want {
+				t.Errorf("buildIssueFilter() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
