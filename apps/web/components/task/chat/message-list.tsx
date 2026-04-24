@@ -30,7 +30,7 @@ function resolveStrategy(): string {
 }
 
 export const MessageList = memo(function MessageList(props: MessageListProps) {
-  const key = useMemo(resolveStrategy, []);
+  const key = useMemo(() => resolveStrategy(), []);
   const Renderer = strategies[key] ?? NativeMessageList;
   return <Renderer {...props} />;
 });
