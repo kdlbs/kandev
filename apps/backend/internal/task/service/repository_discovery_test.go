@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -200,6 +201,56 @@ func TestResolveGitDir(t *testing.T) {
 	expected := filepath.Clean(filepath.Join(altRepo, relPath))
 	if resolved != expected {
 		t.Fatalf("expected git dir %q, got %q", expected, resolved)
+	}
+}
+
+// TestResolveGitDirWithin_RejectsEscapedGitdir exercises the security-critical
+// branch of resolveGitDirWithin: a repo whose `.git` is a file pointer
+// (worktree style) whose embedded `gitdir:` points outside any allowed root.
+// The function must return ErrPathNotAllowed; if the bounds check is ever
+// removed, callers like readGitCurrentBranch would read arbitrary files on
+// disk.
+func TestResolveGitDirWithin_RejectsEscapedGitdir(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	gitFile := filepath.Join(repoPath, ".git")
+	if err := os.WriteFile(gitFile, []byte("gitdir: "+outside+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+
+	if _, err := resolveGitDirWithin(repoPath, []string{root}); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("expected ErrPathNotAllowed for gitdir outside roots, got %v", err)
+	}
+}
+
+// TestResolveGitDirWithin_AllowsRepoLocalGitFile covers the legitimate
+// worktree case: `.git` file points to a sibling path that's still inside the
+// repo (e.g. main repo's `.git/worktrees/<name>`).
+func TestResolveGitDirWithin_AllowsRepoLocalGitFile(t *testing.T) {
+	repoPath := t.TempDir()
+	worktreesDir := filepath.Join(repoPath, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+	gitFile := filepath.Join(repoPath, "wt-clone", ".git")
+	if err := os.MkdirAll(filepath.Dir(gitFile), 0o755); err != nil {
+		t.Fatalf("mkdir wt-clone: %v", err)
+	}
+	if err := os.WriteFile(gitFile, []byte("gitdir: "+worktreesDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+
+	got, err := resolveGitDirWithin(filepath.Dir(gitFile), []string{repoPath})
+	if err != nil {
+		t.Fatalf("expected legitimate worktree to resolve, got %v", err)
+	}
+	if got != worktreesDir {
+		t.Fatalf("expected gitdir %q, got %q", worktreesDir, got)
 	}
 }
 
