@@ -96,7 +96,9 @@ export function tryRestoreLayout(
       const sessionLayout = getSessionLayout(currentSessionId);
       if (sessionLayout) {
         const sanitized = sanitizeLayout(sessionLayout, validComponents);
-        if (!sanitized) return false;
+        if (!sanitized) {
+          return false;
+        }
         api.fromJSON(sanitized as SerializedDockview);
         applyFixupsWithMaximize(api, currentSessionId);
         return true;

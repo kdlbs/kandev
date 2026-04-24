@@ -411,11 +411,6 @@ function useSessionSwitchCleanup(effectiveSessionId: string | null) {
       // the store (e.g., after a COMPLETED state change removed it).
       const effectiveOldTask = oldTask ?? prevTaskRef.current;
       if (effectiveOldTask && newTask && effectiveOldTask === newTask) {
-        console.log("[session-switch] same-task switch, skipping layout rebuild", {
-          oldSessionId: oldSessionId?.slice(0, 8),
-          newSessionId: effectiveSessionId.slice(0, 8),
-          taskId: newTask.slice(0, 8),
-        });
         prevTaskRef.current = newTask;
         return;
       }

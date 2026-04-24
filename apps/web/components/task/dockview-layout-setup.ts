@@ -63,8 +63,8 @@ export function setupLayoutPersistence(
     saveTimerRef.current = setTimeout(() => {
       try {
         const json = api.toJSON();
-        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
         const sid = sessionIdRef.current;
+        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
         if (sid) {
           setSessionLayout(sid, json);
         }

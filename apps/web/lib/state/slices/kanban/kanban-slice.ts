@@ -42,16 +42,18 @@ export const createKanbanSlice: StateCreator<
       }
       draft.workflows.items = reordered;
     }),
-  setActiveTask: (taskId) =>
+  setActiveTask: (taskId) => {
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = null;
-    }),
-  setActiveSession: (taskId, sessionId) =>
+    });
+  },
+  setActiveSession: (taskId, sessionId) => {
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = sessionId;
-    }),
+    });
+  },
   clearActiveSession: () =>
     set((draft) => {
       draft.tasks.activeSessionId = null;

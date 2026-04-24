@@ -166,6 +166,8 @@ type sessionExecutorStore interface {
 	// Session listing + delete
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+	// Workspace
+	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
