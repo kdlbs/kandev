@@ -31,6 +31,22 @@ export async function fetchGitHubStatus(options?: ApiRequestOptions) {
   return fetchJson<GitHubStatusResponse>("/api/v1/github/status", options);
 }
 
+// Token configuration
+export async function configureGitHubToken(token: string) {
+  return fetchJson<{ configured: boolean }>("/api/v1/github/token", {
+    init: {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    },
+  });
+}
+
+export async function clearGitHubToken() {
+  return fetchJson<{ cleared: boolean }>("/api/v1/github/token", {
+    init: { method: "DELETE" },
+  });
+}
+
 // Task PR associations
 export async function listTaskPRs(taskIds: string[], options?: ApiRequestOptions) {
   const query = new URLSearchParams();

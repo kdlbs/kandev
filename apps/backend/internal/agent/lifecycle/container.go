@@ -22,7 +22,7 @@ import (
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
 	AgentConfig     agents.Agent
-	WorkspacePath   string
+	WorkspacePath   string // If empty, workspace is not mounted (will clone inside container)
 	TaskID          string
 	TaskDescription string
 	Model           string
@@ -33,6 +33,7 @@ type ContainerConfig struct {
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
 	McpMode         string
+	PrepareScript   string // Script to run inside container before agent starts (e.g., clone repo)
 	BootstrapNonce  string // one-time nonce for agentctl handshake (set internally)
 }
 
@@ -279,6 +280,11 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	containerName := fmt.Sprintf("kandev-agent-%s", config.InstanceID[:8])
 
+	// If a prepare script is provided, pass it as env var for the entrypoint to run
+	if config.PrepareScript != "" {
+		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
+	}
+
 	containerCfg := docker.ContainerConfig{
 		Name:        containerName,
 		Image:       imageName,
@@ -381,12 +387,30 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", rt.Protocol))
 	}
 
-	// Configure Git to trust the workspace directory
+	// Configure Git settings via environment
+	// - Trust all directories (for mounted workspaces)
+	// - URL rewriting: SSH → HTTPS for GitHub (enables token auth)
+	// - Credential helper for GitHub HTTPS auth (uses GH_TOKEN env var)
+	gitConfigCount := 3
 	env = append(env,
-		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=safe.directory",
 		"GIT_CONFIG_VALUE_0=*",
+		"GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_1=git@github.com:",
+		"GIT_CONFIG_KEY_2=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_2=ssh://git@github.com/",
 	)
+
+	// If GitHub token is provided, add credential helper
+	// Use ${GH_TOKEN:-${GITHUB_TOKEN}} to support either env var being set
+	if config.Credentials["GH_TOKEN"] != "" || config.Credentials["GITHUB_TOKEN"] != "" {
+		env = append(env,
+			"GIT_CONFIG_KEY_3=credential.https://github.com.helper",
+			`GIT_CONFIG_VALUE_3=!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-${GITHUB_TOKEN}}"; }; f`,
+		)
+		gitConfigCount = 4
+	}
+	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", gitConfigCount))
 
 	// Inject credentials from the provided credentials map
 	for k, v := range config.Credentials {

@@ -28,6 +28,18 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	return ok && cm
 }
 
+// isContainerizedExecutor returns true for executor types that run in containers.
+// These executors need GitHub token injection for git operations since they don't
+// have access to the host's git credentials.
+func isContainerizedExecutor(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
+		return true
+	default:
+		return false
+	}
+}
+
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
 // On error it marks both the session and task as FAILED.
 // On success it calls onSuccess with a non-cancellable context derived from ctx.
@@ -517,6 +529,41 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
+	// For containerized executors, resolve credentials in this order:
+	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
+	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
+	// 3. Global GITHUB_TOKEN secret (fallback)
+	// 4. Auto-extract from local gh CLI (final fallback)
+	if isContainerizedExecutor(execConfig.ExecutorType) {
+		e.applyContainerCredentials(ctx, req, metadata)
+	}
+
+	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
+	if err != nil {
+		return nil, execConfig, err
+	}
+
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
+		req.McpMode = McpModeConfig
+	}
+
+	if len(metadata) > 0 {
+		req.Metadata = metadata
+	}
+
+	return req, execConfig, nil
+}
+
+// applyContainerCredentials resolves and injects credentials for containerized executors.
+func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
+	e.resolveRemoteCredentials(ctx, req, metadata)
+	e.injectGitHubToken(ctx, req)        // Fallback to global secret
+	e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
+}
+
+// applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
+func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryPath = repoInfo.RepositoryPath
@@ -541,21 +588,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
-			return nil, execConfig, ErrNoCloneURL
+			return metadata, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}
 
-	// Activate config-mode MCP tools when config_mode is set in session metadata.
-	if isConfigModeSession(session) {
-		req.McpMode = McpModeConfig
-	}
-
-	if len(metadata) > 0 {
-		req.Metadata = metadata
-	}
-
-	return req, execConfig, nil
+	return metadata, nil
 }
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session

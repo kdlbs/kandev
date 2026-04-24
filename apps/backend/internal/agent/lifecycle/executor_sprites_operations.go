@@ -149,6 +149,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		WithProvider(scriptengine.WorkspaceProvider(spritesWorkspacePath)).
 		WithProvider(scriptengine.AgentctlProvider(r.agentctlPort, spritesWorkspacePath)).
 		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
+		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
 		WithProvider(scriptengine.AgentInstallProvider(installScripts)).
 		WithProvider(scriptengine.RepositoryProvider(
 			req.Metadata,

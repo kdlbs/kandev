@@ -12,6 +12,9 @@ export type GitHubStatus = {
   authenticated: boolean;
   username: string;
   auth_method: GitHubAuthMethod;
+  token_configured: boolean;
+  token_secret_id?: string;
+  required_scopes: string[];
   diagnostics?: AuthDiagnostics;
 };
 

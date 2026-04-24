@@ -28,6 +28,8 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github")
 	api.GET("/status", c.httpGetStatus)
+	api.POST("/token", c.httpConfigureToken)
+	api.DELETE("/token", c.httpClearToken)
 
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
@@ -76,6 +78,34 @@ func (c *Controller) httpGetStatus(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, status)
+}
+
+func (c *Controller) httpConfigureToken(ctx *gin.Context) {
+	var req ConfigureTokenRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: token is required"})
+		return
+	}
+
+	if err := c.service.ConfigureToken(ctx.Request.Context(), req.Token); err != nil {
+		// Check if it's a validation error (invalid token)
+		if strings.Contains(err.Error(), "invalid token") {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"configured": true})
+}
+
+func (c *Controller) httpClearToken(ctx *gin.Context) {
+	if err := c.service.ClearToken(ctx.Request.Context()); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"cleared": true})
 }
 
 func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
