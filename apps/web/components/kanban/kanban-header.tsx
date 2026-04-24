@@ -16,7 +16,6 @@ import {
   IconBrandGithub,
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
-import { RefreshReviewsButton } from "../github/refresh-reviews-button";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
@@ -28,9 +27,9 @@ import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -57,16 +56,12 @@ function GitHubTopbarButton() {
   const { status } = useGitHubStatus();
   if (!status?.authenticated) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="outline" size="icon" asChild className="cursor-pointer">
-          <Link href="/github">
-            <IconBrandGithub className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>My GitHub — PRs & issues</TooltipContent>
-    </Tooltip>
+    <Button variant="outline" asChild className="cursor-pointer gap-2">
+      <Link href="/github">
+        <IconBrandGithub className="h-4 w-4" />
+        <span>GitHub</span>
+      </Link>
+    </Button>
   );
 }
 
@@ -144,9 +139,12 @@ function TabletHeader({
 }) {
   return (
     <header className="flex items-center justify-between p-4 pb-3 gap-3">
-      <Link href="/" className="text-xl font-bold hover:opacity-80 flex-shrink-0">
-        KanDev
-      </Link>
+      <div className="flex items-center gap-4 flex-shrink-0">
+        <Link href="/" className="text-xl font-bold hover:opacity-80">
+          KanDev
+        </Link>
+        <GitHubTopbarButton />
+      </div>
       {onSearchChange && (
         <TaskSearchInput
           value={searchQuery}
@@ -174,7 +172,6 @@ function TabletHeader({
             className="h-8"
             itemClassName="h-8 w-8"
           />
-          <GitHubTopbarButton />
           {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
           <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         </TooltipProvider>
@@ -219,10 +216,19 @@ function DesktopHeader({
 }) {
   return (
     <header className="relative flex items-center justify-between p-4 pb-3">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-5">
         <Link href="/" className="text-2xl font-bold hover:opacity-80">
           KanDev
         </Link>
+        <div className="flex items-center gap-3">
+          <GitHubTopbarButton />
+          <Button variant="outline" asChild className="cursor-pointer gap-2">
+            <Link href="/stats">
+              <IconChartBar className="h-4 w-4" />
+              <span>Stats</span>
+            </Link>
+          </Button>
+        </div>
       </div>
       {onSearchChange && (
         <div className="absolute left-1/2 -translate-x-1/2">
@@ -243,19 +249,8 @@ function DesktopHeader({
         <QuickChatButton workspaceId={workspaceId} />
         <TooltipProvider>
           <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" asChild className="cursor-pointer">
-                <Link href="/stats">
-                  <IconChartBar className="h-4 w-4" />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Stats</TooltipContent>
-          </Tooltip>
-          <GitHubTopbarButton />
+
         </TooltipProvider>
-        <RefreshReviewsButton />
         {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
         <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         <KanbanDisplayDropdown />

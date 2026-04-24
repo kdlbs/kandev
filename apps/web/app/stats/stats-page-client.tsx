@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { IconArrowLeft } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
+import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { StatsResponse } from "@/lib/types/http";
 import { useMemo, useState } from "react";
@@ -81,13 +80,7 @@ function getRangeLabel(range: RangeKey): string {
 function StatsEmptyState({ message }: { message: string }) {
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <header className="flex items-center gap-3 p-4 pb-3">
-        <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">
-          KanDev
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="text-muted-foreground">Statistics</span>
-      </header>
+      <PageTopbar title="Statistics" />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-muted-foreground">{message}</p>
       </div>
@@ -105,56 +98,42 @@ type StatsHeaderProps = {
 
 function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHeaderProps) {
   return (
-    <header className="flex items-center gap-3 p-4 pb-3 shrink-0">
-      <Button variant="ghost" size="sm" asChild className="cursor-pointer">
-        <Link href="/">
-          <IconArrowLeft className="h-4 w-4" />
-          Back
-        </Link>
-      </Button>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/" className="font-semibold text-foreground hover:opacity-80 cursor-pointer">
-          KanDev
-        </Link>
-        <span>›</span>
-        <span>Statistics</span>
-        <span className="text-muted-foreground/60">·</span>
-        <span className="font-mono text-xs">
-          {global.total_tasks} tasks · {global.total_sessions} sessions ·{" "}
-          {formatDuration(global.total_duration_ms)}
-        </span>
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        <ToggleGroup
-          type="single"
-          value={range}
-          onValueChange={(v) => {
-            if (v) onRangeChange(v as RangeKey);
-          }}
-          variant="outline"
-          className="h-7"
-        >
-          {(["week", "month", "all"] as RangeKey[]).map((key) => (
-            <ToggleGroupItem
-              key={key}
-              value={key}
-              className="cursor-pointer h-7 px-2 font-mono text-[11px] data-[state=on]:bg-muted data-[state=on]:text-foreground"
-            >
-              {getRangeLabel(key)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 font-mono text-[11px] cursor-pointer"
-          onClick={onCopy}
-        >
-          {copied ? "Copied" : "Copy Stats"}
-        </Button>
-      </div>
-    </header>
+    <PageTopbar
+      title="Statistics"
+      subtitle={`${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`}
+      actions={
+        <>
+          <ToggleGroup
+            type="single"
+            value={range}
+            onValueChange={(v) => {
+              if (v) onRangeChange(v as RangeKey);
+            }}
+            variant="outline"
+            className="h-7"
+          >
+            {(["week", "month", "all"] as RangeKey[]).map((key) => (
+              <ToggleGroupItem
+                key={key}
+                value={key}
+                className="cursor-pointer h-7 px-2 text-xs data-[state=on]:bg-muted data-[state=on]:text-foreground"
+              >
+                {getRangeLabel(key)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs cursor-pointer"
+            onClick={onCopy}
+          >
+            {copied ? "Copied" : "Copy Stats"}
+          </Button>
+        </>
+      }
+    />
   );
 }
 
@@ -343,13 +322,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
   if (error)
     return (
       <div className="h-screen w-full flex flex-col bg-background">
-        <header className="flex items-center gap-3 p-4 pb-3">
-          <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">
-            KanDev
-          </Link>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-muted-foreground">Statistics</span>
-        </header>
+        <PageTopbar title="Statistics" />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-destructive">Error loading stats: {error}</p>
         </div>

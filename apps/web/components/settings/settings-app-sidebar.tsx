@@ -270,14 +270,12 @@ export function SettingsAppSidebar() {
 
   return (
     <Sidebar variant="inset">
-      <SidebarHeader>
+      <SidebarHeader className="h-16 justify-center">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/">
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">KanDev</span>
-                </div>
+                <span className="text-2xl font-bold">KanDev</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

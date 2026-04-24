@@ -11,7 +11,15 @@ import {
 import { IconEye, IconSparkles } from "@tabler/icons-react";
 
 describe("interpolatePromptTemplate", () => {
-  it("replaces {url} and {title} placeholders", () => {
+  it("replaces {{url}} and {{title}} placeholders", () => {
+    const out = interpolatePromptTemplate("Review {{url}} titled {{title}}", {
+      url: "https://gh/pr/1",
+      title: "Fix bug",
+    });
+    expect(out).toBe("Review https://gh/pr/1 titled Fix bug");
+  });
+
+  it("supports legacy single-brace {url} and {title}", () => {
     const out = interpolatePromptTemplate("Review {url} titled {title}", {
       url: "https://gh/pr/1",
       title: "Fix bug",
@@ -20,7 +28,7 @@ describe("interpolatePromptTemplate", () => {
   });
 
   it("leaves unknown placeholders intact", () => {
-    const out = interpolatePromptTemplate("See {url} and {unknown}", {
+    const out = interpolatePromptTemplate("See {{url}} and {unknown}", {
       url: "u",
       title: "t",
     });
@@ -67,7 +75,7 @@ describe("resolvePRPresets / resolveIssuePresets", () => {
           label: "Custom",
           hint: "h",
           icon: "eye",
-          prompt_template: "Do it on {url}",
+          prompt_template: "Do it on {{url}}",
         },
       ],
       issue: [],
@@ -86,7 +94,7 @@ describe("toTaskPreset", () => {
       label: "L",
       hint: "H",
       icon: "message",
-      prompt_template: "On {url} for {title}",
+      prompt_template: "On {{url}} for {{title}}",
     };
     const preset = toTaskPreset(stored);
     expect(preset.prompt({ url: "U", title: "T" })).toBe("On U for T");
