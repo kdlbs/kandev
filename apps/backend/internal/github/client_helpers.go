@@ -89,6 +89,7 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 		checks = []CheckRun{}
 	}
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
+	total, passing := countCheckResults(checks)
 	return &PRStatus{
 		PR:                 pr,
 		ReviewState:        reviewState,
@@ -96,7 +97,34 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 		MergeableState:     pr.MergeableState,
 		ReviewCount:        len(reviews),
 		PendingReviewCount: pendingReviewCount,
+		ChecksTotal:        total,
+		ChecksPassing:      passing,
 	}, nil
+}
+
+// countCheckResults returns (total, passing) counts using the same logic as
+// computeOverallCheckStatus: skipped/neutral and still-running checks are
+// excluded from the total so the X/Y badge communicates pass rate rather
+// than conflating in-flight checks with failures. The pending state is
+// carried separately via ChecksState.
+func countCheckResults(checks []CheckRun) (int, int) {
+	total, passing := 0, 0
+	for _, c := range checks {
+		if c.Status != checkStatusCompleted {
+			continue
+		}
+		switch c.Conclusion {
+		case checkConclusionSkipped, checkConclusionNeutral:
+			continue
+		case checkConclusionFail, checkConclusionTimedOut,
+			checkConclusionCancelled, checkConclusionActionRequired:
+			total++
+		default:
+			total++
+			passing++
+		}
+	}
+	return total, passing
 }
 
 // convertRawCheckRuns converts raw ghCheckRun structs into the domain CheckRun type.
@@ -304,18 +332,59 @@ func convertSearchItemToPR(
 	}
 }
 
+// clampSearchPage normalizes page and perPage to GitHub's Search API limits:
+// page >= 1, 1 <= perPage <= 100. Defaults: page=1, perPage=50.
+func clampSearchPage(page, perPage int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 50
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	return page, perPage
+}
+
+// hasTypeQualifier reports whether the query already pins the result type via
+// `type:pr`, `type:issue`, `is:pr`, or `is:issue` (case-insensitive).
+func hasTypeQualifier(query string) bool {
+	lower := strings.ToLower(query)
+	for _, tok := range strings.Fields(lower) {
+		switch tok {
+		case "type:pr", "type:issue", "is:pr", "is:issue":
+			return true
+		}
+	}
+	return false
+}
+
 // buildIssueSearchQuery assembles a GitHub search query for issues.
-// When customQuery is non-empty, it is used verbatim as the entire query.
-// Otherwise a query is built from optional filter qualifiers.
+// The `type:issue` qualifier is always injected (unless the caller already
+// pinned it) because `/search/issues` returns both PRs and issues otherwise.
 func buildIssueSearchQuery(filter, customQuery string) string {
+	return buildSearchQuery("type:issue", filter, customQuery)
+}
+
+// buildPRSearchQuery assembles a GitHub search query for pull requests.
+// The `type:pr` qualifier is always injected (unless the caller already pinned
+// it) because `/search/issues` returns both PRs and issues otherwise.
+func buildPRSearchQuery(filter, customQuery string) string {
+	return buildSearchQuery("type:pr", filter, customQuery)
+}
+
+func buildSearchQuery(typeQualifier, filter, customQuery string) string {
 	if customQuery != "" {
-		return customQuery
+		if hasTypeQualifier(customQuery) {
+			return customQuery
+		}
+		return typeQualifier + " " + customQuery
 	}
-	base := "type:issue state:open"
 	if filter != "" {
-		base += " " + filter
+		return typeQualifier + " " + filter
 	}
-	return base
+	return typeQualifier
 }
 
 // issueSearchItem is an issue item from the GitHub search API.

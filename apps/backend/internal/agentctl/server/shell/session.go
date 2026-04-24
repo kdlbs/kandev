@@ -79,7 +79,8 @@ type Status struct {
 	StartedAt time.Time
 }
 
-// detectShell returns the appropriate shell for the current OS
+// detectShell returns the appropriate shell for the current OS.
+// It validates that the shell exists before returning it.
 func detectShell() (string, []string) {
 	if runtime.GOOS == "windows" {
 		// Prefer PowerShell if available
@@ -93,8 +94,12 @@ func detectShell() (string, []string) {
 	}
 
 	// Unix-like systems (Linux, macOS)
+	// Check $SHELL but only use it if the shell actually exists
+	// (host's $SHELL may not be installed in Docker containers)
 	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell, []string{"-l"} // Login shell
+		if _, err := exec.LookPath(shell); err == nil {
+			return shell, []string{"-l"} // Login shell
+		}
 	}
 
 	// Try common shells

@@ -15,6 +15,7 @@ import type {
   PRWatch,
   ReviewWatch as GitHubReviewWatch,
   IssueWatch as GitHubIssueWatch,
+  GitHubActionPresets,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -200,6 +201,7 @@ export type AppState = {
   prWatches: (typeof defaultGitHubState)["prWatches"];
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
+  actionPresets: (typeof defaultGitHubState)["actionPresets"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -216,6 +218,7 @@ export type AppState = {
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
+  collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -237,6 +240,8 @@ export type AppState = {
   addIssueWatch: (watch: GitHubIssueWatch) => void;
   updateIssueWatch: (watch: GitHubIssueWatch) => void;
   removeIssueWatch: (id: string) => void;
+  setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
+  setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -430,6 +435,7 @@ export type AppState = {
   renameSidebarView: UIA["renameSidebarView"];
   duplicateSidebarView: UIA["duplicateSidebarView"];
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
+  toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
 };
@@ -506,6 +512,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       prWatches: merged.prWatches,
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,
+      actionPresets: merged.actionPresets,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,
@@ -518,6 +525,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       quickChat: merged.quickChat,
       sessionFailureNotification: merged.sessionFailureNotification,
       bottomTerminal: merged.bottomTerminal,
+      // Note: collapsedSubtaskParents is intentionally not overridden here —
+      // createUISlice hydrates it from sessionStorage and we want that to win.
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

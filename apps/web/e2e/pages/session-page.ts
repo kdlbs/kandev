@@ -695,4 +695,21 @@ export class SessionPage {
   changesBulkDiscardButton(variant: "unstaged" | "staged" = "unstaged"): Locator {
     return this.changes.getByTestId(`bulk-discard-${variant}`);
   }
+
+  // --- Panel search helpers (Ctrl+F feature) ---
+
+  /** Any currently-mounted panel search bar. */
+  panelSearchBar(): Locator {
+    return this.page.locator("[data-panel-search-bar]");
+  }
+
+  /** Search input inside the currently-mounted bar. */
+  panelSearchInput(): Locator {
+    return this.panelSearchBar().locator('input[type="text"]');
+  }
+
+  /** "N / M" match counter. */
+  panelSearchCounter(): Locator {
+    return this.panelSearchBar().locator('[aria-live="polite"]');
+  }
 }

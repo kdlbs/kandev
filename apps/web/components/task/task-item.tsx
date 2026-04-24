@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import {
+  IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
   IconDots,
@@ -42,6 +43,12 @@ type TaskItemProps = {
   primarySessionId?: string | null;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /** Number of subtasks under this parent task. Only set for parent rows. */
+  subtaskCount?: number;
+  /** Whether the subtasks of this parent are currently hidden. */
+  subtasksCollapsed?: boolean;
+  /** Toggles subtask visibility when the chevron is clicked. */
+  onToggleSubtasks?: () => void;
   repositories?: string[];
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
@@ -269,6 +276,9 @@ export const TaskItem = memo(function TaskItem({
   taskId,
   primarySessionId,
   isSubTask,
+  subtaskCount,
+  subtasksCollapsed,
+  onToggleSubtasks,
   repositories,
   prInfo,
   issueInfo,
@@ -276,6 +286,7 @@ export const TaskItem = memo(function TaskItem({
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
 
   return (
     <div
@@ -317,17 +328,59 @@ export const TaskItem = memo(function TaskItem({
         issueInfo={issueInfo}
         reserveMenuSpace={!hasDiffStats}
       />
+      {showSubtaskToggle && (
+        <SubtaskToggle
+          taskId={taskId}
+          count={subtaskCount!}
+          collapsed={!!subtasksCollapsed}
+          onToggle={onToggleSubtasks!}
+        />
+      )}
       {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} />
+      <TaskMenuButton visible={effectiveMenuOpen} shiftLeft={showSubtaskToggle} />
     </div>
   );
 });
 
-function TaskMenuButton({ visible }: { visible: boolean }) {
+function SubtaskToggle({
+  taskId,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  taskId?: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="sidebar-subtask-toggle"
+      data-task-id={taskId}
+      aria-label={collapsed ? "Expand subtasks" : "Collapse subtasks"}
+      aria-expanded={!collapsed}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="self-center flex items-center gap-0.5 shrink-0 cursor-pointer text-[11px] text-muted-foreground/60 hover:text-foreground"
+    >
+      <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
+      <span>{count}</span>
+    </button>
+  );
+}
+
+function TaskMenuButton({ visible, shiftLeft }: { visible: boolean; shiftLeft?: boolean }) {
   return (
     <div
       className={cn(
-        "absolute right-1 inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
+        "absolute inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
+        // When a subtask toggle is present on the right, push the menu button
+        // left of it so the two controls don't overlap on hover.
+        shiftLeft ? "right-10" : "right-1",
         visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
       )}
     >

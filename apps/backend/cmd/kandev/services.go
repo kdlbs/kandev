@@ -87,6 +87,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
 	}
+	if githubSvc != nil {
+		// Wire secret manager for token configuration
+		githubSvc.SetSecretManager(secretsAdapter)
+	}
 
 	return &Services{
 		Task:     taskSvc,
@@ -162,7 +166,7 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
-// githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider.
+// githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
 }
@@ -185,6 +189,28 @@ func (a *githubSecretAdapter) List(ctx context.Context) ([]*github.SecretListIte
 
 func (a *githubSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
 	return a.store.Reveal(ctx, id)
+}
+
+// Create creates a new secret with the given name and value.
+func (a *githubSecretAdapter) Create(ctx context.Context, name, value string) (string, error) {
+	secret := &secrets.SecretWithValue{
+		Secret: secrets.Secret{Name: name},
+		Value:  value,
+	}
+	if err := a.store.Create(ctx, secret); err != nil {
+		return "", err
+	}
+	return secret.ID, nil
+}
+
+// Update updates an existing secret's value.
+func (a *githubSecretAdapter) Update(ctx context.Context, id, value string) error {
+	return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+}
+
+// Delete removes a secret by ID.
+func (a *githubSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

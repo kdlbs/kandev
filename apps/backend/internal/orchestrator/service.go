@@ -127,7 +127,6 @@ type repoStore interface {
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
-	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
@@ -166,6 +165,8 @@ type sessionExecutorStore interface {
 	// Session listing + delete
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+	// Workspace
+	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error

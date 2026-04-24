@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -62,6 +63,7 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
+	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
 }
 
 type listMessagesParams struct {
@@ -499,6 +501,112 @@ type wsListMessagesRequest struct {
 	Before        string `json:"before"`
 	After         string `json:"after"`
 	Sort          string `json:"sort"`
+}
+
+type wsSearchMessagesRequest struct {
+	TaskSessionID string `json:"session_id"`
+	Query         string `json:"query"`
+	Limit         int    `json:"limit"`
+}
+
+const messageSnippetRadius = 60
+
+// buildSnippet returns a short excerpt around the first case-insensitive match
+// of query within content. Falls back to a leading slice when no match found
+// (e.g. query matched only raw_content). Works in rune space so multi-byte
+// characters (emoji, CJK, accented letters) are never sliced mid-rune.
+func buildSnippet(content, query string) string {
+	if content == "" {
+		return ""
+	}
+	contentRunes := []rune(content)
+	queryRunes := []rune(strings.TrimSpace(query))
+	maxLen := messageSnippetRadius*2 + len(queryRunes)
+
+	idx := -1
+	if len(queryRunes) > 0 {
+		idx = indexRunesFold(contentRunes, queryRunes)
+	}
+	if idx < 0 {
+		if len(contentRunes) <= maxLen {
+			return content
+		}
+		return strings.TrimSpace(string(contentRunes[:maxLen])) + "…"
+	}
+	start := idx - messageSnippetRadius
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(queryRunes) + messageSnippetRadius
+	if end > len(contentRunes) {
+		end = len(contentRunes)
+	}
+	snippet := string(contentRunes[start:end])
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	if end < len(contentRunes) {
+		snippet += "…"
+	}
+	return snippet
+}
+
+// indexRunesFold returns the rune-index of the first case-insensitive
+// occurrence of needle in haystack, or -1. Comparison is per-rune via
+// unicode.ToLower — 1:1 rune count, so the returned index is always a valid
+// slice boundary in the original haystack.
+func indexRunesFold(haystack, needle []rune) int {
+	if len(needle) == 0 {
+		return 0
+	}
+	if len(needle) > len(haystack) {
+		return -1
+	}
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		match := true
+		for j := 0; j < len(needle); j++ {
+			if unicode.ToLower(haystack[i+j]) != unicode.ToLower(needle[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+func (h *MessageHandlers) wsSearchMessages(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsSearchMessagesRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return ws.NewResponse(msg.ID, msg.Action, dto.SearchMessagesResponse{Hits: []dto.MessageSearchHit{}, Total: 0})
+	}
+
+	messages, err := h.service.SearchMessages(ctx, req.TaskSessionID, query, req.Limit)
+	if err != nil {
+		h.logger.Error("failed to search messages", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to search messages", nil)
+	}
+	hits := make([]dto.MessageSearchHit, 0, len(messages))
+	for _, m := range messages {
+		hits = append(hits, dto.MessageSearchHit{
+			ID:         m.ID,
+			TurnID:     m.TurnID,
+			AuthorType: string(m.AuthorType),
+			Type:       string(m.Type),
+			Snippet:    buildSnippet(m.Content, query),
+			CreatedAt:  m.CreatedAt,
+		})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SearchMessagesResponse{Hits: hits, Total: len(hits)})
 }
 
 func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

@@ -70,6 +70,18 @@ type Client interface {
 	// customQuery, when non-empty, replaces the entire generated query.
 	ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error)
 
+	// SearchPRs searches for PRs matching the given query.
+	// filter is an optional additional search qualifier (e.g. "author:@me" or "repo:owner/name").
+	// customQuery, when non-empty, replaces the entire generated query.
+	SearchPRs(ctx context.Context, filter, customQuery string) ([]*PR, error)
+
+	// SearchPRsPaged is the paginated variant of SearchPRs. page is 1-indexed;
+	// perPage is clamped to GitHub's 1..100 range by the implementation.
+	SearchPRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*PRSearchPage, error)
+
+	// ListIssuesPaged is the paginated variant of ListIssues.
+	ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error)
+
 	// GetIssueState returns the state of a single issue ("open" or "closed").
 	GetIssueState(ctx context.Context, owner, repo string, number int) (string, error)
 }

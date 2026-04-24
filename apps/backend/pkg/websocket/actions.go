@@ -140,9 +140,10 @@ const (
 	ActionUserUnsubscribe = "user.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd  = "message.add"
-	ActionMessageGet  = "message.get"
-	ActionMessageList = "message.list"
+	ActionMessageAdd    = "message.add"
+	ActionMessageGet    = "message.get"
+	ActionMessageList   = "message.list"
+	ActionMessageSearch = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress              = "acp.progress"
@@ -377,6 +378,11 @@ const (
 	ActionGitHubIssueTrigger     = "github.issue_watches.trigger"
 	ActionGitHubIssueTriggerAll  = "github.issue_watches.trigger_all"
 	ActionGitHubNewIssueNotify   = "github.new_issue.notify" // Notification
+
+	// Action preset actions for the /github page quick-launch prompts.
+	ActionGitHubActionPresetsList   = "github.action_presets.list"
+	ActionGitHubActionPresetsUpdate = "github.action_presets.update"
+	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
 )
 
 // Error codes

@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout = 90 * time.Second
-	defaultGitPullTimeout  = 60 * time.Second
-	gitNoTags              = "--no-tags"
+	defaultGitFetchTimeout   = 90 * time.Second
+	defaultGitPullTimeout    = 60 * time.Second
+	defaultGitInspectTimeout = 10 * time.Second
+	gitNoTags                = "--no-tags"
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -46,6 +47,8 @@ type Manager struct {
 	// Timeouts for best-effort remote sync before creating a worktree.
 	fetchTimeout time.Duration
 	pullTimeout  time.Duration
+	// Bound for cheap git ref-inspection commands (branchExists, currentBranch).
+	inspectTimeout time.Duration
 }
 
 // ScriptMessageHandler provides script execution and message streaming.
@@ -115,13 +118,14 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 	}
 
 	return &Manager{
-		config:       cfg,
-		logger:       log.WithFields(zap.String("component", "worktree-manager")),
-		store:        store,
-		worktrees:    make(map[string]*Worktree),
-		repoLocks:    make(map[string]*repoLockEntry),
-		fetchTimeout: fetchTimeout,
-		pullTimeout:  pullTimeout,
+		config:         cfg,
+		logger:         log.WithFields(zap.String("component", "worktree-manager")),
+		store:          store,
+		worktrees:      make(map[string]*Worktree),
+		repoLocks:      make(map[string]*repoLockEntry),
+		fetchTimeout:   fetchTimeout,
+		pullTimeout:    pullTimeout,
+		inspectTimeout: defaultGitInspectTimeout,
 	}, nil
 }
 
@@ -241,8 +245,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	// Get repository lock for safe concurrent access
 	repoLock := m.getRepoLock(req.RepositoryPath)
 	repoLock.Lock()
+	lockAcquired := time.Now()
 	defer func() {
 		repoLock.Unlock()
+		m.logger.Debug("released worktree repo lock",
+			zap.String("repository_path", req.RepositoryPath),
+			zap.Duration("held", time.Since(lockAcquired)))
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
 
@@ -252,7 +260,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 
 	// Check base branch exists
-	if !m.branchExists(req.RepositoryPath, baseRef) {
+	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
 
@@ -413,14 +421,13 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 // to origin/<remoteBranch> if the remote-tracking ref exists. Non-fatal on failure.
 func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBranch, remoteBranch string) {
 	upstream := "origin/" + remoteBranch
-	// Verify the remote-tracking ref exists
-	verifyCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", upstream)
-	verifyCmd.Dir = worktreePath
+	// Verify the remote-tracking ref exists. Use the non-interactive helper so
+	// this cannot hang on a credential prompt while Create holds repoLock.
+	verifyCmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "rev-parse", "--verify", upstream)
 	if err := verifyCmd.Run(); err != nil {
 		return
 	}
-	cmd := exec.CommandContext(ctx, "git", "branch", "--set-upstream-to="+upstream, localBranch)
-	cmd.Dir = worktreePath
+	cmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "branch", "--set-upstream-to="+upstream, localBranch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		m.logger.Debug("failed to set upstream (non-fatal)",
 			zap.String("branch", localBranch),
@@ -473,7 +480,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 			zap.Error(err))
 
 		// Fall back to local branch if it exists.
-		if !m.branchExists(repoPath, branch) {
+		if !m.branchExists(ctx, repoPath, branch) {
 			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 		}
 
@@ -1227,18 +1234,37 @@ func (m *Manager) isGitRepo(path string) bool {
 }
 
 // branchExists checks if a branch exists in the repository.
-func (m *Manager) branchExists(repoPath, branch string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", branch)
-	cmd.Dir = repoPath
-	err := cmd.Run()
-	return err == nil
+// Bounded by m.inspectTimeout so a hung git (credential prompt, stuck filter,
+// filesystem stall) cannot deadlock the caller while holding repoLock. When
+// the bound fires, the ctx error is logged so the root cause is visible in
+// logs rather than surfacing only as a misleading "branch not found".
+func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) bool {
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
+	if err := cmd.Run(); err != nil {
+		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+			m.logger.Warn("branchExists bounded by context",
+				zap.String("repository_path", repoPath),
+				zap.String("branch", branch),
+				zap.Error(ctxErr))
+		}
+		return false
+	}
+	return true
 }
 
-func (m *Manager) currentBranch(repoPath string) string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoPath
+func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
+		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+			m.logger.Warn("currentBranch bounded by context",
+				zap.String("repository_path", repoPath),
+				zap.Error(ctxErr))
+		}
 		return ""
 	}
 	return strings.TrimSpace(string(output))
@@ -1346,10 +1372,10 @@ func (m *Manager) resolveLocalBaseRef(
 	onProgress SyncProgressCallback,
 ) string {
 	remoteRef := "origin/" + localBranch
-	if m.currentBranch(repoPath) == baseBranch {
+	if m.currentBranch(ctx, repoPath) == baseBranch {
 		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
-	if m.branchExists(repoPath, remoteRef) {
+	if m.branchExists(ctx, repoPath, remoteRef) {
 		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
 		return remoteRef
 	}

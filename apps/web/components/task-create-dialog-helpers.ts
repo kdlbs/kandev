@@ -181,7 +181,14 @@ export function buildRepositoriesPayload(opts: {
       }
     : {};
   if (opts.repositoryId) {
-    return [{ repository_id: opts.repositoryId, base_branch: opts.branch || undefined, ...fresh }];
+    return [
+      {
+        repository_id: opts.repositoryId,
+        base_branch: opts.branch || undefined,
+        checkout_branch: opts.githubPrHeadBranch || undefined,
+        ...fresh,
+      },
+    ];
   }
   if (opts.selectedLocalRepo) {
     return [

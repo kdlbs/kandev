@@ -133,6 +133,13 @@ const createTablesSQL = `
 		created_at DATETIME NOT NULL,
 		UNIQUE(issue_watch_id, repo_owner, repo_name, issue_number)
 	);
+
+	CREATE TABLE IF NOT EXISTS github_action_presets (
+		workspace_id TEXT PRIMARY KEY,
+		pr_presets TEXT NOT NULL DEFAULT '[]',
+		issue_presets TEXT NOT NULL DEFAULT '[]',
+		updated_at DATETIME NOT NULL
+	);
 `
 
 func (s *Store) initSchema() error {
@@ -886,5 +893,61 @@ func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) 
 // DeleteIssueWatchTask deletes a dedup record by ID.
 func (s *Store) DeleteIssueWatchTask(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM github_issue_watch_tasks WHERE id = ?`, id)
+	return err
+}
+
+// --- Action preset operations ---
+
+// GetActionPresets returns stored PR/Issue presets for a workspace. Returns
+// (nil, nil) when no row exists yet so the caller can apply defaults.
+func (s *Store) GetActionPresets(ctx context.Context, workspaceID string) (*ActionPresets, error) {
+	var row struct {
+		PRJSON    string `db:"pr_presets"`
+		IssueJSON string `db:"issue_presets"`
+	}
+	err := s.ro.GetContext(ctx, &row,
+		`SELECT pr_presets, issue_presets FROM github_action_presets WHERE workspace_id = ?`, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	presets := &ActionPresets{WorkspaceID: workspaceID}
+	if err := json.Unmarshal([]byte(row.PRJSON), &presets.PR); err != nil {
+		return nil, fmt.Errorf("unmarshal pr presets: %w", err)
+	}
+	if err := json.Unmarshal([]byte(row.IssueJSON), &presets.Issue); err != nil {
+		return nil, fmt.Errorf("unmarshal issue presets: %w", err)
+	}
+	return presets, nil
+}
+
+// UpsertActionPresets stores PR/Issue presets for a workspace, replacing any
+// existing row.
+func (s *Store) UpsertActionPresets(ctx context.Context, presets *ActionPresets) error {
+	prJSON, err := json.Marshal(presets.PR)
+	if err != nil {
+		return fmt.Errorf("marshal pr presets: %w", err)
+	}
+	issueJSON, err := json.Marshal(presets.Issue)
+	if err != nil {
+		return fmt.Errorf("marshal issue presets: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO github_action_presets (workspace_id, pr_presets, issue_presets, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			pr_presets = excluded.pr_presets,
+			issue_presets = excluded.issue_presets,
+			updated_at = excluded.updated_at`,
+		presets.WorkspaceID, string(prJSON), string(issueJSON), time.Now().UTC())
+	return err
+}
+
+// DeleteActionPresets removes the stored overrides for a workspace so defaults
+// apply again.
+func (s *Store) DeleteActionPresets(ctx context.Context, workspaceID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM github_action_presets WHERE workspace_id = ?`, workspaceID)
 	return err
 }

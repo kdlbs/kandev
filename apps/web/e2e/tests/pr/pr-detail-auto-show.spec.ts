@@ -478,5 +478,16 @@ test.describe("PR detail panel", () => {
     await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await session.expectPrPanelAndSessionShareGroup();
+
+    // Switch BACK to Task A — regression: the fast-path layout switch used to
+    // remove the old session tab then look for a chat/session panel to anchor
+    // the new tab. With the old tab gone and the PR panel being non-chat, the
+    // lookup failed and fell through to a sidebar split, placing the session
+    // tab in a new group while the PR panel stayed in the old center group.
+    await session.clickTaskInSidebar("First PR Task");
+    await session.waitForLoad();
+    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
+    await session.expectPrPanelAndSessionShareGroup();
   });
 });

@@ -5,6 +5,7 @@ import { IconGitBranch, IconCopy, IconCheck, IconPencil } from "@tabler/icons-re
 import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { formatUserHomePath } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
@@ -172,11 +173,14 @@ function BranchPillTrigger({
   canRename: boolean;
 }) {
   return (
-    <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-full">
+    <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-64">
       <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      <span data-testid="topbar-branch-name" className="text-xs text-muted-foreground truncate">
+      <ScrollOnOverflow
+        data-testid="topbar-branch-name"
+        className="text-xs text-muted-foreground min-w-0"
+      >
         {displayBranch}
-      </span>
+      </ScrollOnOverflow>
       {canRename && (
         <button
           type="button"

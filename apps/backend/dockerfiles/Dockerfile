@@ -53,12 +53,12 @@ WORKDIR /workspace
 # OPENAI_API_KEY - OpenAI API key for Codex
 #
 # agentctl configuration:
-# AGENTCTL_PORT - HTTP API port (default: 9999)
+# AGENTCTL_PORT - HTTP API port (default: 39429)
 # AGENTCTL_AGENT_COMMAND - Command to run (e.g., "auggie --acp" or "codex app-server")
 # AGENTCTL_AUTO_START - Auto-start agent on startup (default: false)
 
 # Expose agentctl HTTP API port
-EXPOSE 9999
+EXPOSE 39429
 
 # Run agentctl HTTP server
 ENTRYPOINT ["/agent/entrypoint.sh"]

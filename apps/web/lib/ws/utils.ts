@@ -1,6 +1,6 @@
 /**
  * Convert HTTP URL to WebSocket URL.
- * http://localhost:8080 → ws://localhost:8080/ws
+ * http://localhost:38429 → ws://localhost:38429/ws
  * https://api.example.com → wss://api.example.com/ws
  */
 export function httpToWebSocketUrl(baseUrl: string): string {

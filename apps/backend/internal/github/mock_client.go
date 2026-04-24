@@ -137,6 +137,28 @@ func (m *MockClient) ListIssues(context.Context, string, string) ([]*Issue, erro
 	return nil, nil
 }
 
+func (m *MockClient) ListIssuesPaged(context.Context, string, string, int, int) (*IssueSearchPage, error) {
+	return &IssueSearchPage{Issues: []*Issue{}, TotalCount: 0, Page: 1, PerPage: 50}, nil
+}
+
+func (m *MockClient) SearchPRs(context.Context, string, string) ([]*PR, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]*PR, 0, len(m.prs))
+	for _, pr := range m.prs {
+		result = append(result, pr)
+	}
+	return result, nil
+}
+
+func (m *MockClient) SearchPRsPaged(ctx context.Context, _, _ string, page, perPage int) (*PRSearchPage, error) {
+	prs, err := m.SearchPRs(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	return &PRSearchPage{PRs: prs, TotalCount: len(prs), Page: page, PerPage: perPage}, nil
+}
+
 func (m *MockClient) GetIssueState(context.Context, string, string, int) (string, error) {
 	return defaultPRState, nil
 }

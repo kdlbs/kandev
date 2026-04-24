@@ -395,7 +395,10 @@ func TestWsGitCommits_NotReady(t *testing.T) {
 
 func TestWsCumulativeDiff_NotReady(t *testing.T) {
 	log := newTestLogger()
-	lookup := &mockExecutionLookup{} // no executions → "no agent running" error
+	// Use "no agent running for session" error which matches isSessionNotReadyError
+	lookup := &mockExecutionLookup{
+		ensureErr: fmt.Errorf("no agent running for session session-1"),
+	}
 	h := NewGitHandlers(lookup, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
@@ -417,6 +420,82 @@ func TestWsCumulativeDiff_NotReady(t *testing.T) {
 	}
 	if payload["cumulative_diff"] != nil {
 		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])
+	}
+}
+
+func TestWsCumulativeDiff_WorkspaceNotReady(t *testing.T) {
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: lifecycle.ErrSessionWorkspaceNotReady,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+
+	resp, err := h.wsCumulativeDiff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for workspace not ready, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if payload["cumulative_diff"] != nil {
+		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])
+	}
+}
+
+func TestWsCumulativeDiff_NilAgentClient(t *testing.T) {
+	log := newTestLogger()
+	// Execution exists but has no agentctl client yet
+	lookup := &mockExecutionLookup{
+		executions: map[string]*lifecycle.AgentExecution{
+			"session-1": {ID: "exec-1", SessionID: "session-1"},
+		},
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+
+	resp, err := h.wsCumulativeDiff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for nil agent client, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if payload["cumulative_diff"] != nil {
+		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])
+	}
+}
+
+func TestWsCumulativeDiff_UnexpectedError(t *testing.T) {
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: errors.New("database connection failed"),
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+
+	_, err := h.wsCumulativeDiff(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for unexpected failure")
 	}
 }
 

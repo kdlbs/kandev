@@ -237,6 +237,22 @@ type ListMessagesResponse struct {
 	Cursor   string        `json:"cursor"`
 }
 
+// MessageSearchHit is a lightweight match returned by a session message search.
+type MessageSearchHit struct {
+	ID         string    `json:"id"`
+	TurnID     string    `json:"turn_id,omitempty"`
+	AuthorType string    `json:"author_type"`
+	Type       string    `json:"type"`
+	Snippet    string    `json:"snippet"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// SearchMessagesResponse contains hits from a session message search.
+type SearchMessagesResponse struct {
+	Hits  []MessageSearchHit `json:"hits"`
+	Total int                `json:"total"`
+}
+
 type TurnDTO struct {
 	ID          string                 `json:"id"`
 	SessionID   string                 `json:"session_id"`

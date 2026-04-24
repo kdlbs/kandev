@@ -145,4 +145,8 @@ export const SHORTCUTS = {
     key: KEYS.J,
     modifiers: { ctrlOrCmd: true },
   },
+  FIND_IN_PANEL: {
+    key: KEYS.F,
+    modifiers: { ctrlOrCmd: true },
+  },
 } as const;
