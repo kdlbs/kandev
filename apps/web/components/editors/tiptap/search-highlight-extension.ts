@@ -126,8 +126,8 @@ export const PlanSearchExtension = Extension.create({
           if (dispatch) {
             tr.setMeta(planSearchPluginKey, { kind: "step", delta: 1 } satisfies SearchMeta);
             dispatch(tr);
+            scrollToMatch(view, s.matches[(s.current + 1) % s.matches.length]);
           }
-          scrollToMatch(view, s.matches[(s.current + 1) % s.matches.length]);
           return true;
         },
       planSearchPrev:
@@ -138,9 +138,9 @@ export const PlanSearchExtension = Extension.create({
           if (dispatch) {
             tr.setMeta(planSearchPluginKey, { kind: "step", delta: -1 } satisfies SearchMeta);
             dispatch(tr);
+            const len = s.matches.length;
+            scrollToMatch(view, s.matches[(s.current - 1 + len) % len]);
           }
-          const len = s.matches.length;
-          scrollToMatch(view, s.matches[(s.current - 1 + len) % len]);
           return true;
         },
       clearPlanSearch:
