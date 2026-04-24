@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type {
-  LocalRepository,
-  Workspace,
-  ExecutorProfile,
-  Branch,
-} from "@/lib/types/http";
+import type { LocalRepository, Workspace, ExecutorProfile, Branch } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -20,11 +15,7 @@ import {
   useExecutorProfileOptions,
   useIsLocalExecutor,
 } from "@/components/task-create-dialog-options";
-import {
-  getTaskCreateDraft,
-  setTaskCreateDraft,
-  removeTaskCreateDraft,
-} from "@/lib/local-storage";
+import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
   TaskCreateDialogInitialValues,

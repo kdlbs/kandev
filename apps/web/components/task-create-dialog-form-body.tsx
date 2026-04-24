@@ -126,7 +126,9 @@ function AgentColumn({
   );
 }
 
-export const CreateEditSelectors = memo(function CreateEditSelectors(props: CreateEditSelectorsProps) {
+export const CreateEditSelectors = memo(function CreateEditSelectors(
+  props: CreateEditSelectorsProps,
+) {
   if (props.isTaskStarted) return null;
 
   const {
@@ -205,7 +207,6 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(props: Crea
     </div>
   );
 });
-
 
 type SessionSelectorsProps = {
   agentProfileOptions: SelectorOption[];

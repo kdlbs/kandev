@@ -286,7 +286,10 @@ test.describe("Fresh-branch flow", () => {
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       // Pick the develop base branch so the new branch will fork from it.
       await branchSelector.click();
-      await testPage.getByRole("option", { name: /develop/ }).first().click();
+      await testPage
+        .getByRole("option", { name: /develop/ })
+        .first()
+        .click();
       const newBranchInput = testPage.getByTestId("new-branch-name-input");
       await expect(newBranchInput).toBeVisible();
       await newBranchInput.fill("feature/from-develop");
@@ -453,7 +456,10 @@ test.describe("Fresh-branch flow", () => {
     await executorSelector.click();
     // The seed creates a worktree profile; pick the first non-local option.
     // We rely on the existing list ordering; just open and select something matching "worktree".
-    const worktreeOption = testPage.getByRole("option").filter({ hasText: /worktree/i }).first();
+    const worktreeOption = testPage
+      .getByRole("option")
+      .filter({ hasText: /worktree/i })
+      .first();
     await worktreeOption.click();
     await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
     expect(seedData.worktreeExecutorProfileId).toBeTruthy();

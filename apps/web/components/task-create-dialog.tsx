@@ -17,10 +17,7 @@ import {
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
-import {
-  useBranchOptions,
-  useAgentProfileOptions,
-} from "@/components/task-create-dialog-options";
+import { useBranchOptions, useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import {
   BranchSelector,
   AgentSelector,
@@ -152,7 +149,8 @@ function DialogFormBody({
         handleKeyDown={handleKeyDown}
         enhance={enhance}
       />
-      {!isSessionMode && renderCreateEditSelectors({
+      {!isSessionMode &&
+        renderCreateEditSelectors({
           isTaskStarted,
           hasRepositorySelection,
           branchOptions,

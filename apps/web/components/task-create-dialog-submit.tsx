@@ -80,9 +80,7 @@ export function useTaskSubmitHandlers({
     });
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
-    isFreshBranchActive
-      ? { newBranchName, confirmDiscard: true, consentedDirtyFiles }
-      : undefined;
+    isFreshBranchActive ? { newBranchName, confirmDiscard: true, consentedDirtyFiles } : undefined;
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
