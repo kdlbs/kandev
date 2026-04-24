@@ -31,7 +31,7 @@ function newPreset(): GitHubActionPreset {
 function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 w-10 cursor-pointer px-2" aria-label="Icon">
+      <SelectTrigger className="h-8 cursor-pointer" aria-label="Icon">
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
