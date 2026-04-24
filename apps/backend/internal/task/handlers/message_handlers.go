@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -512,40 +513,68 @@ const messageSnippetRadius = 60
 
 // buildSnippet returns a short excerpt around the first case-insensitive match
 // of query within content. Falls back to a leading slice when no match found
-// (e.g. query matched only raw_content).
+// (e.g. query matched only raw_content). Works in rune space so multi-byte
+// characters (emoji, CJK, accented letters) are never sliced mid-rune.
 func buildSnippet(content, query string) string {
 	if content == "" {
 		return ""
 	}
-	maxLen := messageSnippetRadius*2 + len(query)
-	lcContent := strings.ToLower(content)
-	lcQuery := strings.ToLower(strings.TrimSpace(query))
+	contentRunes := []rune(content)
+	queryRunes := []rune(strings.TrimSpace(query))
+	maxLen := messageSnippetRadius*2 + len(queryRunes)
+
 	idx := -1
-	if lcQuery != "" {
-		idx = strings.Index(lcContent, lcQuery)
+	if len(queryRunes) > 0 {
+		idx = indexRunesFold(contentRunes, queryRunes)
 	}
 	if idx < 0 {
-		if len(content) <= maxLen {
+		if len(contentRunes) <= maxLen {
 			return content
 		}
-		return strings.TrimSpace(content[:maxLen]) + "…"
+		return strings.TrimSpace(string(contentRunes[:maxLen])) + "…"
 	}
 	start := idx - messageSnippetRadius
 	if start < 0 {
 		start = 0
 	}
-	end := idx + len(query) + messageSnippetRadius
-	if end > len(content) {
-		end = len(content)
+	end := idx + len(queryRunes) + messageSnippetRadius
+	if end > len(contentRunes) {
+		end = len(contentRunes)
 	}
-	snippet := content[start:end]
+	snippet := string(contentRunes[start:end])
 	if start > 0 {
 		snippet = "…" + snippet
 	}
-	if end < len(content) {
+	if end < len(contentRunes) {
 		snippet += "…"
 	}
 	return snippet
+}
+
+// indexRunesFold returns the rune-index of the first case-insensitive
+// occurrence of needle in haystack, or -1. Comparison is per-rune via
+// unicode.ToLower — 1:1 rune count, so the returned index is always a valid
+// slice boundary in the original haystack.
+func indexRunesFold(haystack, needle []rune) int {
+	if len(needle) == 0 {
+		return 0
+	}
+	if len(needle) > len(haystack) {
+		return -1
+	}
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		match := true
+		for j := 0; j < len(needle); j++ {
+			if unicode.ToLower(haystack[i+j]) != unicode.ToLower(needle[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 func (h *MessageHandlers) wsSearchMessages(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
