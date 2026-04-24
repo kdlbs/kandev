@@ -32,6 +32,10 @@ export function useSessionSearch(
   const [activeHitId, setActiveHitIdState] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Generation counter for setActiveHit — lets an in-flight backfill loop
+  // bail out if the user clicks a newer hit while the old loop is awaiting
+  // loadOlder(), preventing a stale scroll/flash from overriding the user.
+  const activeHitGenRef = useRef(0);
 
   const runSearch = useCallback(
     async (q: string) => {
@@ -91,6 +95,7 @@ export function useSessionSearch(
     async (id: string | null) => {
       setActiveHitIdState(id);
       if (!id) return;
+      const myGen = ++activeHitGenRef.current;
       const tryFocus = (): boolean => {
         const el = document.getElementById(`msg-${id}`);
         if (!el) return false;
@@ -106,6 +111,8 @@ export function useSessionSearch(
       if (!loadOlder) return;
       for (let i = 0; i < MAX_BACKFILL_ITERATIONS; i++) {
         const loaded = await loadOlder();
+        // Superseded by a newer setActiveHit call (user clicked another hit).
+        if (activeHitGenRef.current !== myGen) return;
         if (loaded === 0) break;
         if (tryFocus()) return;
       }
