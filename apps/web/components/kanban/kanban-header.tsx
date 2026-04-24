@@ -13,6 +13,7 @@ import {
   IconMenu2,
   IconChartBar,
   IconTimeline,
+  IconBrandGithub,
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { RefreshReviewsButton } from "../github/refresh-reviews-button";
@@ -29,6 +30,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -50,6 +52,23 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
   { value: "list", icon: IconList, label: "List" },
 ];
+
+function GitHubTopbarButton() {
+  const { status } = useGitHubStatus();
+  if (!status?.authenticated) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="icon" asChild className="cursor-pointer">
+          <Link href="/github">
+            <IconBrandGithub className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>My GitHub — PRs & issues</TooltipContent>
+    </Tooltip>
+  );
+}
 
 function ViewToggleGroup({
   toggleValue,
@@ -155,6 +174,7 @@ function TabletHeader({
             className="h-8"
             itemClassName="h-8 w-8"
           />
+          <GitHubTopbarButton />
           {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
           <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         </TooltipProvider>
@@ -233,6 +253,7 @@ function DesktopHeader({
             </TooltipTrigger>
             <TooltipContent>Stats</TooltipContent>
           </Tooltip>
+          <GitHubTopbarButton />
         </TooltipProvider>
         <RefreshReviewsButton />
         {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}

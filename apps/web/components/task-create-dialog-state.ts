@@ -112,7 +112,7 @@ function useFormResetEffects({
 
   useEffect(() => {
     if (!open) return;
-    resetDiscoveryState(resetters);
+    resetDiscoveryState(resetters, initialValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
 }
@@ -161,14 +161,15 @@ function resetTaskForm(
 }
 
 /** Resets repository discovery state */
-function resetDiscoveryState(resetters: FormResetters) {
+function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
+  const ghUrl = iv?.githubUrl ?? "";
   resetters.setDiscoveredRepositories([]);
   resetters.setDiscoveredRepoPath("");
   resetters.setSelectedLocalRepo(null);
   resetters.setLocalBranches([]);
   resetters.setDiscoverReposLoaded(false);
-  resetters.setUseGitHubUrl(false);
-  resetters.setGitHubUrl("");
+  resetters.setUseGitHubUrl(Boolean(ghUrl));
+  resetters.setGitHubUrl(ghUrl);
   resetters.setGitHubBranches([]);
   resetters.setGitHubUrlError(null);
   resetters.setGitHubPrHeadBranch(null);

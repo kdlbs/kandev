@@ -86,6 +86,17 @@ export type PRFeedback = {
   has_issues: boolean;
 };
 
+export type GitHubPRStatus = {
+  pr: GitHubPR;
+  review_state: "approved" | "changes_requested" | "pending" | "";
+  checks_state: "success" | "failure" | "pending" | "";
+  mergeable_state: MergeableState;
+  review_count: number;
+  pending_review_count: number;
+  checks_total: number;
+  checks_passing: number;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"
@@ -293,4 +304,36 @@ export type PRCommitInfo = {
   additions: number;
   deletions: number;
   files_changed: number;
+};
+
+// GitHub Issue (separate from Pull Request)
+export type GitHubIssue = {
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+  html_url: string;
+  state: "open" | "closed";
+  author_login: string;
+  repo_owner: string;
+  repo_name: string;
+  labels: string[];
+  assignees: string[];
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+};
+
+export type SearchPRsResponse = {
+  prs: GitHubPR[];
+  total_count: number;
+  page: number;
+  per_page: number;
+};
+
+export type SearchIssuesResponse = {
+  issues: GitHubIssue[];
+  total_count: number;
+  page: number;
+  per_page: number;
 };
