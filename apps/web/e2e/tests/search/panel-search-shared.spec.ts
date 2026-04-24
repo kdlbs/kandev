@@ -15,8 +15,6 @@ import { SessionPage } from "../../pages/session-page";
 
 const panels: PanelKind[] = ["session", "plan", "terminal"];
 
-const MODIFIER = process.platform === "darwin" ? "Meta" : "Control";
-
 test.describe("@search panel search bar — shared contract", () => {
   test.describe.configure({ retries: 1 });
 
@@ -136,5 +134,3 @@ async function preparePanel(
     )
     .toBe(true);
 }
-
-void MODIFIER;

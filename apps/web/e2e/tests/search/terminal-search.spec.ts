@@ -8,7 +8,7 @@ import {
   panelSearchMatchCounter,
   panelSearchToggle,
 } from "../../helpers/panel-search";
-import { seedTask, seedMessagesDescription, MODIFIER } from "./shared";
+import { seedTask, seedMessagesDescription } from "./shared";
 
 /** Wait until the terminal xterm buffer contains the given text. */
 async function waitForTerminalText(
@@ -206,6 +206,4 @@ test.describe("@search terminal panel search", () => {
       })
       .toMatch(/^[1-9]\d* \/ [1-9]\d*$/);
   });
-
-  void MODIFIER;
 });

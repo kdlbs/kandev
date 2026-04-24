@@ -176,10 +176,8 @@ test.describe("@search session chat panel search", () => {
   }) => {
     test.setTimeout(120_000);
     const { session } = await seedTask(testPage, apiClient, seedData, "session-search-virtuoso", {
-      description: {
-        description: seedMessagesDescription(["virtuoso fox alpha", "virtuoso fox beta"]),
-        rendererOverride: "virtuoso",
-      },
+      description: seedMessagesDescription(["virtuoso fox alpha", "virtuoso fox beta"]),
+      rendererOverride: "virtuoso",
     });
     await expect(session.chat.getByText("virtuoso", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
