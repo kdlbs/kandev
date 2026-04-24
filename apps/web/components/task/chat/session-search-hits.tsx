@@ -122,11 +122,7 @@ export function SessionSearchHits({
           )}
         >
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <HitAuthor
-              authorType={hit.author_type}
-              agentLabel={agentLabel}
-              agentName={agentName}
-            />
+            <HitAuthor authorType={hit.author_type} agentLabel={agentLabel} agentName={agentName} />
             <span className="text-[0.6875rem] text-muted-foreground/70 shrink-0">
               {formatTime(hit.created_at)}
             </span>

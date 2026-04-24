@@ -52,9 +52,7 @@ test.describe("@search panel search bar — shared contract", () => {
       test(`S3 Esc closes the bar`, async ({ testPage, apiClient, seedData }) => {
         test.setTimeout(90_000);
         const description =
-          kind === "plan"
-            ? planScript("## Scratch\nnothing")
-            : seedMessagesDescription(["hello"]);
+          kind === "plan" ? planScript("## Scratch\nnothing") : seedMessagesDescription(["hello"]);
         const { session } = await seedTask(
           testPage,
           apiClient,
@@ -72,9 +70,7 @@ test.describe("@search panel search bar — shared contract", () => {
       test(`S4 Close button closes the bar`, async ({ testPage, apiClient, seedData }) => {
         test.setTimeout(90_000);
         const description =
-          kind === "plan"
-            ? planScript("## Scratch\ntext")
-            : seedMessagesDescription(["foo"]);
+          kind === "plan" ? planScript("## Scratch\ntext") : seedMessagesDescription(["foo"]);
         const { session } = await seedTask(
           testPage,
           apiClient,

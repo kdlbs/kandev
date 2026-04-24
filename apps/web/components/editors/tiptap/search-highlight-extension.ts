@@ -181,4 +181,3 @@ function findScrollContainer(el: HTMLElement | null): HTMLElement | null {
   }
   return null;
 }
-

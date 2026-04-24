@@ -1,9 +1,6 @@
 // Panel-scoped Ctrl+F — focus routing between panels.
 import { test, expect } from "../../fixtures/test-base";
-import {
-  openPanelSearch,
-  panelSearchBar,
-} from "../../helpers/panel-search";
+import { openPanelSearch, panelSearchBar } from "../../helpers/panel-search";
 import { seedTask, seedMessagesDescription, planScript } from "./shared";
 
 test.describe("@search panel-focus routing", () => {
@@ -55,9 +52,9 @@ test.describe("@search panel-focus routing", () => {
     const inTerminal = testPage.getByTestId("terminal-panel").locator("[data-panel-search-bar]");
     await expect(inTerminal).toBeVisible();
     // Chat panel has none
-    expect(await testPage.getByTestId("session-chat").locator("[data-panel-search-bar]").count()).toBe(
-      0,
-    );
+    expect(
+      await testPage.getByTestId("session-chat").locator("[data-panel-search-bar]").count(),
+    ).toBe(0);
   });
 
   test("F2 plan-focused Ctrl+F opens the bar inside the plan panel only", async ({

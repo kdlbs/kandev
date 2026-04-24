@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  searchSessionMessages,
-  type MessageSearchHit,
-} from "@/lib/api/domains/session-api";
+import { searchSessionMessages, type MessageSearchHit } from "@/lib/api/domains/session-api";
 
 type SessionSearchState = {
   isOpen: boolean;

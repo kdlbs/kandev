@@ -59,7 +59,9 @@ function handleAppShortcuts(event: KeyboardEvent, options: TerminalKeyHandlerOpt
     if (event.type === "keydown") options.onFindInPanelRef?.current?.();
     return true;
   }
-  if (matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))) {
+  if (
+    matchesShortcut(event, getShortcut("BOTTOM_TERMINAL", options.keyboardShortcutsRef?.current))
+  ) {
     event.preventDefault();
     if (event.type === "keydown") options.onToggleBottomTerminal?.();
     return true;

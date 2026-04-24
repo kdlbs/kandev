@@ -1,10 +1,6 @@
 // Session chat panel search — hit list, backfill, scroll-to-message.
 import { test, expect } from "../../fixtures/test-base";
-import {
-  openPanelSearch,
-  panelSearchBar,
-  panelSearchInput,
-} from "../../helpers/panel-search";
+import { openPanelSearch, panelSearchBar, panelSearchInput } from "../../helpers/panel-search";
 import { seedTask, seedMessagesDescription } from "./shared";
 
 const HITS_LIST_SELECTOR = "[data-panel-search-bar] + div";
