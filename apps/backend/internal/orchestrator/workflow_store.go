@@ -9,11 +9,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
+
+// taskUpdatedPublisher is the minimal hook the workflow store needs to emit
+// task.updated events. The orchestrator Service binds this to its shared
+// publishTaskUpdated helper so the publisher wiring stays in one place.
+type taskUpdatedPublisher func(ctx context.Context, task *models.Task)
 
 // workflowStore implements engine.TransitionStore by delegating to the
 // orchestrator's existing repositories and services.
@@ -21,7 +25,7 @@ type workflowStore struct {
 	repo               sessionExecutorStore
 	workflowStepGetter WorkflowStepGetter
 	agentManager       executor.AgentManagerClient
-	eventBus           bus.EventBus
+	publishTaskUpdated taskUpdatedPublisher
 	logger             *logger.Logger
 	appliedOps         sync.Map
 }
@@ -30,14 +34,14 @@ func newWorkflowStore(
 	repo sessionExecutorStore,
 	stepGetter WorkflowStepGetter,
 	agentMgr executor.AgentManagerClient,
-	eventBus bus.EventBus,
+	publishTaskUpdated taskUpdatedPublisher,
 	log *logger.Logger,
 ) *workflowStore {
 	return &workflowStore{
 		repo:               repo,
 		workflowStepGetter: stepGetter,
 		agentManager:       agentMgr,
-		eventBus:           eventBus,
+		publishTaskUpdated: publishTaskUpdated,
 		logger:             log,
 	}
 }
@@ -103,13 +107,7 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
-	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated,
-			"orchestrator",
-			buildTaskEventPayload(task),
-		))
-	}
+	s.publishTaskUpdated(ctx, task)
 
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 		s.logger.Warn("failed to clear session review status",

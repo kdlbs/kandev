@@ -13,8 +13,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -273,6 +271,41 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		return nil, fmt.Errorf("agent_profile_id is required")
 	}
 
+	// Override with workflow step's agent profile if one is configured.
+	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+
+	// If the workflow step overrode the profile, update the session record in DB
+	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
+	if effectiveProfileID != session.AgentProfileID {
+		s.logger.Info("updating session agent profile for workflow step override",
+			zap.String("session_id", sessionID),
+			zap.String("old_profile", session.AgentProfileID),
+			zap.String("new_profile", effectiveProfileID))
+		session.AgentProfileID = effectiveProfileID
+		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
+		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
+		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
+		if profileInfo, err := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); err != nil {
+			s.logger.Warn("failed to resolve agent profile snapshot for workflow step override",
+				zap.String("session_id", sessionID),
+				zap.String("profile_id", effectiveProfileID),
+				zap.Error(err))
+		} else if profileInfo != nil {
+			session.AgentProfileSnapshot = map[string]interface{}{
+				"id":         profileInfo.ProfileID,
+				"name":       profileInfo.ProfileName,
+				"agent_id":   profileInfo.AgentID,
+				"agent_name": profileInfo.AgentName,
+				"model":      profileInfo.Model,
+			}
+		}
+		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+			s.logger.Warn("failed to update session agent profile",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor)
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -391,6 +424,11 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
 
+	// Resolve the workflow step's agent profile override.
+	// The frontend may pass the workspace default profile, but the step may
+	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
+	agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
@@ -462,13 +500,78 @@ func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowSt
 			zap.String("task_id", taskID),
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
-	} else if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated,
-			"orchestrator",
-			buildTaskEventPayload(dbTask),
-		))
+		return
 	}
+	s.publishTaskUpdated(ctx, dbTask)
+}
+
+// resolveEffectiveAgentProfile checks whether the task's workflow step overrides
+// the agent profile. If the step (or workflow default) specifies a different
+// profile, that profile is returned instead of the caller-provided one.
+// This ensures the initial task start uses the step's agent — not just the
+// workspace default the frontend sends.
+func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, workflowStepID, callerProfileID string) string {
+	if s.workflowStepGetter == nil {
+		s.logger.Debug("resolveEffectiveAgentProfile: no workflowStepGetter, using caller profile",
+			zap.String("task_id", taskID),
+			zap.String("caller_profile", callerProfileID))
+		return callerProfileID
+	}
+
+	// Determine the effective step ID: explicit param > task's current step.
+	effectiveStepID := workflowStepID
+	if effectiveStepID == "" {
+		dbTask, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			s.logger.Debug("resolveEffectiveAgentProfile: failed to load task from DB",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return callerProfileID
+		}
+		s.logger.Debug("resolveEffectiveAgentProfile: loaded task from DB",
+			zap.String("task_id", taskID),
+			zap.String("db_workflow_step_id", dbTask.WorkflowStepID))
+		if dbTask.WorkflowStepID == "" {
+			s.logger.Debug("resolveEffectiveAgentProfile: task has no workflow step, using caller profile",
+				zap.String("task_id", taskID))
+			return callerProfileID
+		}
+		effectiveStepID = dbTask.WorkflowStepID
+	}
+
+	step, err := s.workflowStepGetter.GetStep(ctx, effectiveStepID)
+	if err != nil || step == nil {
+		s.logger.Debug("resolveEffectiveAgentProfile: failed to load step",
+			zap.String("task_id", taskID),
+			zap.String("step_id", effectiveStepID),
+			zap.Error(err))
+		return callerProfileID
+	}
+
+	s.logger.Debug("resolveEffectiveAgentProfile: loaded step",
+		zap.String("task_id", taskID),
+		zap.String("step_id", effectiveStepID),
+		zap.String("step_name", step.Name),
+		zap.String("step_agent_profile_id", step.AgentProfileID),
+		zap.String("step_workflow_id", step.WorkflowID))
+
+	stepProfile := s.resolveStepAgentProfile(ctx, step)
+	s.logger.Debug("resolveEffectiveAgentProfile: resolved step profile",
+		zap.String("task_id", taskID),
+		zap.String("step_profile", stepProfile),
+		zap.String("caller_profile", callerProfileID))
+
+	if stepProfile == "" || stepProfile == callerProfileID {
+		return callerProfileID
+	}
+
+	s.logger.Info("overriding agent profile with workflow step profile",
+		zap.String("task_id", taskID),
+		zap.String("step_id", effectiveStepID),
+		zap.String("step_name", step.Name),
+		zap.String("caller_profile", callerProfileID),
+		zap.String("step_profile", stepProfile))
+	return stepProfile
 }
 
 // postLaunchStart records the initial message and sets plan mode after a successful launch.
@@ -519,7 +622,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 
 	if planMode && !stepHasPlanMode {
 		var parts []string
-		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(sysprompt.DefaultPlanPrefix, taskID)))
+		parts = append(parts, sysprompt.Wrap(sysprompt.DefaultPlanPrefix()))
 		parts = append(parts, effectivePrompt)
 		effectivePrompt = strings.Join(parts, "\n\n")
 	}
@@ -593,14 +696,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 
 	// Completed sessions cannot be restarted — they require a new session.
-	// Failed sessions clear the resume token so the agent starts fresh (the old
-	// process crashed). Cancelled sessions keep the token so --resume restores
-	// the conversation when the user re-starts a manually stopped session.
-	switch session.State {
-	case models.TaskSessionStateCompleted:
+	// Failed and cancelled sessions keep the resume token so the relaunched
+	// agent continues the previous conversation (via ACP session/load for
+	// native-resume agents, or --resume on CLI). Users who want a fresh start
+	// after a failure can invoke RecoverSession with action="fresh_start".
+	if session.State == models.TaskSessionStateCompleted {
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	case models.TaskSessionStateFailed:
-		s.clearResumeToken(ctx, sessionID)
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
@@ -1196,6 +1297,8 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	}
 
 	// Broadcast task.updated so frontend updates the primary star indicator.
+	// The task service's publisher loads primary-session info from the DB,
+	// which already reflects the SetSessionPrimary write above.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
@@ -1206,14 +1309,7 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
 		return nil
 	}
-	if s.eventBus != nil {
-		payload := buildTaskEventPayload(task)
-		payload["primary_session_id"] = sessionID
-		payload["primary_session_state"] = string(session.State)
-		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-			events.TaskUpdated, "orchestrator", payload,
-		))
-	}
+	s.publishTaskUpdated(ctx, task)
 	return nil
 }
 

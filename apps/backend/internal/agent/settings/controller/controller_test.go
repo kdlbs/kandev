@@ -288,6 +288,110 @@ func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
 	}
 }
 
+// TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag regresses
+// the Auggie case where enabling CLI passthrough caused --allow-indexing to be
+// emitted twice: once by BuildPassthroughCommand via Settings() and again by an
+// unconditional CLIFlagTokens append in the preview. The launch path only adds
+// it via Settings(), so the preview must match.
+func TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag(t *testing.T) {
+	permSettings := map[string]agents.PermissionSetting{
+		"allow_indexing": {
+			Supported:   true,
+			ApplyMethod: "cli_flag",
+			CLIFlag:     "--allow-indexing",
+		},
+	}
+	agentList := map[string]agents.Agent{
+		"auggie": &testAgent{
+			id:      "auggie",
+			name:    "auggie",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{
+				Cmd: agents.NewCommand("auggie"),
+			},
+			StandardPassthrough: agents.StandardPassthrough{
+				Cfg: agents.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: agents.NewCommand("npx", "-y", "@augmentcode/auggie"),
+				},
+				PermSettings: permSettings,
+			},
+			permissionSettings: permSettings,
+		},
+	}
+
+	controller := newTestController(agentList)
+
+	// Simulate the post-backfill state: allow_indexing toggle ON and the legacy
+	// backfill has seeded --allow-indexing into CLIFlags. Both sources would
+	// previously emit the flag.
+	req := CommandPreviewRequest{
+		PermissionSettings: map[string]bool{"allow_indexing": true},
+		CLIPassthrough:     true,
+		CLIFlags: []dto.CLIFlagDTO{
+			{Flag: "--allow-indexing", Enabled: true},
+		},
+	}
+
+	result, err := controller.PreviewAgentCommand(context.Background(), "auggie", req)
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+
+	count := 0
+	for _, part := range result.Command {
+		if part == "--allow-indexing" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("PreviewAgentCommand() emitted --allow-indexing %d times, want 1; got %v", count, result.Command)
+	}
+}
+
+// TestController_PreviewAgentCommand_ACPAppendsCLIFlagsOnce locks in that the
+// non-passthrough (ACP) branch still appends user-configured CLI flags exactly
+// once. Auggie's real BuildCommand intentionally does not emit --allow-indexing;
+// the flag must come through CLIFlagTokens.
+func TestController_PreviewAgentCommand_ACPAppendsCLIFlagsOnce(t *testing.T) {
+	agentList := map[string]agents.Agent{
+		"auggie": &testAgent{
+			id:      "auggie",
+			name:    "auggie",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{
+				Cmd: agents.NewCommand("auggie", "--acp"),
+			},
+			// No permissionSettings: mirrors Auggie's real BuildCommand which
+			// does not emit --allow-indexing — it flows through CLIFlags only.
+		},
+	}
+
+	controller := newTestController(agentList)
+
+	req := CommandPreviewRequest{
+		CLIPassthrough: false,
+		CLIFlags: []dto.CLIFlagDTO{
+			{Flag: "--allow-indexing", Enabled: true},
+		},
+	}
+
+	result, err := controller.PreviewAgentCommand(context.Background(), "auggie", req)
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+
+	count := 0
+	for _, part := range result.Command {
+		if part == "--allow-indexing" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("PreviewAgentCommand() emitted --allow-indexing %d times, want 1; got %v", count, result.Command)
+	}
+}
+
 func TestBuildCommandString(t *testing.T) {
 	tests := []struct {
 		name     string

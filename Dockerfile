@@ -5,7 +5,7 @@
 #   docker build -t kandev:latest .
 #
 # Run:
-#   docker run -p 8080:8080 -v kandev-data:/data kandev:latest
+#   docker run -p 38429:38429 -v kandev-data:/data kandev:latest
 
 # ---------------------------------------------------------------------------
 # Stage 1: Go builder — compile kandev + agentctl binaries
@@ -114,8 +114,10 @@ RUN chown -R kandev:kandev /app /data
 
 WORKDIR /app
 
-EXPOSE 8080
+# Only the backend port is exposed — it reverse-proxies the Next.js frontend
+# (which listens on 37429 internally), so users hit a single port.
+EXPOSE 38429
 
 # tini as PID 1 for signal handling; entrypoint handles privilege drop
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
-CMD ["kandev", "start", "--backend-port", "8080", "--web-port", "37429", "--verbose"]
+CMD ["kandev", "start", "--backend-port", "38429", "--web-port", "37429", "--verbose"]

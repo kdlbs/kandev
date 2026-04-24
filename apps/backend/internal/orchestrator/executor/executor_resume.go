@@ -22,6 +22,14 @@ func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "already has an agent running")
 }
 
+// isTerminalSessionState reports whether a session state implies the agent
+// process is no longer running. Stale in-memory execution or agentctl status
+// for these states should be cleaned up rather than trusted.
+func isTerminalSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateFailed ||
+		state == models.TaskSessionStateCancelled
+}
+
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
 	RepositoryID         string
@@ -246,6 +254,18 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		zap.String("resume_token", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
+	// Force-cleanup any stale in-memory execution / agentctl state for terminal-state
+	// sessions. Their agent process is dead by definition, so "already running" signals
+	// from the execution store or agentctl's "starting" status are stale and would
+	// otherwise block the relaunch.
+	if isTerminalSessionState(session.State) {
+		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
+				zap.String("session_id", session.ID),
+				zap.Error(cleanupErr))
+		}
+	}
+
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -253,8 +273,11 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		// "already has an agent running" fires both for live executions (a concurrent
 		// resume raced us) and stale ones (agent never started or exited without
 		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
-		// healthy agent mid-prompt.
-		if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		// healthy agent mid-prompt. For terminal states the agent is dead by definition,
+		// so skip the probe and go straight to cleanup+retry — this avoids a silent
+		// regression to ErrExecutionAlreadyRunning if the preemptive cleanup above
+		// failed and agentctl still reports a stale "starting" status.
+		if !isTerminalSessionState(session.State) && e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
@@ -350,9 +373,34 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 		return nil, func() {}, ErrNoAgentProfileID
 	}
 
-	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
+	// Re-read session state after acquiring the lock. The caller fetched the
+	// session before the lock, so on concurrent resumes the state may be stale —
+	// the first request could have already transitioned FAILED → STARTING, and
+	// a stale FAILED state here would wrongly make isTerminalSessionState bypass
+	// the live-execution guard and cleanup the live agent the first request just
+	// registered, launching a duplicate. If the re-read fails, abort rather than
+	// proceeding with uncertain state — silently falling back to the stale state
+	// would reintroduce the exact race this re-read prevents.
+	fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID)
+	if fetchErr != nil {
 		unlock()
-		return nil, func() {}, ErrExecutionAlreadyRunning
+		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
+			zap.String("session_id", session.ID),
+			zap.Error(fetchErr))
+		return nil, func() {}, fetchErr
+	}
+	if fresh != nil {
+		session.State = fresh.State
+	}
+
+	// Skip the "already running" rejection for terminal-state sessions — the agent
+	// process is dead by definition, and ResumeSession will force-cleanup stale
+	// state before the relaunch.
+	if !isTerminalSessionState(session.State) {
+		if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
+			unlock()
+			return nil, func() {}, ErrExecutionAlreadyRunning
+		}
 	}
 
 	return task, unlock, nil

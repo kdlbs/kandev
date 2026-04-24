@@ -152,7 +152,6 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
-
     if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
@@ -231,7 +230,9 @@ export class WebSocketClient {
 
   unsubscribeSession(sessionId: string) {
     const currentCount = this.sessionSubscriptions.get(sessionId);
-    if (!currentCount) return;
+    if (!currentCount) {
+      return;
+    }
     const nextCount = currentCount - 1;
 
     if (nextCount <= 0) {

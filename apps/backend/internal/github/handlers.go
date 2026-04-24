@@ -60,6 +60,11 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchDelete, wsDeleteIssueWatch(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubIssueTrigger, wsTriggerIssueWatch(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubIssueTriggerAll, wsTriggerAllIssueChecks(svc, log))
+
+	// Action preset handlers
+	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsList, wsListActionPresets(svc))
+	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsUpdate, wsUpdateActionPresets(svc))
+	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsReset, wsResetActionPresets(svc))
 }
 
 // parseMap parses the WS message payload into a map for simple field lookups.
@@ -439,4 +444,35 @@ func wsTriggerIssueWatch(svc *Service, log *logger.Logger) func(ctx context.Cont
 
 func wsTriggerAllIssueChecks(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsTriggerAllByWorkspace("new_issues_found", svc.TriggerAllIssueChecks)
+}
+
+// --- Action preset WS handlers ---
+
+func wsListActionPresets(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsWithField("workspace_id", func(ctx context.Context, workspaceID string) (interface{}, error) {
+		return svc.GetActionPresets(ctx, workspaceID)
+	})
+}
+
+func wsUpdateActionPresets(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		var req UpdateActionPresetsRequest
+		if err := msg.ParsePayload(&req); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
+		}
+		if strings.TrimSpace(req.WorkspaceID) == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		presets, err := svc.UpdateActionPresets(ctx, &req)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, presets)
+	}
+}
+
+func wsResetActionPresets(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsWithField("workspace_id", func(ctx context.Context, workspaceID string) (interface{}, error) {
+		return svc.ResetActionPresets(ctx, workspaceID)
+	})
 }

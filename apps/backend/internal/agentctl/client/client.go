@@ -586,6 +586,12 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
+// AuthToken returns the Bearer token used for authenticating requests to agentctl.
+// Returns empty string if no token is configured.
+func (c *Client) AuthToken() string {
+	return c.authToken
+}
+
 // Host returns the host portion (without port) of the agentctl client URL.
 func (c *Client) Host() string {
 	parsed, err := url.Parse(c.baseURL)

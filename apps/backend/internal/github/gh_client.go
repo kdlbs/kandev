@@ -171,21 +171,69 @@ func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, cu
 	return c.parseSearchResults(out)
 }
 
+func (c *GHClient) SearchPRs(ctx context.Context, filter, customQuery string) ([]*PR, error) {
+	page, err := c.SearchPRsPaged(ctx, filter, customQuery, 1, 50)
+	if err != nil {
+		return nil, err
+	}
+	return page.PRs, nil
+}
+
+func (c *GHClient) SearchPRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*PRSearchPage, error) {
+	page, perPage = clampSearchPage(page, perPage)
+	query := buildPRSearchQuery(filter, customQuery)
+	out, err := c.run(ctx, "api", "search/issues",
+		"-X", "GET",
+		"-f", "q="+query,
+		"-f", fmt.Sprintf("per_page=%d", perPage),
+		"-f", fmt.Sprintf("page=%d", page),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search PRs: %w", err)
+	}
+	var result struct {
+		TotalCount int             `json:"total_count"`
+		Items      json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return nil, fmt.Errorf("parse PR search response: %w", err)
+	}
+	prs, err := c.parseSearchResults(string(result.Items))
+	if err != nil {
+		return nil, err
+	}
+	return &PRSearchPage{PRs: prs, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
+}
+
 func (c *GHClient) ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+	page, err := c.ListIssuesPaged(ctx, filter, customQuery, 1, 50)
+	if err != nil {
+		return nil, err
+	}
+	return page.Issues, nil
+}
+
+func (c *GHClient) ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+	page, perPage = clampSearchPage(page, perPage)
 	query := buildIssueSearchQuery(filter, customQuery)
 	out, err := c.run(ctx, "api", "search/issues",
 		"-X", "GET",
 		"-f", "q="+query,
-		"-f", "per_page=50",
-		"--jq", ".items")
+		"-f", fmt.Sprintf("per_page=%d", perPage),
+		"-f", fmt.Sprintf("page=%d", page),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
-	var items []issueSearchItem
-	if err := json.Unmarshal([]byte(out), &items); err != nil {
-		return nil, fmt.Errorf("parse issue search results: %w", err)
+	var result struct {
+		TotalCount int               `json:"total_count"`
+		Items      []issueSearchItem `json:"items"`
 	}
-	return parseIssueSearchResults(items), nil
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return nil, fmt.Errorf("parse issue search response: %w", err)
+	}
+	issues := parseIssueSearchResults(result.Items)
+	return &IssueSearchPage{Issues: issues, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
 }
 
 func (c *GHClient) GetIssueState(ctx context.Context, owner, repo string, number int) (string, error) {

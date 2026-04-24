@@ -6,7 +6,7 @@ This document provides a complete reference for all WebSocket API actions, their
 
 Kandev uses a **single WebSocket connection** for all API operations and real-time streaming. This eliminates the need for separate REST endpoints and enables full-duplex communication.
 
-**Endpoint**: `ws://localhost:8080/ws`
+**Endpoint**: `ws://localhost:38429/ws`
 
 ### Message Envelope
 
@@ -70,7 +70,7 @@ flowchart LR
 
 ### Typical Workflow
 
-1. **Connect** to `ws://localhost:8080/ws`
+1. **Connect** to `ws://localhost:38429/ws`
 2. **Create Board** → `board.create`
 3. **Create Column** → `column.create`
 4. **Create Task** → `task.create`
@@ -2282,7 +2282,7 @@ These are push notifications from the server to subscribed clients. They have `t
 ## Complete Usage Example
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
+const ws = new WebSocket('ws://localhost:38429/ws');
 const pending = new Map();
 
 // Handle incoming messages

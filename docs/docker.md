@@ -5,10 +5,10 @@ Run Kandev in a Docker container. For Kubernetes deployment, see [k8s.md](k8s.md
 ## Quick Start
 
 ```bash
-docker run -p 8080:8080 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
+docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 ```
 
-Open `http://localhost:8080` in your browser.
+Open `http://localhost:38429` in your browser.
 
 ## Using the Pre-built Image
 
@@ -53,7 +53,7 @@ Without a volume, data is lost when the container is removed.
 Configuration is done via `KANDEV_`-prefixed environment variables:
 
 ```bash
-docker run -p 8080:8080 \
+docker run -p 38429:38429 \
   -v kandev-data:/data \
   -e KANDEV_LOG_LEVEL=debug \
   ghcr.io/kdlbs/kandev:latest
@@ -77,7 +77,7 @@ docker run -p 8080:8080 \
 To use PostgreSQL instead of SQLite:
 
 ```bash
-docker run -p 8080:8080 \
+docker run -p 38429:38429 \
   -e KANDEV_DATABASE_DRIVER=postgres \
   -e KANDEV_DATABASE_HOST=host.docker.internal \
   -e KANDEV_DATABASE_PORT=5432 \
@@ -93,7 +93,7 @@ Kandev exposes a single port. The Go backend serves the API, WebSocket, and reve
 
 | Port | Service |
 |------|---------|
-| `8080` | API + WebSocket + Web UI |
+| `38429` | API + WebSocket + Web UI |
 
 Override the port:
 
@@ -113,7 +113,7 @@ services:
   kandev:
     image: ghcr.io/kdlbs/kandev:latest
     ports:
-      - "8080:8080"
+      - "38429:38429"
     volumes:
       - kandev-data:/data
     restart: unless-stopped
@@ -133,7 +133,7 @@ services:
   kandev:
     image: ghcr.io/kdlbs/kandev:latest
     ports:
-      - "8080:8080"
+      - "38429:38429"
     volumes:
       - kandev-data:/data
     environment:
@@ -170,7 +170,7 @@ volumes:
 
 ## Reverse Proxy
 
-Since Kandev serves everything on a single port, a reverse proxy only needs to forward all traffic to port 8080. No extra environment variables are needed — the frontend automatically uses `window.location.origin` to reach the API.
+Since Kandev serves everything on a single port, a reverse proxy only needs to forward all traffic to port 38429. No extra environment variables are needed — the frontend automatically uses `window.location.origin` to reach the API.
 
 ### Docker Compose with Caddy
 
@@ -201,7 +201,7 @@ Example `Caddyfile`:
 
 ```
 kandev.example.com {
-    reverse_proxy kandev:8080
+    reverse_proxy kandev:38429
 }
 ```
 
@@ -210,7 +210,7 @@ kandev.example.com {
 By default, `KANDEV_DOCKER_ENABLED=false` inside the container. To enable Docker-based agent execution, mount the Docker socket:
 
 ```bash
-docker run -p 8080:8080 \
+docker run -p 38429:38429 \
   -v kandev-data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e KANDEV_DOCKER_ENABLED=true \
@@ -224,14 +224,14 @@ docker run -p 8080:8080 \
 The backend exposes a `/health` endpoint:
 
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:38429/health
 ```
 
 For Docker health checks in compose:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:38429/health"]
   interval: 30s
   timeout: 5s
   retries: 3

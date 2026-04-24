@@ -57,7 +57,7 @@ function useTerminalRefs() {
   };
 }
 
-const WS_BASE_URL_FALLBACK = "ws://localhost:8080";
+const WS_BASE_URL_FALLBACK = "ws://localhost:38429";
 function useWsBaseUrl() {
   return useMemo(() => {
     try {

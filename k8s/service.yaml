@@ -10,6 +10,6 @@ spec:
     app: kandev
   ports:
     - name: http
-      port: 8080
+      port: 38429
       targetPort: backend
       protocol: TCP

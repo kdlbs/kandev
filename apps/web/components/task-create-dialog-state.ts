@@ -112,7 +112,7 @@ function useFormResetEffects({
 
   useEffect(() => {
     if (!open) return;
-    resetDiscoveryState(resetters);
+    resetDiscoveryState(resetters, initialValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
 }
@@ -161,17 +161,18 @@ function resetTaskForm(
 }
 
 /** Resets repository discovery state */
-function resetDiscoveryState(resetters: FormResetters) {
+function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
+  const ghUrl = iv?.githubUrl ?? "";
   resetters.setDiscoveredRepositories([]);
   resetters.setDiscoveredRepoPath("");
   resetters.setSelectedLocalRepo(null);
   resetters.setLocalBranches([]);
   resetters.setDiscoverReposLoaded(false);
-  resetters.setUseGitHubUrl(false);
-  resetters.setGitHubUrl("");
+  resetters.setUseGitHubUrl(Boolean(ghUrl));
+  resetters.setGitHubUrl(ghUrl);
   resetters.setGitHubBranches([]);
   resetters.setGitHubUrlError(null);
-  resetters.setGitHubPrHeadBranch(null);
+  resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -254,7 +255,9 @@ function useFormStateValues(
 ) {
   // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
   const [openCycle, setOpenCycle] = useState(0);
-  const prevOpenRef = useRef(open);
+  // Start as false so a fresh mount with open=true is detected as a rising edge
+  // (callers like QuickTaskLauncher conditionally mount the dialog already-open).
+  const prevOpenRef = useRef(false);
 
   // currentDefaults stores the loaded draft/initial values for this open cycle
   const [currentDefaults, setCurrentDefaults] = useState<{ name: string; description: string }>({

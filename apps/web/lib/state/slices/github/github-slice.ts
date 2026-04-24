@@ -7,6 +7,7 @@ export const defaultGitHubState: GitHubSliceState = {
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
   issueWatches: { items: [], loaded: false, loading: false },
+  actionPresets: { byWorkspaceId: {}, loading: {} },
 };
 
 type ImmerSet = Parameters<
@@ -144,6 +145,21 @@ function createWatchActions(
   };
 }
 
+function createActionPresetActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "setActionPresets" | "setActionPresetsLoading"> {
+  return {
+    setActionPresets: (workspaceId, presets) =>
+      set((draft) => {
+        draft.actionPresets.byWorkspaceId[workspaceId] = presets;
+      }),
+    setActionPresetsLoading: (workspaceId, loading) =>
+      set((draft) => {
+        draft.actionPresets.loading[workspaceId] = loading;
+      }),
+  };
+}
+
 export const createGitHubSlice: StateCreator<
   GitHubSlice,
   [["zustand/immer", never]],
@@ -154,4 +170,5 @@ export const createGitHubSlice: StateCreator<
   ...createGitHubStatusActions(set),
   ...createTaskPRActions(set),
   ...createWatchActions(set),
+  ...createActionPresetActions(set),
 });

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { makeGitEnv } from "../../helpers/git-helper";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
@@ -47,14 +48,7 @@ test.describe("Changes panel focus behavior", () => {
     test.setTimeout(90_000);
 
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = {
-      ...process.env,
-      HOME: backend.tmpDir,
-      GIT_AUTHOR_NAME: "E2E Test",
-      GIT_AUTHOR_EMAIL: "e2e@test.local",
-      GIT_COMMITTER_NAME: "E2E Test",
-      GIT_COMMITTER_EMAIL: "e2e@test.local",
-    };
+    const gitEnv = makeGitEnv(backend.tmpDir);
     const git = new GitHelper(repoDir, gitEnv);
 
     // Create a task and wait for the agent to be ready
@@ -118,14 +112,7 @@ test.describe("Changes panel focus behavior", () => {
     test.setTimeout(90_000);
 
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const gitEnv = {
-      ...process.env,
-      HOME: backend.tmpDir,
-      GIT_AUTHOR_NAME: "E2E Test",
-      GIT_AUTHOR_EMAIL: "e2e@test.local",
-      GIT_COMMITTER_NAME: "E2E Test",
-      GIT_COMMITTER_EMAIL: "e2e@test.local",
-    };
+    const gitEnv = makeGitEnv(backend.tmpDir);
     const git = new GitHelper(repoDir, gitEnv);
 
     const task = await apiClient.createTaskWithAgent(

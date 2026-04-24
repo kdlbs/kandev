@@ -52,9 +52,22 @@ ci: add PR title linting workflow
 
 **Create a task for each step below and mark them as completed as you go.**
 
-1. Run `git status` and `git diff` to understand all changes
-2. Review recent commits with `git log --oneline -10` to match project style
-3. Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete before proceeding.
-4. Stage relevant files (prefer specific files over `git add -A`)
-5. Write a commit message following the format above
-6. If changes span multiple concerns, consider separate commits
+1. **Understand changes:** Run `git status` and `git diff` to understand all changes. Review recent commits with `git log --oneline -10` to match project style.
+
+2. **Check pre-commit hooks:** Run:
+   ```bash
+   pre-commit --version 2>/dev/null && echo "INSTALLED" || echo "NOT_INSTALLED"
+   ```
+   - If **not installed**, warn the user: _"⚠️ pre-commit is not installed. Install it with `pip install pre-commit && pre-commit install` for automatic formatting and lint checks on every commit."_
+   - If installed, check hooks are active:
+     ```bash
+     test -f .git/hooks/pre-commit && grep -q "pre-commit" .git/hooks/pre-commit && echo "ACTIVE" || echo "INACTIVE"
+     ```
+   - If **inactive**, warn the user: _"⚠️ pre-commit hooks are not active. Run `pre-commit install` to enable them."_
+   - **Do not block** — continue with the remaining steps regardless.
+
+3. **Run verify (MANDATORY — do NOT skip):** Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
+
+4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
+
+5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.

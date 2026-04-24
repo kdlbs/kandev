@@ -19,6 +19,11 @@ import type {
   CreateIssueWatchRequest,
   UpdateIssueWatchRequest,
   TriggerIssueResponse,
+  SearchPRsResponse,
+  SearchIssuesResponse,
+  GitHubPRStatus,
+  GitHubActionPresets,
+  UpdateGitHubActionPresetsRequest,
 } from "@/lib/types/github";
 
 // Status
@@ -68,6 +73,32 @@ export async function getPRFeedback(
   options?: ApiRequestOptions,
 ) {
   return fetchJson<PRFeedback>(`/api/v1/github/prs/${owner}/${repo}/${number}`, options);
+}
+
+// Lightweight PR status (review + checks + mergeable), skips comments.
+export async function getPRStatus(
+  owner: string,
+  repo: string,
+  number: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubPRStatus>(`/api/v1/github/prs/${owner}/${repo}/${number}/status`, options);
+}
+
+export type PRStatusRef = { owner: string; repo: string; number: number };
+
+// Batch variant of getPRStatus: one round-trip for a whole list page. The
+// backend fans out concurrently and caches per-PR, so repeat calls for the
+// same page are cheap. Keys in the returned map are "<owner>/<repo>#<number>".
+export async function getPRStatusesBatch(refs: PRStatusRef[], options?: ApiRequestOptions) {
+  return fetchJson<{ statuses: Record<string, GitHubPRStatus> }>(`/api/v1/github/prs/statuses`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ refs }),
+      ...(options?.init ?? {}),
+    },
+  });
 }
 
 // Submit PR review
@@ -257,4 +288,66 @@ export async function triggerAllIssueWatches(workspaceId: string, options?: ApiR
       init: { method: "POST", ...(options?.init ?? {}) },
     },
   );
+}
+
+// User PR / issue search (for the /github page).
+// Pass `query` to use a verbatim GitHub search string, or `filter` to append to
+// the default (type:pr state:open / type:issue state:open).
+type SearchParams = {
+  query?: string;
+  filter?: string;
+  page?: number;
+  perPage?: number;
+};
+
+function buildSearchQuery(params: SearchParams) {
+  const search = new URLSearchParams();
+  if (params.query) search.set("query", params.query);
+  if (params.filter) search.set("filter", params.filter);
+  if (params.page && params.page > 1) search.set("page", String(params.page));
+  if (params.perPage) search.set("per_page", String(params.perPage));
+  return search.toString();
+}
+
+export async function searchUserPRs(params: SearchParams, options?: ApiRequestOptions) {
+  const suffix = buildSearchQuery(params);
+  return fetchJson<SearchPRsResponse>(
+    `/api/v1/github/user/prs${suffix ? `?${suffix}` : ""}`,
+    options,
+  );
+}
+
+export async function searchUserIssues(params: SearchParams, options?: ApiRequestOptions) {
+  const suffix = buildSearchQuery(params);
+  return fetchJson<SearchIssuesResponse>(
+    `/api/v1/github/user/issues${suffix ? `?${suffix}` : ""}`,
+    options,
+  );
+}
+
+// Action presets (quick-launch prompts on the /github page).
+export async function fetchGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubActionPresets>(
+    `/api/v1/github/action-presets?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updateGitHubActionPresets(
+  payload: UpdateGitHubActionPresetsRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubActionPresets>("/api/v1/github/action-presets", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  });
+}
+
+export async function resetGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubActionPresets>(`/api/v1/github/action-presets/reset?${query.toString()}`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST" },
+  });
 }

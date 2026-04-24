@@ -2,10 +2,12 @@ import os from "node:os";
 import path from "node:path";
 
 // Default service ports (will auto-fallback if busy).
-export const DEFAULT_BACKEND_PORT = 8080;
+// Clustered near the web port (37429) to avoid collisions with commonly used
+// ports (8080, 9090, 9999, etc.) while keeping the numbers memorable.
+export const DEFAULT_BACKEND_PORT = 38429;
 export const DEFAULT_WEB_PORT = 37429;
-export const DEFAULT_AGENTCTL_PORT = 9999;
-export const DEFAULT_MCP_PORT = 9090;
+export const DEFAULT_AGENTCTL_PORT = 39429;
+export const DEFAULT_MCP_PORT = 40429;
 
 // Random fallback range for port selection.
 export const RANDOM_PORT_MIN = 10000;

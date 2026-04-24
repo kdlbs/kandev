@@ -183,6 +183,13 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// Tolerate malformed entries silently — the preview is informational.
 	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
 
+	// Passthrough: BuildPassthroughCommand emits permission flags via Settings();
+	// the launch path (manager_passthrough.go) does not append CLIFlagTokens for
+	// passthrough, so the preview must match — otherwise permission flags that
+	// the legacy allow_indexing backfill also pushes into CLIFlags get rendered
+	// twice (e.g. Auggie's --allow-indexing).
+	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
+	// after the agent's BuildCommand.
 	var cmd agents.Command
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
@@ -195,9 +202,9 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			PermissionValues: req.PermissionSettings,
 			CLIFlagTokens:    cliFlagTokens,
 		})
-	}
-	if len(cliFlagTokens) > 0 {
-		cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		if len(cliFlagTokens) > 0 {
+			cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		}
 	}
 
 	return &dto.CommandPreviewResponse{
