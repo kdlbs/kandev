@@ -24,7 +24,7 @@ type FetchArgs = {
   page: number;
 };
 
-function buildParams(
+export function buildParams(
   presets: PresetOption[],
   preset: string,
   customQuery: string,

@@ -13,7 +13,7 @@ export type SavedPreset = {
   createdAt: string;
 };
 
-function readStorage(): SavedPreset[] {
+export function readStorage(): SavedPreset[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);

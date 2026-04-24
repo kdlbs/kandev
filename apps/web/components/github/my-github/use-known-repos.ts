@@ -27,7 +27,7 @@ function getServerSnapshot(): string[] {
   return emptySnapshot;
 }
 
-function recordForKey(key: string, repos: readonly string[]) {
+export function recordForKey(key: string, repos: readonly string[]) {
   let changed = false;
   if (currentKey !== key) {
     currentKey = key;
@@ -53,4 +53,9 @@ export function useKnownRepos(resetKey: string, fromItems: readonly string[]): s
     recordForKey(resetKey, fromItems);
   }, [resetKey, fromItems]);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+// Test-only: read the current module-level snapshot.
+export function __getSnapshotForTests(): string[] {
+  return snapshot;
 }
