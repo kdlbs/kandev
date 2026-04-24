@@ -1460,9 +1460,12 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 	return s.fetchIssuesWithRepoFilter(ctx, watch), nil
 }
 
-// buildIssueFilter builds the filter qualifier from watch labels.
+// buildIssueFilter builds the filter qualifier from watch labels. `state:open`
+// is included because the watcher is only interested in active issues —
+// buildIssueSearchQuery no longer injects it (the /github page presets
+// supply their own state qualifiers), so we add it here instead.
 func (s *Service) buildIssueFilter(watch *IssueWatch) string {
-	var parts []string
+	parts := []string{"state:open"}
 	for _, label := range watch.Labels {
 		if strings.ContainsRune(label, ' ') {
 			parts = append(parts, `label:"`+label+`"`)

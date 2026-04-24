@@ -399,6 +399,55 @@ func TestHasFailingChecks(t *testing.T) {
 	}
 }
 
+func TestCountCheckResults(t *testing.T) {
+	tests := []struct {
+		name                string
+		checks              []CheckRun
+		wantTotal, wantPass int
+	}{
+		{
+			name:      "empty",
+			wantTotal: 0, wantPass: 0,
+		},
+		{
+			name: "in-progress checks excluded from total",
+			checks: []CheckRun{
+				{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess},
+				{Status: "in_progress", Conclusion: ""},
+				{Status: "queued", Conclusion: ""},
+			},
+			wantTotal: 1, wantPass: 1,
+		},
+		{
+			name: "skipped and neutral are excluded",
+			checks: []CheckRun{
+				{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess},
+				{Status: checkStatusCompleted, Conclusion: checkConclusionSkipped},
+				{Status: checkStatusCompleted, Conclusion: checkConclusionNeutral},
+			},
+			wantTotal: 1, wantPass: 1,
+		},
+		{
+			name: "failures count toward total but not passing",
+			checks: []CheckRun{
+				{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess},
+				{Status: checkStatusCompleted, Conclusion: checkConclusionFail},
+				{Status: checkStatusCompleted, Conclusion: checkConclusionTimedOut},
+			},
+			wantTotal: 3, wantPass: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total, passing := countCheckResults(tt.checks)
+			if total != tt.wantTotal || passing != tt.wantPass {
+				t.Errorf("countCheckResults = (%d, %d), want (%d, %d)",
+					total, passing, tt.wantTotal, tt.wantPass)
+			}
+		})
+	}
+}
+
 func TestHasChangesRequested(t *testing.T) {
 	tests := []struct {
 		name    string

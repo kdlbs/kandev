@@ -103,12 +103,14 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 }
 
 // countCheckResults returns (total, passing) counts using the same logic as
-// computeOverallCheckStatus: skipped/neutral are excluded from the total.
+// computeOverallCheckStatus: skipped/neutral and still-running checks are
+// excluded from the total so the X/Y badge communicates pass rate rather
+// than conflating in-flight checks with failures. The pending state is
+// carried separately via ChecksState.
 func countCheckResults(checks []CheckRun) (int, int) {
 	total, passing := 0, 0
 	for _, c := range checks {
 		if c.Status != checkStatusCompleted {
-			total++
 			continue
 		}
 		switch c.Conclusion {
