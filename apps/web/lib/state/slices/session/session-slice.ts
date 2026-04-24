@@ -219,6 +219,10 @@ function buildTaskPlanActions(set: ImmerSet) {
           list.unshift(revision);
         } else {
           list[idx] = { ...list[idx], ...revision };
+          // Coalesced writes update an existing revision's content on the
+          // backend, but the WS payload carries metadata only — drop any
+          // cached content so the next preview refetches.
+          delete draft.taskPlans.revisionContentCache[revision.id];
         }
         list.sort((a, b) => b.revision_number - a.revision_number);
         draft.taskPlans.revisionsByTaskId[taskId] = list;
