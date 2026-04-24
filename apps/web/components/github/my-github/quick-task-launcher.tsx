@@ -2,14 +2,6 @@
 
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import {
-  IconEye,
-  IconMessageDots,
-  IconTool,
-  IconCode,
-  IconSearch,
-  IconBug,
-} from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
@@ -27,65 +19,12 @@ export type LaunchPayload =
   | { kind: "pr"; pr: GitHubPR; preset: TaskPreset }
   | { kind: "issue"; issue: GitHubIssue; preset: TaskPreset };
 
-export const PR_TASK_PRESETS: TaskPreset[] = [
-  {
-    id: "review",
-    label: "Review",
-    hint: "Read the diff, flag issues",
-    icon: IconEye,
-    prompt: ({ url }) =>
-      `Review the pull request at ${url}. Provide feedback on code quality, correctness, and suggest improvements.`,
-  },
-  {
-    id: "address_feedback",
-    label: "Address feedback",
-    hint: "Apply review comments",
-    icon: IconMessageDots,
-    prompt: ({ url }) =>
-      `Address the review feedback on the pull request at ${url}. Make the requested changes and push them.`,
-  },
-  {
-    id: "fix_ci",
-    label: "Fix CI",
-    hint: "Diagnose failing checks",
-    icon: IconTool,
-    prompt: ({ url }) =>
-      `Investigate and fix the CI failures on the pull request at ${url}. Run the failing checks locally, diagnose, and push fixes.`,
-  },
-];
-
-export const ISSUE_TASK_PRESETS: TaskPreset[] = [
-  {
-    id: "implement",
-    label: "Implement",
-    hint: "Build and open a PR",
-    icon: IconCode,
-    prompt: ({ url, title }) =>
-      `Implement the changes described in the GitHub issue at ${url} (title: "${title}"). Open a pull request when complete.`,
-  },
-  {
-    id: "investigate",
-    label: "Investigate",
-    hint: "Find the root cause",
-    icon: IconSearch,
-    prompt: ({ url, title }) =>
-      `Investigate the GitHub issue at ${url} (title: "${title}"). Identify root cause and summarize findings.`,
-  },
-  {
-    id: "reproduce",
-    label: "Reproduce",
-    hint: "Document repro steps",
-    icon: IconBug,
-    prompt: ({ url, title }) =>
-      `Reproduce the bug described in the GitHub issue at ${url} (title: "${title}"). Document the reproduction steps.`,
-  },
-];
-
 type DialogState = {
   title: string;
   description: string;
   repositoryId?: string;
   branch?: string;
+  checkoutBranch?: string;
   githubUrl?: string;
 };
 
@@ -121,14 +60,22 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   const repo = matchRepo(repositories, data.owner, data.name);
   const description = payload.preset.prompt({ url: data.url, title: data.title });
   const title = `${payload.preset.label}: ${data.title}`;
+  const checkoutBranch = payload.kind === "pr" ? data.branch : undefined;
   if (repo) {
-    return { title, description, repositoryId: repo.id, branch: data.branch };
+    return {
+      title,
+      description,
+      repositoryId: repo.id,
+      branch: data.branch,
+      checkoutBranch,
+    };
   }
   return {
     title,
     description,
     githubUrl: `github.com/${data.owner}/${data.name}`,
     branch: data.branch,
+    checkoutBranch,
   };
 }
 
@@ -194,6 +141,7 @@ export function QuickTaskLauncher({
         description: dialog.description,
         repositoryId: dialog.repositoryId,
         branch: dialog.branch,
+        checkoutBranch: dialog.checkoutBranch,
         githubUrl: dialog.githubUrl,
       }}
       onSuccess={handleSuccess}

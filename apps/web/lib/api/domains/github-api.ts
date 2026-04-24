@@ -22,6 +22,8 @@ import type {
   SearchPRsResponse,
   SearchIssuesResponse,
   GitHubPRStatus,
+  GitHubActionPresets,
+  UpdateGitHubActionPresetsRequest,
 } from "@/lib/types/github";
 
 // Status
@@ -305,4 +307,31 @@ export async function searchUserIssues(params: SearchParams, options?: ApiReques
     `/api/v1/github/user/issues${suffix ? `?${suffix}` : ""}`,
     options,
   );
+}
+
+// Action presets (quick-launch prompts on the /github page).
+export async function fetchGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubActionPresets>(
+    `/api/v1/github/action-presets?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updateGitHubActionPresets(
+  payload: UpdateGitHubActionPresetsRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubActionPresets>("/api/v1/github/action-presets", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  });
+}
+
+export async function resetGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubActionPresets>(`/api/v1/github/action-presets/reset?${query.toString()}`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST" },
+  });
 }

@@ -337,3 +337,38 @@ export type SearchIssuesResponse = {
   page: number;
   per_page: number;
 };
+
+// Action presets — configurable quick-launch prompts on the /github page.
+export type GitHubActionPresetKind = "pr" | "issue";
+
+export type GitHubActionPresetIcon =
+  | "eye"
+  | "message"
+  | "tool"
+  | "code"
+  | "search"
+  | "bug"
+  | "sparkle"
+  | "check";
+
+export type GitHubActionPreset = {
+  id: string;
+  label: string;
+  hint: string;
+  // `string & {}` preserves autocomplete for the known icon keys while still
+  // accepting custom strings for forward compatibility.
+  icon: GitHubActionPresetIcon | (string & {});
+  prompt_template: string;
+};
+
+export type GitHubActionPresets = {
+  workspace_id: string;
+  pr: GitHubActionPreset[];
+  issue: GitHubActionPreset[];
+};
+
+export type UpdateGitHubActionPresetsRequest = {
+  workspace_id: string;
+  pr?: GitHubActionPreset[];
+  issue?: GitHubActionPreset[];
+};

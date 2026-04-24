@@ -14,20 +14,23 @@ import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import type { GitHubIssue } from "@/lib/types/github";
-import { ISSUE_TASK_PRESETS, type LaunchPayload, type TaskPreset } from "./quick-task-launcher";
+import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
 
 type IssueListProps = {
   items: GitHubIssue[];
   loading: boolean;
   error: string | null;
+  presets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
 };
 
 function StartTaskMenu({
   issue,
+  presets,
   onStartTask,
 }: {
   issue: GitHubIssue;
+  presets: TaskPreset[];
   onStartTask: IssueListProps["onStartTask"];
 }) {
   const launch = (preset: TaskPreset) => onStartTask({ kind: "issue", issue, preset });
@@ -41,7 +44,7 @@ function StartTaskMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        {ISSUE_TASK_PRESETS.map((p) => {
+        {presets.map((p) => {
           const ItemIcon = p.icon;
           return (
             <DropdownMenuItem
@@ -80,9 +83,11 @@ function IssueLabels({ labels }: { labels: string[] }) {
 
 function IssueRow({
   issue,
+  presets,
   onStartTask,
 }: {
   issue: GitHubIssue;
+  presets: TaskPreset[];
   onStartTask: IssueListProps["onStartTask"];
 }) {
   const StateIcon = issue.state === "open" ? IconCircle : IconCircleCheck;
@@ -114,13 +119,13 @@ function IssueRow({
         </div>
       </div>
       <div className="shrink-0">
-        <StartTaskMenu issue={issue} onStartTask={onStartTask} />
+        <StartTaskMenu issue={issue} presets={presets} onStartTask={onStartTask} />
       </div>
     </div>
   );
 }
 
-function IssueListBody({ loading, error, items, onStartTask }: IssueListProps) {
+function IssueListBody({ loading, error, items, presets, onStartTask }: IssueListProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -144,6 +149,7 @@ function IssueListBody({ loading, error, items, onStartTask }: IssueListProps) {
         <IssueRow
           key={`${issue.repo_owner}/${issue.repo_name}#${issue.number}`}
           issue={issue}
+          presets={presets}
           onStartTask={onStartTask}
         />
       ))}

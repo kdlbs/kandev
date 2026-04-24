@@ -62,6 +62,10 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/user/prs", c.httpSearchUserPRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
 
+	api.GET("/action-presets", c.httpGetActionPresets)
+	api.PUT("/action-presets", c.httpUpdateActionPresets)
+	api.POST("/action-presets/reset", c.httpResetActionPresets)
+
 	api.GET("/stats", c.httpGetStats)
 }
 
@@ -599,4 +603,52 @@ func (c *Controller) httpTriggerAllIssueChecks(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": count})
+}
+
+// --- Action preset HTTP handlers ---
+
+func (c *Controller) httpGetActionPresets(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	presets, err := c.service.GetActionPresets(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
+}
+
+func (c *Controller) httpUpdateActionPresets(ctx *gin.Context) {
+	var req UpdateActionPresetsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.WorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		return
+	}
+	presets, err := c.service.UpdateActionPresets(ctx.Request.Context(), &req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
+}
+
+func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	presets, err := c.service.ResetActionPresets(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
 }

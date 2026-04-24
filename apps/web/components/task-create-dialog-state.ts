@@ -172,7 +172,7 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubUrl(ghUrl);
   resetters.setGitHubBranches([]);
   resetters.setGitHubUrlError(null);
-  resetters.setGitHubPrHeadBranch(null);
+  resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
 }
 
 /** Hook to manage draft persistence for task creation dialog */
