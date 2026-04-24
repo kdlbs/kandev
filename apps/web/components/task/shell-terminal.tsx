@@ -285,9 +285,9 @@ function useShellTerminalKeyHandler({
 }: ShellKeyHandlerOptions) {
   // Use a ref so the handler (attached once) always reads the latest values
   // without needing cleanup (attachCustomKeyEventHandler has no dispose).
-  const stateRef = useRef({ sessionId, send, onFindInPanel });
+  const stateRef = useRef({ sessionId, send, onFindInPanel, isReadOnlyMode });
   useEffect(() => {
-    stateRef.current = { sessionId, send, onFindInPanel };
+    stateRef.current = { sessionId, send, onFindInPanel, isReadOnlyMode };
   });
 
   const attachedRef = useRef(false);
@@ -295,14 +295,19 @@ function useShellTerminalKeyHandler({
     if (!xtermRef.current || !isTerminalReady || attachedRef.current) return;
     attachedRef.current = true;
     xtermRef.current.attachCustomKeyEventHandler((event) => {
-      const { sessionId: sid, send: sendFn, onFindInPanel: findFn } = stateRef.current;
+      const {
+        sessionId: sid,
+        send: sendFn,
+        onFindInPanel: findFn,
+        isReadOnlyMode: ro,
+      } = stateRef.current;
       if (matchesShortcut(event, SHORTCUTS.FIND_IN_PANEL)) {
         event.preventDefault();
         if (event.type === "keydown") findFn();
         return false;
       }
       if (
-        !isReadOnlyMode &&
+        !ro &&
         event.type === "keydown" &&
         event.metaKey &&
         !event.ctrlKey &&
@@ -317,7 +322,7 @@ function useShellTerminalKeyHandler({
       }
       return true;
     });
-  }, [xtermRef, isReadOnlyMode, isTerminalReady]);
+  }, [xtermRef, isTerminalReady]);
 }
 
 /** Handles user input in interactive mode, filtering out cursor position responses. */
