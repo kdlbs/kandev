@@ -310,10 +310,7 @@ export async function searchUserIssues(params: SearchParams, options?: ApiReques
 }
 
 // Action presets (quick-launch prompts on the /github page).
-export async function fetchGitHubActionPresets(
-  workspaceId: string,
-  options?: ApiRequestOptions,
-) {
+export async function fetchGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<GitHubActionPresets>(
     `/api/v1/github/action-presets?${query.toString()}`,
@@ -331,16 +328,10 @@ export async function updateGitHubActionPresets(
   });
 }
 
-export async function resetGitHubActionPresets(
-  workspaceId: string,
-  options?: ApiRequestOptions,
-) {
+export async function resetGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<GitHubActionPresets>(
-    `/api/v1/github/action-presets/reset?${query.toString()}`,
-    {
-      ...options,
-      init: { method: "POST", ...(options?.init ?? {}) },
-    },
-  );
+  return fetchJson<GitHubActionPresets>(`/api/v1/github/action-presets/reset?${query.toString()}`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
 }

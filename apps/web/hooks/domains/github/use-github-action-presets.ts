@@ -7,10 +7,7 @@ import {
   resetGitHubActionPresets,
 } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
-import type {
-  GitHubActionPreset,
-  UpdateGitHubActionPresetsRequest,
-} from "@/lib/types/github";
+import type { GitHubActionPreset, UpdateGitHubActionPresetsRequest } from "@/lib/types/github";
 
 export function useGitHubActionPresets(workspaceId: string | null) {
   const presets = useAppStore((state) =>
@@ -55,15 +52,9 @@ export function useGitHubActionPresets(workspaceId: string | null) {
     return response;
   }, [workspaceId, setPresets]);
 
-  const savePR = useCallback(
-    async (pr: GitHubActionPreset[]) => save({ pr }),
-    [save],
-  );
+  const savePR = useCallback(async (pr: GitHubActionPreset[]) => save({ pr }), [save]);
 
-  const saveIssue = useCallback(
-    async (issue: GitHubActionPreset[]) => save({ issue }),
-    [save],
-  );
+  const saveIssue = useCallback(async (issue: GitHubActionPreset[]) => save({ issue }), [save]);
 
   return {
     presets,

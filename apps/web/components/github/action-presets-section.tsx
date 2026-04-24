@@ -7,13 +7,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
@@ -42,13 +36,7 @@ function newPreset(): GitHubActionPreset {
   };
 }
 
-function PresetIconSelect({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="h-8 cursor-pointer">
@@ -224,9 +212,7 @@ function PresetEditor({ kind, presets, onChange }: EditorProps) {
   );
 }
 
-function usePresetDrafts(
-  workspaceId: string,
-): {
+function usePresetDrafts(workspaceId: string): {
   prDraft: GitHubActionPreset[];
   issueDraft: GitHubActionPreset[];
   setPrDraft: (next: GitHubActionPreset[]) => void;
