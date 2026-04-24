@@ -4,8 +4,26 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+// gitRefRe accepts the conservative subset of git ref names we expose to user
+// input: ASCII letters, digits, and `._/-`, with no leading `-` (which git
+// would treat as an option). This rejects any value that could be interpreted
+// as a flag by `git fetch` / `git checkout` even though we pass refs as
+// positional argv entries.
+var gitRefRe = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./-]*$`)
+
+func validateGitRef(name string) error {
+	if !gitRefRe.MatchString(name) {
+		return fmt.Errorf("invalid git ref name %q", name)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid git ref name %q", name)
+	}
+	return nil
+}
 
 // FreshBranchRequest performs a destructive checkout on a local repository:
 // discard uncommitted changes, then create NewBranch from BaseBranch.
@@ -40,6 +58,12 @@ func (s *Service) PerformFreshBranch(ctx context.Context, req FreshBranchRequest
 	}
 	if req.BaseBranch == "" {
 		return fmt.Errorf("base branch is required")
+	}
+	if err := validateGitRef(req.NewBranch); err != nil {
+		return err
+	}
+	if err := validateGitRef(req.BaseBranch); err != nil {
+		return err
 	}
 	absPath, err := s.resolveAllowedLocalPath(req.RepoPath)
 	if err != nil {

@@ -198,25 +198,36 @@ func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (Local
 	}, nil
 }
 
-func (s *Service) resolveAllowedLocalPath(path string) (string, error) {
-	if path == "" {
+func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
+	if repoPath == "" {
 		return "", fmt.Errorf("repository path is required")
 	}
-	absPath, err := filepath.Abs(path)
+	cleaned := filepath.Clean(repoPath)
+	absPath, err := filepath.Abs(cleaned)
 	if err != nil {
 		return "", fmt.Errorf("invalid repository path: %w", err)
 	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
+	roots := s.discoveryRoots()
+	if !isPathAllowed(absPath, roots) {
 		return "", ErrPathNotAllowed
 	}
-	info, err := os.Stat(absPath)
+	// Resolve symlinks then re-validate so a symlink within a root cannot
+	// escape outside the allowed roots.
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", err
+	}
+	if !isPathAllowed(resolved, roots) {
+		return "", ErrPathNotAllowed
+	}
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("repository path is not a directory")
 	}
-	return absPath, nil
+	return resolved, nil
 }
 
 func (s *Service) discoveryRoots() []string {
@@ -401,15 +412,24 @@ func isWithinRoot(path string, root string) bool {
 }
 
 // readGitCurrentBranch returns the currently checked-out branch by reading
-// .git/HEAD directly. Returns an empty string if HEAD is detached or unreadable.
-// We avoid `git rev-parse --abbrev-ref HEAD` to skip the subprocess cost on
-// the hot path of branch discovery.
+// .git/HEAD directly. Returns an empty string if HEAD is detached, the path
+// is not a clean absolute path, or HEAD is unreadable. We avoid
+// `git rev-parse --abbrev-ref HEAD` to skip the subprocess cost on the hot
+// path of branch discovery.
 func readGitCurrentBranch(repoPath string) string {
-	gitDir, err := resolveGitDir(repoPath)
+	if !filepath.IsAbs(repoPath) {
+		return ""
+	}
+	cleanRepo := filepath.Clean(repoPath)
+	gitDir, err := resolveGitDir(cleanRepo)
 	if err != nil {
 		return ""
 	}
-	content, err := os.ReadFile(filepath.Join(gitDir, gitHEAD))
+	headPath := filepath.Clean(filepath.Join(gitDir, gitHEAD))
+	if !filepath.IsAbs(headPath) {
+		return ""
+	}
+	content, err := os.ReadFile(headPath)
 	if err != nil {
 		return ""
 	}
