@@ -16,10 +16,7 @@ import {
 import { PR_PRESETS, ISSUE_PRESETS } from "@/components/github/my-github/search-bar";
 import { useGitHubSearch } from "@/components/github/my-github/use-github-search";
 import { useSavedPresets, type SavedPreset } from "@/components/github/my-github/use-saved-presets";
-import {
-  useKnownRepos,
-  resetKnownReposStore,
-} from "@/components/github/my-github/use-known-repos";
+import { useKnownRepos, resetKnownReposStore } from "@/components/github/my-github/use-known-repos";
 import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
 import { ListToolbar } from "@/components/github/my-github/list-toolbar";
 import { ResultsPagination } from "@/components/github/my-github/results-pagination";
