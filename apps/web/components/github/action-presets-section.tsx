@@ -1,13 +1,12 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
-import { IconArrowDown, IconArrowUp, IconPlus, IconTrash, IconRefresh } from "@tabler/icons-react";
+import { createElement, useMemo, useState, useCallback } from "react";
+import { IconPlus, IconTrash, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
@@ -15,16 +14,9 @@ import {
   DEFAULT_ISSUE_PRESETS,
   DEFAULT_PR_PRESETS,
   PRESET_ICON_CHOICES,
+  iconForPresetKey,
 } from "@/components/github/my-github/action-presets";
 import type { GitHubActionPreset } from "@/lib/types/github";
-
-type PresetKind = "pr" | "issue";
-
-type EditorProps = {
-  kind: PresetKind;
-  presets: GitHubActionPreset[];
-  onChange: (presets: GitHubActionPreset[]) => void;
-};
 
 function newPreset(): GitHubActionPreset {
   return {
@@ -39,8 +31,10 @@ function newPreset(): GitHubActionPreset {
 function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 cursor-pointer">
-        <SelectValue />
+      <SelectTrigger className="h-8 w-10 cursor-pointer px-2" aria-label="Icon">
+        <SelectValue>
+          {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {PRESET_ICON_CHOICES.map((choice) => {
@@ -59,125 +53,77 @@ function PresetIconSelect({ value, onChange }: { value: string; onChange: (v: st
   );
 }
 
-function PresetRowControls({
-  index,
-  total,
-  onMove,
-  onRemove,
-}: {
-  index: number;
-  total: number;
-  onMove: (direction: -1 | 1) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1 pt-[22px]">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 cursor-pointer"
-        disabled={index === 0}
-        onClick={() => onMove(-1)}
-        aria-label="Move up"
-      >
-        <IconArrowUp className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 cursor-pointer"
-        disabled={index === total - 1}
-        onClick={() => onMove(1)}
-        aria-label="Move down"
-      >
-        <IconArrowDown className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 cursor-pointer text-destructive"
-        onClick={onRemove}
-        aria-label="Remove"
-      >
-        <IconTrash className="h-3.5 w-3.5" />
-      </Button>
-    </div>
-  );
-}
-
 function PresetRow({
   preset,
-  index,
-  total,
+  expanded,
+  onToggle,
   onPatch,
-  onMove,
   onRemove,
 }: {
   preset: GitHubActionPreset;
-  index: number;
-  total: number;
+  expanded: boolean;
+  onToggle: () => void;
   onPatch: (patch: Partial<GitHubActionPreset>) => void;
-  onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
 }) {
   return (
-    <div className="rounded-md border p-3 space-y-2">
-      <div className="flex items-start gap-2">
-        <div className="flex-1 grid grid-cols-[auto_1fr_1fr] gap-2 items-start">
-          <div className="min-w-[6.5rem]">
-            <Label className="text-xs mb-1 block">Icon</Label>
-            <PresetIconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
-          </div>
-          <div>
-            <Label className="text-xs mb-1 block">Label</Label>
-            <Input
-              className="h-8"
-              value={preset.label}
-              onChange={(e) => onPatch({ label: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label className="text-xs mb-1 block">Hint</Label>
-            <Input
-              className="h-8"
-              value={preset.hint}
-              onChange={(e) => onPatch({ hint: e.target.value })}
-            />
-          </div>
-        </div>
-        <PresetRowControls index={index} total={total} onMove={onMove} onRemove={onRemove} />
-      </div>
-      <div>
-        <Label className="text-xs mb-1 block">
-          Prompt template — use <code className="text-[10px]">{"{url}"}</code> and{" "}
-          <code className="text-[10px]">{"{title}"}</code>
-        </Label>
-        <Textarea
-          rows={2}
-          className="text-xs font-mono"
-          value={preset.prompt_template}
-          onChange={(e) => onPatch({ prompt_template: e.target.value })}
+    <div className="rounded-md border">
+      <div className="flex items-center gap-2 p-2">
+        <PresetIconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+        <Input
+          className="h-8 w-40"
+          value={preset.label}
+          placeholder="Label"
+          onChange={(e) => onPatch({ label: e.target.value })}
         />
+        <Input
+          className="h-8 flex-1"
+          value={preset.hint}
+          placeholder="Hint (optional)"
+          onChange={(e) => onPatch({ hint: e.target.value })}
+        />
+        <Button variant="ghost" size="sm" className="h-8 cursor-pointer text-xs" onClick={onToggle}>
+          {expanded ? "Hide prompt" : "Edit prompt"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 cursor-pointer text-destructive"
+          onClick={onRemove}
+          aria-label="Remove"
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </Button>
       </div>
+      {expanded && (
+        <div className="px-2 pb-2">
+          <Textarea
+            rows={3}
+            className="text-xs font-mono"
+            placeholder="Prompt template — {url} and {title} are substituted"
+            value={preset.prompt_template}
+            onChange={(e) => onPatch({ prompt_template: e.target.value })}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function PresetEditor({ kind, presets, onChange }: EditorProps) {
+function PresetEditor({
+  presets,
+  onChange,
+  addLabel,
+}: {
+  presets: GitHubActionPreset[];
+  onChange: (presets: GitHubActionPreset[]) => void;
+  addLabel: string;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   const patch = useCallback(
     (index: number, change: Partial<GitHubActionPreset>) => {
       onChange(presets.map((p, i) => (i === index ? { ...p, ...change } : p)));
-    },
-    [presets, onChange],
-  );
-  const move = useCallback(
-    (index: number, direction: -1 | 1) => {
-      const target = index + direction;
-      if (target < 0 || target >= presets.length) return;
-      const next = [...presets];
-      const [item] = next.splice(index, 1);
-      next.splice(target, 0, item);
-      onChange(next);
     },
     [presets, onChange],
   );
@@ -188,25 +134,26 @@ function PresetEditor({ kind, presets, onChange }: EditorProps) {
     [presets, onChange],
   );
   const add = useCallback(() => {
-    onChange([...presets, newPreset()]);
+    const created = newPreset();
+    onChange([...presets, created]);
+    setExpandedId(created.id);
   }, [presets, onChange]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {presets.map((preset, index) => (
         <PresetRow
           key={preset.id}
           preset={preset}
-          index={index}
-          total={presets.length}
-          onPatch={(patchObj) => patch(index, patchObj)}
-          onMove={(direction) => move(index, direction)}
+          expanded={expandedId === preset.id}
+          onToggle={() => setExpandedId((id) => (id === preset.id ? null : preset.id))}
+          onPatch={(p) => patch(index, p)}
           onRemove={() => remove(index)}
         />
       ))}
       <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
         <IconPlus className="h-3.5 w-3.5 mr-1" />
-        Add {kind === "pr" ? "PR action" : "issue action"}
+        {addLabel}
       </Button>
     </div>
   );
@@ -223,17 +170,15 @@ function usePresetDrafts(workspaceId: string): {
   loading: boolean;
 } {
   const { presets, save, reset, loading } = useGitHubActionPresets(workspaceId);
-  // Seed drafts from whatever the store has right now; on a warm mount this is
-  // the user's saved customisations, otherwise the built-in defaults.
   const [prDraft, setPrDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.pr?.length ? presets.pr : DEFAULT_PR_PRESETS,
   );
   const [issueDraft, setIssueDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS,
   );
-  // When a new `presets` object arrives from the server, reset the editor drafts.
-  // Render-time conditional setState is React's documented pattern for deriving
-  // state from props with a reset; preferred over useEffect for sync updates.
+  // Render-time conditional setState is React's documented "adjust state
+  // during render" pattern; it resets drafts whenever a new server response
+  // replaces the presets reference.
   const [syncedPresets, setSyncedPresets] = useState(presets);
   if (presets && presets !== syncedPresets) {
     setSyncedPresets(presets);
@@ -308,7 +253,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   return (
     <SettingsSection
       title="Quick actions"
-      description="Prompts shown on the /github page when starting a task from a PR or issue."
+      description="Prompts shown on /github when starting a task from a PR or issue."
       action={
         <div className="flex gap-2">
           <Button
@@ -332,18 +277,22 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
         </div>
       }
     >
-      <Card>
-        <CardContent className="p-4 space-y-5">
-          <div>
-            <div className="text-sm font-semibold mb-2">Pull request actions</div>
-            <PresetEditor kind="pr" presets={prDraft} onChange={setPrDraft} />
-          </div>
-          <div>
-            <div className="text-sm font-semibold mb-2">Issue actions</div>
-            <PresetEditor kind="issue" presets={issueDraft} onChange={setIssueDraft} />
-          </div>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="pr">
+        <TabsList>
+          <TabsTrigger value="pr" className="cursor-pointer">
+            Pull requests
+          </TabsTrigger>
+          <TabsTrigger value="issue" className="cursor-pointer">
+            Issues
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="pr">
+          <PresetEditor presets={prDraft} onChange={setPrDraft} addLabel="Add PR action" />
+        </TabsContent>
+        <TabsContent value="issue">
+          <PresetEditor presets={issueDraft} onChange={setIssueDraft} addLabel="Add issue action" />
+        </TabsContent>
+      </Tabs>
     </SettingsSection>
   );
 }
