@@ -62,6 +62,7 @@ var (
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
 	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
 	ErrTaskArchived            = errors.New("task is archived")
+	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 )
 
 // PromptResult contains the result of a prompt operation

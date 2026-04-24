@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -344,8 +345,17 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
+	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory execution
+	// was lost (e.g. backend restart). The session's AgentExecutionID has been cleared,
+	// so we fall through to the full LaunchAgent path below.
 	if session.AgentExecutionID != "" {
-		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		if !errors.Is(err, ErrStaleExecution) {
+			return result, err
+		}
+		e.logger.Info("falling through to full LaunchAgent after stale execution",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID))
 	}
 
 	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
@@ -556,7 +566,8 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	// with a different ID than what the database still holds. Using the stale DB
 	// value would cause "execution not found" errors.
 	executionID := session.AgentExecutionID
-	if liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID); err == nil && liveID != "" && liveID != executionID {
+	liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	if err == nil && liveID != "" && liveID != executionID {
 		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
 			zap.String("session_id", session.ID),
 			zap.String("stale_id", executionID),
@@ -568,6 +579,21 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.String("session_id", session.ID),
 				zap.Error(updateErr))
 		}
+	} else if err != nil {
+		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
+		// Clear AgentExecutionID and return ErrStaleExecution so the caller falls through
+		// to the full LaunchAgent path, which creates a complete execution with agent
+		// commands, worktree, and all required configuration.
+		e.logger.Info("stale execution ID, clearing for full re-launch",
+			zap.String("session_id", session.ID),
+			zap.String("stale_execution_id", executionID))
+		session.AgentExecutionID = ""
+		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+			e.logger.Warn("failed to clear stale execution ID",
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
+		return nil, ErrStaleExecution
 	}
 
 	if !startAgent {

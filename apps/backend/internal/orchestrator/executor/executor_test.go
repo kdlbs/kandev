@@ -325,6 +325,13 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 			}
 			return nil
 		},
+		// The execution must exist in the in-memory store for startAgentOnExistingWorkspace to proceed.
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			if sessionID == "session-123" {
+				return "exec-existing", nil
+			}
+			return "", fmt.Errorf("not found")
+		},
 	}
 	agentManager.setExecutionDescriptionFunc = func(ctx context.Context, id, desc string) error {
 		descriptionSet = desc
@@ -431,6 +438,72 @@ func TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore(t *testin
 		t.Errorf("Expected DB AgentExecutionID to be corrected to 'live-exec-id', got %s", updatedSession.AgentExecutionID)
 	}
 }
+
+func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testing.T) {
+	repo := newMockRepository()
+
+	// Session has an AgentExecutionID but no live execution exists in memory
+	// (e.g. backend restarted since workspace was prepared).
+	session := &models.TaskSession{
+		ID:               "session-123",
+		TaskID:           "task-123",
+		AgentProfileID:   "profile-123",
+		AgentExecutionID: "stale-exec-id",
+		State:            models.TaskSessionStateCreated,
+		StartedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	var launchCalled atomic.Bool
+	agentManager := &mockAgentManager{
+		// No live execution — simulates backend restart
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "", fmt.Errorf("no execution found for session %s", sessionID)
+		},
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchCalled.Store(true)
+			return &LaunchAgentResponse{
+				AgentExecutionID: "new-exec-id",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}
+
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123",
+		Prompt:         "review this PR",
+		StartAgent:     true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession should fall through to LaunchAgent, got error: %v", err)
+	}
+
+	// Should have used LaunchAgent (full path) instead of failing
+	if !launchCalled.Load() {
+		t.Error("Expected LaunchAgent to be called after stale execution fallthrough")
+	}
+
+	// Should use the new execution ID
+	if execution.AgentExecutionID != "new-exec-id" {
+		t.Errorf("Expected new execution ID 'new-exec-id', got %s", execution.AgentExecutionID)
+	}
+
+	// Database AgentExecutionID should have been cleared by startAgentOnExistingWorkspace
+	updatedSession := repo.sessions["session-123"]
+	if updatedSession.AgentExecutionID == "stale-exec-id" {
+		t.Error("Expected stale AgentExecutionID to be cleared from DB")
+	}
+}
+
 
 func TestExecuteWithProfile_UsesPrepareThenLaunch(t *testing.T) {
 	repo := newMockRepository()
