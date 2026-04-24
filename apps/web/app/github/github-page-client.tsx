@@ -131,6 +131,31 @@ function defaultQuery(kind: "pr" | "issue"): string {
 
 type GitHubPageState = ReturnType<typeof useGitHubPageState>;
 
+function useRepoOptions(
+  selection: SidebarSelection,
+  committedQuery: string,
+  items: Array<GitHubPR | GitHubIssue>,
+  repoFilter: string,
+): string[] {
+  const pageRepos = useMemo(
+    () =>
+      items
+        .filter((it) => it.repo_owner && it.repo_name)
+        .map((it) => `${it.repo_owner}/${it.repo_name}`),
+    [items],
+  );
+  // Reset the accumulator whenever the query context changes (preset, saved,
+  // custom query). Repo filter is deliberately excluded so narrowing doesn't
+  // reset — that's the whole point of the accumulator.
+  const reposResetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
+  const knownRepos = useKnownRepos(reposResetKey, pageRepos);
+  return useMemo(() => {
+    const set = new Set(knownRepos);
+    if (repoFilter) set.add(repoFilter);
+    return Array.from(set).sort();
+  }, [knownRepos, repoFilter]);
+}
+
 function useGitHubPageState() {
   const [selection, setSelection] = useState<SidebarSelection>(() => defaultSelection("pr"));
   const {
@@ -156,25 +181,7 @@ function useGitHubPageState() {
     committedQuery,
     repoFilter,
   );
-
-  const pageRepos = useMemo(
-    () =>
-      search.items
-        .filter((it) => it.repo_owner && it.repo_name)
-        .map((it) => `${it.repo_owner}/${it.repo_name}`),
-    [search.items],
-  );
-  // Reset the accumulator whenever the query context changes (preset, saved,
-  // custom query). Repo filter is deliberately excluded so narrowing doesn't
-  // reset — that's the whole point of the accumulator.
-  const reposResetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
-  const knownRepos = useKnownRepos(reposResetKey, pageRepos);
-  const repoOptions = useMemo(() => {
-    const set = new Set(knownRepos);
-    if (repoFilter) set.add(repoFilter);
-    return Array.from(set).sort();
-  }, [knownRepos, repoFilter]);
-
+  const repoOptions = useRepoOptions(selection, committedQuery, search.items, repoFilter);
   const title = useMemo(() => resolveTitle(selection, savedPresets), [selection, savedPresets]);
 
   const onSelect = useCallback(

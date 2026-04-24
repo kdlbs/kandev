@@ -598,7 +598,14 @@ func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[str
 		wg.Add(1)
 		go func(r PRRef) {
 			defer wg.Done()
-			sem <- struct{}{}
+			// Release queued goroutines early when the caller disconnects —
+			// otherwise up to 200 refs queue up serially behind the semaphore
+			// and each still runs its full upstream fetch.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 			status, err := s.GetPRStatus(ctx, r.Owner, r.Repo, r.Number)
 			if err != nil {

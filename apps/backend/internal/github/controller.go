@@ -144,7 +144,7 @@ func (c *Controller) httpGetPRStatus(ctx *gin.Context) {
 	}
 	status, err := c.service.GetPRStatus(ctx.Request.Context(), owner, repo, number)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.handleSearchError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, status)
@@ -173,7 +173,7 @@ func (c *Controller) httpGetPRStatusesBatch(ctx *gin.Context) {
 	}
 	statuses, err := c.service.GetPRStatusesBatch(ctx.Request.Context(), body.Refs)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.handleSearchError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"statuses": statuses})
@@ -433,8 +433,10 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-// parsePaginationQuery reads `page` and `per_page` query params with defaults
-// of 1 and 50. Values are returned raw; the client layer enforces bounds.
+// parsePaginationQuery reads `page` and `per_page` query params. Missing or
+// non-positive values fall back to defaults (page=1, perPage=50). The upper
+// bound for perPage (100) is applied later by clampSearchPage in the client
+// layer, where it also gates the cache key.
 func parsePaginationQuery(ctx *gin.Context) (int, int) {
 	page, _ := strconv.Atoi(ctx.Query("page"))
 	perPage, _ := strconv.Atoi(ctx.Query("per_page"))

@@ -70,13 +70,24 @@ function PresetItem({
   onClick: () => void;
   trailing?: React.ReactNode;
 }) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  };
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
       className={cn(
         "group/item mx-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50",
       )}
       onClick={onClick}
+      onKeyDown={onKeyDown}
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate flex-1">{label}</span>

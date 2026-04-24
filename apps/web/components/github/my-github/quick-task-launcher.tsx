@@ -155,16 +155,17 @@ export function QuickTaskLauncher({
   const [dialog, setDialog] = useState<DialogState>({ open: false, title: "", description: "" });
 
   const defaultWorkflow = workflows[0];
-  const defaultStep = useMemo(
-    () => steps.find((s) => s.workflow_id === defaultWorkflow?.id),
-    [steps, defaultWorkflow],
-  );
-  const stepsForWorkflow = useMemo(
+  const sortedStepsForWorkflow = useMemo(
     () =>
       steps
         .filter((s) => s.workflow_id === defaultWorkflow?.id)
-        .map((s) => ({ id: s.id, title: s.name, events: s.events })),
+        .sort((a, b) => a.position - b.position),
     [steps, defaultWorkflow],
+  );
+  const defaultStep = sortedStepsForWorkflow[0];
+  const stepsForWorkflow = useMemo(
+    () => sortedStepsForWorkflow.map((s) => ({ id: s.id, title: s.name, events: s.events })),
+    [sortedStepsForWorkflow],
   );
 
   useEffect(() => {
