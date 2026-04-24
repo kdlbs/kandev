@@ -66,7 +66,7 @@ ci: add PR title linting workflow
    - If **inactive**, warn the user: _"⚠️ pre-commit hooks are not active. Run `pre-commit install` to enable them."_
    - **Do not block** — continue with the remaining steps regardless.
 
-3. **Run verify (MANDATORY — do NOT skip):** Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
+3. **Run verify (MANDATORY — do NOT skip):** Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
 
