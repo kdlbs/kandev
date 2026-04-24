@@ -53,8 +53,8 @@ function SavePresetForm({
       <DialogHeader>
         <DialogTitle>Save query</DialogTitle>
         <DialogDescription>
-          Save this {kind === "pr" ? "pull request" : "issue"} query to the sidebar for quick
-          access later.
+          Save this {kind === "pr" ? "pull request" : "issue"} query to the sidebar for quick access
+          later.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-3">

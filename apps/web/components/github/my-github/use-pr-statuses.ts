@@ -17,9 +17,7 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
   const [statuses, setStatuses] = useState<Map<string, GitHubPRStatus>>(new Map());
   const requestedKey = useRef<string>("");
 
-  const key = prs
-    .map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number))
-    .join(",");
+  const key = prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",");
 
   useEffect(() => {
     if (prs.length === 0) return;

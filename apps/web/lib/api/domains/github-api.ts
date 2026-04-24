@@ -64,10 +64,7 @@ export async function getPRStatus(
   number: number,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<GitHubPRStatus>(
-    `/api/v1/github/prs/${owner}/${repo}/${number}/status`,
-    options,
-  );
+  return fetchJson<GitHubPRStatus>(`/api/v1/github/prs/${owner}/${repo}/${number}/status`, options);
 }
 
 export type PRStatusRef = { owner: string; repo: string; number: number };
@@ -75,21 +72,15 @@ export type PRStatusRef = { owner: string; repo: string; number: number };
 // Batch variant of getPRStatus: one round-trip for a whole list page. The
 // backend fans out concurrently and caches per-PR, so repeat calls for the
 // same page are cheap. Keys in the returned map are "<owner>/<repo>#<number>".
-export async function getPRStatusesBatch(
-  refs: PRStatusRef[],
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ statuses: Record<string, GitHubPRStatus> }>(
-    `/api/v1/github/prs/statuses`,
-    {
-      ...options,
-      init: {
-        method: "POST",
-        body: JSON.stringify({ refs }),
-        ...(options?.init ?? {}),
-      },
+export async function getPRStatusesBatch(refs: PRStatusRef[], options?: ApiRequestOptions) {
+  return fetchJson<{ statuses: Record<string, GitHubPRStatus> }>(`/api/v1/github/prs/statuses`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ refs }),
+      ...(options?.init ?? {}),
     },
-  );
+  });
 }
 
 // Submit PR review

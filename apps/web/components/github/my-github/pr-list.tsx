@@ -142,14 +142,7 @@ function PRListBody({ loading, error, items, onStartTask }: PRListProps) {
     <div className="divide-y">
       {items.map((pr) => {
         const key = prStatusKey(pr.repo_owner, pr.repo_name, pr.number);
-        return (
-          <PRRow
-            key={key}
-            pr={pr}
-            status={statuses.get(key)}
-            onStartTask={onStartTask}
-          />
-        );
+        return <PRRow key={key} pr={pr} status={statuses.get(key)} onStartTask={onStartTask} />;
       })}
     </div>
   );
