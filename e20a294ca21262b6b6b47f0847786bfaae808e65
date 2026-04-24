@@ -1,0 +1,1 @@
+{"v":4,"author":"carlosmflorencio@gmail.com","week":"2026-04-20","files":{"apps/backend/internal/orchestrator/service.go":{"ai_del_ai":0,"ai_del_usr":1,"usr_del_usr":0,"usr_del_ai":0,"ai_add":0,"usr_add":0}},"agents":["augment"],"source":"hook","orig_sha":"e20a294ca21262b6b6b47f0847786bfaae808e65"}
