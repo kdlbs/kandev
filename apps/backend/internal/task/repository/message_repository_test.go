@@ -312,4 +312,36 @@ func TestSQLiteRepository_SearchMessages(t *testing.T) {
 	if len(limited) != 1 {
 		t.Errorf("expected 1 hit with limit=1, got %d", len(limited))
 	}
+
+	// LIKE metacharacters in the query must match literally — "%" should not
+	// be treated as "any sequence" and "_" should not match any single char.
+	pct, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "%"})
+	if err != nil {
+		t.Fatalf("percent search failed: %v", err)
+	}
+	if len(pct) != 0 {
+		t.Errorf("percent query must not match as wildcard, got %d hits", len(pct))
+	}
+	underscore, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "h_llo"})
+	if err != nil {
+		t.Fatalf("underscore search failed: %v", err)
+	}
+	if len(underscore) != 0 {
+		t.Errorf("underscore query must not match as wildcard, got %d hits", len(underscore))
+	}
+
+	// Literal percent in content must be findable via a query containing "%".
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m-pct", TaskSessionID: sid, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent,
+		Content:    "progress: 95% complete",
+		CreatedAt:  base.Add(1 * time.Minute),
+	})
+	litPct, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "95%"})
+	if err != nil {
+		t.Fatalf("literal percent search failed: %v", err)
+	}
+	if len(litPct) != 1 || litPct[0].ID != "m-pct" {
+		t.Errorf("expected literal 95%% match, got %d hits", len(litPct))
+	}
 }

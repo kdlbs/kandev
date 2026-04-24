@@ -236,11 +236,14 @@ func (r *Repository) SearchMessages(ctx context.Context, sessionID string, opts 
 		limit = 500
 	}
 	like := dialect.Like(r.ro.DriverName())
-	pattern := "%" + query + "%"
+	// Escape LIKE metacharacters so a user query of "%" or "_" matches
+	// literally rather than as SQL wildcards.
+	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	pattern := "%" + escaper.Replace(query) + "%"
 	sql := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages
-		WHERE task_session_id = ? AND content %s ?
+		WHERE task_session_id = ? AND content %s ? ESCAPE '\'
 		ORDER BY created_at DESC, id DESC
 		LIMIT ?
 	`, like)
