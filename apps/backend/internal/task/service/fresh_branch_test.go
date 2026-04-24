@@ -206,6 +206,66 @@ func TestLocalRepositoryStatus_CleanRepo(t *testing.T) {
 	}
 }
 
+func TestLocalRepositoryStatus_HandlesSpacesAndRenames(t *testing.T) {
+	isolateGitEnvForTest(t)
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	initRealGitRepo(t, repoPath)
+	env := isolatedGitEnv()
+	// Commit "old name.txt" so we can rename it.
+	writeDirty(t, repoPath, "old name.txt", "hi")
+	for _, args := range [][]string{
+		{"add", "old name.txt"},
+		{"commit", "-m", "add file"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoPath
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+	// Stage a rename + add an unicode-named untracked file.
+	for _, args := range [][]string{
+		{"mv", "old name.txt", "renamed name.txt"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoPath
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+	writeDirty(t, repoPath, "café.txt", "x")
+
+	svc := newDiscoveryService(t, root)
+	status, err := svc.LocalRepositoryStatus(context.Background(), repoPath)
+	if err != nil {
+		t.Fatalf("LocalRepositoryStatus error: %v", err)
+	}
+	// Expect the rename target ("renamed name.txt") with its space preserved
+	// (no surrounding quotes), and the unicode untracked file un-escaped.
+	wantRename := "renamed name.txt"
+	wantUnicode := "café.txt"
+	got := status.DirtyFiles
+	hasRename := false
+	hasUnicode := false
+	for _, p := range got {
+		if p == wantRename {
+			hasRename = true
+		}
+		if p == wantUnicode {
+			hasUnicode = true
+		}
+	}
+	if !hasRename {
+		t.Fatalf("expected rename target %q in dirty files, got %#v", wantRename, got)
+	}
+	if !hasUnicode {
+		t.Fatalf("expected unicode path %q in dirty files, got %#v", wantUnicode, got)
+	}
+}
+
 func TestLocalRepositoryStatus_ListsDirtyFiles(t *testing.T) {
 	isolateGitEnvForTest(t)
 	root := t.TempDir()

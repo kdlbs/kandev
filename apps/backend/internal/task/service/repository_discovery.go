@@ -467,22 +467,34 @@ func readGitCurrentBranch(repoPath string, allowedRoots []string) string {
 }
 
 // readGitDirtyFiles returns the list of dirty file paths in a repository, as
-// reported by `git status --porcelain`. Each returned entry is the relative
-// path with the two-char status flag stripped. Returns an empty slice for a
-// clean working tree.
+// reported by `git status --porcelain=v1 -z`. The `-z` form is NUL-terminated
+// and disables path quoting, so paths with spaces, unicode, or control chars
+// round-trip cleanly through the consent flow. Renames (status `R`/`C`)
+// emit two NUL-separated records: the rename target then the original; we
+// keep only the target since that's what's currently in the working tree.
+// Returns an empty slice for a clean working tree.
 func readGitDirtyFiles(ctx context.Context, repoPath string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain=v1", "-z")
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git status: %w", err)
 	}
+	entries := strings.Split(strings.TrimRight(string(out), "\x00"), "\x00")
 	var paths []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if len(line) < 4 {
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
 			continue
 		}
-		paths = append(paths, line[3:])
+		status := entry[:2]
+		path := entry[3:]
+		paths = append(paths, path)
+		// Rename / copy entries push an extra "old name" record after the
+		// "new name" record in -z mode; consume and skip it.
+		if status[0] == 'R' || status[0] == 'C' {
+			i++
+		}
 	}
 	return paths, nil
 }
