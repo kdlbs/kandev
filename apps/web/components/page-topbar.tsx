@@ -14,13 +14,7 @@ type PageTopbarProps = {
   actions?: React.ReactNode;
 };
 
-export function PageTopbar({
-  title,
-  subtitle,
-  icon,
-  backHref = "/",
-  actions,
-}: PageTopbarProps) {
+export function PageTopbar({ title, subtitle, icon, backHref = "/", actions }: PageTopbarProps) {
   return (
     <header className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
       <Link

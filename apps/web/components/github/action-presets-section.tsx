@@ -110,7 +110,12 @@ function PresetRow({
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
         </div>
-        <Button variant="outline" size="sm" className="h-8 cursor-pointer text-xs" onClick={onToggle}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 cursor-pointer text-xs"
+          onClick={onToggle}
+        >
           {expanded ? "Hide prompt" : "Edit prompt"}
         </Button>
         <Button

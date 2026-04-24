@@ -150,7 +150,12 @@ export function KanbanDisplayDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" data-testid="display-button" className="cursor-pointer">
+        <Button
+          variant="outline"
+          size="icon"
+          data-testid="display-button"
+          className="cursor-pointer"
+        >
           <IconAdjustmentsHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>

@@ -249,7 +249,6 @@ function DesktopHeader({
         <QuickChatButton workspaceId={workspaceId} />
         <TooltipProvider>
           <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
-
         </TooltipProvider>
         {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
         <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />

@@ -86,14 +86,8 @@ function getServerSnapshot(): StoredDefaults | null {
 export function useDefaultQueryPresets() {
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  const prPresets = useMemo(
-    () => stored?.pr ?? toStored(BUILTIN_PR_PRESETS),
-    [stored],
-  );
-  const issuePresets = useMemo(
-    () => stored?.issue ?? toStored(BUILTIN_ISSUE_PRESETS),
-    [stored],
-  );
+  const prPresets = useMemo(() => stored?.pr ?? toStored(BUILTIN_PR_PRESETS), [stored]);
+  const issuePresets = useMemo(() => stored?.issue ?? toStored(BUILTIN_ISSUE_PRESETS), [stored]);
 
   const save = useCallback((defaults: StoredDefaults) => {
     publish(defaults);

@@ -57,13 +57,20 @@ function QueryRow({
       </div>
       <div className="flex flex-col gap-0.5">
         <span className="text-[10px] text-muted-foreground">Group</span>
-        <Select value={preset.group} onValueChange={(v) => onPatch({ group: v as "inbox" | "created" })}>
+        <Select
+          value={preset.group}
+          onValueChange={(v) => onPatch({ group: v as "inbox" | "created" })}
+        >
           <SelectTrigger className="h-8 w-28 cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="inbox" className="cursor-pointer">Inbox</SelectItem>
-            <SelectItem value="created" className="cursor-pointer">Created</SelectItem>
+            <SelectItem value="inbox" className="cursor-pointer">
+              Inbox
+            </SelectItem>
+            <SelectItem value="created" className="cursor-pointer">
+              Created
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -176,12 +183,7 @@ export function DefaultQueriesSection() {
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             Reset
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!dirty}
-            className="cursor-pointer"
-          >
+          <Button size="sm" onClick={handleSave} disabled={!dirty} className="cursor-pointer">
             Save changes
           </Button>
         </div>

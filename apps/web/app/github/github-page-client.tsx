@@ -14,7 +14,11 @@ import {
   PresetsSidebar,
   type SidebarSelection,
 } from "@/components/github/my-github/presets-sidebar";
-import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "@/components/github/my-github/search-bar";
+import {
+  PR_PRESETS,
+  ISSUE_PRESETS,
+  type PresetOption,
+} from "@/components/github/my-github/search-bar";
 import { useGitHubSearch } from "@/components/github/my-github/use-github-search";
 import {
   useDefaultQueryPresets,

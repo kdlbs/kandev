@@ -175,7 +175,10 @@ function BranchPillTrigger({
   return (
     <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-64">
       <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      <ScrollOnOverflow data-testid="topbar-branch-name" className="text-xs text-muted-foreground min-w-0">
+      <ScrollOnOverflow
+        data-testid="topbar-branch-name"
+        className="text-xs text-muted-foreground min-w-0"
+      >
         {displayBranch}
       </ScrollOnOverflow>
       {canRename && (
