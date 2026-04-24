@@ -97,8 +97,8 @@ function IssueRow({
         <Link
           href={issue.html_url}
           target="_blank"
-          rel="noreferrer"
-          className="text-sm font-semibold hover:underline block truncate"
+          rel="noopener noreferrer"
+          className="text-sm font-semibold hover:underline block truncate cursor-pointer"
         >
           {issue.title}
         </Link>

@@ -1,8 +1,10 @@
 "use client";
 
+import { Fragment } from "react";
 import {
   Pagination,
   PaginationContent,
+  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -57,20 +59,26 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
             const prev = windowPages[i - 1];
             const needsGap = prev !== undefined && p - prev > 1;
             return (
-              <PaginationItem key={p}>
-                {needsGap && <span className="px-1 text-muted-foreground text-xs">…</span>}
-                <PaginationLink
-                  href="#"
-                  isActive={p === page}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onPageChange(p);
-                  }}
-                  className="cursor-pointer"
-                >
-                  {p}
-                </PaginationLink>
-              </PaginationItem>
+              <Fragment key={p}>
+                {needsGap && (
+                  <PaginationItem>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                )}
+                <PaginationItem>
+                  <PaginationLink
+                    href="#"
+                    isActive={p === page}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onPageChange(p);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {p}
+                  </PaginationLink>
+                </PaginationItem>
+              </Fragment>
             );
           })}
           <PaginationItem>

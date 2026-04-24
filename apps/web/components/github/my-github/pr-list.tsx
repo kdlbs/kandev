@@ -17,8 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Spinner } from "@kandev/ui/spinner";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
 import { PR_TASK_PRESETS, type LaunchPayload, type TaskPreset } from "./quick-task-launcher";
 import { PRStatusBadges } from "./pr-status-badges";
@@ -96,8 +95,8 @@ function PRRow({
         <Link
           href={pr.html_url}
           target="_blank"
-          rel="noreferrer"
-          className="text-sm font-semibold hover:underline block truncate"
+          rel="noopener noreferrer"
+          className="text-sm font-semibold hover:underline block truncate cursor-pointer"
         >
           {pr.title}
         </Link>

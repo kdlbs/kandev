@@ -203,7 +203,9 @@ function useGitHubPageState() {
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
-  const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
+  const onOpenSaveDialog = () => {
+    if (canSaveCurrent) setSaveDialogOpen(true);
+  };
   const onConfirmSave = (label: string) => {
     const created = saveSavedPreset({ kind: selection.kind, label, customQuery, repoFilter });
     setSelection({ kind: selection.kind, source: "saved", id: created.id });
