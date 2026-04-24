@@ -211,4 +211,8 @@ type PlanRepository interface {
 	GetLatestTaskPlanRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, error)
 	ListTaskPlanRevisions(ctx context.Context, taskID string, limit int) ([]*models.TaskPlanRevision, error)
 	NextTaskPlanRevisionNumber(ctx context.Context, taskID string) (int, error)
+	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
+	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
+	// otherwise a new revision is appended with revision_number computed inside the tx.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
 }

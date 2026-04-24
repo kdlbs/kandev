@@ -21,6 +21,7 @@ var (
 	ErrTaskIDRequired       = errors.New("task_id is required")
 	ErrContentRequired      = errors.New("content is required")
 	ErrRevisionNotFound     = errors.New("task plan revision not found")
+	ErrRevisionIDRequired   = errors.New("target_revision_id is required")
 	ErrRevisionTaskMismatch = errors.New("revision does not belong to given task")
 )
 
@@ -119,9 +120,10 @@ func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (*m
 	})
 }
 
-// upsertPlan is the shared write path. It:
-//  1. inserts/updates the task_plans HEAD row,
-//  2. either coalesces into the latest revision (same author within window) or appends a new revision.
+// upsertPlan is the shared write path. It upserts the task_plans HEAD row and either
+// coalesces into the latest revision (same author within window) or appends a new revision
+// — both steps run in one write transaction via WritePlanRevision so HEAD and history
+// cannot diverge under concurrent writers or partial failures.
 func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*models.TaskPlan, error) {
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
@@ -138,6 +140,10 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 		s.logger.Error("get existing plan", zap.String("task_id", req.TaskID), zap.Error(err))
 		return nil, err
 	}
+	eventType := events.TaskPlanCreated
+	if existing != nil {
+		eventType = events.TaskPlanUpdated
+	}
 
 	plan := &models.TaskPlan{
 		TaskID:    req.TaskID,
@@ -145,66 +151,43 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 		Content:   req.Content,
 		CreatedBy: createdBy,
 	}
-	eventType := events.TaskPlanCreated
-	if existing == nil {
-		if err := s.repo.CreateTaskPlan(ctx, plan); err != nil {
-			return nil, err
-		}
-	} else {
+	if existing != nil {
 		plan.ID = existing.ID
 		plan.CreatedAt = existing.CreatedAt
-		if err := s.repo.UpdateTaskPlan(ctx, plan); err != nil {
-			return nil, err
-		}
-		eventType = events.TaskPlanUpdated
 	}
 
-	rev, coalesced, err := s.writeRevision(ctx, plan, authorKind, authorName)
+	latest, err := s.repo.GetLatestTaskPlanRevision(ctx, req.TaskID)
 	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	coalesce := s.canCoalesce(latest, authorKind, authorName, now)
+
+	rev := &models.TaskPlanRevision{
+		TaskID:     req.TaskID,
+		Title:      title,
+		Content:    req.Content,
+		AuthorKind: authorKind,
+		AuthorName: authorName,
+	}
+	var coalesceID *string
+	if coalesce {
+		coalesceID = &latest.ID
+		// Preserve the original revision's author + number on merge.
+		rev.RevisionNumber = latest.RevisionNumber
+		rev.AuthorKind = latest.AuthorKind
+		rev.AuthorName = latest.AuthorName
+		rev.CreatedAt = latest.CreatedAt
+	}
+
+	if err := s.repo.WritePlanRevision(ctx, plan, rev, coalesceID); err != nil {
 		s.logger.Error("write plan revision", zap.String("task_id", req.TaskID), zap.Error(err))
 		return nil, err
 	}
 
 	s.publishPlanEvent(ctx, eventType, plan)
-	s.publishRevisionEvent(ctx, rev, coalesced)
+	s.publishRevisionEvent(ctx, rev, coalesce)
 	return plan, nil
-}
-
-// writeRevision coalesces with the latest revision or appends a new one.
-// Returns (revision, coalesced).
-func (s *PlanService) writeRevision(ctx context.Context, plan *models.TaskPlan, authorKind, authorName string) (*models.TaskPlanRevision, bool, error) {
-	latest, err := s.repo.GetLatestTaskPlanRevision(ctx, plan.TaskID)
-	if err != nil {
-		return nil, false, err
-	}
-	now := time.Now().UTC()
-
-	if s.canCoalesce(latest, authorKind, authorName, now) {
-		latest.Title = plan.Title
-		latest.Content = plan.Content
-		if err := s.repo.UpdateTaskPlanRevision(ctx, latest); err != nil {
-			return nil, false, err
-		}
-		return latest, true, nil
-	}
-
-	n, err := s.repo.NextTaskPlanRevisionNumber(ctx, plan.TaskID)
-	if err != nil {
-		return nil, false, err
-	}
-	rev := &models.TaskPlanRevision{
-		TaskID:         plan.TaskID,
-		RevisionNumber: n,
-		Title:          plan.Title,
-		Content:        plan.Content,
-		AuthorKind:     authorKind,
-		AuthorName:     authorName,
-		CreatedAt:      now,
-	}
-	if err := s.repo.InsertTaskPlanRevision(ctx, rev); err != nil {
-		return nil, false, err
-	}
-	return rev, false, nil
 }
 
 func (s *PlanService) canCoalesce(latest *models.TaskPlanRevision, authorKind, authorName string, now time.Time) bool {
@@ -304,14 +287,15 @@ type RevertPlanRequest struct {
 	AuthorName       string // user display name; "User" fallback when empty
 }
 
-// RevertPlan creates a new revision whose content mirrors the target and updates HEAD.
-// Revert revisions are never coalesced (the "restored from vK" marker is preserved).
+// RevertPlan creates a new revision whose content mirrors the target and updates HEAD,
+// atomically via WritePlanRevision. Revert revisions are never coalesced (the "restored
+// from vK" marker is preserved).
 func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*models.TaskPlanRevision, error) {
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
 	}
 	if req.TargetRevisionID == "" {
-		return nil, ErrRevisionNotFound
+		return nil, ErrRevisionIDRequired
 	}
 	target, err := s.repo.GetTaskPlanRevision(ctx, req.TargetRevisionID)
 	if err != nil {
@@ -329,27 +313,6 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		authorName = defaultUserAuthorFallback
 	}
 
-	n, err := s.repo.NextTaskPlanRevisionNumber(ctx, req.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	targetID := target.ID
-	now := time.Now().UTC()
-	rev := &models.TaskPlanRevision{
-		TaskID:             req.TaskID,
-		RevisionNumber:     n,
-		Title:              target.Title,
-		Content:            target.Content,
-		AuthorKind:         createdByUser,
-		AuthorName:         authorName,
-		RevertOfRevisionID: &targetID,
-		CreatedAt:          now,
-	}
-	if err := s.repo.InsertTaskPlanRevision(ctx, rev); err != nil {
-		return nil, err
-	}
-
-	// Update HEAD to reflect reverted content.
 	head, err := s.repo.GetTaskPlan(ctx, req.TaskID)
 	if err != nil {
 		return nil, err
@@ -360,16 +323,22 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		Content:   target.Content,
 		CreatedBy: createdByUser,
 	}
-	if head == nil {
-		if err := s.repo.CreateTaskPlan(ctx, plan); err != nil {
-			return nil, err
-		}
-	} else {
+	if head != nil {
 		plan.ID = head.ID
 		plan.CreatedAt = head.CreatedAt
-		if err := s.repo.UpdateTaskPlan(ctx, plan); err != nil {
-			return nil, err
-		}
+	}
+
+	targetID := target.ID
+	rev := &models.TaskPlanRevision{
+		TaskID:             req.TaskID,
+		Title:              target.Title,
+		Content:            target.Content,
+		AuthorKind:         createdByUser,
+		AuthorName:         authorName,
+		RevertOfRevisionID: &targetID,
+	}
+	if err := s.repo.WritePlanRevision(ctx, plan, rev, nil); err != nil {
+		return nil, err
 	}
 
 	s.publishPlanEvent(ctx, events.TaskPlanUpdated, plan)

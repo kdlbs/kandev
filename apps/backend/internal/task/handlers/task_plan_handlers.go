@@ -198,6 +198,8 @@ func (h *TaskHandlers) wsRevertTaskPlan(ctx context.Context, msg *ws.Message) (*
 		switch {
 		case errors.Is(err, service.ErrTaskIDRequired):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		case errors.Is(err, service.ErrRevisionIDRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "revision_id is required", nil)
 		case errors.Is(err, service.ErrRevisionNotFound):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
 		case errors.Is(err, service.ErrRevisionTaskMismatch):

@@ -708,11 +708,11 @@ func TaskPlanRevisionFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDT
 
 // TaskPlanRevisionMetaFromModel converts without content (for list payloads/WS broadcasts).
 func TaskPlanRevisionMetaFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDTO {
-	dto := TaskPlanRevisionFromModel(rev)
-	if dto != nil {
-		dto.Content = ""
+	meta := TaskPlanRevisionFromModel(rev)
+	if meta != nil {
+		meta.Content = ""
 	}
-	return dto
+	return meta
 }
 
 // FromTurn converts a Turn model to a TurnDTO.
