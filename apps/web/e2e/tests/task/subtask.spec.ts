@@ -180,17 +180,28 @@ test.describe("MCP subtask creation", () => {
     );
     expect(parentTask.id).toBeTruthy();
 
-    // 2. Navigate to parent task and wait for the agent to complete (which
-    //    includes the MCP create_task call that creates the subtask).
+    // 2. Navigate to parent task so the agent session is visible and the
+    //    backend keeps the execution alive for the duration of the test.
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 3. Locate the subtask created by the MCP call.
-    const allTasks = await apiClient.listTasks(seedData.workspaceId);
-    const subtask = allTasks.tasks.find((t) => t.title === subtaskTitle);
-    expect(subtask).toBeDefined();
+    // 3. Poll the API until the subtask appears. The agent starts
+    //    asynchronously when created via the HTTP API, so we cannot rely on
+    //    the idle-input indicator alone — it may appear before the agent has
+    //    finished executing the MCP script.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 60_000, message: "Subtask should be created by the agent's MCP call" },
+      )
+      .toBeDefined();
 
     // 4. Verify the subtask inherited the parent's repository.
     const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
@@ -304,13 +315,28 @@ test.describe("Subtask inheritance", () => {
     );
     expect(parentTask.id).toBeTruthy();
 
-    // 3. Navigate to the parent task page and wait for the agent to complete.
+    // 3. Navigate to the parent task page so the execution stays alive.
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Confirm the parent session has both profiles set as expected.
+    // 4. Poll until the subtask appears. The agent starts asynchronously
+    //    when created via the HTTP API, so the idle-input indicator may
+    //    appear before the MCP script has finished.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 60_000, message: "Subtask should be created by the agent's MCP call" },
+      )
+      .toBeDefined();
+
+    // 5. Confirm the parent session has both profiles set as expected.
     const parentRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${parentTask.id}/sessions`);
     const parentData = (await parentRaw.json()) as { sessions: SessionInfo[] };
     const parentSession = parentData.sessions[0];
@@ -322,11 +348,6 @@ test.describe("Subtask inheritance", () => {
       parentSession?.executor_profile_id,
       `executor_profile_id: got ${parentSession?.executor_profile_id}, want ${executorProfile.id}; full session: ${JSON.stringify(parentSession)}`,
     ).toBe(executorProfile.id);
-
-    // 5. Locate the subtask created by the MCP call.
-    const allTasks = await apiClient.listTasks(seedData.workspaceId);
-    const subtask = allTasks.tasks.find((t) => t.title === subtaskTitle);
-    expect(subtask).toBeDefined();
 
     // 6. Verify subtask was auto-started: must have at least one session.
     //    Without the fix, autoStartTask finds no agent profile and skips launch →

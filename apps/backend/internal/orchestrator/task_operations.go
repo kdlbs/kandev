@@ -111,6 +111,28 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		}
 	}
 
+	// Inherit agent/executor profile from parent task's primary session when not
+	// explicitly provided. This covers subtasks created with start_agent=false that
+	// are later opened manually from the UI. We check each field independently so
+	// that a caller providing only some fields still gets the rest filled in.
+	if (agentProfileID == "" || executorProfileID == "" || executorID == "") && task.ParentID != "" {
+		agentProfileID, executorProfileID, executorID = s.inheritFromParentSession(
+			ctx, task.ParentID, agentProfileID, executorProfileID, executorID,
+		)
+
+		// Fall back to workspace defaults for agent profile (subtasks only —
+		// regular tasks resolve defaults downstream in the executor layer).
+		if agentProfileID == "" {
+			workspace, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
+			if err == nil && workspace != nil && workspace.DefaultAgentProfileID != nil && *workspace.DefaultAgentProfileID != "" {
+				agentProfileID = *workspace.DefaultAgentProfileID
+			}
+		}
+		if executorID == "" && executorProfileID == "" {
+			executorID = models.ExecutorIDWorktree
+		}
+	}
+
 	// Fall back to the task's current workflow step when the caller didn't provide one.
 	// This ensures sessions created via the kanban card (which doesn't send workflow_step_id)
 	// inherit the task's step and participate in workflow events.
