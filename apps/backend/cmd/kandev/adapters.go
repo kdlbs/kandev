@@ -99,6 +99,27 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepoName:    req.RepoName,
 	}
 
+	// Multi-repo: forward the explicit repo list when the orchestrator built one.
+	if len(req.Repositories) > 0 {
+		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
+		for _, r := range req.Repositories {
+			specs = append(specs, lifecycle.RepoLaunchSpec{
+				RepositoryID:         r.RepositoryID,
+				RepositoryPath:       r.RepositoryPath,
+				RepositoryURL:        r.RepositoryURL,
+				RepoName:             r.RepoName,
+				BaseBranch:           r.BaseBranch,
+				CheckoutBranch:       r.CheckoutBranch,
+				WorktreeID:           r.WorktreeID,
+				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
+				PullBeforeWorktree:   r.PullBeforeWorktree,
+				RepoSetupScript:      r.RepoSetupScript,
+				RepoCleanupScript:    r.RepoCleanupScript,
+			})
+		}
+		launchReq.Repositories = specs
+	}
+
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
@@ -119,6 +140,23 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		}
 	}
 
+	// Surface per-repo worktree results from the prepare step so the orchestrator
+	// can persist N TaskEnvironmentRepo / TaskSessionWorktree rows when multi-repo.
+	var worktrees []executor.RepoWorktreeResult
+	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
+		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
+		for _, w := range execution.PrepareResult.Worktrees {
+			worktrees = append(worktrees, executor.RepoWorktreeResult{
+				RepositoryID:   w.RepositoryID,
+				WorktreeID:     w.WorktreeID,
+				WorktreeBranch: w.WorktreeBranch,
+				WorktreePath:   w.WorktreePath,
+				MainRepoGitDir: w.MainRepoGitDir,
+				ErrorMessage:   w.ErrorMessage,
+			})
+		}
+	}
+
 	return &executor.LaunchAgentResponse{
 		AgentExecutionID: execution.ID,
 		ContainerID:      execution.ContainerID,
@@ -128,6 +166,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeBranch:   worktreeBranch,
 		Metadata:         execution.Metadata,
 		PrepareResult:    execution.PrepareResult,
+		Worktrees:        worktrees,
 	}, nil
 }
 

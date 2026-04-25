@@ -174,13 +174,16 @@ func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID s
 
 // mockRepository implements executorStore for testing
 type mockRepository struct {
-	mu               sync.Mutex
-	sessions         map[string]*models.TaskSession
-	tasks            map[string]*models.Task
-	taskRepositories map[string]*models.TaskRepository
-	repositories     map[string]*models.Repository
-	executors        map[string]*models.Executor
-	executorsRunning map[string]*models.ExecutorRunning
+	mu                   sync.Mutex
+	sessions             map[string]*models.TaskSession
+	tasks                map[string]*models.Task
+	taskRepositories     map[string]*models.TaskRepository
+	repositories         map[string]*models.Repository
+	executors            map[string]*models.Executor
+	executorsRunning     map[string]*models.ExecutorRunning
+	taskEnvironments     map[string]*models.TaskEnvironment
+	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
+	sessionWorktrees     []*models.TaskSessionWorktree
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -194,12 +197,14 @@ type mockRepository struct {
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:         make(map[string]*models.TaskSession),
-		tasks:            make(map[string]*models.Task),
-		taskRepositories: make(map[string]*models.TaskRepository),
-		repositories:     make(map[string]*models.Repository),
-		executors:        make(map[string]*models.Executor),
-		executorsRunning: make(map[string]*models.ExecutorRunning),
+		sessions:             make(map[string]*models.TaskSession),
+		tasks:                make(map[string]*models.Task),
+		taskRepositories:     make(map[string]*models.TaskRepository),
+		repositories:         make(map[string]*models.Repository),
+		executors:            make(map[string]*models.Executor),
+		executorsRunning:     make(map[string]*models.ExecutorRunning),
+		taskEnvironments:     make(map[string]*models.TaskEnvironment),
+		taskEnvironmentRepos: make(map[string][]*models.TaskEnvironmentRepo),
 	}
 }
 
@@ -290,7 +295,8 @@ func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *mod
 	return nil
 }
 
-func (m *mockRepository) CreateTaskSessionWorktree(ctx context.Context, worktree *models.TaskSessionWorktree) error {
+func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *models.TaskSessionWorktree) error {
+	m.sessionWorktrees = append(m.sessionWorktrees, worktree)
 	return nil
 }
 
@@ -354,7 +360,19 @@ func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*mod
 	return nil, nil
 }
 func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
-	return nil, nil
+	var out []*models.TaskRepository
+	for _, tr := range m.taskRepositories {
+		if tr.TaskID == taskID {
+			out = append(out, tr)
+		}
+	}
+	// Stable order by Position so callers (and tests) see deterministic results.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].Position < out[j-1].Position; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out, nil
 }
 func (m *mockRepository) ListTaskRepositoriesByTaskIDs(_ context.Context, _ []string) (map[string][]*models.TaskRepository, error) {
 	return make(map[string][]*models.TaskRepository), nil
@@ -608,14 +626,44 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 }
 
 // Task environment operations
-func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+func (m *mockRepository) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
+	for _, env := range m.taskEnvironments {
+		if env.TaskID == taskID {
+			return env, nil
+		}
+	}
 	return nil, nil
 }
-func (m *mockRepository) CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+func (m *mockRepository) CreateTaskEnvironment(_ context.Context, env *models.TaskEnvironment) error {
+	if env.ID == "" {
+		env.ID = "env-" + env.TaskID
+	}
+	m.taskEnvironments[env.ID] = env
+	for i, r := range env.Repos {
+		r.TaskEnvironmentID = env.ID
+		if r.ID == "" {
+			r.ID = env.ID + "-repo-" + r.RepositoryID
+		}
+		_ = i
+	}
+	if len(env.Repos) > 0 {
+		m.taskEnvironmentRepos[env.ID] = append(m.taskEnvironmentRepos[env.ID], env.Repos...)
+	}
 	return nil
 }
-func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.TaskEnvironment) error {
+	if env.ID == "" {
+		return nil
+	}
+	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
+	return nil
+}
+func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
+	return m.taskEnvironmentRepos[envID], nil
 }
 
 // Task Plan operations

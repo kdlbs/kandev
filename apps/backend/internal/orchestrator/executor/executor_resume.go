@@ -54,9 +54,43 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 	if primaryTaskRepo == nil {
 		return info, nil
 	}
-	info.RepositoryID = primaryTaskRepo.RepositoryID
-	info.BaseBranch = primaryTaskRepo.BaseBranch
-	info.CheckoutBranch = primaryTaskRepo.CheckoutBranch
+	return e.resolveTaskRepoInfo(ctx, primaryTaskRepo)
+}
+
+// resolveAllRepoInfo returns the resolved repository info for every repository
+// linked to the task, ordered by Position. Returns a single-element slice for
+// single-repo tasks and an empty slice for repo-less tasks (e.g. quick chat).
+// Each entry has LocalPath populated, cloning provider-backed repos on demand.
+func (e *Executor) resolveAllRepoInfo(ctx context.Context, taskID string) ([]*repoInfo, error) {
+	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		e.logger.Error("failed to list task repositories",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, err
+	}
+	if len(taskRepos) == 0 {
+		return nil, nil
+	}
+	out := make([]*repoInfo, 0, len(taskRepos))
+	for _, tr := range taskRepos {
+		info, resolveErr := e.resolveTaskRepoInfo(ctx, tr)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
+// resolveTaskRepoInfo turns a TaskRepository row into a fully-resolved repoInfo
+// (loads the Repository entity, clones if necessary, fills defaults).
+func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepository) (*repoInfo, error) {
+	info := &repoInfo{
+		RepositoryID:   tr.RepositoryID,
+		BaseBranch:     tr.BaseBranch,
+		CheckoutBranch: tr.CheckoutBranch,
+	}
 	if info.RepositoryID == "" {
 		return info, nil
 	}
@@ -207,6 +241,38 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 }
 
 func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
+	// Multi-repo path: persist one TaskSessionWorktree row per per-repo worktree
+	// returned by the preparer. Each row carries its own RepositoryID so
+	// downstream lookups can scope by repo.
+	if len(resp.Worktrees) > 0 {
+		existingIDs := make(map[string]bool, len(session.Worktrees))
+		for _, wt := range session.Worktrees {
+			existingIDs[wt.WorktreeID] = true
+		}
+		for i, w := range resp.Worktrees {
+			if w.WorktreeID == "" || existingIDs[w.WorktreeID] {
+				continue
+			}
+			row := &models.TaskSessionWorktree{
+				SessionID:      session.ID,
+				WorktreeID:     w.WorktreeID,
+				RepositoryID:   w.RepositoryID,
+				Position:       i,
+				WorktreePath:   w.WorktreePath,
+				WorktreeBranch: w.WorktreeBranch,
+			}
+			if err := e.repo.CreateTaskSessionWorktree(ctx, row); err != nil {
+				e.logger.Error("failed to persist session worktree association",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.String("worktree_id", w.WorktreeID),
+					zap.String("repository_id", w.RepositoryID),
+					zap.Error(err))
+			}
+		}
+		return
+	}
+
 	if resp.WorktreeID == "" {
 		return
 	}
@@ -594,6 +660,25 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		}
 		req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repository.PullBeforeWorktree
+	}
+
+	// Multi-repo: when the task has more than one repository, populate
+	// req.Repositories so the lifecycle preparer can resume/recreate each
+	// repo's worktree. The legacy top-level fields above stay populated
+	// from the primary for backwards compat.
+	if len(task.Repositories) > 1 {
+		allRepos, allErr := e.resolveAllRepoInfo(ctx, task.ID)
+		if allErr != nil {
+			return repositoryID, allErr
+		}
+		if len(allRepos) > 1 {
+			req.Repositories = buildRepoSpecs(allRepos, executorConfig{})
+			// Stamp the per-repo TaskDirName so the preparer reuses the same
+			// task root that the original launch created.
+			if env, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID); env != nil && env.TaskDirName != "" {
+				req.TaskDirName = env.TaskDirName
+			}
+		}
 	}
 
 	return repositoryID, nil

@@ -24,6 +24,7 @@ type executorStore interface {
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// Task↔repo junction
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	// Session
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -48,6 +49,8 @@ type executorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
+	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	// Session history + plan (for context handover)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
@@ -255,6 +258,30 @@ type LaunchAgentRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+
+	// Repositories carries one entry per repository when the launch is multi-repo.
+	// When non-empty it is the source of truth and the legacy single-repo
+	// top-level fields above are populated from Repositories[0] for backwards
+	// compatibility with code paths that have not yet been updated.
+	Repositories []RepoSpec
+}
+
+// RepoSpec describes one repository for a multi-repo task launch from the
+// orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
+// the orchestrator package does not need to import lifecycle types into its
+// public API.
+type RepoSpec struct {
+	RepositoryID         string
+	RepositoryPath       string
+	RepositoryURL        string
+	RepoName             string
+	BaseBranch           string
+	CheckoutBranch       string
+	WorktreeID           string
+	WorktreeBranchPrefix string
+	PullBeforeWorktree   bool
+	RepoSetupScript      string
+	RepoCleanupScript    string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
@@ -282,6 +309,22 @@ type LaunchAgentResponse struct {
 	WorktreeBranch   string
 	Metadata         map[string]interface{}
 	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
+
+	// Worktrees is the per-repository preparer result list when the launch is
+	// multi-repo. Empty for single-repo launches; the legacy WorktreeID/Path/
+	// Branch fields above mirror Worktrees[0] in that case.
+	Worktrees []RepoWorktreeResult
+}
+
+// RepoWorktreeResult mirrors lifecycle.RepoWorktreeResult for the orchestrator
+// API surface. One entry per repository prepared during a multi-repo launch.
+type RepoWorktreeResult struct {
+	RepositoryID   string
+	WorktreeID     string
+	WorktreeBranch string
+	WorktreePath   string
+	MainRepoGitDir string
+	ErrorMessage   string
 }
 
 // TaskExecution tracks an active task execution

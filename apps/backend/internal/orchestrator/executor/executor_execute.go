@@ -370,12 +370,21 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			zap.String("session_id", sessionID))
 	}
 
-	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
+	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
 	if err != nil {
 		return nil, err
 	}
+	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
+	// is empty and primary is a zero-value placeholder; downstream code already
+	// handles the missing-repo path.
+	var primaryRepo *repoInfo
+	if len(allRepos) > 0 {
+		primaryRepo = allRepos[0]
+	} else {
+		primaryRepo = &repoInfo{}
+	}
 
-	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
+	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +436,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.captureBaseCommit(captureCtx, sid)
 	}(sessionID)
 
-	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, repoInfo, resp, startAgent, execCfg)
+	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
 }
 
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.
@@ -494,7 +503,9 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
-func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo) (*LaunchAgentRequest, executorConfig, error) {
+// allRepos carries every repository for the task in Position order; for single-repo
+// or repo-less tasks it has length <=1 and the legacy single-repo path runs unchanged.
+func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo) (*LaunchAgentRequest, executorConfig, error) {
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
 		if metadata == nil {
@@ -543,6 +554,14 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		return nil, execConfig, err
 	}
 
+	// Multi-repo: when more than one repository is associated with the task,
+	// populate req.Repositories so the lifecycle preparer creates one worktree
+	// per repo. The legacy single-repo top-level fields above stay populated
+	// (mirroring the primary) for downstream code that has not been migrated.
+	if len(allRepos) > 1 {
+		req.Repositories = buildRepoSpecs(allRepos, execConfig)
+	}
+
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {
 		req.McpMode = McpModeConfig
@@ -560,6 +579,37 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 	e.resolveRemoteCredentials(ctx, req, metadata)
 	e.injectGitHubToken(ctx, req)        // Fallback to global secret
 	e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
+}
+
+// buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
+// the lifecycle layer. Used only when the task has more than one repository.
+func buildRepoSpecs(allRepos []*repoInfo, execCfg executorConfig) []RepoSpec {
+	out := make([]RepoSpec, 0, len(allRepos))
+	for _, info := range allRepos {
+		spec := RepoSpec{
+			RepositoryID:         info.RepositoryID,
+			RepositoryPath:       info.RepositoryPath,
+			BaseBranch:           info.BaseBranch,
+			CheckoutBranch:       info.CheckoutBranch,
+			WorktreeBranchPrefix: info.WorktreeBranchPrefix,
+			PullBeforeWorktree:   info.PullBeforeWorktree,
+		}
+		if info.Repository != nil {
+			spec.RepoName = info.Repository.Name
+			spec.RepoSetupScript = info.Repository.SetupScript
+			spec.RepoCleanupScript = info.Repository.CleanupScript
+		}
+		// Containerized executors need a clone URL; reuse the same helper as
+		// the single-repo path (best-effort — skipped if Repository is nil).
+		if info.Repository != nil {
+			if u := repositoryCloneURL(info.Repository); u != "" {
+				spec.RepositoryURL = u
+			}
+		}
+		_ = execCfg // execCfg currently unused per-repo; reserved for future per-repo config.
+		out = append(out, spec)
+	}
+	return out
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
@@ -801,6 +851,7 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
 // It also links the session to the environment via TaskEnvironmentID.
+// For multi-repo launches it additionally writes one TaskEnvironmentRepo row per repo.
 func (e *Executor) persistTaskEnvironment(
 	ctx context.Context,
 	taskID string,
@@ -821,6 +872,8 @@ func (e *Executor) persistTaskEnvironment(
 				zap.Error(err))
 		}
 		session.TaskEnvironmentID = existingEnv.ID
+		// Persist per-repo rows for multi-repo launches that didn't have them yet.
+		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, resp.Worktrees)
 		return
 	}
 
@@ -846,6 +899,11 @@ func (e *Executor) persistTaskEnvironment(
 		WorktreeBranch:    resp.WorktreeBranch,
 		WorkspacePath:     workspacePath,
 		ContainerID:       resp.ContainerID,
+		TaskDirName:       req.TaskDirName,
+	}
+	// Embed per-repo rows in the same create transaction when multi-repo.
+	if len(resp.Worktrees) > 0 {
+		env.Repos = buildTaskEnvironmentRepos(resp.Worktrees)
 	}
 	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
 		e.logger.Warn("failed to create task environment",
@@ -854,4 +912,61 @@ func (e *Executor) persistTaskEnvironment(
 		return
 	}
 	session.TaskEnvironmentID = env.ID
+}
+
+// buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.
+// TaskEnvironmentID is left blank — it is set by the env Create transaction.
+func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnvironmentRepo {
+	out := make([]*models.TaskEnvironmentRepo, 0, len(worktrees))
+	for i, w := range worktrees {
+		out = append(out, &models.TaskEnvironmentRepo{
+			RepositoryID:   w.RepositoryID,
+			WorktreeID:     w.WorktreeID,
+			WorktreePath:   w.WorktreePath,
+			WorktreeBranch: w.WorktreeBranch,
+			Position:       i,
+			ErrorMessage:   w.ErrorMessage,
+		})
+	}
+	return out
+}
+
+// persistTaskEnvironmentRepos inserts per-repo rows under an existing env id,
+// skipping any (env, repo) pair that already exists. Used when an existing
+// environment is reused (resume / re-launch on the same task).
+func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string, worktrees []RepoWorktreeResult) {
+	if envID == "" || len(worktrees) == 0 {
+		return
+	}
+	existing, err := e.repo.ListTaskEnvironmentRepos(ctx, envID)
+	if err != nil {
+		e.logger.Warn("failed to list existing task_environment_repos before insert",
+			zap.String("env_id", envID),
+			zap.Error(err))
+		return
+	}
+	have := make(map[string]bool, len(existing))
+	for _, row := range existing {
+		have[row.RepositoryID] = true
+	}
+	for i, w := range worktrees {
+		if w.RepositoryID == "" || have[w.RepositoryID] {
+			continue
+		}
+		row := &models.TaskEnvironmentRepo{
+			TaskEnvironmentID: envID,
+			RepositoryID:      w.RepositoryID,
+			WorktreeID:        w.WorktreeID,
+			WorktreePath:      w.WorktreePath,
+			WorktreeBranch:    w.WorktreeBranch,
+			Position:          i,
+			ErrorMessage:      w.ErrorMessage,
+		}
+		if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
+			e.logger.Warn("failed to persist task environment repo",
+				zap.String("env_id", envID),
+				zap.String("repository_id", w.RepositoryID),
+				zap.Error(createErr))
+		}
+	}
 }
