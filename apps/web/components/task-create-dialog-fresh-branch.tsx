@@ -5,7 +5,7 @@ import { Toggle } from "@kandev/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 const FRESH_BRANCH_TOOLTIP =
-  "Fork a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
+  "Create a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
 
 export type FreshBranchToggleProps = {
   enabled: boolean;
@@ -24,7 +24,7 @@ export function FreshBranchToggle({ enabled, onToggle }: FreshBranchToggleProps)
       <TooltipTrigger asChild>
         <Toggle
           variant="outline"
-          aria-label="Fork a new branch"
+          aria-label="Create a new branch"
           pressed={enabled}
           onPressedChange={onToggle}
           data-testid="fresh-branch-toggle"
