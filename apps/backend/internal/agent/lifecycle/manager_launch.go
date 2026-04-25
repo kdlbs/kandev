@@ -381,6 +381,30 @@ func (m *Manager) runEnvironmentPreparer(
 		RepoName:             req.RepoName,
 		Env:                  req.Env,
 	}
+	// Multi-repo: forward the repo list when the launch request carries one.
+	// Each per-repo entry inherits the request-level RepoSetupScript when its
+	// own is empty so single-repo callers continue to work unchanged.
+	if len(req.Repositories) > 0 {
+		specs := make([]RepoPrepareSpec, 0, len(req.Repositories))
+		for _, r := range req.Repositories {
+			setup := r.RepoSetupScript
+			if setup == "" {
+				setup = repoSetupScript
+			}
+			specs = append(specs, RepoPrepareSpec{
+				RepositoryID:         r.RepositoryID,
+				RepositoryPath:       r.RepositoryPath,
+				RepoName:             r.RepoName,
+				BaseBranch:           r.BaseBranch,
+				CheckoutBranch:       r.CheckoutBranch,
+				WorktreeID:           r.WorktreeID,
+				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
+				PullBeforeWorktree:   r.PullBeforeWorktree,
+				RepoSetupScript:      setup,
+			})
+		}
+		prepReq.Repositories = specs
+	}
 
 	result, err := preparer.Prepare(ctx, prepReq, m.newProgressCallback(req.TaskID, req.SessionID))
 	if err != nil {

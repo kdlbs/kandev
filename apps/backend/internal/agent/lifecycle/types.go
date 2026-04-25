@@ -248,6 +248,24 @@ func (ae *AgentExecution) EndSessionSpan() {
 	}
 }
 
+// RepoLaunchSpec describes one repository for a multi-repo task launch.
+// Mirrors the per-repo launch fields that LaunchRequest historically carried at
+// the top level. When LaunchRequest.Repositories is set, each entry produces
+// one prepared worktree under the shared TaskDirName.
+type RepoLaunchSpec struct {
+	RepositoryID         string
+	RepositoryPath       string
+	RepositoryURL        string // Clone URL for remote executors that need to clone
+	RepoName             string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch           string
+	CheckoutBranch       string
+	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
+	WorktreeBranchPrefix string
+	PullBeforeWorktree   bool
+	RepoSetupScript      string // Repository-level setup script (optional)
+	RepoCleanupScript    string // Repository-level cleanup script (optional)
+}
+
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
@@ -284,6 +302,35 @@ type LaunchRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+
+	// Repositories carries one entry per repository when the launch is multi-repo.
+	// When non-empty it is the source of truth; the legacy single-repo top-level
+	// fields above are populated from Repositories[0] for callers that have not
+	// yet been updated.
+	Repositories []RepoLaunchSpec
+}
+
+// RepoSpecs returns the per-repo launch specs for this request. When
+// Repositories is set it is returned verbatim; otherwise a length-1 list is
+// synthesized from the legacy top-level single-repo fields. Returns an empty
+// slice for repo-less launches (e.g. quick chat).
+func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
+	if len(r.Repositories) > 0 {
+		return r.Repositories
+	}
+	if r.RepositoryID == "" && r.RepositoryPath == "" {
+		return nil
+	}
+	return []RepoLaunchSpec{{
+		RepositoryID:         r.RepositoryID,
+		RepositoryPath:       r.RepositoryPath,
+		RepoName:             r.RepoName,
+		BaseBranch:           r.BaseBranch,
+		CheckoutBranch:       r.CheckoutBranch,
+		WorktreeID:           r.WorktreeID,
+		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
+		PullBeforeWorktree:   r.PullBeforeWorktree,
+	}}
 }
 
 // MessageAttachment represents an image or file attachment for agent prompts.

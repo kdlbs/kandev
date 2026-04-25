@@ -20,6 +20,23 @@ const (
 	PrepareStepSkipped   PrepareStepStatus = "skipped"
 )
 
+// RepoPrepareSpec describes one repository for multi-repo environment preparation.
+// Mirrors the per-repo prepare fields that EnvPrepareRequest historically
+// carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
+// each entry produces one prepared worktree under the shared TaskDirName.
+type RepoPrepareSpec struct {
+	RepositoryID         string
+	RepositoryPath       string
+	RepoName             string
+	BaseBranch           string
+	CheckoutBranch       string
+	WorktreeID           string
+	WorktreeBranch       string
+	WorktreeBranchPrefix string
+	PullBeforeWorktree   bool
+	RepoSetupScript      string
+}
+
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
 	TaskID          string
@@ -44,7 +61,38 @@ type EnvPrepareRequest struct {
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
 
+	// Repositories carries one entry per repository when the request is
+	// multi-repo. When non-empty it is the source of truth; the legacy
+	// single-repo top-level fields above are populated from Repositories[0]
+	// for callers that have not yet been updated.
+	Repositories []RepoPrepareSpec
+
 	Env map[string]string
+}
+
+// RepoSpecs returns the per-repo prepare specs for this request. When
+// Repositories is set it is returned verbatim; otherwise a length-1 list is
+// synthesized from the legacy top-level single-repo fields. Returns an empty
+// slice for repo-less requests.
+func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
+	if len(r.Repositories) > 0 {
+		return r.Repositories
+	}
+	if r.RepositoryID == "" && r.RepositoryPath == "" {
+		return nil
+	}
+	return []RepoPrepareSpec{{
+		RepositoryID:         r.RepositoryID,
+		RepositoryPath:       r.RepositoryPath,
+		RepoName:             r.RepoName,
+		BaseBranch:           r.BaseBranch,
+		CheckoutBranch:       r.CheckoutBranch,
+		WorktreeID:           r.WorktreeID,
+		WorktreeBranch:       r.WorktreeBranch,
+		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
+		PullBeforeWorktree:   r.PullBeforeWorktree,
+		RepoSetupScript:      r.RepoSetupScript,
+	}}
 }
 
 // PrepareStep represents a single step in the preparation process.
@@ -60,6 +108,18 @@ type PrepareStep struct {
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 }
 
+// RepoWorktreeResult is the per-repository outcome of environment preparation.
+// Populated by preparers that handle multi-repo launches; each entry corresponds
+// to one RepoPrepareSpec from the request.
+type RepoWorktreeResult struct {
+	RepositoryID   string `json:"repository_id"`
+	WorktreeID     string `json:"worktree_id,omitempty"`
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	MainRepoGitDir string `json:"main_repo_git_dir,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
+}
+
 // EnvPrepareResult contains the result of environment preparation.
 type EnvPrepareResult struct {
 	Success       bool          `json:"success"`
@@ -68,10 +128,15 @@ type EnvPrepareResult struct {
 	ErrorMessage  string        `json:"error_message,omitempty"`
 	Duration      time.Duration `json:"duration"`
 
-	// Worktree fields (populated when worktree preparer runs)
+	// Worktree fields (populated when worktree preparer runs).
+	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID     string `json:"worktree_id,omitempty"`
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	MainRepoGitDir string `json:"main_repo_git_dir,omitempty"`
+
+	// Worktrees is the per-repository outcome list when the preparer ran in
+	// multi-repo mode. Empty for single-repo or repo-less results.
+	Worktrees []RepoWorktreeResult `json:"worktrees,omitempty"`
 }
 
 // PrepareProgressCallback is called when a preparation step changes status.
