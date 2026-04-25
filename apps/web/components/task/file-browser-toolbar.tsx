@@ -99,7 +99,7 @@ export function FileBrowserToolbar({
               {displayPath}
             </span>
           ) : (
-            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-24" />
           )}
         </>
       }
