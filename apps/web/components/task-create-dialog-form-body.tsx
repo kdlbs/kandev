@@ -9,6 +9,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import type { JiraTicket } from "@/lib/types/jira";
 
 type SelectorOption = {
   value: string;
@@ -323,6 +324,8 @@ export type DialogPromptSectionProps = {
   fs: DialogFormState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+  workspaceId?: string | null;
+  onJiraImport?: (ticket: JiraTicket) => void;
 };
 
 export function DialogPromptSection({
@@ -334,7 +337,10 @@ export function DialogPromptSection({
   fs,
   handleKeyDown,
   enhance,
+  workspaceId,
+  onJiraImport,
 }: DialogPromptSectionProps) {
+  const showJiraImport = !isSessionMode && !isTaskStarted && !!onJiraImport;
   return (
     <>
       <TaskFormInputs
@@ -350,6 +356,15 @@ export function DialogPromptSection({
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
+        jiraImport={
+          showJiraImport && onJiraImport
+            ? {
+                workspaceId: workspaceId ?? null,
+                disabled: isPassthroughProfile,
+                onImport: onJiraImport,
+              }
+            : undefined
+        }
       />
       {isPassthroughProfile && hasDescription && (
         <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>

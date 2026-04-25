@@ -1,0 +1,94 @@
+package jira
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
+)
+
+// defaultAuthPollInterval is how often the auth-health poller probes each
+// configured workspace. 90s is a compromise: short enough to keep
+// session-cookie auth warm (Atlassian idle-times sessions out after a few
+// minutes) and to surface expirations promptly in the UI, long enough that we
+// don't hammer Atlassian when many workspaces are configured.
+const defaultAuthPollInterval = 90 * time.Second
+
+// Poller probes the stored Jira credentials of every configured workspace on a
+// fixed cadence and persists the result on the JiraConfig row. The frontend
+// reads those fields via getJiraConfig to render the connected/disconnected
+// indicator without doing its own probing.
+type Poller struct {
+	service  *Service
+	logger   *logger.Logger
+	interval time.Duration
+
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started bool
+}
+
+// NewPoller returns a poller that uses the default 90s cadence.
+func NewPoller(svc *Service, log *logger.Logger) *Poller {
+	return &Poller{service: svc, logger: log, interval: defaultAuthPollInterval}
+}
+
+// Start launches the background loop. Calling Start more than once without
+// Stop is a no-op.
+func (p *Poller) Start(ctx context.Context) {
+	if p.started || p.service == nil {
+		return
+	}
+	p.started = true
+	ctx, p.cancel = context.WithCancel(ctx)
+	p.wg.Add(1)
+	go p.loop(ctx)
+	p.logger.Info("Jira auth poller started")
+}
+
+// Stop cancels the loop and waits for it to drain.
+func (p *Poller) Stop() {
+	if !p.started {
+		return
+	}
+	if p.cancel != nil {
+		p.cancel()
+	}
+	p.wg.Wait()
+	p.started = false
+	p.logger.Info("Jira auth poller stopped")
+}
+
+func (p *Poller) loop(ctx context.Context) {
+	defer p.wg.Done()
+	// Run an initial probe immediately so the UI gets a status without waiting
+	// the full interval after backend startup.
+	p.probeAll(ctx)
+	ticker := time.NewTicker(p.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.probeAll(ctx)
+		}
+	}
+}
+
+func (p *Poller) probeAll(ctx context.Context) {
+	ids, err := p.service.Store().ListConfiguredWorkspaces(ctx)
+	if err != nil {
+		p.logger.Warn("jira poller: list workspaces failed", zap.Error(err))
+		return
+	}
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return
+		}
+		p.service.RecordAuthHealth(ctx, id)
+	}
+}
