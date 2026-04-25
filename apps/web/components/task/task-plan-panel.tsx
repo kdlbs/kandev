@@ -50,7 +50,13 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     revisions,
     isLoadingRevisions,
     loadRevisions,
+    loadRevisionContent,
     revertTo,
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
   } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
@@ -122,7 +128,13 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     revisions,
     isLoadingRevisions,
     loadRevisions,
+    loadRevisionContent,
     revertTo,
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
   };
 }
 
@@ -131,37 +143,16 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   visible = true,
 }: TaskPlanPanelProps) {
   const state = useTaskPlanPanelState(taskId, visible);
-  const {
-    plan,
-    isLoading,
-    isSaving,
-    savePlan,
-    activeSessionId,
-    draftContent,
-    setDraftContent,
-    editorKey,
-    isEditorFocused,
-    handleEmptyStateClick,
-    hasUnsavedChanges,
-    commentState,
-    selectionState,
-    handleEditorReady,
-    handleCommentDeleted,
-    commentHighlights,
-    isAgentBusy,
-    isAgentCreatingPlan,
-    editorWrapperRef,
-    editorInstanceRef,
-    revisions,
-    isLoadingRevisions,
-    loadRevisions,
-    revertTo,
-  } = state;
-
   // Ctrl+S to save immediately
-  useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
+  useSaveShortcut(
+    state.hasUnsavedChanges,
+    state.isSaving,
+    state.savePlan,
+    state.draftContent,
+    state.plan?.title,
+  );
 
-  if (isLoading) {
+  if (state.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
@@ -178,56 +169,75 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     );
   }
 
-  const { textSelection, setTextSelection } = selectionState;
+  return <PlanPanelContent taskId={taskId} state={state} />;
+});
 
+function PlanPanelContent({
+  taskId,
+  state,
+}: {
+  taskId: string;
+  state: ReturnType<typeof useTaskPlanPanelState>;
+}) {
+  const { editorWrapperRef, editorInstanceRef, selectionState } = state;
+  const { textSelection, setTextSelection } = selectionState;
   return (
     <PanelRoot data-testid="plan-panel">
       <PlanPanelHeader
         taskId={taskId}
-        revisions={revisions}
-        isLoadingRevisions={isLoadingRevisions}
-        isSaving={isSaving}
-        onOpenRevisions={loadRevisions}
-        onRevert={revertTo}
+        revisions={state.revisions}
+        isLoadingRevisions={state.isLoadingRevisions}
+        isSaving={state.isSaving}
+        onOpenRevisions={state.loadRevisions}
+        onRevert={state.revertTo}
+        loadRevisionContent={state.loadRevisionContent}
+        previewRevisionId={state.previewRevisionId}
+        setPreviewRevision={state.setPreviewRevision}
+        comparePair={state.comparePair}
+        toggleCompareSelection={state.toggleCompareSelection}
+        clearComparePair={state.clearComparePair}
       />
       <PanelBody
         padding={false}
         scroll={false}
-        className={cn("relative transition-colors cursor-text", isAgentBusy && "bg-background")}
+        className={cn(
+          "relative transition-colors cursor-text",
+          state.isAgentBusy && "bg-background",
+        )}
         ref={editorWrapperRef}
-        onClick={handleEmptyStateClick}
+        onClick={state.handleEmptyStateClick}
       >
         <PlanEditor
-          key={`${taskId}-${editorKey}`}
-          value={draftContent}
-          onChange={setDraftContent}
+          key={`${taskId}-${state.editorKey}`}
+          value={state.draftContent}
+          onChange={state.setDraftContent}
           placeholder="Start typing your plan..."
-          onSelectionChange={activeSessionId ? setTextSelection : undefined}
-          comments={commentHighlights}
+          onSelectionChange={state.activeSessionId ? setTextSelection : undefined}
+          comments={state.commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}
-          onCommentDeleted={handleCommentDeleted}
-          onEditorReady={handleEditorReady}
+          onCommentDeleted={state.handleCommentDeleted}
+          onEditorReady={state.handleEditorReady}
         />
         <PlanEmptyState
-          isLoading={isLoading}
-          draftContent={draftContent}
-          isEditorFocused={isEditorFocused}
-          isAgentCreatingPlan={isAgentCreatingPlan}
-          onClick={handleEmptyStateClick}
+          isLoading={state.isLoading}
+          draftContent={state.draftContent}
+          isEditorFocused={state.isEditorFocused}
+          isAgentCreatingPlan={state.isAgentCreatingPlan}
+          onClick={state.handleEmptyStateClick}
         />
       </PanelBody>
 
       <PlanSelectionPopoverWrapper
         textSelection={textSelection}
-        activeSessionId={activeSessionId}
+        activeSessionId={state.activeSessionId}
         taskId={taskId}
-        commentState={commentState}
+        commentState={state.commentState}
         editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
       />
     </PanelRoot>
   );
-});
+}
 
 function removeCommentMark(editor: Editor | null, commentId: string) {
   if (!editor) return;
@@ -532,6 +542,12 @@ type PlanPanelHeaderProps = {
   isSaving: boolean;
   onOpenRevisions: () => void;
   onRevert: (id: string) => Promise<TaskPlanRevision | null>;
+  loadRevisionContent: (revisionId: string) => Promise<string>;
+  previewRevisionId: string | null;
+  setPreviewRevision: (revisionId: string | null) => void;
+  comparePair: [string | null, string | null];
+  toggleCompareSelection: (revisionId: string) => void;
+  clearComparePair: () => void;
 };
 
 // Header bar lives only to host the rewind button. The plan's title (default
@@ -544,6 +560,12 @@ function PlanPanelHeader({
   isSaving,
   onOpenRevisions,
   onRevert,
+  loadRevisionContent,
+  previewRevisionId,
+  setPreviewRevision,
+  comparePair,
+  toggleCompareSelection,
+  clearComparePair,
 }: PlanPanelHeaderProps) {
   return (
     <PanelHeaderBarSplit
@@ -556,6 +578,12 @@ function PlanPanelHeader({
           isSaving={isSaving}
           onOpen={onOpenRevisions}
           onRevert={onRevert}
+          loadRevisionContent={loadRevisionContent}
+          previewRevisionId={previewRevisionId}
+          setPreviewRevision={setPreviewRevision}
+          comparePair={comparePair}
+          toggleCompareSelection={toggleCompareSelection}
+          clearComparePair={clearComparePair}
         />
       }
     />

@@ -135,6 +135,11 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
   };
 }
 
+const EMPTY_PAIR: readonly [string | null, string | null] = Object.freeze([null, null]) as readonly [
+  string | null,
+  string | null,
+];
+
 function useTaskPlanRevisions(
   taskId: string | null,
   setTaskPlanSaving: (taskId: string, saving: boolean) => void,
@@ -206,5 +211,52 @@ function useTaskPlanRevisions(
     [taskId, setTaskPlanSaving, setError],
   );
 
-  return { revisions, isLoadingRevisions, loadRevisions, loadRevisionContent, revertTo };
+  return {
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    loadRevisionContent,
+    revertTo,
+    ...usePreviewCompareState(taskId),
+  };
+}
+
+/** Phase 6: preview + compare selectors and actions, scoped to the active task. */
+function usePreviewCompareState(taskId: string | null) {
+  const previewRevisionId = useAppStore((state) =>
+    taskId ? (state.taskPlans.previewRevisionIdByTaskId[taskId] ?? null) : null,
+  );
+  const comparePair = useAppStore((state) =>
+    taskId ? (state.taskPlans.comparePairByTaskId[taskId] ?? EMPTY_PAIR) : EMPTY_PAIR,
+  ) as [string | null, string | null];
+  const setPreviewRevisionStore = useAppStore((state) => state.setPreviewRevision);
+  const toggleComparePairStore = useAppStore((state) => state.toggleComparePair);
+  const clearComparePairStore = useAppStore((state) => state.clearComparePair);
+
+  const setPreviewRevision = useCallback(
+    (revisionId: string | null) => {
+      if (!taskId) return;
+      setPreviewRevisionStore(taskId, revisionId);
+    },
+    [taskId, setPreviewRevisionStore],
+  );
+  const toggleCompareSelection = useCallback(
+    (revisionId: string) => {
+      if (!taskId) return;
+      toggleComparePairStore(taskId, revisionId);
+    },
+    [taskId, toggleComparePairStore],
+  );
+  const clearComparePair = useCallback(() => {
+    if (!taskId) return;
+    clearComparePairStore(taskId);
+  }, [taskId, clearComparePairStore]);
+
+  return {
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
+  };
 }
