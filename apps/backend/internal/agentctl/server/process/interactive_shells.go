@@ -104,6 +104,20 @@ func (r *InteractiveRunner) RegisterScriptShell(sessionID, terminalID, label, in
 	}
 }
 
+// LookupShellInitialCommand returns the InitialCommand stored for a pre-registered
+// shell entry, or "" when no entry exists. Used by remote-shell handlers to recover
+// the script command across the WS-handshake boundary, since the per-terminal WS URL
+// only carries terminalId — not script_id or command.
+func (r *InteractiveRunner) LookupShellInitialCommand(sessionID, terminalID string) string {
+	key := sessionID + ":" + terminalID
+	r.userShellsMu.RLock()
+	defer r.userShellsMu.RUnlock()
+	if entry, ok := r.userShells[key]; ok {
+		return entry.InitialCommand
+	}
+	return ""
+}
+
 // StartUserShell starts or returns an existing user shell for a terminal tab.
 // Each terminal tab gets its own independent shell process.
 // If opts.InitialCommand is provided, it will be written to stdin after the shell starts.
