@@ -1037,7 +1037,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	// 3. Session can be resumed if it has a resume token
 	if resumeToken != "" {
-		// Don't auto-resume terminal sessions — they failed/completed for a reason.
+		// Auto-resume FAILED sessions when the runtime is resumable: PR #670 made
+		// terminal-state resume safe (cleanup + retry), so recover transparently
+		// before surfacing the error. Frontend falls back to restore_workspace if
+		// the resume itself fails.
+		if session.State == models.TaskSessionStateFailed && running != nil && running.Resumable {
+			return s.validateResumeEligibility(session, resp), nil
+		}
+		// Don't auto-resume other terminal sessions (CANCELLED stays stopped, COMPLETED is done).
 		if !isActiveSessionState(session.State) {
 			resp.IsAgentRunning = false
 			resp.IsResumable = false
