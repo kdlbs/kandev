@@ -28,9 +28,13 @@ var monitorRegistrationRE = regexp.MustCompile(`^Monitor started \(task ([a-zA-Z
 // user_message_chunk. Capture groups: 1=taskId, 2=event body.
 //
 // Pattern is intentionally permissive: the outer `Human:` prefix is optional
-// (some chunks split across multiple deltas), and we match across newlines.
+// (some chunks split across multiple deltas), we match across newlines, and
+// the event body uses lazy `(.*?)` rather than `[^<]*` so script lines that
+// contain `<` characters (e.g. `<error>build failed</error>`, ANSI escape
+// fragments, shell redirection text) still match instead of leaking the
+// raw envelope into the chat.
 var monitorTaskNotifRE = regexp.MustCompile(
-	`(?s)(?:Human:\s*)?<task-notification>\s*<task-id>([^<]+)</task-id>.*?<event>([^<]*)</event>\s*</task-notification>`,
+	`(?s)(?:Human:\s*)?<task-notification>\s*<task-id>([^<]+)</task-id>.*?<event>(.*?)</event>\s*</task-notification>`,
 )
 
 // monitorHumanEchoRE matches an orphan "Human:" prefix with no closing
@@ -92,41 +96,27 @@ func recognizeMonitorTaskCall(tc *acp.SessionUpdateToolCall) (string, bool) {
 	return cmd, true
 }
 
-// handleMonitorRegistration recognizes the claude-acp Monitor "I just
-// registered" tool_call_update (status=completed + banner rawOutput),
-// records the Monitor in activeMonitors, seeds its Generic payload view,
-// and returns the overridden status. Returns (status, false) when the
-// update is not a Monitor registration so the caller can keep the original
-// status untouched.
-func (a *Adapter) handleMonitorRegistration(sessionID, toolCallID, status string, tcu *acp.SessionToolCallUpdate) (string, bool) {
-	if status != toolStatusComplete {
-		return status, false
+// monitorCommandFromPayload extracts the watched command string from a
+// Generic tool payload's Input field. The ACP normalizer stores the entire
+// args map (including a `raw_input` key) under Input, so the command lives
+// at `Input.raw_input.command` for Generic tools — not at a top-level key.
+// Returns empty string when the path is missing or the wrong shape.
+func monitorCommandFromPayload(payload *streams.NormalizedPayload) string {
+	if payload == nil || payload.Generic() == nil {
+		return ""
 	}
-	taskID, ok := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
+	args, ok := payload.Generic().Input.(map[string]any)
 	if !ok {
-		return status, false
+		return ""
 	}
-	a.trackMonitor(sessionID, taskID, toolCallID)
-	a.seedMonitorViewLocked(toolCallID, taskID)
-	return "in_progress", true
-}
-
-// seedMonitorViewLocked acquires Adapter.mu and writes the initial Monitor
-// view onto the Generic payload at registration time so the frontend can
-// switch the card renderer immediately — before any events fire. Without
-// this, a CI watch with a long quiet startup would render as a generic
-// tool_call for minutes.
-func (a *Adapter) seedMonitorViewLocked(toolCallID, taskID string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	payload := a.activeToolCalls[toolCallID]
-	command := ""
-	if payload != nil && payload.Generic() != nil {
-		if input, ok := payload.Generic().Input.(map[string]any); ok {
-			command, _ = input["command"].(string)
-		}
+	rawInput, ok := args["raw_input"].(map[string]any)
+	if !ok {
+		// Fallback: some agents pass command at the top level.
+		cmd, _ := args["command"].(string)
+		return cmd
 	}
-	seedMonitorView(payload, taskID, command)
+	cmd, _ := rawInput["command"].(string)
+	return cmd
 }
 
 // trackMonitor records a registered Monitor against a session.
@@ -472,14 +462,13 @@ func (a *Adapter) dropMonitorByToolCallID(sessionID, toolCallID string) {
 // parent prompt naturally completes — the Monitor process exits with the
 // agent turn, so the card should flip from "watching" to "ended".
 func (a *Adapter) sweepMonitorsOnPromptEnd(sessionID string) {
-	monitors := a.takeActiveMonitors(sessionID)
-	for taskID, toolCallID := range monitors {
+	for _, toolCallID := range a.takeActiveMonitors(sessionID) {
 		a.mu.Lock()
 		payload := a.activeToolCalls[toolCallID]
 		markMonitorEnded(payload, "exited")
+		delete(a.activeToolCalls, toolCallID)
 		a.mu.Unlock()
 		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, toolStatusComplete, "Monitor exited", payload))
-		_ = taskID
 	}
 }
 
@@ -489,14 +478,13 @@ func (a *Adapter) sweepMonitorsOnPromptEnd(sessionID string) {
 // restart is dead — we surface that to the UI rather than leaving the card
 // stuck in "watching".
 func (a *Adapter) sweepMonitorsOnReplayEnd(sessionID string) {
-	monitors := a.takeActiveMonitors(sessionID)
-	for taskID, toolCallID := range monitors {
+	for _, toolCallID := range a.takeActiveMonitors(sessionID) {
 		a.mu.Lock()
 		payload := a.activeToolCalls[toolCallID]
 		markMonitorEnded(payload, "session_restart")
+		delete(a.activeToolCalls, toolCallID)
 		a.mu.Unlock()
 		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, "cancelled", "Monitor ended (session restart)", payload))
-		_ = taskID
 	}
 }
 

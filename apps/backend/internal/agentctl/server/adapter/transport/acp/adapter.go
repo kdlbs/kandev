@@ -694,13 +694,31 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 
 // cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
 // and clears the activeToolCalls map.
+//
+// Monitor tool calls are intentionally skipped here — they are tracked in
+// activeMonitors and given their own terminal sweep (sweepMonitorsOnPromptEnd
+// or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
+// payload snapshot. Without this skip the Monitor would receive two
+// terminal events with conflicting states.
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	a.mu.Lock()
-	toolCalls := a.activeToolCalls
-	a.activeToolCalls = make(map[string]*streams.NormalizedPayload)
+	monitorToolCallIDs := make(map[string]bool)
+	for _, tcID := range a.activeMonitors[sessionID] {
+		monitorToolCallIDs[tcID] = true
+	}
+	toCancel := make(map[string]*streams.NormalizedPayload)
+	preserved := make(map[string]*streams.NormalizedPayload)
+	for tcID, payload := range a.activeToolCalls {
+		if monitorToolCallIDs[tcID] {
+			preserved[tcID] = payload
+		} else {
+			toCancel[tcID] = payload
+		}
+	}
+	a.activeToolCalls = preserved
 	a.mu.Unlock()
 
-	for toolCallID, normalized := range toolCalls {
+	for toolCallID, normalized := range toCancel {
 		a.logger.Debug("cancelling active tool call",
 			zap.String("session_id", sessionID),
 			zap.String("tool_call_id", toolCallID))
@@ -1055,20 +1073,14 @@ func (a *Adapter) routeMonitorEvents(sessionID, text string) string {
 	for _, ev := range events {
 		toolCallID, ok := a.lookupMonitorByTaskID(sessionID, ev.TaskID)
 		if !ok {
-			a.logger.Debug("monitor event for unknown task, dropping envelope but preserving text",
+			a.logger.Debug("monitor event for unknown task, dropping envelope and event body",
 				zap.String("session_id", sessionID),
 				zap.String("task_id", ev.TaskID))
 			continue
 		}
 		a.mu.Lock()
 		payload := a.activeToolCalls[toolCallID]
-		command := ""
-		if payload != nil && payload.Generic() != nil {
-			if input, ok := payload.Generic().Input.(map[string]any); ok {
-				command, _ = input["command"].(string)
-			}
-		}
-		appendMonitorEvent(payload, ev.TaskID, command, ev.Body)
+		appendMonitorEvent(payload, ev.TaskID, monitorCommandFromPayload(payload), ev.Body)
 		a.mu.Unlock()
 		a.sendUpdate(monitorEventEvent(sessionID, toolCallID, ev.Body, payload))
 		a.logger.Debug("monitor event routed",
@@ -1468,8 +1480,14 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// itself is just beginning. Override to "in_progress" so the card stays
 	// open, and remember taskID -> toolCallID so subsequent task-notification
 	// envelopes can route their events back to this card.
-	if newStatus, handled := a.handleMonitorRegistration(sessionID, toolCallID, status, tcu); handled {
-		status = newStatus
+	monitorTaskID, isMonitorRegistration := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
+	if isMonitorRegistration && status == toolStatusComplete {
+		a.trackMonitor(sessionID, monitorTaskID, toolCallID)
+		status = "in_progress"
+		a.logger.Info("monitor registered",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", monitorTaskID),
+			zap.String("tool_call_id", toolCallID))
 	}
 
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
@@ -1486,6 +1504,15 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// Update stored payload with tool result output
 	if tcu.RawOutput != nil && payload != nil {
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+	}
+
+	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
+	// banner string the normalizer just stuffed into Generic.Output. The
+	// Monitor card detects itself by `output.monitor` presence — the banner
+	// would shadow it and the frontend would render this as a generic
+	// tool_call instead.
+	if isMonitorRegistration && payload != nil {
+		seedMonitorView(payload, monitorTaskID, monitorCommandFromPayload(payload))
 	}
 
 	// Enrich modify_file payload from tool_call_contents.

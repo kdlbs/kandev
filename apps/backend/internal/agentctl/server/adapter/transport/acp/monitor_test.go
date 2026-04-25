@@ -111,6 +111,21 @@ func TestExtractMonitorEvents_EmptyEventBody(t *testing.T) {
 	}
 }
 
+func TestExtractMonitorEvents_BodyContainingAngleBrackets(t *testing.T) {
+	// Real-world scripts emit lines containing `<` (XML-ish errors, shell
+	// redirection like `< /dev/null`, ANSI fragments). The regex must not
+	// abort on the first `<` it sees inside the event body; otherwise the
+	// whole envelope leaks to the chat as raw assistant text.
+	in := "<task-notification><task-id>t1</task-id><event><error>build failed: exit < 1</error></event></task-notification>"
+	_, events := extractMonitorEvents(in)
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 (regex should accept '<' in body)", len(events))
+	}
+	if events[0].Body != "<error>build failed: exit < 1</error>" {
+		t.Errorf("event body = %q, want literal '<error>...' carried through", events[0].Body)
+	}
+}
+
 // --- isMonitorHumanEcho ---
 
 func TestIsMonitorHumanEcho_Variants(t *testing.T) {
@@ -239,6 +254,60 @@ func TestConvertToolCallResultUpdate_RealCompletedStaysComplete(t *testing.T) {
 	}
 }
 
+// TestConvertToolCallResultUpdate_MonitorRegistrationSurvivesNormalize is a
+// regression guard: NormalizeToolResult writes the rawOutput banner string
+// into the Generic payload's Output field, which would shadow the
+// `output.monitor` view the frontend uses to detect Monitor cards. The
+// Monitor seed must run AFTER NormalizeToolResult so the synthetic
+// `{monitor: …}` wrapper is the final value.
+func TestConvertToolCallResultUpdate_MonitorRegistrationSurvivesNormalize(t *testing.T) {
+	a := newTestAdapter()
+
+	// First the initial pending tool_call lands in activeToolCalls so
+	// convertToolCallResultUpdate has a Generic payload to mutate.
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f /var/log/x"},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+
+	completed := acp.ToolCallStatus("completed")
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task realTaskId, timeout 60000ms). You will be notified.",
+	}
+
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected event, got nil")
+	}
+	if ev.NormalizedPayload == nil || ev.NormalizedPayload.Generic() == nil {
+		t.Fatalf("expected Generic payload, got %+v", ev.NormalizedPayload)
+	}
+	out, ok := ev.NormalizedPayload.Generic().Output.(map[string]any)
+	if !ok {
+		t.Fatalf("Generic.Output = %v (%T), want map (the {monitor: …} wrapper, not the raw banner string)",
+			ev.NormalizedPayload.Generic().Output, ev.NormalizedPayload.Generic().Output)
+	}
+	monitor, ok := out["monitor"].(map[string]any)
+	if !ok {
+		t.Fatalf("Generic.Output[monitor] missing or wrong type — frontend would fall back to generic tool_call rendering")
+	}
+	if monitor["task_id"] != "realTaskId" {
+		t.Errorf("monitor.task_id = %v, want realTaskId", monitor["task_id"])
+	}
+	if monitor["command"] != "tail -f /var/log/x" {
+		t.Errorf("monitor.command = %v, want it carried over from initial tool_call", monitor["command"])
+	}
+}
+
 // --- sweepMonitorsOnPromptEnd ---
 
 func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
@@ -259,6 +328,49 @@ func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
 	}
 	if _, ok := a.lookupMonitorByTaskID("s1", "t1"); ok {
 		t.Error("activeMonitors not cleared after sweep")
+	}
+}
+
+// TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls is a
+// regression guard for a real wire-bug discovered in CI: when the parent
+// prompt naturally ends, `cancelActiveToolCalls` would blanket-cancel every
+// entry in `activeToolCalls` (including the Monitor's tool call) before
+// `sweepMonitorsOnPromptEnd` ran, leaving the frontend with two
+// conflicting terminal events for the same Monitor. Monitor entries must
+// be skipped in the cancel loop so the sweep emits the single
+// authoritative "Monitor exited" event.
+func TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls(t *testing.T) {
+	a := newTestAdapter()
+
+	// Land an initial Monitor tool_call so it sits in activeToolCalls.
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f log"},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed tool_call returned nil")
+	}
+	a.trackMonitor("s1", "task-X", "tc-monitor")
+	drainEvents(a) // ignore the initial events
+
+	a.cancelActiveToolCalls("s1")
+	a.sweepMonitorsOnPromptEnd("s1")
+
+	events := drainEvents(a)
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 (the Monitor sweep's terminal event only)", len(events))
+	}
+	if events[0].ToolCallID != "tc-monitor" {
+		t.Errorf("event ToolCallID = %q, want tc-monitor", events[0].ToolCallID)
+	}
+	if events[0].ToolStatus != "complete" {
+		t.Errorf("event ToolStatus = %q, want complete (cancelActiveToolCalls must skip Monitors)", events[0].ToolStatus)
+	}
+	if events[0].NormalizedPayload == nil {
+		t.Errorf("event NormalizedPayload is nil — sweep lost payload (activeToolCalls drained too early)")
 	}
 }
 
