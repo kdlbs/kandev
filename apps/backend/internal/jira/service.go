@@ -343,7 +343,15 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		return nil, "", errors.New("no secret store configured")
 	}
 	secret, err := s.secrets.Reveal(ctx, SecretKeyForWorkspace(req.WorkspaceID))
-	if err != nil || secret == "" {
+	if err != nil {
+		// Don't conflate a transient secret-store failure with "no token
+		// stored". Surfacing the real error gives the user a path to retry
+		// instead of telling them to paste a token they already have.
+		s.log.Warn("jira: secret reveal failed",
+			zap.String("workspace_id", req.WorkspaceID), zap.Error(err))
+		return nil, "", fmt.Errorf("read jira secret: %w", err)
+	}
+	if secret == "" {
 		return nil, "", errors.New("no token stored — paste one to test")
 	}
 	// Merge with persisted config so the test uses saved site/email if the

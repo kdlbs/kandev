@@ -517,9 +517,13 @@ function EnabledPill({ workspaceId }: { workspaceId: string }) {
 
 export function JiraSettings({ workspaceId }: JiraSettingsProps) {
   const s = useJiraSettings(workspaceId);
+  const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave =
-    s.saving || !s.form.siteUrl || (s.form.authMethod === "api_token" && !s.form.email);
-  const disableTest = !s.config?.hasSecret && !s.form.secret;
+    s.saving ||
+    !s.form.siteUrl ||
+    (s.form.authMethod === "api_token" && !s.form.email) ||
+    missingSecret;
+  const disableTest = missingSecret;
 
   return (
     <div className="space-y-8">
