@@ -110,16 +110,12 @@ func (s *Service) PerformFreshBranch(ctx context.Context, req FreshBranchRequest
 	}
 
 	// Best-effort fetch so a remote-tracking ref like "origin/main" resolves.
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", baseBranch)
-	fetchCmd.Dir = absPath
-	_ = fetchCmd.Run()
+	_, _ = runGit(ctx, absPath, "fetch", "origin", baseBranch)
 
 	// Use `-b` (not `-B`) so we refuse to overwrite an existing branch — that
 	// would silently orphan commits only reachable from it.
-	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", newBranch, baseBranch)
-	cmd.Dir = absPath
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %q from %q: %s", ErrFreshBranchCheckout, newBranch, baseBranch, strings.TrimSpace(string(out)))
+	if out, err := runGit(ctx, absPath, "checkout", "-b", newBranch, baseBranch); err != nil {
+		return fmt.Errorf("%w: %q from %q: %s", ErrFreshBranchCheckout, newBranch, baseBranch, out)
 	}
 	return nil
 }
