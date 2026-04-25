@@ -50,10 +50,26 @@ function readStorage(): SavedView[] {
   }
 }
 
+function isFilterState(f: unknown): f is FilterState {
+  if (!f || typeof f !== "object") return false;
+  const rec = f as Record<string, unknown>;
+  return (
+    Array.isArray(rec.projectKeys) &&
+    rec.projectKeys.every((k) => typeof k === "string") &&
+    Array.isArray(rec.statusCategories) &&
+    rec.statusCategories.every(
+      (c) => c === "" || c === "new" || c === "indeterminate" || c === "done",
+    ) &&
+    (rec.assignee === "me" || rec.assignee === "unassigned" || rec.assignee === "anyone") &&
+    typeof rec.searchText === "string" &&
+    (rec.sort === "updated" || rec.sort === "created" || rec.sort === "priority")
+  );
+}
+
 function isSavedView(v: unknown): v is SavedView {
   if (!v || typeof v !== "object") return false;
   const rec = v as Record<string, unknown>;
-  return typeof rec.id === "string" && typeof rec.name === "string" && !!rec.filters;
+  return typeof rec.id === "string" && typeof rec.name === "string" && isFilterState(rec.filters);
 }
 
 function writeStorage(views: SavedView[]): void {

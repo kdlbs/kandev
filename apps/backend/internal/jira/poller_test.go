@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,16 +36,24 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 	return f
 }
 
+// saveConfig persists a workspace config directly via the store + secret
+// fakes. We deliberately avoid Service.SetConfig here because it now fires an
+// async auth probe in a goroutine — fine for production but it would race
+// against the deterministic `probeAll` calls these tests make.
 func (f *pollerFixture) saveConfig(t *testing.T, workspaceID, secret string) {
 	t.Helper()
-	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+	ctx := context.Background()
+	if err := f.store.UpsertConfig(ctx, &JiraConfig{
 		WorkspaceID: workspaceID,
 		SiteURL:     "https://" + workspaceID + ".atlassian.net",
 		Email:       workspaceID + "@example.com",
 		AuthMethod:  AuthMethodAPIToken,
-		Secret:      secret,
 	}); err != nil {
 		t.Fatalf("save config %s: %v", workspaceID, err)
+	}
+	if err := f.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID),
+		"jira", secret); err != nil {
+		t.Fatalf("save secret %s: %v", workspaceID, err)
 	}
 }
 
@@ -142,7 +151,12 @@ func TestPoller_ProbeAll_MultipleWorkspaces(t *testing.T) {
 func TestPoller_StartStop(t *testing.T) {
 	f := newPollerFixture(t)
 	f.saveConfig(t, "ws-1", "tok")
+	probed := make(chan struct{}, 1)
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
 		return &TestConnectionResult{OK: true}, nil
 	}
 
@@ -151,25 +165,44 @@ func TestPoller_StartStop(t *testing.T) {
 	f.poller.Start(ctx)
 	defer f.poller.Stop()
 
-	// The loop runs an initial probe immediately on Start. Wait for it to land
-	// in the store. We poll the store rather than sleeping a fixed duration so
-	// the test stays robust under load.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
-		if cfg != nil && cfg.LastCheckedAt != nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The loop runs an initial probe immediately on Start; the fake client
+	// signals on `probed` so we wait without polling.
+	select {
+	case <-probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("poller did not record an initial probe within 2s")
 	}
-	t.Fatal("poller did not record an initial probe within 2s")
 }
 
 func TestPoller_StartIsIdempotent(t *testing.T) {
 	f := newPollerFixture(t)
+	f.saveConfig(t, "ws-1", "tok")
+	var calls int32
+	probed := make(chan struct{}, 1)
+	f.client.testAuthFn = func() (*TestConnectionResult, error) {
+		atomic.AddInt32(&calls, 1)
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
+		return &TestConnectionResult{OK: true}, nil
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	f.poller.Start(ctx)
-	f.poller.Start(ctx) // second call must be a no-op
+	f.poller.Start(ctx) // second call must be a no-op (no second goroutine).
+
+	// Wait for the first probe to land. If the second Start spawned a parallel
+	// loop we'd see two probes back-to-back.
+	select {
+	case <-probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("poller did not run an initial probe within 2s")
+	}
 	f.poller.Stop()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("expected exactly 1 probe call from the initial run, got %d", got)
+	}
 }

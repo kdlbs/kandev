@@ -174,7 +174,7 @@ function AuthenticatedView({
         onSelectView={state.selectView}
         onDeleteView={state.deleteView}
         onSaveView={state.saveCurrentAsView}
-        count={search.total}
+        count={search.items.length}
         loading={search.loading}
         sort={state.filters.sort}
         onSortChange={(sort) => state.updateFilters({ ...state.filters, sort })}
@@ -213,8 +213,10 @@ function AuthenticatedView({
       <ResultsPagination
         page={search.page}
         pageSize={search.pageSize}
-        total={search.total}
-        onPageChange={search.setPage}
+        itemCount={search.items.length}
+        isLast={search.isLast}
+        onNext={search.goNext}
+        onPrev={search.goPrev}
       />
     </>
   );

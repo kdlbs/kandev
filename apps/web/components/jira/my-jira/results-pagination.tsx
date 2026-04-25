@@ -1,12 +1,9 @@
 "use client";
 
-import { Fragment } from "react";
 import {
   Pagination,
   PaginationContent,
-  PaginationEllipsis,
   PaginationItem,
-  PaginationLink,
   PaginationNext,
   PaginationPrevious,
 } from "@kandev/ui/pagination";
@@ -14,29 +11,32 @@ import {
 type ResultsPaginationProps = {
   page: number;
   pageSize: number;
-  total: number;
-  onPageChange: (page: number) => void;
+  itemCount: number;
+  isLast: boolean;
+  onNext: () => void;
+  onPrev: () => void;
 };
 
-function pageWindow(page: number, totalPages: number): number[] {
-  const pages = new Set<number>([1, totalPages, page - 1, page, page + 1]);
-  return Array.from(pages)
-    .filter((p) => p >= 1 && p <= totalPages)
-    .sort((a, b) => a - b);
-}
-
-export function ResultsPagination({ page, pageSize, total, onPageChange }: ResultsPaginationProps) {
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  if (totalPages <= 1) return null;
-
-  const windowPages = pageWindow(page, totalPages);
+// Token-based pagination from Atlassian's /search/jql gives no total count, so
+// we render forward/backward controls plus the current page's row range.
+export function ResultsPagination({
+  page,
+  pageSize,
+  itemCount,
+  isLast,
+  onNext,
+  onPrev,
+}: ResultsPaginationProps) {
+  if (page === 1 && isLast) return null;
   const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
+  const end = (page - 1) * pageSize + itemCount;
+  const prevDisabled = page <= 1;
+  const nextDisabled = isLast;
 
   return (
     <div className="flex items-center justify-between px-6 py-3 border-t shrink-0">
       <div className="text-xs text-muted-foreground tabular-nums">
-        {start}–{end} of {total}
+        {itemCount === 0 ? "No results" : `${start}–${end}`}
       </div>
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>
@@ -45,47 +45,24 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                if (page > 1) onPageChange(page - 1);
+                if (!prevDisabled) onPrev();
               }}
-              aria-disabled={page <= 1}
-              className={page <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+              aria-disabled={prevDisabled}
+              className={prevDisabled ? "pointer-events-none opacity-50" : "cursor-pointer"}
             />
           </PaginationItem>
-          {windowPages.map((p, i) => {
-            const prev = windowPages[i - 1];
-            const needsGap = prev !== undefined && p - prev > 1;
-            return (
-              <Fragment key={p}>
-                {needsGap && (
-                  <PaginationItem>
-                    <PaginationEllipsis />
-                  </PaginationItem>
-                )}
-                <PaginationItem>
-                  <PaginationLink
-                    href="#"
-                    isActive={p === page}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onPageChange(p);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    {p}
-                  </PaginationLink>
-                </PaginationItem>
-              </Fragment>
-            );
-          })}
+          <PaginationItem>
+            <span className="px-3 text-sm tabular-nums">Page {page}</span>
+          </PaginationItem>
           <PaginationItem>
             <PaginationNext
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                if (page < totalPages) onPageChange(page + 1);
+                if (!nextDisabled) onNext();
               }}
-              aria-disabled={page >= totalPages}
-              className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+              aria-disabled={nextDisabled}
+              className={nextDisabled ? "pointer-events-none opacity-50" : "cursor-pointer"}
             />
           </PaginationItem>
         </PaginationContent>

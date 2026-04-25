@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -254,7 +255,14 @@ func (a *jiraSecretAdapter) Delete(ctx context.Context, id string) error {
 func (a *jiraSecretAdapter) Exists(ctx context.Context, id string) (bool, error) {
 	_, err := a.store.Get(ctx, id)
 	if err != nil {
-		return false, nil
+		// The secrets layer reports "not found" via a fmt.Errorf string with
+		// the "secret not found:" prefix; treat that as the absence case and
+		// surface anything else (DB outage, decoding failure) so the caller
+		// can log it instead of silently reporting "not configured".
+		if strings.HasPrefix(err.Error(), "secret not found:") {
+			return false, nil
+		}
+		return false, err
 	}
 	return true, nil
 }

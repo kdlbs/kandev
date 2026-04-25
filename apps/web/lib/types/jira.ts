@@ -75,7 +75,7 @@ export interface JiraProject {
 
 export interface JiraSearchResult {
   tickets: JiraTicket[];
-  total: number;
-  startAt: number;
   maxResults: number;
+  isLast: boolean;
+  nextPageToken?: string;
 }

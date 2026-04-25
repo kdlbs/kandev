@@ -1,6 +1,5 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import { IconExternalLink, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -11,28 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import type { JiraTicket, JiraStatusCategory } from "@/lib/types/jira";
+import type { JiraTicket } from "@/lib/types/jira";
+import { formatRelative, statusBadgeClass } from "@/components/jira/jira-ticket-common";
 import type { JiraTaskPreset } from "./presets";
-
-function statusBadgeClass(category: JiraStatusCategory | undefined): string {
-  switch (category) {
-    case "done":
-      return "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30";
-    case "indeterminate":
-      return "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30";
-    case "new":
-      return "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30";
-    default:
-      return "";
-  }
-}
-
-function formatRelative(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
 
 type TicketRowProps = {
   ticket: JiraTicket;

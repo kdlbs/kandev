@@ -9,9 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import { getJiraConfig, getJiraTicket } from "@/lib/api/domains/jira-api";
 import { updateTask } from "@/lib/api/domains/kanban-api";
-
-// Matches PROJ-123. Accepts URLs, plain keys, pasted summaries.
-const JIRA_KEY_RE = /[A-Z][A-Z0-9]+-\d+/;
+import { JIRA_KEY_RE } from "./jira-ticket-common";
 
 function useJiraConfigured(workspaceId: string | null | undefined): boolean {
   const [configured, setConfigured] = useState(false);

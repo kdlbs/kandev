@@ -24,14 +24,14 @@ export async function getJiraConfig(
 export async function setJiraConfig(payload: SetJiraConfigRequest, options?: ApiRequestOptions) {
   return fetchJson<JiraConfig>(`/api/v1/jira/config`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
 export async function deleteJiraConfig(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<{ deleted: boolean }>(
     `/api/v1/jira/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-    { ...options, init: { method: "DELETE", ...(options?.init ?? {}) } },
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
   );
 }
 
@@ -41,7 +41,7 @@ export async function testJiraConnection(
 ) {
   return fetchJson<TestJiraConnectionResult>(`/api/v1/jira/config/test`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
@@ -65,12 +65,12 @@ export async function getJiraTicket(
 
 export async function searchJiraTickets(
   workspaceId: string,
-  params: { jql?: string; startAt?: number; maxResults?: number },
+  params: { jql?: string; pageToken?: string; maxResults?: number },
   options?: ApiRequestOptions,
 ) {
   const search = new URLSearchParams({ workspace_id: workspaceId });
   if (params.jql) search.set("jql", params.jql);
-  if (params.startAt) search.set("start_at", String(params.startAt));
+  if (params.pageToken) search.set("page_token", params.pageToken);
   if (params.maxResults) search.set("max_results", String(params.maxResults));
   return fetchJson<JiraSearchResult>(`/api/v1/jira/tickets?${search.toString()}`, options);
 }
@@ -85,7 +85,7 @@ export async function transitionJiraTicket(
     `/api/v1/jira/tickets/${encodeURIComponent(ticketKey)}/transitions?workspace_id=${encodeURIComponent(workspaceId)}`,
     {
       ...options,
-      init: { method: "POST", body: JSON.stringify({ transitionId }), ...(options?.init ?? {}) },
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ transitionId }) },
     },
   );
 }

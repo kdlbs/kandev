@@ -70,7 +70,11 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*JiraConfi
 		return cfg, nil
 	}
 	key := SecretKeyForWorkspace(workspaceID)
-	exists, _ := s.secrets.Exists(ctx, key)
+	exists, existsErr := s.secrets.Exists(ctx, key)
+	if existsErr != nil {
+		s.log.Warn("jira: secret exists check failed",
+			zap.String("workspace_id", workspaceID), zap.Error(existsErr))
+	}
 	cfg.HasSecret = exists
 	if exists && cfg.AuthMethod == AuthMethodSessionCookie {
 		if secret, revealErr := s.secrets.Reveal(ctx, key); revealErr == nil {
@@ -80,13 +84,17 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*JiraConfi
 	return cfg, nil
 }
 
+// ErrInvalidConfig is returned by SetConfig when the request fails validation
+// (missing workspace, bad auth method, etc.). Callers map it to HTTP 400.
+var ErrInvalidConfig = errors.New("jira: invalid configuration")
+
 // SetConfig is upsert: it writes the workspace row and, when a new secret is
 // provided, stores it in the encrypted secret store. An empty Secret means
 // "keep the existing token" — this lets the UI edit auxiliary fields without
 // forcing the user to paste the token again.
 func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraConfig, error) {
 	if err := validateConfigRequest(req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
 	cfg := &JiraConfig{
 		WorkspaceID:       req.WorkspaceID,
@@ -108,9 +116,15 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 		}
 	}
 	s.invalidateClient(req.WorkspaceID)
-	// Probe immediately so the UI's connected/disconnected indicator reflects
-	// the freshly-saved credentials without waiting up to one poller interval.
-	s.RecordAuthHealth(ctx, req.WorkspaceID)
+	// Probe asynchronously so a slow Atlassian doesn't stall the save response.
+	// Use a detached context with its own timeout: the request ctx may be
+	// cancelled when this returns, but we still want the probe to complete and
+	// update the auth-health row that the UI is about to poll.
+	go func(workspaceID string) {
+		probeCtx, cancel := context.WithTimeout(context.Background(), authProbeTimeout)
+		defer cancel()
+		s.RecordAuthHealth(probeCtx, workspaceID)
+	}(req.WorkspaceID)
 	return s.GetConfig(ctx, req.WorkspaceID)
 }
 
@@ -215,14 +229,14 @@ func (s *Service) ListProjects(ctx context.Context, workspaceID string) ([]JiraP
 }
 
 // SearchTickets runs a JQL search for the workspace, returning a page of
-// tickets. Used by the /jira page to list tickets matching preset or custom
-// queries.
-func (s *Service) SearchTickets(ctx context.Context, workspaceID, jql string, startAt, maxResults int) (*SearchResult, error) {
+// tickets. pageToken is the cursor returned in the previous page's
+// NextPageToken; pass "" for the first page.
+func (s *Service) SearchTickets(ctx context.Context, workspaceID, jql, pageToken string, maxResults int) (*SearchResult, error) {
 	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	return client.SearchTickets(ctx, jql, startAt, maxResults)
+	return client.SearchTickets(ctx, jql, pageToken, maxResults)
 }
 
 // clientFor returns a cached client, creating one if needed. The cache is
@@ -251,8 +265,14 @@ func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, er
 	}
 	client := s.clientFn(cfg, secret)
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Re-check: another caller may have populated the cache while we were
+	// fetching the config and secret. Returning the existing client keeps the
+	// cache identity stable so callers comparing pointers don't see flapping.
+	if existing, ok := s.cache[workspaceID]; ok {
+		return existing, nil
+	}
 	s.cache[workspaceID] = client
-	s.mu.Unlock()
 	return client, nil
 }
 

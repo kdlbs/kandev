@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -87,7 +88,7 @@ func (c *fakeClient) ListProjects(_ context.Context) ([]JiraProject, error) {
 	}
 	return nil, nil
 }
-func (c *fakeClient) SearchTickets(_ context.Context, _ string, _, _ int) (*SearchResult, error) {
+func (c *fakeClient) SearchTickets(_ context.Context, _, _ string, _ int) (*SearchResult, error) {
 	return &SearchResult{}, nil
 }
 
@@ -140,26 +141,21 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 
 func TestService_SetConfig_ProbesAuthImmediately(t *testing.T) {
 	f := newSvcFixture(t)
-	probes := 0
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
-		probes++
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
-	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
 		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "tok",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if probes != 1 {
-		t.Errorf("expected one immediate probe, got %d", probes)
-	}
+	cfg := waitForAuthProbe(t, f.svc, "ws-1")
 	if !cfg.LastOk {
-		t.Errorf("expected LastOk=true after immediate probe, got %+v", cfg)
+		t.Errorf("expected LastOk=true after async probe, got %+v", cfg)
 	}
 	if cfg.LastCheckedAt == nil {
-		t.Error("expected LastCheckedAt to be set after immediate probe")
+		t.Error("expected LastCheckedAt to be set after async probe")
 	}
 }
 
@@ -168,19 +164,36 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: false, Error: "401 unauthorized"}, nil
 	}
-	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
 		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "bad",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
+	cfg := waitForAuthProbe(t, f.svc, "ws-1")
 	if cfg.LastOk {
 		t.Error("expected LastOk=false after failed probe")
 	}
 	if cfg.LastError != "401 unauthorized" {
 		t.Errorf("expected probe error preserved, got %q", cfg.LastError)
 	}
+}
+
+// waitForAuthProbe polls GetConfig until the async probe spawned by SetConfig
+// has populated LastCheckedAt. Polling is bounded; a 2s ceiling is well above
+// the expected sub-millisecond cost of the in-memory fakes.
+func waitForAuthProbe(t *testing.T, svc *Service, workspaceID string) *JiraConfig {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cfg, err := svc.GetConfig(context.Background(), workspaceID)
+		if err == nil && cfg != nil && cfg.LastCheckedAt != nil {
+			return cfg
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("async probe did not record LastCheckedAt for %q within 2s", workspaceID)
+	return nil
 }
 
 func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {

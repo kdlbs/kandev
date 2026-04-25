@@ -8,9 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraTicket } from "@/lib/types/jira";
-
-// Extract a PROJ-123 style key from either a raw key or a Jira URL.
-const JIRA_KEY_RE = /[A-Z][A-Z0-9]+-\d+/;
+import { JIRA_KEY_RE } from "./jira-ticket-common";
 
 function extractKey(input: string): string | null {
   const match = input.toUpperCase().match(JIRA_KEY_RE);

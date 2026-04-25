@@ -17,7 +17,7 @@ import (
 func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	ctrl := &Controller{service: svc, logger: log}
 	ctrl.RegisterHTTPRoutes(router)
-	registerWSHandlers(dispatcher, svc, log)
+	registerWSHandlers(dispatcher, svc)
 }
 
 // Controller holds HTTP route handlers for the Jira integration.
@@ -67,7 +67,11 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 	}
 	cfg, err := c.service.SetConfig(ctx.Request.Context(), &req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalidConfig) {
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, cfg)
@@ -121,9 +125,9 @@ func (c *Controller) httpSearchTickets(ctx *gin.Context) {
 		return
 	}
 	jql := ctx.Query("jql")
-	startAt, _ := strconv.Atoi(ctx.Query("start_at"))
+	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))
-	result, err := c.service.SearchTickets(ctx.Request.Context(), workspaceID, jql, startAt, maxResults)
+	result, err := c.service.SearchTickets(ctx.Request.Context(), workspaceID, jql, pageToken, maxResults)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -199,7 +203,7 @@ func (c *Controller) writeClientError(ctx *gin.Context, err error) {
 
 // --- WebSocket handlers ---
 
-func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
+func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service) {
 	dispatcher.RegisterFunc(ws.ActionJiraConfigGet, wsGetConfig(svc))
 	dispatcher.RegisterFunc(ws.ActionJiraConfigSet, wsSetConfig(svc))
 	dispatcher.RegisterFunc(ws.ActionJiraConfigDelete, wsDeleteConfig(svc))
@@ -207,7 +211,6 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionJiraTicketGet, wsGetTicket(svc))
 	dispatcher.RegisterFunc(ws.ActionJiraTicketTransition, wsDoTransition(svc))
 	dispatcher.RegisterFunc(ws.ActionJiraProjectsList, wsListProjects(svc))
-	_ = log
 }
 
 // wsReply wraps the common boilerplate: try to build a response, fall back to
@@ -251,7 +254,10 @@ func wsSetConfig(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		cfg, err := svc.SetConfig(ctx, &req)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
+			if errors.Is(err, ErrInvalidConfig) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
+			}
+			return wsFail(msg, err)
 		}
 		return wsReply(msg, gin.H{"config": cfg})
 	}

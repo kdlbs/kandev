@@ -247,7 +247,9 @@ type transitionsResponse struct {
 
 // GetTicket fetches the ticket + available transitions in two calls. We ask
 // Jira for the ADF-rendered description so the UI gets plain-text rather than
-// an opaque document tree.
+// an opaque document tree. A 4xx on the transitions call is bubbled up so the
+// UI can surface auth/permission failures rather than silently rendering a
+// ticket with an empty transitions menu.
 func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket, error) {
 	var issue issueResponse
 	path := "/rest/api/3/issue/" + ticketKey + "?expand=renderedFields"
@@ -256,7 +258,14 @@ func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTic
 	}
 	t := issueToTicket(&issue, c.siteURL)
 	transitions, terr := c.ListTransitions(ctx, ticketKey)
-	if terr == nil {
+	if terr != nil {
+		var apiErr *APIError
+		if errors.As(terr, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 {
+			return nil, terr
+		}
+		// Network blips or 5xx: keep the ticket and let the UI render without
+		// transitions. The user can still read the ticket and refresh.
+	} else {
 		t.Transitions = transitions
 	}
 	return &t, nil
@@ -324,9 +333,9 @@ type searchResponse struct {
 
 // SearchTickets runs a JQL search and returns a page of tickets. Uses the
 // /rest/api/3/search/jql endpoint (the legacy /search was removed by Atlassian
-// in 2025). The startAt parameter is ignored — the new API is token-based — but
-// retained in the signature for API compatibility. maxResults is capped at 100.
-func (c *CloudClient) SearchTickets(ctx context.Context, jql string, startAt, maxResults int) (*SearchResult, error) {
+// in 2025). pageToken is the cursor returned in the previous page's
+// NextPageToken; pass "" for the first page. maxResults is capped at 100.
+func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 25
 	}
@@ -341,15 +350,18 @@ func (c *CloudClient) SearchTickets(ctx context.Context, jql string, startAt, ma
 			"priority", "assignee", "reporter", "updated",
 		},
 	}
+	if pageToken != "" {
+		body["nextPageToken"] = pageToken
+	}
 	var resp searchResponse
 	if err := c.do(ctx, http.MethodPost, "/rest/api/3/search/jql", body, &resp); err != nil {
 		return nil, err
 	}
 	out := &SearchResult{
-		Total:      len(resp.Issues),
-		StartAt:    0,
-		MaxResults: maxResults,
-		Tickets:    make([]JiraTicket, 0, len(resp.Issues)),
+		MaxResults:    maxResults,
+		IsLast:        resp.IsLast,
+		NextPageToken: resp.NextPageToken,
+		Tickets:       make([]JiraTicket, 0, len(resp.Issues)),
 	}
 	for i := range resp.Issues {
 		out.Tickets = append(out.Tickets, issueToTicket(&resp.Issues[i], c.siteURL))
@@ -411,7 +423,7 @@ func walkADF(node map[string]interface{}, b *strings.Builder) {
 		if s, ok := node["text"].(string); ok {
 			b.WriteString(s)
 		}
-	case "hardBreak":
+	case "hardBreak", "softBreak":
 		b.WriteString("\n")
 	}
 	content, ok := node["content"].([]interface{})

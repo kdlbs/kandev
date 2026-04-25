@@ -18,7 +18,7 @@ type Client interface {
 	ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error)
 	DoTransition(ctx context.Context, ticketKey, transitionID string) error
 	ListProjects(ctx context.Context) ([]JiraProject, error)
-	SearchTickets(ctx context.Context, jql string, startAt, maxResults int) (*SearchResult, error)
+	SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error)
 }
 
 // APIError captures an upstream non-2xx response so handlers can surface a

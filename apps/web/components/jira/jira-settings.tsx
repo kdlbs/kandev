@@ -336,6 +336,7 @@ type ActionBarProps = {
   loading: boolean;
   hasConfig: boolean;
   disableSave: boolean;
+  disableTest: boolean;
   onTest: () => void;
   onSave: () => void;
   onDelete: () => void;
@@ -347,6 +348,7 @@ function ActionBar({
   loading,
   hasConfig,
   disableSave,
+  disableTest,
   onTest,
   onSave,
   onDelete,
@@ -357,8 +359,9 @@ function ActionBar({
         type="button"
         variant="outline"
         onClick={onTest}
-        disabled={testing || loading}
+        disabled={testing || loading || disableTest}
         className="cursor-pointer"
+        title={disableTest ? "Paste a token to test the connection" : undefined}
       >
         {testing ? "Testing..." : "Test connection"}
       </Button>
@@ -512,6 +515,7 @@ export function JiraSettings({ workspaceId }: JiraSettingsProps) {
   const s = useJiraSettings(workspaceId);
   const disableSave =
     s.saving || !s.form.siteUrl || (s.form.authMethod === "api_token" && !s.form.email);
+  const disableTest = !s.config?.hasSecret && !s.form.secret;
 
   return (
     <div className="space-y-8">
@@ -541,6 +545,7 @@ export function JiraSettings({ workspaceId }: JiraSettingsProps) {
               loading={s.loading}
               hasConfig={!!s.config}
               disableSave={disableSave}
+              disableTest={disableTest}
               onTest={s.handleTest}
               onSave={s.handleSave}
               onDelete={s.handleDelete}

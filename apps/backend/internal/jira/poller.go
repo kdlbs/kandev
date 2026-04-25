@@ -26,6 +26,8 @@ type Poller struct {
 	logger   *logger.Logger
 	interval time.Duration
 
+	// mu guards started/cancel/wg against concurrent Start/Stop calls.
+	mu      sync.Mutex
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	started bool
@@ -39,6 +41,8 @@ func NewPoller(svc *Service, log *logger.Logger) *Poller {
 // Start launches the background loop. Calling Start more than once without
 // Stop is a no-op.
 func (p *Poller) Start(ctx context.Context) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.started || p.service == nil {
 		return
 	}
@@ -51,14 +55,20 @@ func (p *Poller) Start(ctx context.Context) {
 
 // Stop cancels the loop and waits for it to drain.
 func (p *Poller) Stop() {
+	p.mu.Lock()
 	if !p.started {
+		p.mu.Unlock()
 		return
 	}
-	if p.cancel != nil {
-		p.cancel()
+	cancel := p.cancel
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	p.wg.Wait()
+	p.mu.Lock()
 	p.started = false
+	p.mu.Unlock()
 	p.logger.Info("Jira auth poller stopped")
 }
 

@@ -77,7 +77,7 @@ export function ListToolbar({
       <SaveViewButton onSave={onSaveView} />
       <div className="ml-auto flex items-center gap-1">
         <span className="text-xs text-muted-foreground tabular-nums mr-2">
-          {loading ? "Loading…" : `${count} ticket${count === 1 ? "" : "s"}`}
+          {loading ? "Loading…" : `${count} ticket${count === 1 ? "" : "s"} on this page`}
         </span>
         <SortDropdown sort={sort} sortLabel={sortLabel} onSortChange={onSortChange} />
         <Button

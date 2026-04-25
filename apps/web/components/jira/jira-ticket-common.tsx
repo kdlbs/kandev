@@ -11,7 +11,7 @@ import type { JiraStatusCategory, JiraTicket } from "@/lib/types/jira";
 
 // Matches PROJECT-123 anywhere in the string. Jira keys start with letters and
 // include an uppercase prefix, followed by a dash and one or more digits.
-const JIRA_KEY_RE = /\b[A-Z][A-Z0-9]+-\d+\b/;
+export const JIRA_KEY_RE = /\b[A-Z][A-Z0-9]+-\d+\b/;
 
 export function extractJiraKey(title: string | undefined | null): string | null {
   if (!title) return null;

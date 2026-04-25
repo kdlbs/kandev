@@ -29,8 +29,10 @@ function readStorage(): JiraStoredPreset[] | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return null;
-    const valid = parsed.filter(isStoredPreset);
-    return valid.length > 0 ? valid : null;
+    // An explicitly-saved empty array means "the user cleared their presets"
+    // and should beat the built-in defaults. Only the absent-key case should
+    // fall back to defaults.
+    return parsed.filter(isStoredPreset);
   } catch {
     return null;
   }

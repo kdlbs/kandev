@@ -103,13 +103,14 @@ type JiraProject struct {
 	ID   string `json:"id"`
 }
 
-// SearchResult is a page of tickets from a JQL search, plus pagination metadata
-// so the UI can render page controls without a second count request.
+// SearchResult is a page of tickets from a JQL search. Atlassian's
+// /rest/api/3/search/jql endpoint is token-paginated and returns no total
+// count, so the UI relies on IsLast and NextPageToken to walk pages.
 type SearchResult struct {
-	Tickets    []JiraTicket `json:"tickets"`
-	Total      int          `json:"total"`
-	StartAt    int          `json:"startAt"`
-	MaxResults int          `json:"maxResults"`
+	Tickets       []JiraTicket `json:"tickets"`
+	MaxResults    int          `json:"maxResults"`
+	IsLast        bool         `json:"isLast"`
+	NextPageToken string       `json:"nextPageToken,omitempty"`
 }
 
 // SecretKeyForWorkspace returns the secret-store key used for the Jira token of
