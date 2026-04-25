@@ -395,9 +395,18 @@ test.describe("Plan checkpointing — rewind UI", () => {
     // Summary text appears once content has loaded.
     await expect(session.diffSummary()).toContainText("added", { timeout: 5_000 });
     await expect(session.diffSummary()).toContainText("removed");
-    // At least one add and one remove line.
+    // Default unified mode shows at least one add and one remove line.
     await expect(session.diffLines("add").first()).toBeVisible();
     await expect(session.diffLines("remove").first()).toBeVisible();
+
+    // Switch to split mode: assert side-by-side cells render with kinds.
+    await session.diffModeToggle("split").click();
+    await expect(session.diffSplitCells("remove").first()).toBeVisible({ timeout: 5_000 });
+    await expect(session.diffSplitCells("add").first()).toBeVisible();
+
+    // Switch back to unified.
+    await session.diffModeToggle("unified").click();
+    await expect(session.diffLines("add").first()).toBeVisible();
 
     // Restore from diff targets the older revision (v1).
     await session.diffRestoreButton().click();

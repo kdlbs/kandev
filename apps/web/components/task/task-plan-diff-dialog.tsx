@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import {
@@ -12,18 +11,15 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import type { TaskPlanRevision } from "@/lib/types/http";
-import { formatRelativeTime } from "@/lib/utils";
-import { lineDiff, diffSummary, type DiffLine, type DiffLineKind } from "./task-plan-diff";
-
-const PlanReadOnlyMarkdown = dynamic(
-  () =>
-    import("@/components/editors/tiptap/tiptap-plan-readonly").then(
-      (mod) => mod.PlanReadOnlyMarkdown,
-    ),
-  { ssr: false },
-);
+import {
+  lineDiff,
+  diffSummary,
+  type DiffLine,
+  type DiffLineKind,
+} from "./task-plan-diff";
 
 type Props = {
   /** Revision pair in arbitrary user-pick order; the dialog re-orders them by
@@ -35,6 +31,8 @@ type Props = {
    * fully populated. */
   onRestoreOlder: (revisionId: string) => void;
 };
+
+type DiffMode = "unified" | "split";
 
 const KIND_CLASS: Record<DiffLineKind, string> = {
   add: "bg-emerald-500/10 border-l-2 border-emerald-500/60",
@@ -55,6 +53,7 @@ export function PlanRevisionDiffDialog({
   onRestoreOlder,
 }: Props): ReactNode {
   const [before, after] = useMemo(() => orderPair(pair), [pair]);
+  const [mode, setMode] = useState<DiffMode>("unified");
   const open = before !== null && after !== null;
   const sameRevision = before !== null && after !== null && before.id === after.id;
   const title =
@@ -74,10 +73,10 @@ export function PlanRevisionDiffDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="text-xs">
-            Rendered markdown from each version, plus a line-level breakdown of the changes.
+            Line-level diff between the two selected versions.
           </DialogDescription>
         </DialogHeader>
-        <DiffBody before={before} after={after} loadContent={loadContent} />
+        <DiffBody before={before} after={after} loadContent={loadContent} mode={mode} setMode={setMode} />
         <DialogFooter>
           <Button
             variant="outline"
@@ -106,166 +105,94 @@ function DiffBody({
   before,
   after,
   loadContent,
+  mode,
+  setMode,
 }: {
   before: TaskPlanRevision | null;
   after: TaskPlanRevision | null;
   loadContent: (revisionId: string) => Promise<string>;
+  mode: DiffMode;
+  setMode: (m: DiffMode) => void;
 }) {
   const { beforeContent, afterContent, lines, error } = useDiffContent(before, after, loadContent);
   const summary = lines ? diffSummary(lines) : null;
   const sameRevision = before !== null && after !== null && before.id === after.id;
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-3 overflow-y-auto">
-      <div className="text-[11px] text-muted-foreground" data-testid="plan-revision-diff-summary">
-        {summary ? `${summary.added} added · ${summary.removed} removed` : "Loading…"}
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] text-muted-foreground" data-testid="plan-revision-diff-summary">
+          {summary ? `${summary.added} added · ${summary.removed} removed` : "Loading…"}
+        </div>
+        <ToggleGroup
+          type="single"
+          size="sm"
+          value={mode}
+          onValueChange={(v) => {
+            if (v === "unified" || v === "split") setMode(v);
+          }}
+          data-testid="plan-revision-diff-mode-toggle"
+        >
+          <ToggleGroupItem value="unified" className="text-xs px-2 cursor-pointer" data-testid="plan-revision-diff-mode-unified">
+            Unified
+          </ToggleGroupItem>
+          <ToggleGroupItem value="split" className="text-xs px-2 cursor-pointer" data-testid="plan-revision-diff-mode-split">
+            Split
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
-
-      <DiffRenderedSections
-        before={before}
-        after={after}
-        beforeContent={beforeContent}
-        afterContent={afterContent}
-        error={error}
-        sameRevision={sameRevision}
-      />
-
-      <DiffLinesSection
-        lines={lines}
-        error={error}
-        sameRevision={sameRevision}
-        summary={summary}
-      />
+      <div
+        className="flex-1 min-h-0 overflow-auto rounded border border-border bg-muted/20 font-mono text-xs"
+        data-testid="plan-revision-diff-body"
+      >
+        <DiffBodyInner
+          mode={mode}
+          lines={lines}
+          beforeContent={beforeContent}
+          afterContent={afterContent}
+          error={error}
+          sameRevision={sameRevision}
+          summary={summary}
+        />
+      </div>
     </div>
   );
 }
 
-function DiffRenderedSections({
-  before,
-  after,
+function DiffBodyInner({
+  mode,
+  lines,
   beforeContent,
   afterContent,
   error,
   sameRevision,
+  summary,
 }: {
-  before: TaskPlanRevision | null;
-  after: TaskPlanRevision | null;
+  mode: DiffMode;
+  lines: DiffLine[] | null;
   beforeContent: string | null;
   afterContent: string | null;
   error: string | null;
   sameRevision: boolean;
-}) {
-  if (error) return null;
-  if (sameRevision) return null;
-  return (
-    <div
-      className="grid grid-cols-1 md:grid-cols-2 gap-3"
-      data-testid="plan-revision-diff-rendered"
-    >
-      <RenderedSide
-        revision={before}
-        content={beforeContent}
-        side="before"
-        label="Before"
-      />
-      <RenderedSide revision={after} content={afterContent} side="after" label="After" />
-    </div>
-  );
-}
-
-function RenderedSide({
-  revision,
-  content,
-  side,
-  label,
-}: {
-  revision: TaskPlanRevision | null;
-  content: string | null;
-  side: "before" | "after";
-  label: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded border p-3 bg-card",
-        side === "before"
-          ? "border-rose-500/30 bg-rose-500/[0.02]"
-          : "border-emerald-500/30 bg-emerald-500/[0.02]",
-      )}
-      data-testid={`plan-revision-diff-${side}`}
-    >
-      <div className="flex items-center justify-between mb-2 text-[11px] text-muted-foreground">
-        <span className="font-semibold uppercase tracking-wide">
-          {label}
-          {revision ? ` · v${revision.revision_number}` : ""}
-        </span>
-        {revision && <span>{formatRelativeTime(revision.updated_at)}</span>}
-      </div>
-      <RenderedSideBody content={content} />
-    </div>
-  );
-}
-
-function RenderedSideBody({ content }: { content: string | null }) {
-  if (content === null) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        Loading…
-      </div>
-    );
-  }
-  if (content.trim() === "") {
-    return <div className="text-xs text-muted-foreground italic">(empty)</div>;
-  }
-  return <PlanReadOnlyMarkdown content={content} />;
-}
-
-function DiffLinesSection({
-  lines,
-  error,
-  sameRevision,
-  summary,
-}: {
-  lines: DiffLine[] | null;
-  error: string | null;
-  sameRevision: boolean;
   summary: { added: number; removed: number } | null;
 }) {
-  return (
-    <div className="rounded border border-border bg-muted/20" data-testid="plan-revision-diff-body">
-      <div className="px-3 py-1.5 border-b text-[11px] text-muted-foreground font-medium">
-        Line-level changes
-      </div>
-      <DiffLinesInner
-        lines={lines}
-        error={error}
-        sameRevision={sameRevision}
-        summary={summary}
-      />
-    </div>
-  );
-}
-
-function DiffLinesInner({
-  lines,
-  error,
-  sameRevision,
-  summary,
-}: {
-  lines: DiffLine[] | null;
-  error: string | null;
-  sameRevision: boolean;
-  summary: { added: number; removed: number } | null;
-}) {
-  if (error) return <div className="p-3 text-destructive text-xs">{error}</div>;
+  if (error) return <div className="p-3 text-destructive">{error}</div>;
   if (lines === null) return <DiffLoading />;
   if (sameRevision) return <DiffMessage>These are the same version; nothing to compare.</DiffMessage>;
   if (lines.length === 0) return <DiffMessage>(both versions are empty)</DiffMessage>;
   if (summary && summary.added === 0 && summary.removed === 0) {
     return <DiffMessage>No textual changes between these versions.</DiffMessage>;
   }
+  if (mode === "split") {
+    return <SplitDiff beforeContent={beforeContent ?? ""} afterContent={afterContent ?? ""} />;
+  }
+  return <UnifiedDiff lines={lines} />;
+}
+
+function UnifiedDiff({ lines }: { lines: DiffLine[] }) {
   return (
-    <ul className="font-mono text-xs">
+    // inline-block + min-w-full lets the row backgrounds extend past the
+    // viewport so highlights stay solid when the user scrolls horizontally.
+    <ul className="inline-block min-w-full" data-testid="plan-revision-diff-unified">
       {lines.map((line, i) => (
         <DiffLineRow key={i} line={line} />
       ))}
@@ -273,24 +200,11 @@ function DiffLinesInner({
   );
 }
 
-function DiffLoading() {
-  return (
-    <div className="flex items-center gap-2 p-3 text-muted-foreground text-xs">
-      <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-      Loading…
-    </div>
-  );
-}
-
-function DiffMessage({ children }: { children: ReactNode }) {
-  return <div className="p-3 text-muted-foreground italic text-xs">{children}</div>;
-}
-
 function DiffLineRow({ line }: { line: DiffLine }) {
   return (
     <li
       className={cn(
-        "flex gap-2 px-3 py-0.5 leading-relaxed whitespace-pre",
+        "flex gap-2 px-3 py-0.5 leading-relaxed whitespace-pre min-w-full w-max",
         KIND_CLASS[line.kind],
       )}
       data-testid="plan-revision-diff-line"
@@ -304,6 +218,85 @@ function DiffLineRow({ line }: { line: DiffLine }) {
   );
 }
 
+/** Side-by-side diff: align lines from `before` and `after` row-by-row using
+ * the existing line-diff sequence. Each row holds at most one before-line and
+ * one after-line; pure-context rows show both. */
+function SplitDiff({
+  beforeContent,
+  afterContent,
+}: {
+  beforeContent: string;
+  afterContent: string;
+}) {
+  const rows = useMemo(() => alignSplit(beforeContent, afterContent), [beforeContent, afterContent]);
+  return (
+    <table
+      className="w-full table-fixed border-collapse"
+      data-testid="plan-revision-diff-split"
+    >
+      <colgroup>
+        <col className="w-1/2" />
+        <col className="w-1/2" />
+      </colgroup>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} className="align-top">
+            <SplitCell side="before" line={row.before} />
+            <SplitCell side="after" line={row.after} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SplitCell({
+  side,
+  line,
+}: {
+  side: "before" | "after";
+  line: DiffLine | null;
+}) {
+  // Empty cells (a removal on the after side, or an addition on the before
+  // side) get a subtle striped background so the row alignment is visible.
+  if (!line) {
+    return (
+      <td
+        className="px-3 py-0.5 leading-relaxed bg-muted/40 align-top border-l-2 border-transparent"
+        data-testid="plan-revision-diff-split-cell"
+        data-line-kind="empty"
+        data-side={side}
+      />
+    );
+  }
+  return (
+    <td
+      className={cn(
+        "px-3 py-0.5 leading-relaxed align-top",
+        KIND_CLASS[line.kind],
+      )}
+      data-testid="plan-revision-diff-split-cell"
+      data-line-kind={line.kind}
+      data-side={side}
+    >
+      <pre className="whitespace-pre font-mono text-xs leading-relaxed">{line.text || " "}</pre>
+    </td>
+  );
+}
+
+function DiffLoading() {
+  return (
+    <div className="flex items-center gap-2 p-3 text-muted-foreground">
+      <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+      Loading…
+    </div>
+  );
+}
+
+function DiffMessage({ children }: { children: ReactNode }) {
+  return <div className="p-3 text-muted-foreground italic">{children}</div>;
+}
+
 /** Sort a 2-slot pair by revision_number ascending so the older revision is
  * always the "before" side, regardless of pick order. */
 function orderPair(
@@ -312,6 +305,43 @@ function orderPair(
   const [a, b] = pair;
   if (!a || !b) return pair;
   return a.revision_number <= b.revision_number ? [a, b] : [b, a];
+}
+
+type SplitRow = { before: DiffLine | null; after: DiffLine | null };
+
+/** Align the line-diff into side-by-side rows: each row contains at most one
+ * before-line and one after-line. Removals render on the left only; adds on
+ * the right only; context lines align across both sides. Adjacent
+ * remove/add chunks are zipped together so a single-line edit shows up on the
+ * same row. */
+function alignSplit(beforeContent: string, afterContent: string): SplitRow[] {
+  const lines = lineDiff(beforeContent, afterContent);
+  const rows: SplitRow[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.kind === "context") {
+      rows.push({ before: line, after: line });
+      i++;
+      continue;
+    }
+    // Collect a contiguous remove block, then any adjacent add block.
+    const removes: DiffLine[] = [];
+    while (i < lines.length && lines[i].kind === "remove") {
+      removes.push(lines[i]);
+      i++;
+    }
+    const adds: DiffLine[] = [];
+    while (i < lines.length && lines[i].kind === "add") {
+      adds.push(lines[i]);
+      i++;
+    }
+    const max = Math.max(removes.length, adds.length);
+    for (let k = 0; k < max; k++) {
+      rows.push({ before: removes[k] ?? null, after: adds[k] ?? null });
+    }
+  }
+  return rows;
 }
 
 function useDiffContent(

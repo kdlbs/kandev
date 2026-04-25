@@ -816,6 +816,18 @@ export class SessionPage {
     return root.locator(`[data-testid="plan-revision-diff-line"][data-line-kind="${kind}"]`);
   }
 
+  diffSplitCells(kind?: "add" | "remove" | "context" | "empty"): Locator {
+    const root = this.diffDialog();
+    if (!kind) return root.getByTestId("plan-revision-diff-split-cell");
+    return root.locator(
+      `[data-testid="plan-revision-diff-split-cell"][data-line-kind="${kind}"]`,
+    );
+  }
+
+  diffModeToggle(mode: "unified" | "split"): Locator {
+    return this.page.getByTestId(`plan-revision-diff-mode-${mode}`);
+  }
+
   diffRestoreButton(): Locator {
     return this.page.getByTestId("plan-revision-diff-restore");
   }
