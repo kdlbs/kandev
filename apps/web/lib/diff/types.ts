@@ -48,7 +48,11 @@ export interface DiffCommentsActions {
   clearPending: () => void;
   setEditingComment: (commentId: string | null) => void;
   markCommentsSent: (commentIds: string[]) => void;
-  getCommentsForFile: (sessionId: string, filePath: string) => DiffComment[];
+  getCommentsForFile: (
+    sessionId: string,
+    filePath: string,
+    repositoryId?: string,
+  ) => DiffComment[];
   getPendingComments: () => DiffComment[];
   clearSessionComments: (sessionId: string) => void;
 }

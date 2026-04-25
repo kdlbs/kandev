@@ -145,15 +145,23 @@ export const useCommentsStore = create<CommentsSlice>()(
 
     hydrateSession: (sessionId: string) => set((state) => hydrateSessionInState(state, sessionId)),
 
-    getCommentsForFile: (sessionId: string, filePath: string): DiffComment[] => {
+    getCommentsForFile: (
+      sessionId: string,
+      filePath: string,
+      repositoryId?: string,
+    ): DiffComment[] => {
       const state = get();
       const ids = state.bySession[sessionId];
       if (!ids) return [];
       const result: DiffComment[] = [];
       for (const id of ids) {
         const comment = state.byId[id];
-        if (comment && isDiffComment(comment) && comment.filePath === filePath)
-          result.push(comment);
+        if (!comment || !isDiffComment(comment) || comment.filePath !== filePath) continue;
+        // When a repo is specified, scope to that repo. Comments without a
+        // repositoryId (legacy) match any repo so existing data keeps showing.
+        if (repositoryId && comment.repositoryId && comment.repositoryId !== repositoryId)
+          continue;
+        result.push(comment);
       }
       return result;
     },

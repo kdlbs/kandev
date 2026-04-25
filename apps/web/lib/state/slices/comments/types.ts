@@ -14,6 +14,12 @@ export type AnnotationSide = "additions" | "deletions";
 type CommentBase = {
   id: string;
   sessionId: string;
+  /**
+   * Repository this comment belongs to. Optional for backwards compat with
+   * comments persisted before multi-repo support. New comments always set it
+   * so per-repo filtering works in multi-repo task views.
+   */
+  repositoryId?: string;
   text: string;
   createdAt: string;
   status: "pending" | "sent";
@@ -95,7 +101,17 @@ export type CommentsActions = {
   markCommentsSent: (commentIds: string[]) => void;
   clearSessionComments: (sessionId: string) => void;
   hydrateSession: (sessionId: string) => void;
-  getCommentsForFile: (sessionId: string, filePath: string) => DiffComment[];
+  /**
+   * Returns diff comments for a file in a session. When repositoryId is
+   * provided, results are filtered to that repo only (multi-repo support).
+   * Omitting repositoryId matches comments regardless of repo, preserving
+   * single-repo callers and legacy localStorage entries.
+   */
+  getCommentsForFile: (
+    sessionId: string,
+    filePath: string,
+    repositoryId?: string,
+  ) => DiffComment[];
   getPendingComments: () => Comment[];
 };
 
