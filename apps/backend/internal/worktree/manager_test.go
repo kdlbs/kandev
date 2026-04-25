@@ -102,6 +102,27 @@ func (s *mockStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, error
 	return result, nil
 }
 
+// GetWorktreesBySessionID — MultiRepoStore.
+func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
+	var out []*Worktree
+	for _, wt := range s.worktrees {
+		if wt.SessionID == sessionID && wt.Status == StatusActive {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
+}
+
+// GetWorktreeBySessionAndRepository — MultiRepoStore.
+func (s *mockStore) GetWorktreeBySessionAndRepository(_ context.Context, sessionID, repoID string) (*Worktree, error) {
+	for _, wt := range s.worktrees {
+		if wt.SessionID == sessionID && wt.RepositoryID == repoID && wt.Status == StatusActive {
+			return wt, nil
+		}
+	}
+	return nil, nil
+}
+
 func TestNewManager(t *testing.T) {
 	cfg := newTestConfig(t)
 	log := newTestLogger()

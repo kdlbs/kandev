@@ -32,11 +32,15 @@ type repoLockEntry struct {
 
 // Manager handles Git worktree operations for concurrent agent execution.
 type Manager struct {
-	config     Config
-	logger     *logger.Logger
-	store      Store
-	worktrees  map[string]*Worktree // sessionID -> worktree (in-memory cache)
-	mu         sync.RWMutex         // Protects worktrees map
+	config Config
+	logger *logger.Logger
+	store  Store
+	// worktrees is the in-memory cache keyed by cacheKey(sessionID, repositoryID).
+	// For legacy single-repo writes the repositoryID may be empty, in which
+	// case the cache key collapses to "{sessionID}|" — still distinct from
+	// any per-repo entry the same session might gain later.
+	worktrees  map[string]*Worktree
+	mu         sync.RWMutex // Protects worktrees map
 	repoLocks  map[string]*repoLockEntry
 	repoLockMu sync.Mutex
 
@@ -63,7 +67,10 @@ type Store interface {
 	CreateWorktree(ctx context.Context, wt *Worktree) error
 	// GetWorktreeByID retrieves a worktree by its unique ID.
 	GetWorktreeByID(ctx context.Context, id string) (*Worktree, error)
-	// GetWorktreeBySessionID retrieves the worktree by session ID.
+	// GetWorktreeBySessionID retrieves a single active worktree by session ID.
+	// For multi-repo sessions, returns the first one found (typically the
+	// primary/first-created). Use GetWorktreesBySessionID when the caller
+	// needs all of them.
 	GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error)
 	// GetWorktreesByTaskID retrieves all worktrees for a task (used for cleanup on task deletion).
 	GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error)
@@ -75,6 +82,18 @@ type Store interface {
 	DeleteWorktree(ctx context.Context, id string) error
 	// ListActiveWorktrees returns all active worktrees.
 	ListActiveWorktrees(ctx context.Context) ([]*Worktree, error)
+}
+
+// MultiRepoStore is an optional capability some stores implement to support
+// multi-repo task sessions (one worktree per repository per session). The
+// Manager checks at runtime whether its Store satisfies this interface and
+// uses the multi-repo lookups when available.
+type MultiRepoStore interface {
+	// GetWorktreesBySessionID returns all active worktrees for the session.
+	GetWorktreesBySessionID(ctx context.Context, sessionID string) ([]*Worktree, error)
+	// GetWorktreeBySessionAndRepository returns the active worktree for the
+	// given (session, repository) pair, or nil if none exists.
+	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID string) (*Worktree, error)
 }
 
 // NewManager creates a new worktree manager.
@@ -190,14 +209,18 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, err
 	}
 
-	// First, check if a worktree already exists for this session
+	// First, check if a worktree already exists for this (session, repository) pair.
+	// Multi-repo sessions can host multiple worktrees concurrently, so we must
+	// scope the lookup by RepositoryID rather than session alone — otherwise
+	// the second repo's Create would return the first repo's worktree.
 	if req.SessionID != "" {
-		existing, err := m.GetBySessionID(ctx, req.SessionID)
+		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
-				m.logger.Debug("reusing existing worktree by session ID",
+				m.logger.Debug("reusing existing worktree by session+repo",
 					zap.String("worktree_id", existing.ID),
 					zap.String("session_id", req.SessionID),
+					zap.String("repository_id", req.RepositoryID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
 				return existing, nil
@@ -206,6 +229,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 			m.logger.Warn("worktree directory invalid, recreating",
 				zap.String("worktree_id", existing.ID),
 				zap.String("session_id", req.SessionID),
+				zap.String("repository_id", req.RepositoryID),
 				zap.String("task_id", req.TaskID))
 			return m.recreate(ctx, existing, req)
 		}
@@ -795,10 +819,11 @@ func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req
 		}
 	}
 
-	// Update cache (keyed by sessionID)
+	// Update cache keyed by (sessionID, repositoryID) so multi-repo sessions
+	// can hold multiple entries.
 	if req.SessionID != "" {
 		m.mu.Lock()
-		m.worktrees[req.SessionID] = wt
+		m.worktrees[cacheKey(req.SessionID, req.RepositoryID)] = wt
 		m.mu.Unlock()
 	}
 	return nil
@@ -823,11 +848,33 @@ func (m *Manager) persistWorktree(ctx context.Context, wt *Worktree, req CreateR
 	return nil
 }
 
-// GetBySessionID returns the worktree for a session, if it exists.
+// cacheKey computes the cache key for a (sessionID, repositoryID) pair.
+// Used by all read/write paths against m.worktrees so multi-repo sessions
+// can hold multiple worktrees concurrently.
+func cacheKey(sessionID, repositoryID string) string {
+	return sessionID + "|" + repositoryID
+}
+
+// firstCacheEntryForSession scans the cache for any entry belonging to
+// sessionID. Returns the first match or nil. Caller must hold m.mu.
+func (m *Manager) firstCacheEntryForSession(sessionID string) *Worktree {
+	prefix := sessionID + "|"
+	for k, wt := range m.worktrees {
+		if strings.HasPrefix(k, prefix) {
+			return wt
+		}
+	}
+	return nil
+}
+
+// GetBySessionID returns one worktree for the session. For multi-repo sessions
+// it returns whichever worktree happens to come first; callers that need a
+// specific repo's worktree should use GetBySessionAndRepo, and callers that
+// need them all should use GetAllBySessionID.
 func (m *Manager) GetBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
-	// Check cache first (keyed by sessionID)
+	// Check cache first
 	m.mu.RLock()
-	if wt, ok := m.worktrees[sessionID]; ok {
+	if wt := m.firstCacheEntryForSession(sessionID); wt != nil {
 		m.mu.RUnlock()
 		return wt, nil
 	}
@@ -840,15 +887,98 @@ func (m *Manager) GetBySessionID(ctx context.Context, sessionID string) (*Worktr
 			return nil, err
 		}
 		if wt != nil {
-			// Update cache
+			// Update cache under the wt's repository key (or empty for legacy
+			// records that never had one).
 			m.mu.Lock()
-			m.worktrees[sessionID] = wt
+			m.worktrees[cacheKey(sessionID, wt.RepositoryID)] = wt
 			m.mu.Unlock()
 			return wt, nil
 		}
 	}
 
 	return nil, ErrWorktreeNotFound
+}
+
+// GetAllBySessionID returns all active worktrees for a session. Empty slice
+// (not error) if the session has none.
+func (m *Manager) GetAllBySessionID(ctx context.Context, sessionID string) ([]*Worktree, error) {
+	if m.store == nil {
+		// Cache-only path: scan our in-memory map.
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		prefix := sessionID + "|"
+		var out []*Worktree
+		for k, wt := range m.worktrees {
+			if strings.HasPrefix(k, prefix) {
+				out = append(out, wt)
+			}
+		}
+		return out, nil
+	}
+	if multi, ok := m.store.(MultiRepoStore); ok {
+		wts, err := multi.GetWorktreesBySessionID(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		// Refresh cache while we're at it.
+		m.mu.Lock()
+		for _, wt := range wts {
+			m.worktrees[cacheKey(sessionID, wt.RepositoryID)] = wt
+		}
+		m.mu.Unlock()
+		return wts, nil
+	}
+	// Single-repo store fallback: at most one worktree per session.
+	wt, err := m.store.GetWorktreeBySessionID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if wt == nil {
+		return nil, nil
+	}
+	return []*Worktree{wt}, nil
+}
+
+// GetBySessionAndRepo returns the active worktree for the (session, repo)
+// pair, or ErrWorktreeNotFound if none exists. Falls back to GetBySessionID
+// when the store does not implement MultiRepoStore (legacy single-repo).
+func (m *Manager) GetBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*Worktree, error) {
+	if sessionID == "" {
+		return nil, ErrWorktreeNotFound
+	}
+	// Check cache first.
+	m.mu.RLock()
+	if wt, ok := m.worktrees[cacheKey(sessionID, repositoryID)]; ok {
+		m.mu.RUnlock()
+		return wt, nil
+	}
+	m.mu.RUnlock()
+
+	if m.store == nil {
+		return nil, ErrWorktreeNotFound
+	}
+	if multi, ok := m.store.(MultiRepoStore); ok {
+		wt, err := multi.GetWorktreeBySessionAndRepository(ctx, sessionID, repositoryID)
+		if err != nil {
+			return nil, err
+		}
+		if wt == nil {
+			return nil, ErrWorktreeNotFound
+		}
+		m.mu.Lock()
+		m.worktrees[cacheKey(sessionID, repositoryID)] = wt
+		m.mu.Unlock()
+		return wt, nil
+	}
+	// Legacy single-repo store: best we can do is the session lookup.
+	wt, err := m.store.GetWorktreeBySessionID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if wt == nil || (repositoryID != "" && wt.RepositoryID != repositoryID) {
+		return nil, ErrWorktreeNotFound
+	}
+	return wt, nil
 }
 
 // GetByID returns a worktree by its unique ID.
@@ -963,10 +1093,11 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		}
 	}
 
-	// Update cache
+	// Update cache: delete the (session, repo) entry. Removing a worktree only
+	// affects its own repo; siblings on other repos must remain cached.
 	m.mu.Lock()
 	if wt.SessionID != "" {
-		delete(m.worktrees, wt.SessionID)
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
 	}
 	m.mu.Unlock()
 
@@ -1025,7 +1156,7 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repo
 func (m *Manager) cleanupWorktreeOnSetupFailure(ctx context.Context, wt *Worktree, repositoryPath string) {
 	if wt.SessionID != "" {
 		m.mu.Lock()
-		delete(m.worktrees, wt.SessionID)
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
 		m.mu.Unlock()
 	}
 	if cleanupErr := m.removeWorktreeDir(ctx, wt.Path, repositoryPath); cleanupErr != nil {
@@ -1105,7 +1236,7 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 			continue
 		}
 		if wt.SessionID != "" {
-			delete(m.worktrees, wt.SessionID)
+			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
 		}
 	}
 	m.mu.Unlock()
@@ -1546,10 +1677,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Update cache (keyed by sessionID)
+	// Update cache keyed by (sessionID, repositoryID).
 	if req.SessionID != "" {
 		m.mu.Lock()
-		m.worktrees[req.SessionID] = existing
+		m.worktrees[cacheKey(req.SessionID, req.RepositoryID)] = existing
 		m.mu.Unlock()
 	}
 

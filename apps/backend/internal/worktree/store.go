@@ -441,5 +441,68 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	return result, rows.Err()
 }
 
-// Ensure SQLiteStore implements Store interface.
-var _ Store = (*SQLiteStore)(nil)
+// GetWorktreesBySessionID returns all active worktrees for the session.
+// Implements MultiRepoStore.
+func (s *SQLiteStore) GetWorktreesBySessionID(ctx context.Context, sessionID string) ([]*Worktree, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.session_id = ? AND tsw.status = ?
+		ORDER BY tsw.position ASC, tsw.created_at ASC
+	`), sessionID, StatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return s.scanWorktrees(rows)
+}
+
+// GetWorktreeBySessionAndRepository returns the active worktree for the
+// given (session, repository) pair, or nil if none exists.
+// Implements MultiRepoStore.
+func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID string) (*Worktree, error) {
+	row := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.session_id = ? AND tsw.repository_id = ? AND tsw.status = ?
+		LIMIT 1
+	`), sessionID, repositoryID, StatusActive)
+	return scanWorktreeRow(row)
+}
+
+// Ensure SQLiteStore implements both Store and MultiRepoStore.
+var (
+	_ Store          = (*SQLiteStore)(nil)
+	_ MultiRepoStore = (*SQLiteStore)(nil)
+)
