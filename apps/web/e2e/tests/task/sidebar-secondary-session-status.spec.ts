@@ -61,9 +61,9 @@ test.describe("Sidebar status with secondary session", () => {
 
     // 4. Sanity: sidebar shows the task as "Turn Finished" before we start
     //    the secondary session.
-    await expect(
-      session.taskInSection(TASK_TITLE, "Turn Finished"),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(session.taskInSection(TASK_TITLE, "Turn Finished")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // 5. Open the new session dialog and start a slow second session that
     //    stays RUNNING long enough to assert the sidebar reaction.
@@ -95,8 +95,8 @@ test.describe("Sidebar status with secondary session", () => {
     // 8. After the delay completes, the task should land back in
     //    "Turn Finished" — proving the fix doesn't break the normal
     //    completion path either.
-    await expect(
-      session.taskInSection(TASK_TITLE, "Turn Finished"),
-    ).toBeVisible({ timeout: 45_000 });
+    await expect(session.taskInSection(TASK_TITLE, "Turn Finished")).toBeVisible({
+      timeout: 45_000,
+    });
   });
 });
