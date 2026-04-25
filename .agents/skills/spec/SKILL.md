@@ -26,7 +26,7 @@ docs/specs/<feature-slug>/
 └── spec.md
 ```
 
-- Slug is kebab-case, descriptive: `kanban-task-queue`, `host-utility-agentctl`. No numbers.
+- Slug is kebab-case, descriptive: `kanban-task-queue`, `host-utility-agentctl`. Avoid sequential numbering (`feature-1`, `feature-2`); numbers that are part of a technology name (`http2-proxy`, `oauth2-integration`) are fine.
 - One folder per feature.
 
 ## Template
