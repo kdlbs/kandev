@@ -3,6 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const TASK_TITLE = "Secondary Session Status Task";
 
 /**
  * Regression: when a task already has a primary session that is idle
@@ -22,7 +23,7 @@ test.describe("Sidebar status with secondary session", () => {
     // 1. Create task whose first session completes quickly.
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Secondary Session Status Task",
+      TASK_TITLE,
       seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
@@ -47,7 +48,7 @@ test.describe("Sidebar status with secondary session", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    const card = kanban.taskCardByTitle("Secondary Session Status Task");
+    const card = kanban.taskCardByTitle(TASK_TITLE);
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
@@ -61,7 +62,7 @@ test.describe("Sidebar status with secondary session", () => {
     // 4. Sanity: sidebar shows the task as "Turn Finished" before we start
     //    the secondary session.
     await expect(
-      session.taskInSection("Secondary Session Status Task", "Turn Finished"),
+      session.taskInSection(TASK_TITLE, "Turn Finished"),
     ).toBeVisible({ timeout: 15_000 });
 
     // 5. Open the new session dialog and start a slow second session that
@@ -87,7 +88,7 @@ test.describe("Sidebar status with secondary session", () => {
 
     // 7. Regression assertion: sidebar moves the task into the "Running"
     //    bucket while the secondary session is still mid-delay.
-    await expect(session.taskInSection("Secondary Session Status Task", "Running")).toBeVisible({
+    await expect(session.taskInSection(TASK_TITLE, "Running")).toBeVisible({
       timeout: 30_000,
     });
 
@@ -95,7 +96,7 @@ test.describe("Sidebar status with secondary session", () => {
     //    "Turn Finished" — proving the fix doesn't break the normal
     //    completion path either.
     await expect(
-      session.taskInSection("Secondary Session Status Task", "Turn Finished"),
+      session.taskInSection(TASK_TITLE, "Turn Finished"),
     ).toBeVisible({ timeout: 45_000 });
   });
 });
