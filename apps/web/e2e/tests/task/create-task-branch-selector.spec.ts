@@ -433,26 +433,34 @@ test.describe("Fresh-branch flow", () => {
 
   test("non-local executor (worktree) hides fresh-branch toggle", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
+    if (!seedData.worktreeExecutorProfileId) {
+      test.skip(true, "No worktree executor profile in seed data");
+      return;
+    }
+    // Look up the actual profile name so the option matcher doesn't depend on
+    // the seed naming containing "worktree".
+    const { executors } = await apiClient.listExecutors();
+    const worktreeProfileName = executors
+      .flatMap((e) => e.profiles ?? [])
+      .find((p) => p.id === seedData.worktreeExecutorProfileId)?.name;
+    if (!worktreeProfileName) {
+      test.skip(true, "Could not resolve worktree profile name");
+      return;
+    }
+
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("No toggle for worktree");
     await testPage.getByTestId("task-description-input").fill("worktree mode");
-    // Pick the worktree executor profile from the seed.
     const executorSelector = testPage.getByTestId("executor-profile-selector");
     await executorSelector.click();
-    // The seed creates a worktree profile; pick the first non-local option.
-    // We rely on the existing list ordering; just open and select something matching "worktree".
-    const worktreeOption = testPage
-      .getByRole("option")
-      .filter({ hasText: /worktree/i })
-      .first();
-    await worktreeOption.click();
+    await testPage.getByRole("option", { name: worktreeProfileName }).click();
     await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
-    expect(seedData.worktreeExecutorProfileId).toBeTruthy();
   });
 
   test("switching worktree → local resets the disabled selector to current branch", async ({

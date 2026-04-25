@@ -460,21 +460,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	// Run the destructive fresh-branch step only after the task is durably
-	// persisted, so a DB failure can't mutate the user's repo without leaving
-	// a corresponding task record. If the discard fails after CreateTask
-	// succeeded, compensate by deleting the just-created task.
-	if !h.applyFreshBranch(c, title, body.Repositories, repos) {
-		if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
-			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
-				zap.String("task_id", task.ID), zap.Error(delErr))
-		}
+	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
 		return
-	}
-	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
-	if err := h.service.ReplaceTaskRepositories(c.Request.Context(), task.ID, body.WorkspaceID, convertToServiceRepos(repos)); err != nil {
-		h.logger.Warn("failed to persist fresh-branch base branch onto task",
-			zap.String("task_id", task.ID), zap.Error(err))
 	}
 
 	taskDTO := dto.FromTask(task)
@@ -487,6 +474,31 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// commitFreshBranch wraps the post-CreateTask fresh-branch sequence: run the
+// destructive checkout, compensate by deleting the task if it fails, then
+// persist the rewritten BaseBranch onto the now-existing task. Returns false
+// when an HTTP error response was already written.
+func (h *TaskHandlers) commitFreshBranch(
+	c *gin.Context,
+	taskID, title, workspaceID string,
+	inputs []httpTaskRepositoryInput,
+	repos []dto.TaskRepositoryInput,
+) bool {
+	if !h.applyFreshBranch(c, title, inputs, repos) {
+		if delErr := h.service.DeleteTask(c.Request.Context(), taskID); delErr != nil {
+			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
+				zap.String("task_id", taskID), zap.Error(delErr))
+		}
+		return false
+	}
+	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
+	if err := h.service.ReplaceTaskRepositories(c.Request.Context(), taskID, workspaceID, convertToServiceRepos(repos)); err != nil {
+		h.logger.Warn("failed to persist fresh-branch base branch onto task",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+	return true
 }
 
 // applyFreshBranch executes the fresh-branch flow for any local-executor
@@ -511,8 +523,7 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs
 		baseBranch := raw.BaseBranch
 		if baseBranch == "" {
 			// User didn't pick one — fall back to the repo's checked-out branch.
-			currentBranch, _ := h.service.LocalRepositoryCurrentBranch(ctx, repoPath)
-			baseBranch = resolveFreshBaseBranch(raw.BaseBranch, currentBranch)
+			baseBranch, _ = h.service.LocalRepositoryCurrentBranch(ctx, repoPath)
 		}
 		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
@@ -542,18 +553,6 @@ func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
 		return name
 	}
 	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
-}
-
-// resolveFreshBaseBranch picks the base branch the discard+checkout should
-// fork from. When the caller didn't pick one, fall back to whatever branch is
-// currently checked out in the local clone. Returns "" only if both inputs
-// are empty (e.g. detached HEAD with no caller-supplied base) — the caller
-// should propagate this so PerformFreshBranch returns ErrInvalidGitRef.
-func resolveFreshBaseBranch(rawBase, currentBranch string) string {
-	if rawBase != "" {
-		return rawBase
-	}
-	return currentBranch
 }
 
 func (h *TaskHandlers) resolveLocalRepoPath(c *gin.Context, raw httpTaskRepositoryInput) (string, bool) {
@@ -593,6 +592,16 @@ func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
 		// git checkout failure (e.g. branch already exists, base branch unknown).
 		// Surface the underlying message — it tells the user what to fix.
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrPartialDiscard) {
+		// Tracked files already gone, untracked survived. The user needs to
+		// know they have lost work before retrying — never a generic 500.
+		h.logger.Error("partial discard during fresh-branch", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "tracked changes were discarded but git clean failed; untracked files remain — inspect the repo before retrying",
+			"partial": true,
+		})
 		return
 	}
 	h.logger.Error("fresh branch checkout failed", zap.Error(err))

@@ -27,6 +27,13 @@ var ErrInvalidGitRef = errors.New("invalid git ref name")
 // resolved). The caller can map this to a 4xx + the wrapped message.
 var ErrFreshBranchCheckout = errors.New("checkout failed")
 
+// ErrPartialDiscard is returned when discarding the working tree partially
+// succeeded — `git reset --hard` mutated tracked files but `git clean -fd`
+// then failed (locked file, permission error, etc.) so untracked files
+// survive. Callers must surface a distinct message: a generic 500 would
+// hide the fact that some user work has already been destroyed.
+var ErrPartialDiscard = errors.New("partial discard: tracked changes were reset but git clean failed")
+
 // FreshBranchRequest performs a destructive checkout on a local repository:
 // discard uncommitted changes, then create NewBranch from BaseBranch.
 //
@@ -131,15 +138,20 @@ func sanitizeGitRef(name, label string) (string, error) {
 }
 
 func discardLocalChanges(ctx context.Context, repoPath string) error {
-	for _, args := range [][]string{
-		{"reset", "--hard"},
-		{"clean", "-fd"},
-	} {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = repoPath
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-		}
+	if out, err := runGit(ctx, repoPath, "reset", "--hard"); err != nil {
+		return fmt.Errorf("git reset --hard: %w (%s)", err, out)
+	}
+	if out, err := runGit(ctx, repoPath, "clean", "-fd"); err != nil {
+		// reset already mutated tracked files; signal partial state so the
+		// HTTP handler can surface a distinct message instead of a generic 500.
+		return fmt.Errorf("%w: git clean -fd: %v (%s)", ErrPartialDiscard, err, out)
 	}
 	return nil
+}
+
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }

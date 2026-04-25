@@ -82,18 +82,6 @@ func TestResolveFreshBranchName(t *testing.T) {
 	}
 }
 
-func TestResolveFreshBaseBranch(t *testing.T) {
-	if got := resolveFreshBaseBranch("main", "develop"); got != "main" {
-		t.Fatalf("raw value should win, got %q", got)
-	}
-	if got := resolveFreshBaseBranch("", "develop"); got != "develop" {
-		t.Fatalf("expected fallback to current, got %q", got)
-	}
-	if got := resolveFreshBaseBranch("", ""); got != "" {
-		t.Fatalf("expected empty when both empty (caller surfaces 400 downstream), got %q", got)
-	}
-}
-
 func TestAssociatePRFromRepoInputs(t *testing.T) {
 	log := newTestLogger(t)
 
