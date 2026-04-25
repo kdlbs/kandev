@@ -86,7 +86,7 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 {{github.auth_setup}}
 
 # ---- Install pnpm globally ----
-curl -fsSL https://github.com/pnpm/pnpm/releases/latest/download/pnpm-linux-x64 -o /usr/local/bin/pnpm
+curl -fsSL https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-linux-x64 -o /usr/local/bin/pnpm
 chmod +x /usr/local/bin/pnpm
 
 # ---- Git identity ----

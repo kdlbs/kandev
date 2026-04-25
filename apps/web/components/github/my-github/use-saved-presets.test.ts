@@ -1,11 +1,28 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readStorage, type SavedPreset } from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 
+// happy-dom's localStorage Proxy does not expose methods across VM contexts;
+// stub globalThis.localStorage with a minimal in-memory implementation.
+const store: Record<string, string> = {};
+const localStorageMock = {
+  getItem: (key: string) => store[key] ?? null,
+  setItem: (key: string, value: string) => {
+    store[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete store[key];
+  },
+  clear: () => {
+    for (const key of Object.keys(store)) delete store[key];
+  },
+};
+vi.stubGlobal("localStorage", localStorageMock);
+
 function set(raw: string | null) {
-  if (raw === null) window.localStorage.removeItem(STORAGE_KEY);
-  else window.localStorage.setItem(STORAGE_KEY, raw);
+  if (raw === null) localStorageMock.removeItem(STORAGE_KEY);
+  else localStorageMock.setItem(STORAGE_KEY, raw);
 }
 
 const valid: SavedPreset = {
@@ -19,7 +36,7 @@ const valid: SavedPreset = {
 
 describe("readStorage", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    localStorageMock.removeItem(STORAGE_KEY);
   });
 
   it("returns empty array when no value is stored", () => {
