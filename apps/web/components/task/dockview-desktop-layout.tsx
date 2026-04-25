@@ -20,6 +20,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
+import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
@@ -38,6 +39,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
+import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
 import {
@@ -149,9 +151,23 @@ function PermanentTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} hideClose />;
 }
 
+/** Sync the user's default saved layout from settings into the dockview store. */
+function useSyncUserDefaultLayout() {
+  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
+  useEffect(() => {
+    const defaultLayout = savedLayouts.find((l) => l.is_default);
+    const state = defaultLayout?.layout as unknown as
+      | import("@/lib/state/layout-manager").LayoutState
+      | undefined;
+    setUserDefaultLayout(state?.columns ? state : null);
+  }, [savedLayouts, setUserDefaultLayout]);
+}
+
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
+  planTab: PlanTab,
   sessionTab: SessionTab,
   previewFileTab: PreviewFileTab,
   previewDiffTab: PreviewDiffTab,
@@ -451,24 +467,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   const review = useReviewDialog(effectiveSessionId);
 
-  // Sync user's default saved layout into dockview store
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
-  const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
-  useEffect(() => {
-    const defaultLayout = savedLayouts.find((l) => l.is_default);
-    const state = defaultLayout?.layout as unknown as
-      | import("@/lib/state/layout-manager").LayoutState
-      | undefined;
-    setUserDefaultLayout(state?.columns ? state : null);
-  }, [savedLayouts, setUserDefaultLayout]);
-
-  // Connect LSP Go-to-Definition navigation to dockview file tabs
+  useSyncUserDefaultLayout();
   useLspFileOpener();
-
-  // Global editor keybinds (tab nav, terminal toggle)
   useEditorKeybinds();
+  usePlanPanelAutoOpen();
 
-  // Keep sessionIdRef in sync for use inside event handlers
   useEffect(() => {
     sessionIdRef.current = effectiveSessionId;
   }, [effectiveSessionId]);

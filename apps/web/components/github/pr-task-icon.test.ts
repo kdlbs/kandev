@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { getPRStatusColor, getPRTooltip, isPRReadyToMerge } from "./pr-task-icon";
+import {
+  getPRStatusColor,
+  getPRTooltip,
+  isPRAwaitingReview,
+  isPRReadyToMerge,
+} from "./pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
@@ -33,7 +38,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 }
 
 describe("isPRReadyToMerge", () => {
-  it("is true only when open + approved + success + clean", () => {
+  it("is true when open + approved + success + clean", () => {
     expect(
       isPRReadyToMerge(
         makePR({
@@ -44,6 +49,48 @@ describe("isPRReadyToMerge", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("is true when CI succeeds and no reviewers are required (clean + no pending reviews)", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          checks_state: "success",
+          mergeable_state: "clean",
+          pending_review_count: 0,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is false when reviewers are requested even if CI passed and mergeable is clean", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "pending",
+          checks_state: "success",
+          mergeable_state: "clean",
+          pending_review_count: 2,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false when no review state but pending reviewers still requested", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          checks_state: "success",
+          mergeable_state: "clean",
+          pending_review_count: 1,
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("is false when mergeable_state is blocked", () => {
@@ -120,6 +167,39 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe("text-green-500");
   });
 
+  it("returns sky-400 when CI passed but review is pending", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "pending",
+      checks_state: "success",
+      mergeable_state: "clean",
+      pending_review_count: 2,
+    });
+    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+  });
+
+  it("returns sky-400 when CI passed and reviewers are requested but no review state set", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "",
+      checks_state: "success",
+      mergeable_state: "blocked",
+      pending_review_count: 1,
+    });
+    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+  });
+
+  it("returns emerald when CI passed and no reviewers are required", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "",
+      checks_state: "success",
+      mergeable_state: "clean",
+      pending_review_count: 0,
+    });
+    expect(getPRStatusColor(pr)).toBe("text-emerald-400");
+  });
+
   it("returns red for changes_requested regardless of mergeable_state", () => {
     const pr = makePR({
       state: "open",
@@ -137,6 +217,55 @@ describe("getPRStatusColor", () => {
 
   it("returns purple for merged", () => {
     expect(getPRStatusColor(makePR({ state: "merged" }))).toBe("text-purple-500");
+  });
+});
+
+describe("isPRAwaitingReview", () => {
+  it("is true when CI succeeded and review is pending", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "pending",
+          checks_state: "success",
+          pending_review_count: 1,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is false when CI is still running", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({ state: "open", checks_state: "pending", pending_review_count: 1 }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false when no review is required", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "",
+          checks_state: "success",
+          pending_review_count: 0,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for an approved PR with extra reviewers still pending", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          pending_review_count: 1,
+        }),
+      ),
+    ).toBe(false);
   });
 });
 

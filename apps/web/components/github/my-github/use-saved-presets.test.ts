@@ -3,21 +3,24 @@ import { readStorage, type SavedPreset } from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 
-// happy-dom's localStorage Proxy does not expose methods across VM contexts;
-// stub globalThis.localStorage with a minimal in-memory implementation.
-const store: Record<string, string> = {};
-const localStorageMock = {
-  getItem: (key: string) => store[key] ?? null,
-  setItem: (key: string, value: string) => {
-    store[key] = value;
-  },
-  removeItem: (key: string) => {
-    delete store[key];
-  },
-  clear: () => {
-    for (const key of Object.keys(store)) delete store[key];
-  },
-};
+// Provide a simple in-memory localStorage mock so the tests are not sensitive
+// to how the test runner exposes window.localStorage (e.g. Node's
+// --localstorage-file flag without a valid path).
+function makeLocalStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+  };
+}
+
+const localStorageMock = makeLocalStorageMock();
 vi.stubGlobal("localStorage", localStorageMock);
 
 function set(raw: string | null) {
@@ -36,7 +39,7 @@ const valid: SavedPreset = {
 
 describe("readStorage", () => {
   beforeEach(() => {
-    localStorageMock.removeItem(STORAGE_KEY);
+    localStorageMock.clear();
   });
 
   it("returns empty array when no value is stored", () => {

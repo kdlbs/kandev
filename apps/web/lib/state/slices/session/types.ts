@@ -67,6 +67,7 @@ export type TaskPlansState = {
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
 export type QueuedMessage = {
@@ -141,6 +142,7 @@ export type SessionSliceActions = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  markTaskPlanSeen: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
