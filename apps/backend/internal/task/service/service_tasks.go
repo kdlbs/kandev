@@ -120,6 +120,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		}
 	}
 
+	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
 		repositoryID, baseBranch, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
@@ -128,6 +129,14 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
+		// Multi-repo validation: each repository may appear at most once per task.
+		// Without this guard the unique (task_id, repository_id) constraint on
+		// task_repositories would surface as an opaque DB error mid-loop, leaving
+		// some rows already inserted.
+		if seen[repositoryID] {
+			return fmt.Errorf("repository %q listed more than once for the task", repositoryID)
+		}
+		seen[repositoryID] = true
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
 			RepositoryID:   repositoryID,

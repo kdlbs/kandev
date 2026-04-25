@@ -167,6 +167,58 @@ func TestService_CreateTask(t *testing.T) {
 	}
 }
 
+func TestService_CreateTask_RejectsDuplicateRepositories(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-dup", WorkspaceID: "ws-1", Name: "Dup"})
+
+	req := &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "dup repos",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-dup", BaseBranch: "main"},
+			{RepositoryID: "repo-dup", BaseBranch: "main"},
+		},
+	}
+	_, err := svc.CreateTask(ctx, req)
+	if err == nil {
+		t.Fatal("expected duplicate-repository error, got nil")
+	}
+}
+
+func TestService_CreateTask_AcceptsMultipleDistinctRepositories(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-front", WorkspaceID: "ws-1", Name: "front"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-back", WorkspaceID: "ws-1", Name: "back"})
+
+	req := &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "multi",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-front", BaseBranch: "main"},
+			{RepositoryID: "repo-back", BaseBranch: "main"},
+		},
+	}
+	task, err := svc.CreateTask(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 2 {
+		t.Errorf("expected 2 task repositories, got %d", len(task.Repositories))
+	}
+}
+
 func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

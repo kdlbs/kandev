@@ -38,14 +38,14 @@ func TestTaskPR_PerRepoStorage(t *testing.T) {
 	prFront := &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-front",
 		Owner: "kdlbs", Repo: "kandev", PRNumber: 100,
-		PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRURL:   "https://github.com/kdlbs/kandev/pull/100",
 		PRTitle: "frontend changes", HeadBranch: "feat/x", BaseBranch: "main",
 		State: "open", CreatedAt: now,
 	}
 	prBack := &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-back",
 		Owner: "kdlbs", Repo: "kandev-backend", PRNumber: 200,
-		PRURL: "https://github.com/kdlbs/kandev-backend/pull/200",
+		PRURL:   "https://github.com/kdlbs/kandev-backend/pull/200",
 		PRTitle: "backend changes", HeadBranch: "feat/x", BaseBranch: "main",
 		State: "open", CreatedAt: now,
 	}
