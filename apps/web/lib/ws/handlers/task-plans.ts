@@ -34,6 +34,10 @@ export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers
     "task.plan.updated": (message) => handlePlanUpsert(store, message),
     "task.plan.deleted": (message) => {
       const { task_id } = message.payload;
+      // Intentionally NOT clearTaskPlan: setTaskPlan(null) preserves
+      // loadedByTaskId[taskId] = true so useTaskPlan doesn't see !isLoaded
+      // and refetch a plan that was just deleted. clearTaskPlan would drop
+      // that flag and trigger a wasted HTTP round-trip.
       store.getState().setTaskPlan(task_id, null);
       store.getState().markTaskPlanSeen(task_id);
     },
