@@ -401,6 +401,10 @@ export type AppState = {
   ) => void;
   setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
   cachePlanRevisionContent: (revisionId: string, content: string) => void;
+  // Plan revision preview + compare actions
+  setPreviewRevision: (taskId: string, revisionId: string | null) => void;
+  toggleComparePair: (taskId: string, revisionId: string) => void;
+  clearComparePair: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;

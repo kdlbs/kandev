@@ -83,6 +83,8 @@ export const defaultSessionState: SessionSliceState = {
     revisionsLoadingByTaskId: {},
     revisionsLoadedByTaskId: {},
     revisionContentCache: {},
+    previewRevisionIdByTaskId: {},
+    comparePairByTaskId: {},
   },
   queue: { bySessionId: {}, isLoading: {} },
 };
@@ -196,6 +198,8 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.revisionsByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
+        delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
+        delete draft.taskPlans.comparePairByTaskId[taskId];
       }),
     setPlanRevisions: (
       taskId: string,
@@ -235,7 +239,46 @@ function buildTaskPlanActions(set: ImmerSet) {
       set((draft) => {
         draft.taskPlans.revisionContentCache[revisionId] = content;
       }),
+    ...buildPreviewCompareActions(set),
   };
+}
+
+function buildPreviewCompareActions(set: ImmerSet) {
+  return {
+    setPreviewRevision: (taskId: string, revisionId: string | null) =>
+      set((draft) => {
+        if (revisionId === null) {
+          delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
+        } else {
+          draft.taskPlans.previewRevisionIdByTaskId[taskId] = revisionId;
+        }
+      }),
+    toggleComparePair: (taskId: string, revisionId: string) =>
+      set((draft) => {
+        draft.taskPlans.comparePairByTaskId[taskId] = nextPair(
+          draft.taskPlans.comparePairByTaskId[taskId] ?? [null, null],
+          revisionId,
+        );
+      }),
+    clearComparePair: (taskId: string) =>
+      set((draft) => {
+        delete draft.taskPlans.comparePairByTaskId[taskId];
+      }),
+  };
+}
+
+/** Compute the next compare-pair after a toggle. Already-selected ids unselect;
+ * empty slots fill in order (slot 0 first); a full pair drops slot 0 and shifts
+ * slot 1 → 0, putting the new pick in slot 1 (FIFO of length 2). */
+function nextPair(
+  current: readonly [string | null, string | null],
+  revisionId: string,
+): [string | null, string | null] {
+  if (current[0] === revisionId) return [current[1], null];
+  if (current[1] === revisionId) return [current[0], null];
+  if (current[0] === null) return [revisionId, current[1]];
+  if (current[1] === null) return [current[0], revisionId];
+  return [current[1], revisionId];
 }
 
 export const createSessionSlice: StateCreator<

@@ -62,6 +62,10 @@ export type ActiveModelState = {
   bySessionId: Record<string, string>;
 };
 
+/** Ordered slot pair for the compare-revisions feature. Either slot may be
+ * null. Reducers enforce a 2-slot cap and reject duplicates. */
+export type ComparePair = [string | null, string | null];
+
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
   loadingByTaskId: Record<string, boolean>;
@@ -71,6 +75,9 @@ export type TaskPlansState = {
   revisionsLoadingByTaskId: Record<string, boolean>;
   revisionsLoadedByTaskId: Record<string, boolean>;
   revisionContentCache: Record<string, string>; // revisionId -> content
+  // Phase 6: preview + compare state
+  previewRevisionIdByTaskId: Record<string, string | null>;
+  comparePairByTaskId: Record<string, ComparePair>;
 };
 
 export type QueuedMessage = {
@@ -150,6 +157,10 @@ export type SessionSliceActions = {
   upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
   setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
   cachePlanRevisionContent: (revisionId: string, content: string) => void;
+  // Phase 6: preview + compare actions
+  setPreviewRevision: (taskId: string, revisionId: string | null) => void;
+  toggleComparePair: (taskId: string, revisionId: string) => void;
+  clearComparePair: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
