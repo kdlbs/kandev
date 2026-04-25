@@ -149,6 +149,9 @@ func (s *Store) initSchema() error {
 	// Idempotent migrations for existing databases.
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`)
+	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -163,9 +166,9 @@ func (s *Store) CreatePRWatch(ctx context.Context, w *PRWatch) error {
 	w.CreatedAt = now
 	w.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_pr_watches (id, session_id, task_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.SessionID, w.TaskID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
+		INSERT INTO github_pr_watches (id, session_id, task_id, repository_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -263,7 +266,9 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 
 // --- TaskPR operations ---
 
-// CreateTaskPR associates a PR with a task.
+// CreateTaskPR associates a PR with a task. RepositoryID may be empty for
+// single-repo tasks; multi-repo task launches set it so each repo's PR is
+// distinguishable.
 func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	if tp.ID == "" {
 		tp.ID = uuid.New().String()
@@ -271,17 +276,18 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, task_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.TaskID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt)
 	return err
 }
 
-// GetTaskPR returns the PR association for a task.
+// GetTaskPR returns the first PR association for a task. For multi-repo tasks
+// the result is non-deterministic across repos — use ListTaskPRsByTask instead.
 func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp, `SELECT * FROM github_task_prs WHERE task_id = ? LIMIT 1`, taskID)
@@ -289,6 +295,34 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 		return nil, nil
 	}
 	return &tp, err
+}
+
+// GetTaskPRByRepository returns the PR association for a (task, repository)
+// pair, or nil if none. Use this for multi-repo tasks.
+func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID string) (*TaskPR, error) {
+	var tp TaskPR
+	err := s.ro.GetContext(ctx, &tp,
+		`SELECT * FROM github_task_prs WHERE task_id = ? AND repository_id = ? LIMIT 1`,
+		taskID, repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &tp, err
+}
+
+// ListTaskPRsByTask returns every PR association for a task (one per repo
+// when multi-repo). Empty slice when no PRs exist.
+func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR, error) {
+	var prs []TaskPR
+	if err := s.ro.SelectContext(ctx, &prs,
+		`SELECT * FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskPR, 0, len(prs))
+	for i := range prs {
+		out = append(out, &prs[i])
+	}
+	return out, nil
 }
 
 // ListTaskPRsByTaskIDs returns PR associations for multiple tasks.
@@ -329,10 +363,10 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 }
 
 // ReplaceTaskPR atomically replaces the task→PR association for a task: any
-// existing rows for task_id are deleted and the new row is inserted inside a
-// single transaction, matching the effective 1:1 task→PR mapping used by
-// reads. Use this when a task's active PR changes (e.g. the first PR was
-// closed and a follow-up was opened).
+// existing rows are deleted and the new row is inserted inside a single
+// transaction. The delete is scoped to (task_id, repository_id) so multi-repo
+// tasks only replace the row for the affected repo; for single-repo tasks
+// (RepositoryID == "") the legacy semantics are preserved (delete all).
 func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	if tp.ID == "" {
 		tp.ID = uuid.New().String()
@@ -346,15 +380,24 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_task_prs WHERE task_id = ?`, tp.TaskID); err != nil {
-		return err
+	if tp.RepositoryID != "" {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM github_task_prs WHERE task_id = ? AND repository_id = ?`,
+			tp.TaskID, tp.RepositoryID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM github_task_prs WHERE task_id = ?`, tp.TaskID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, task_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.TaskID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
 		return err

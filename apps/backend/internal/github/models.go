@@ -113,11 +113,14 @@ type IssueSearchPage struct {
 	PerPage    int      `json:"per_page"`
 }
 
-// PRWatch tracks active PR monitoring (session → PR).
+// PRWatch tracks active PR monitoring (session → PR). RepositoryID identifies
+// which task repository the watched PR belongs to (multi-repo support; empty
+// for legacy rows).
 type PRWatch struct {
 	ID              string     `json:"id" db:"id"`
 	SessionID       string     `json:"session_id" db:"session_id"`
 	TaskID          string     `json:"task_id" db:"task_id"`
+	RepositoryID    string     `json:"repository_id,omitempty" db:"repository_id"`
 	Owner           string     `json:"owner" db:"owner"`
 	Repo            string     `json:"repo" db:"repo"`
 	PRNumber        int        `json:"pr_number" db:"pr_number"`
@@ -130,10 +133,13 @@ type PRWatch struct {
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
-// TaskPR associates a PR with a task.
+// TaskPR associates a PR with a task. RepositoryID identifies which task
+// repository this PR belongs to (multi-repo tasks can have one PR per repo).
+// Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
 	ID                 string     `json:"id" db:"id"`
 	TaskID             string     `json:"task_id" db:"task_id"`
+	RepositoryID       string     `json:"repository_id,omitempty" db:"repository_id"`
 	Owner              string     `json:"owner" db:"owner"`
 	Repo               string     `json:"repo" db:"repo"`
 	PRNumber           int        `json:"pr_number" db:"pr_number"`
