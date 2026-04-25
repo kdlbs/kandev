@@ -255,7 +255,7 @@ test.describe("Fresh-branch flow", () => {
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       const toggle = testPage.getByTestId("fresh-branch-toggle");
       await expect(toggle).toBeVisible();
-      await expect(toggle).not.toBeChecked();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
       const branchSelector = testPage.getByTestId("branch-selector");
       await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
       // Placeholder should show actual current branch (main), not the generic copy.
@@ -329,7 +329,10 @@ test.describe("Fresh-branch flow", () => {
       // Cancel returns to the form with the toggle still on.
       await testPage.getByTestId("discard-local-changes-cancel").click();
       await expect(modal).toBeHidden();
-      await expect(testPage.getByTestId("fresh-branch-toggle")).toBeChecked();
+      await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
 
       // Untracked file must still exist (we didn't confirm).
       expect(fs.existsSync(path.join(setup.repoDir, "WIP.txt"))).toBe(true);

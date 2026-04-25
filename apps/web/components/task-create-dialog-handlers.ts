@@ -111,7 +111,10 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   const handleToggleFreshBranch = useCallback(
     (enabled: boolean) => {
       fs.setFreshBranchEnabled(enabled);
-      if (!enabled) fs.setBranch("");
+      // Always clear the branch so we don't carry a value over from a
+      // different executor (e.g. "develop" picked under worktree) into the
+      // newly-enabled fresh-branch picker.
+      fs.setBranch("");
     },
     [fs],
   );

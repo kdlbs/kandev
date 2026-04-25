@@ -10,7 +10,7 @@ import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import {
-  FreshBranchSwitch,
+  FreshBranchToggle,
   computeBranchPlaceholder,
 } from "@/components/task-create-dialog-fresh-branch";
 
@@ -101,7 +101,7 @@ function AgentColumn({
     return (
       <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
         <span>No agents found.</span>
-        <Link href="/settings/agents" className="text-primary hover:underline">
+        <Link href="/settings/agents" className="cursor-pointer text-primary hover:underline">
           Add agent
         </Link>
       </div>
@@ -183,11 +183,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
           />
         </div>
         {isLocalWithoutGitHubUrl && (
-          <FreshBranchSwitch
-            enabled={freshBranchEnabled}
-            onToggle={onToggleFreshBranch}
-            currentLocalBranch={currentLocalBranch}
-          />
+          <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
         )}
       </div>
       <div>

@@ -1,53 +1,39 @@
 "use client";
 
-import { Switch } from "@kandev/ui/switch";
-import { Label } from "@kandev/ui/label";
+import { IconGitFork } from "@tabler/icons-react";
+import { Toggle } from "@kandev/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
-export type FreshBranchSwitchProps = {
+const FRESH_BRANCH_TOOLTIP =
+  "Fork a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
+
+export type FreshBranchToggleProps = {
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
-  currentLocalBranch: string;
 };
 
-function freshBranchTooltip(enabled: boolean, currentLocalBranch: string): string {
-  if (enabled) {
-    return "Forks a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
-  }
-  if (currentLocalBranch) {
-    return `Uses ${currentLocalBranch} (currently checked out). Enable to start the task on a new branch forked from a base of your choice.`;
-  }
-  return "Uses the branch currently checked out. Enable to start the task on a new branch.";
-}
-
 /**
- * Inline switch shown next to the branch selector for local executors. Toggling
- * on enables the branch selector for picking a base branch (the new branch
- * name is generated server-side from the task title).
+ * Compact icon toggle shown beside the branch selector for local executors.
+ * Pressed = "fork a new branch from the chosen base on submit". Matches the
+ * affordance pattern used by other inline toggles in the dialog (e.g. the
+ * paperclip in the prompt input).
  */
-export function FreshBranchSwitch({
-  enabled,
-  onToggle,
-  currentLocalBranch,
-}: FreshBranchSwitchProps) {
+export function FreshBranchToggle({ enabled, onToggle }: FreshBranchToggleProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input px-2 text-xs">
-          <Switch
-            id="fresh-branch-toggle"
-            checked={enabled}
-            onCheckedChange={onToggle}
-            data-testid="fresh-branch-toggle"
-          />
-          <Label htmlFor="fresh-branch-toggle" className="cursor-pointer font-medium">
-            New branch
-          </Label>
-        </div>
+        <Toggle
+          variant="outline"
+          aria-label="Fork a new branch"
+          pressed={enabled}
+          onPressedChange={onToggle}
+          data-testid="fresh-branch-toggle"
+          className="cursor-pointer"
+        >
+          <IconGitFork />
+        </Toggle>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
-        {freshBranchTooltip(enabled, currentLocalBranch)}
-      </TooltipContent>
+      <TooltipContent className="max-w-xs">{FRESH_BRANCH_TOOLTIP}</TooltipContent>
     </Tooltip>
   );
 }
