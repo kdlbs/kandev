@@ -494,9 +494,17 @@ func (h *TaskHandlers) commitFreshBranch(
 		return false
 	}
 	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
+	// applyFreshBranch already mutated the git repo, so we can't roll back —
+	// but we must surface a 5xx so the caller knows the DB still references
+	// the user's original fork point. Otherwise every subsequent session
+	// resume would silently check out the old branch and abandon the new one.
 	if err := h.service.ReplaceTaskRepositories(c.Request.Context(), taskID, workspaceID, convertToServiceRepos(repos)); err != nil {
-		h.logger.Warn("failed to persist fresh-branch base branch onto task",
+		h.logger.Error("failed to persist fresh-branch base branch onto task",
 			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "fresh branch was created but the task record could not be updated; please check the repository",
+		})
+		return false
 	}
 	return true
 }
