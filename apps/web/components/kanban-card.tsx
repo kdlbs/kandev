@@ -42,6 +42,8 @@ export interface Task {
   description?: string;
   position?: number;
   repositoryId?: string;
+  /** All repositories linked to the task; used to render a "+N" chip for multi-repo. */
+  repositories?: Array<{ id: string; repository_id: string; position: number }>;
   // Workflow fields
   sessionCount?: number | null;
   primarySessionId?: string | null;
@@ -93,8 +95,16 @@ function KanbanCardBody({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           {repoName && (
-            <p className="text-[10px] mb-1 text-muted-foreground leading-tight truncate">
-              {repoName}
+            <p className="text-[10px] mb-1 text-muted-foreground leading-tight truncate flex items-center gap-1">
+              <span className="truncate">{repoName}</span>
+              {task.repositories && task.repositories.length > 1 && (
+                <span
+                  className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80"
+                  title={`Task spans ${task.repositories.length} repositories`}
+                >
+                  +{task.repositories.length - 1}
+                </span>
+              )}
             </p>
           )}
           <div className="flex items-center gap-1 min-w-0">

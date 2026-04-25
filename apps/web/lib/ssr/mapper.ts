@@ -1,4 +1,5 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
+import { primaryTaskRepository } from "@/lib/types/http";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
 import {
   isPRReviewFromMetadata,
@@ -26,6 +27,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
     .map((task) => {
       const workflowStepId = task.workflow_step_id;
       if (!workflowStepId) return null;
+      const primary = primaryTaskRepository(task.repositories);
       return {
         id: task.id,
         workflowStepId,
@@ -33,7 +35,14 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         description: task.description ?? undefined,
         position: task.position ?? 0,
         state: task.state,
-        repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+        repositoryId: primary?.repository_id ?? undefined,
+        repositories: task.repositories?.map((r) => ({
+          id: r.id,
+          repository_id: r.repository_id,
+          base_branch: r.base_branch,
+          checkout_branch: r.checkout_branch,
+          position: r.position,
+        })),
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
         sessionCount: task.session_count ?? undefined,

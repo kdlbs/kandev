@@ -3,7 +3,14 @@
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
-import { primaryTaskRepository, type TaskRepository } from "@/lib/types/http";
+
+/**
+ * Slim per-task repository shape carried in the kanban store. Mirrors
+ * KanbanState["tasks"][number]["repositories"][number].
+ */
+export type KanbanTaskRepository = NonNullable<
+  KanbanState["tasks"][number]["repositories"]
+>[number];
 
 /**
  * Returns the repositories linked to a task, ordered by Position. Empty
@@ -11,7 +18,7 @@ import { primaryTaskRepository, type TaskRepository } from "@/lib/types/http";
  * use this instead of poking task.repositories directly so multi-repo
  * consumers all share one source of truth.
  */
-export function useTaskRepositories(taskId: string | null | undefined): TaskRepository[] {
+export function useTaskRepositories(taskId: string | null | undefined): KanbanTaskRepository[] {
   const task = useAppStore((state) =>
     taskId
       ? (state.kanban.tasks.find((t: KanbanState["tasks"][number]) => t.id === taskId) ?? null)
@@ -28,7 +35,7 @@ export function useTaskRepositories(taskId: string | null | undefined): TaskRepo
  */
 export function useTaskPrimaryRepository(
   taskId: string | null | undefined,
-): TaskRepository | null {
+): KanbanTaskRepository | null {
   const repos = useTaskRepositories(taskId);
-  return primaryTaskRepository(repos) ?? null;
+  return repos.length > 0 ? repos[0] : null;
 }

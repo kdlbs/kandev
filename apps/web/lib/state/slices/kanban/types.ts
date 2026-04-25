@@ -28,7 +28,20 @@ export type KanbanState = {
     description?: string;
     position: number;
     state?: TaskStatus;
+    /** Primary repository id (lowest position). Kept for backwards compat. */
     repositoryId?: string;
+    /**
+     * All repositories linked to the task, ordered by Position. Optional so
+     * legacy SSR payloads still parse; multi-repo UI consumers should prefer
+     * this over repositoryId.
+     */
+    repositories?: Array<{
+      id: string;
+      repository_id: string;
+      base_branch: string;
+      checkout_branch?: string;
+      position: number;
+    }>;
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     sessionCount?: number | null;
