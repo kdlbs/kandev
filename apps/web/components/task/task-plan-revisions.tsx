@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
-import { IconHistory, IconRobot, IconUser, IconRestore, IconLoader2 } from "@tabler/icons-react";
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { IconHistory, IconUser, IconRestore, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import { ScrollArea } from "@kandev/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +16,8 @@ import {
 import { toast } from "sonner";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatRelativeTime } from "@/lib/utils";
+import { AgentLogo } from "@/components/agent-logo";
+import { useAppStore } from "@/components/state-provider";
 
 type TaskPlanRevisionsProps = {
   taskId: string;
@@ -28,6 +29,10 @@ type TaskPlanRevisionsProps = {
   disabled?: boolean;
 };
 
+/** Label rendered in the UI for any user-authored revision. Display-only —
+ * the backend still stamps its own author_name on the row. */
+const USER_DISPLAY_NAME = "You";
+
 export function TaskPlanRevisions({
   revisions,
   isLoading,
@@ -38,6 +43,7 @@ export function TaskPlanRevisions({
 }: TaskPlanRevisionsProps) {
   const [open, setOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<TaskPlanRevision | null>(null);
+  const agentName = useActiveAgentBackendName();
 
   const loadedRef = useRef(false);
   const handleOpenChange = useCallback(
@@ -77,13 +83,17 @@ export function TaskPlanRevisions({
             <span className="text-sm font-medium">Plan history</span>
             {isLoading && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           </div>
-          <ScrollArea className="max-h-96">
+          {/* Plain overflow-y-auto is more reliable than ScrollArea inside a Popover
+           * — the popover doesn't constrain its child by default, so a fixed
+           * max-height with native scroll keeps the list bounded. */}
+          <div className="max-h-96 overflow-y-auto">
             <RevisionList
               revisions={revisions}
               isLoading={isLoading}
+              agentName={agentName}
               onRevertClick={setConfirmTarget}
             />
-          </ScrollArea>
+          </div>
         </PopoverContent>
       </Popover>
 
@@ -112,13 +122,29 @@ export function TaskPlanRevisions({
   );
 }
 
+/** Resolve the active session's agent backend name (e.g. "claude", "codex") so
+ * agent revisions can render the same logo we use elsewhere. Returns null when
+ * there is no active session or its snapshot doesn't carry an agent_name. */
+function useActiveAgentBackendName(): string | null {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const snapshot = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId]?.agent_profile_snapshot : null,
+  );
+  return useMemo(() => {
+    const name = (snapshot as { agent_name?: unknown } | null | undefined)?.agent_name;
+    return typeof name === "string" && name.length > 0 ? name : null;
+  }, [snapshot]);
+}
+
 function RevisionList({
   revisions,
   isLoading,
+  agentName,
   onRevertClick,
 }: {
   revisions: TaskPlanRevision[];
   isLoading: boolean;
+  agentName: string | null;
   onRevertClick: (rev: TaskPlanRevision) => void;
 }) {
   if (revisions.length === 0 && !isLoading) {
@@ -135,6 +161,7 @@ function RevisionList({
           key={rev.id}
           revision={rev}
           isCurrent={i === 0}
+          agentName={agentName}
           onRevertClick={onRevertClick}
         />
       ))}
@@ -142,16 +169,52 @@ function RevisionList({
   );
 }
 
+function RevisionAuthor({
+  revision,
+  agentName,
+}: {
+  revision: TaskPlanRevision;
+  agentName: string | null;
+}) {
+  if (revision.author_kind === "agent") {
+    return (
+      <>
+        {agentName ? (
+          <AgentLogo agentName={agentName} size={14} className="shrink-0" />
+        ) : null}
+        <span
+          className="text-xs text-foreground truncate"
+          data-testid="plan-revision-author"
+        >
+          {revision.author_name}
+        </span>
+      </>
+    );
+  }
+  return (
+    <>
+      <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <span
+        className="text-xs text-foreground truncate"
+        data-testid="plan-revision-author"
+      >
+        {USER_DISPLAY_NAME}
+      </span>
+    </>
+  );
+}
+
 function RevisionRow({
   revision,
   isCurrent,
+  agentName,
   onRevertClick,
 }: {
   revision: TaskPlanRevision;
   isCurrent: boolean;
+  agentName: string | null;
   onRevertClick: (rev: TaskPlanRevision) => void;
 }) {
-  const AuthorIcon = revision.author_kind === "agent" ? IconRobot : IconUser;
   // Derive relative time on every render so prop changes (and the 30s tick)
   // both refresh it. The tick state forces re-renders at a coarse cadence.
   const [, setTick] = useState(0);
@@ -171,13 +234,7 @@ function RevisionRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold">v{revision.revision_number}</span>
-          <AuthorIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span
-            className="text-xs text-foreground truncate"
-            data-testid="plan-revision-author"
-          >
-            {revision.author_name}
-          </span>
+          <RevisionAuthor revision={revision} agentName={agentName} />
           <span
             className="text-xs text-muted-foreground"
             data-testid="plan-revision-time"
@@ -242,8 +299,8 @@ function RevertConfirmDialog({
         <DialogHeader>
           <DialogTitle>Restore to version {target?.revision_number}?</DialogTitle>
           <DialogDescription>
-            This creates a new version with v{target?.revision_number}&#39;s content. Nothing is
-            lost — the current version stays in history.
+            This creates a new version with v{target?.revision_number}&#39;s content.
+            Nothing is lost; the current version stays in history.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

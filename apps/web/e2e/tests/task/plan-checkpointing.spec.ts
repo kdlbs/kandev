@@ -311,13 +311,12 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     await session.openRewind();
     await expectRevisionCount(session, 2);
-    // Newest row is user; oldest row is agent. Assert v2 has a non-empty
-    // author that isn't "Agent" (so an empty/truncated render would fail too).
+    // v2 (newest) is the user write — UI displays "You" for any user-authored
+    // revision regardless of stored author_name. v1 stays as the agent label.
     const v2Author = session.revisionRow(2).getByTestId("plan-revision-author");
     const v1Author = session.revisionRow(1).getByTestId("plan-revision-author");
     await expect(v1Author).toHaveText("Agent");
-    await expect(v2Author).not.toHaveText("Agent");
-    await expect(v2Author).not.toBeEmpty();
+    await expect(v2Author).toHaveText("You");
   });
 
   test("persistence across reload: revisions survive page refresh", async ({

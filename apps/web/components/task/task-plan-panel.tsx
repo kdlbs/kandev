@@ -184,7 +184,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     <PanelRoot data-testid="plan-panel">
       <PlanPanelHeader
         taskId={taskId}
-        title={plan?.title || "Plan"}
         revisions={revisions}
         isLoadingRevisions={isLoadingRevisions}
         isSaving={isSaving}
@@ -528,7 +527,6 @@ function PlanEmptyState({
 
 type PlanPanelHeaderProps = {
   taskId: string;
-  title: string;
   revisions: TaskPlanRevision[];
   isLoadingRevisions: boolean;
   isSaving: boolean;
@@ -536,9 +534,11 @@ type PlanPanelHeaderProps = {
   onRevert: (id: string) => Promise<TaskPlanRevision | null>;
 };
 
+// Header bar lives only to host the rewind button. The plan's title (default
+// "Plan") is already shown by the dockview/mobile tab above the panel, so we
+// don't repeat it here.
 function PlanPanelHeader({
   taskId,
-  title,
   revisions,
   isLoadingRevisions,
   isSaving,
@@ -547,7 +547,7 @@ function PlanPanelHeader({
 }: PlanPanelHeaderProps) {
   return (
     <PanelHeaderBarSplit
-      left={<span className="text-xs font-medium truncate">{title}</span>}
+      left={null}
       right={
         <TaskPlanRevisions
           taskId={taskId}
