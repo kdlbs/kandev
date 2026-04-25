@@ -96,6 +96,14 @@ type Adapter struct {
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
 
+	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
+	// Claude-acp's Monitor tool runs a background script that streams events
+	// back to the LLM as `<task-notification>` envelopes. We hold this map so
+	// later agent_message_chunks carrying those envelopes can be routed back
+	// to the originating Monitor's tool_call card. Cleared on prompt completion
+	// and rebuilt during session/load replay.
+	activeMonitors map[string]map[string]string
+
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
 	promptTraceCtx context.Context
@@ -130,6 +138,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		normalizer:      NewNormalizer(),
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
+		activeMonitors:  make(map[string]map[string]string),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
@@ -475,6 +484,11 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.isLoadingSession = false
 	a.mu.Unlock()
 
+	// Any Monitor still tracked at this point was running in pre-restart history
+	// but has no live process to back it now — emit synthetic cancellations so
+	// the frontend doesn't render a stuck "watching" card.
+	a.sweepMonitorsOnReplayEnd(sessionID)
+
 	if replayPlan != nil {
 		entries := make([]PlanEntry, len(replayPlan.Entries))
 		for i, e := range replayPlan.Entries {
@@ -614,6 +628,12 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
 	a.cancelActiveToolCalls(sessionID)
+
+	// Mark any tracked Monitors as ended. They live longer than a typical tool
+	// call (the script keeps running across model turns), so this sweep runs
+	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
+	// state when the parent prompt completes naturally.
+	a.sweepMonitorsOnPromptEnd(sessionID)
 
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
@@ -823,6 +843,13 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		}
 		a.mu.Unlock()
 
+		// Even though we suppress replay notifications from reaching clients,
+		// reconstruct any in-progress Monitor registrations so the post-replay
+		// sweep can mark them ended-on-restart. Without this, a session where
+		// Monitor was running before agentctl died would keep showing a
+		// "watching" card forever after resume.
+		a.captureReplayMonitor(string(n.SessionId), u)
+
 		// Suppress conversation history events during load.
 		// AvailableCommandsUpdate is intentionally NOT suppressed — it may arrive
 		// after the replay completes as a "ready" signal, and the frontend treats
@@ -986,7 +1013,23 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 
 	// Text content goes directly into the Text field for backward compatibility
 	if content.Text != nil {
-		event.Text = content.Text.Text
+		text := content.Text.Text
+		// Claude-acp's Monitor tool injects each script line back to the model
+		// as a `<task-notification>` user turn. The wrapper suppresses the
+		// user_message_chunk so the model often "echoes" the envelope into its
+		// own assistant text. Parse those out into proper Monitor events and
+		// strip them from the chat text. Assistant role only — genuine user
+		// messages don't carry these.
+		if role == "assistant" {
+			text = a.routeMonitorEvents(sessionID, text)
+			if isMonitorHumanEcho(text) {
+				return nil
+			}
+			if strings.TrimSpace(text) == "" {
+				return nil
+			}
+		}
+		event.Text = text
 		return event
 	}
 
@@ -997,6 +1040,44 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 	}
 	event.ContentBlocks = []streams.ContentBlock{*cb}
 	return event
+}
+
+// routeMonitorEvents extracts Monitor `<task-notification>` envelopes from an
+// agent_message_chunk text, emits a synthetic tool_call_update for each event
+// against the originating Monitor's toolCallID, and returns the cleaned text.
+// Returns the original text unchanged when no envelope is present (the common
+// case for non-Monitor sessions).
+func (a *Adapter) routeMonitorEvents(sessionID, text string) string {
+	cleaned, events := extractMonitorEvents(text)
+	if len(events) == 0 {
+		return text
+	}
+	for _, ev := range events {
+		toolCallID, ok := a.lookupMonitorByTaskID(sessionID, ev.TaskID)
+		if !ok {
+			a.logger.Debug("monitor event for unknown task, dropping envelope but preserving text",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", ev.TaskID))
+			continue
+		}
+		a.mu.Lock()
+		payload := a.activeToolCalls[toolCallID]
+		command := ""
+		if payload != nil && payload.Generic() != nil {
+			if input, ok := payload.Generic().Input.(map[string]any); ok {
+				command, _ = input["command"].(string)
+			}
+		}
+		appendMonitorEvent(payload, ev.TaskID, command, ev.Body)
+		a.mu.Unlock()
+		a.sendUpdate(monitorEventEvent(sessionID, toolCallID, ev.Body, payload))
+		a.logger.Debug("monitor event routed",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", ev.TaskID),
+			zap.String("tool_call_id", toolCallID),
+			zap.Int("body_len", len(ev.Body)))
+	}
+	return cleaned
 }
 
 // convertAvailableCommands converts an ACP AvailableCommandsUpdate to an AgentEvent,
@@ -1370,6 +1451,25 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// Normalize status - "completed" -> "complete" for frontend consistency
 	if status == "completed" {
 		status = toolStatusComplete
+	}
+	// Claude-acp sends incremental updates (title, rawInput, content) with no
+	// Status field — e.g. the second tool_call_update for Bash carries the actual
+	// command and human-readable title. The orchestrator only persists updates
+	// with a known status, so without a synthesized "in_progress" here those
+	// fields are silently dropped and the message stays on the placeholder
+	// "Terminal" title from the initial pending tool_call.
+	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0) {
+		status = "in_progress"
+	}
+
+	// Recognize Monitor registration: claude-acp sends `tool_call_update` with
+	// status="completed" and a `Monitor started (task X, …)` rawOutput about a
+	// second after the Monitor starts. That status is misleading — the Monitor
+	// itself is just beginning. Override to "in_progress" so the card stays
+	// open, and remember taskID -> toolCallID so subsequent task-notification
+	// envelopes can route their events back to this card.
+	if newStatus, handled := a.handleMonitorRegistration(sessionID, toolCallID, status, tcu); handled {
+		status = newStatus
 	}
 
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
