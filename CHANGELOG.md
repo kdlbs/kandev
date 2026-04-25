@@ -2,6 +2,45 @@
 
 All notable changes to Kandev.
 
+## 0.37 - 2026-04-25
+
+### Features
+
+- add GitHub token injection for remote executors and Docker session resume ([#654](https://github.com/kdlbs/kandev/pull/654))
+- add Ctrl+F search to session, plan, and terminal panels ([#686](https://github.com/kdlbs/kandev/pull/686))
+- configurable quick-action presets and PR branch checkout ([#689](https://github.com/kdlbs/kandev/pull/689))
+- add /github page for PRs and issues ([#687](https://github.com/kdlbs/kandev/pull/687))
+- collapse subtasks in sidebar ([#662](https://github.com/kdlbs/kandev/pull/662))
+- review uncommitted changes and add git safety rails ([#684](https://github.com/kdlbs/kandev/pull/684))
+- add issue watcher with task creation and auto-cleanup ([#672](https://github.com/kdlbs/kandev/pull/672))
+- per-launch authentication for agentctl ([#666](https://github.com/kdlbs/kandev/pull/666))
+- configurable CLI flags per agent profile ([#653](https://github.com/kdlbs/kandev/pull/653))
+
+### Bug Fixes
+
+- ui polish — unified topbar, selector consistency, quick actions editor improvements ([#693](https://github.com/kdlbs/kandev/pull/693))
+- subtask sessions inherit agent profile from parent task ([#692](https://github.com/kdlbs/kandev/pull/692))
+- recover from stale execution ID when auto-starting agent on prepared workspace ([#690](https://github.com/kdlbs/kandev/pull/690))
+- apply initialValues when TaskCreateDialog mounts already-open ([#688](https://github.com/kdlbs/kandev/pull/688))
+- bound git ref-inspection with context timeout ([#685](https://github.com/kdlbs/kandev/pull/685))
+- gateway auth injection and cumulative diff error handling ([#682](https://github.com/kdlbs/kandev/pull/682))
+- make task move event handlers asynchronous to prevent HTTP timeouts ([#680](https://github.com/kdlbs/kandev/pull/680))
+- user workflow deadlock ([#677](https://github.com/kdlbs/kandev/pull/677))
+- unblock Resume for FAILED/CANCELLED task sessions ([#670](https://github.com/kdlbs/kandev/pull/670))
+- prevent duplicate --allow-indexing in Auggie passthrough preview ([#675](https://github.com/kdlbs/kandev/pull/675))
+- send auto-start prompt after on_turn_complete context reset ([#669](https://github.com/kdlbs/kandev/pull/669))
+- include archived tasks in completed tasks over time chart ([#668](https://github.com/kdlbs/kandev/pull/668))
+- remove duplicate WebSocket event subscriptions ([#667](https://github.com/kdlbs/kandev/pull/667))
+
+### Refactoring
+
+- unify task.updated via single publisher and shared mapper ([#676](https://github.com/kdlbs/kandev/pull/676))
+- move system prompts from Go constants to external config files ([#673](https://github.com/kdlbs/kandev/pull/673))
+
+### Documentation
+
+- improve commit skill with mandatory verify and pre-commit check ([#691](https://github.com/kdlbs/kandev/pull/691))
+
 ## 0.36 - 2026-04-20
 
 ### Features

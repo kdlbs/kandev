@@ -2,12 +2,12 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type PlanMessage = BackendMessageMap["task.plan.created"] | BackendMessageMap["task.plan.updated"];
 
 function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
   const { task_id, id, title, content, created_by, created_at, updated_at } = message.payload;
+  const prevPlan = store.getState().taskPlans.byTaskId[task_id];
   store.getState().setTaskPlan(task_id, {
     id,
     task_id,
@@ -18,17 +18,13 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  // Auto-open plan panel side-by-side with chat when agent writes a plan
-  if (created_by === "agent" && task_id === store.getState().tasks.activeTaskId) {
-    const dockview = useDockviewStore.getState();
-    if (dockview.isRestoringLayout) return;
-    if (dockview.api?.getPanel("plan")) return;
-
-    const activeSessionId = store.getState().tasks.activeSessionId;
-    if (!activeSessionId) return;
-
-    dockview.addPlanPanel();
-    store.getState().setActiveDocument(activeSessionId, { type: "plan", taskId: task_id });
+  // User-authored writes mark the plan as seen — but only when the content
+  // actually changed. The plan editor's auto-save on mount can emit a
+  // user-authored update with unchanged content (TipTap markdown round-trip
+  // normalises whitespace), which would otherwise wipe an unseen agent
+  // indicator the moment the panel opens.
+  if (created_by === "user" && prevPlan?.content !== content) {
+    store.getState().markTaskPlanSeen(task_id);
   }
 }
 
@@ -38,7 +34,12 @@ export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers
     "task.plan.updated": (message) => handlePlanUpsert(store, message),
     "task.plan.deleted": (message) => {
       const { task_id } = message.payload;
+      // Intentionally NOT clearTaskPlan: setTaskPlan(null) preserves
+      // loadedByTaskId[taskId] = true so useTaskPlan doesn't see !isLoaded
+      // and refetch a plan that was just deleted. clearTaskPlan would drop
+      // that flag and trigger a wasted HTTP round-trip.
       store.getState().setTaskPlan(task_id, null);
+      store.getState().markTaskPlanSeen(task_id);
     },
   };
 }

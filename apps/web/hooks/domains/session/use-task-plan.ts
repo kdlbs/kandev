@@ -30,6 +30,7 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
   const setTaskPlan = useAppStore((state) => state.setTaskPlan);
   const setTaskPlanLoading = useAppStore((state) => state.setTaskPlanLoading);
   const setTaskPlanSaving = useAppStore((state) => state.setTaskPlanSaving);
+  const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   const [error, setError] = useState<string | null>(null);
@@ -42,13 +43,15 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     try {
       const fetchedPlan = await getTaskPlan(taskId);
       setTaskPlan(taskId, fetchedPlan);
+      // Initial fetch is not a notification — mark as seen so no indicator flashes.
+      markTaskPlanSeen(taskId);
     } catch (err) {
       console.error("Failed to fetch task plan:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch plan");
     } finally {
       setTaskPlanLoading(taskId, false);
     }
-  }, [taskId, setTaskPlan, setTaskPlanLoading]);
+  }, [taskId, setTaskPlan, setTaskPlanLoading, markTaskPlanSeen]);
 
   // Fetch plan on mount or when taskId changes
   useEffect(() => {

@@ -370,6 +370,32 @@ export class ApiClient {
     });
   }
 
+  async updateRepository(
+    repositoryId: string,
+    updates: { dev_script?: string; setup_script?: string; cleanup_script?: string },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
+  }
+
+  async createRepositoryScript(
+    repositoryId: string,
+    name: string,
+    command: string,
+    position = 0,
+  ): Promise<{
+    id: string;
+    repository_id: string;
+    name: string;
+    command: string;
+    position: number;
+  }> {
+    return this.request("POST", `/api/v1/repositories/${repositoryId}/scripts`, {
+      name,
+      command,
+      position,
+    });
+  }
+
   async createExecutor(
     name: string,
     type: string,

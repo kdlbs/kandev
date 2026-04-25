@@ -12,6 +12,32 @@ export type GenericPayload = {
   output?: unknown;
 };
 
+// MonitorView is the structured shape the kandev ACP adapter writes into the
+// Generic tool payload's `output.monitor` field for Claude-acp's `Monitor`
+// tool. The adapter mutates this in place across tool_call_updates so the
+// UI sees a stable view of the Monitor's state (event count, recent tail,
+// terminal flag) without needing a custom NormalizedPayload kind.
+export type MonitorView = {
+  kind?: string;
+  task_id?: string;
+  command?: string;
+  event_count?: number;
+  recent_events?: string[];
+  ended?: boolean;
+  end_reason?: string;
+};
+
+// Output wrapper helper: when the adapter attaches a Monitor view, it lands
+// at `generic.output.monitor`. Frontend code should narrow via this guard
+// rather than casting on its own.
+export function readMonitorView(payload: GenericPayload | undefined): MonitorView | null {
+  const out = payload?.output;
+  if (!out || typeof out !== "object") return null;
+  const wrapper = out as { monitor?: unknown };
+  if (!wrapper.monitor || typeof wrapper.monitor !== "object") return null;
+  return wrapper.monitor as MonitorView;
+}
+
 export type ReadFileOutput = {
   content?: string;
   line_count?: number;

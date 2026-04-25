@@ -109,7 +109,7 @@ type DockviewStore = {
   addBrowserPanel: (url?: string, groupId?: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
-  addPlanPanel: (groupId?: string) => void;
+  addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addPRPanel: () => void;
   addTerminalPanel: (terminalId?: string, groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;

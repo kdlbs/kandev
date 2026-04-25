@@ -41,7 +41,10 @@ export function SidebarFilterBar() {
   useRegisterCommands(commands);
 
   return (
-    <div data-testid="sidebar-filter-bar" className="flex items-center gap-1 border-b px-2 py-1">
+    <div
+      data-testid="sidebar-filter-bar"
+      className="flex h-[30px] shrink-0 items-center gap-1 border-b border-border bg-card px-2"
+    >
       <SidebarViewChips />
       <SidebarFilterPopover
         open={open}

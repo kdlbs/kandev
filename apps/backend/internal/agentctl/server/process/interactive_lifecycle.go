@@ -55,6 +55,13 @@ type interactiveProcess struct {
 	stopSignal chan struct{}
 	waitDone   chan struct{} // closed when wait() returns (cmd.Wait completed)
 	mu         sync.Mutex
+
+	// firstOutputCh is closed by readOutput once any bytes arrive from the PTY —
+	// a reliable proxy for "shell has rendered its prompt and is ready for input".
+	// InitialCommand writes wait on this so heavy zsh/bash startup scripts don't
+	// race with stdin echo (which would otherwise duplicate the command in output).
+	firstOutputOnce sync.Once
+	firstOutputCh   chan struct{}
 }
 
 // Start creates an interactive process entry and defers PTY creation until first resize.
@@ -116,6 +123,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		isUserShell:   req.IsUserShell,
 		stopSignal:    make(chan struct{}),
 		waitDone:      make(chan struct{}),
+		firstOutputCh: make(chan struct{}),
 		// Store start parameters for deferred initialization
 		started:  false,
 		startCmd: req.Command,
@@ -267,11 +275,21 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	go r.readOutput(proc)
 	go r.wait(proc)
 
-	// If an initial command was provided, write it to the PTY after a short delay
-	// to allow the shell to initialize and display its prompt
+	// Wait for the shell to print its prompt before writing the initial command.
+	// readOutput closes firstOutputCh on the first PTY read; without that gate a
+	// heavy zsh/bash startup races the write and zsh ends up rendering the
+	// command twice — once from PTY echo, once when it repaints with the
+	// pending input. We still cap the wait so silent shells don't hang.
 	if req.InitialCommand != "" {
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-proc.firstOutputCh:
+			case <-time.After(2 * time.Second):
+				r.logger.Warn("initial command write timed out waiting for shell prompt",
+					zap.String("process_id", proc.info.ID))
+			}
+			// Brief settle so the prompt is fully painted before we type into it.
+			time.Sleep(50 * time.Millisecond)
 			proc.mu.Lock()
 			pty := proc.ptmx
 			proc.mu.Unlock()
