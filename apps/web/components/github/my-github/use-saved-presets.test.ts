@@ -1,11 +1,31 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readStorage, type SavedPreset } from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 
+// Provide a simple in-memory localStorage mock so the tests are not sensitive
+// to how the test runner exposes window.localStorage (e.g. Node's
+// --localstorage-file flag without a valid path).
+function makeLocalStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+  };
+}
+
+const localStorageMock = makeLocalStorageMock();
+vi.stubGlobal("localStorage", localStorageMock);
+
 function set(raw: string | null) {
-  if (raw === null) window.localStorage.removeItem(STORAGE_KEY);
-  else window.localStorage.setItem(STORAGE_KEY, raw);
+  if (raw === null) localStorageMock.removeItem(STORAGE_KEY);
+  else localStorageMock.setItem(STORAGE_KEY, raw);
 }
 
 const valid: SavedPreset = {
@@ -19,7 +39,7 @@ const valid: SavedPreset = {
 
 describe("readStorage", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    localStorageMock.clear();
   });
 
   it("returns empty array when no value is stored", () => {
