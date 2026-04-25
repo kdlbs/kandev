@@ -168,6 +168,18 @@ test.describe("Plan panel auto-open + indicator", () => {
     await session.clickTab("Plan");
     await expect(planTabIndicator(testPage)).toHaveCount(0);
 
+    // Layout persistence is debounced (~300ms) — wait for the saved
+    // layout to actually include the Plan panel before reloading,
+    // otherwise the restore will not bring it back.
+    await testPage.waitForFunction(
+      () => {
+        const raw = localStorage.getItem("dockview-layout-v1");
+        return !!raw && raw.includes('"id":"plan"');
+      },
+      null,
+      { timeout: 5_000 },
+    );
+
     // Reload
     await testPage.goto(`/t/${taskId}`);
     await session.waitForLoad();
