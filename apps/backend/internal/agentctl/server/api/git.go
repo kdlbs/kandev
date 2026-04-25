@@ -10,30 +10,40 @@ import (
 	"go.uber.org/zap"
 )
 
+// Repo selects a repository sub-directory of the workspace for multi-repo
+// task roots. Optional. Empty = workspace root (single-repo behavior).
+// All git request structs below embed this field via the standard `repo` JSON
+// key (or `repo` form key for GET endpoints).
+
 // GitPullRequest for POST /api/v1/git/pull
 type GitPullRequest struct {
-	Rebase bool `json:"rebase"`
+	Rebase bool   `json:"rebase"`
+	Repo   string `json:"repo,omitempty"`
 }
 
 // GitPushRequest for POST /api/v1/git/push
 type GitPushRequest struct {
-	Force       bool `json:"force"`
-	SetUpstream bool `json:"set_upstream"`
+	Force       bool   `json:"force"`
+	SetUpstream bool   `json:"set_upstream"`
+	Repo        string `json:"repo,omitempty"`
 }
 
 // GitRebaseRequest for POST /api/v1/git/rebase
 type GitRebaseRequest struct {
 	BaseBranch string `json:"base_branch"`
+	Repo       string `json:"repo,omitempty"`
 }
 
 // GitMergeRequest for POST /api/v1/git/merge
 type GitMergeRequest struct {
 	BaseBranch string `json:"base_branch"`
+	Repo       string `json:"repo,omitempty"`
 }
 
 // GitAbortRequest for POST /api/v1/git/abort
 type GitAbortRequest struct {
 	Operation string `json:"operation"` // "merge" or "rebase"
+	Repo      string `json:"repo,omitempty"`
 }
 
 // GitCommitRequest for POST /api/v1/git/commit
@@ -41,26 +51,31 @@ type GitCommitRequest struct {
 	Message  string `json:"message"`
 	StageAll bool   `json:"stage_all"`
 	Amend    bool   `json:"amend"`
+	Repo     string `json:"repo,omitempty"`
 }
 
 // GitRenameBranchRequest for POST /api/v1/git/rename-branch
 type GitRenameBranchRequest struct {
 	NewName string `json:"new_name"`
+	Repo    string `json:"repo,omitempty"`
 }
 
 // GitStageRequest for POST /api/v1/git/stage
 type GitStageRequest struct {
 	Paths []string `json:"paths"` // Empty = stage all
+	Repo  string   `json:"repo,omitempty"`
 }
 
 // GitUnstageRequest for POST /api/v1/git/unstage
 type GitUnstageRequest struct {
 	Paths []string `json:"paths"` // Empty = unstage all
+	Repo  string   `json:"repo,omitempty"`
 }
 
 // GitDiscardRequest for POST /api/v1/git/discard
 type GitDiscardRequest struct {
 	Paths []string `json:"paths"` // Required - files to discard
+	Repo  string   `json:"repo,omitempty"`
 }
 
 // GitShowCommitRequest for GET /api/v1/git/commit/:sha
@@ -71,6 +86,7 @@ type GitShowCommitRequest struct {
 // GitRevertCommitRequest for POST /api/v1/git/revert-commit
 type GitRevertCommitRequest struct {
 	CommitSHA string `json:"commit_sha"`
+	Repo      string `json:"repo,omitempty"`
 }
 
 // GitCreatePRRequest for POST /api/v1/git/create-pr
@@ -79,12 +95,14 @@ type GitCreatePRRequest struct {
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
 	Draft      bool   `json:"draft"`
+	Repo       string `json:"repo,omitempty"`
 }
 
 // GitResetRequest for POST /api/v1/git/reset
 type GitResetRequest struct {
 	CommitSHA string `json:"commit_sha"`
 	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
+	Repo      string `json:"repo,omitempty"`
 }
 
 // GitLogRequest for GET /api/v1/git/log
@@ -92,11 +110,29 @@ type GitLogRequest struct {
 	Since        string `form:"since"`         // Base commit SHA (exclusive)
 	TargetBranch string `form:"target_branch"` // Target branch for merge-base calculation (e.g., "origin/main")
 	Limit        int    `form:"limit"`         // Max commits to return
+	Repo         string `form:"repo"`
 }
 
 // GitCumulativeDiffRequest for GET /api/v1/git/cumulative-diff
 type GitCumulativeDiffRequest struct {
 	Base string `form:"base" binding:"required"` // Base commit SHA
+	Repo string `form:"repo"`
+}
+
+// gitOpForRepo resolves the optional repo subpath to a per-repo GitOperator.
+// On invalid subpath it writes a 400 response and returns nil so callers can
+// `return` immediately. Empty subpath returns the workspace-root operator.
+func (s *Server) gitOpForRepo(c *gin.Context, operation, subpath string) *process.GitOperator {
+	op, err := s.procMgr.GitOperatorFor(subpath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: operation,
+			Error:     err.Error(),
+		})
+		return nil
+	}
+	return op
 }
 
 // handleGitPull handles POST /api/v1/git/pull
@@ -111,7 +147,10 @@ func (s *Server) handleGitPull(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "pull", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Pull(c.Request.Context(), req.Rebase)
 	if err != nil {
 		s.handleGitError(c, "pull", err)
@@ -133,7 +172,10 @@ func (s *Server) handleGitPush(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "push", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
 	if err != nil {
 		s.handleGitError(c, "push", err)
@@ -164,7 +206,10 @@ func (s *Server) handleGitRebase(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "rebase", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Rebase(c.Request.Context(), req.BaseBranch)
 	if err != nil {
 		s.handleGitError(c, "rebase", err)
@@ -195,7 +240,10 @@ func (s *Server) handleGitMerge(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "merge", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Merge(c.Request.Context(), req.BaseBranch)
 	if err != nil {
 		s.handleGitError(c, "merge", err)
@@ -226,7 +274,10 @@ func (s *Server) handleGitAbort(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "abort", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Abort(c.Request.Context(), req.Operation)
 	if err != nil {
 		s.handleGitError(c, "abort", err)
@@ -257,7 +308,10 @@ func (s *Server) handleGitCommit(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "commit", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Commit(c.Request.Context(), req.Message, req.StageAll, req.Amend)
 	if err != nil {
 		s.handleGitError(c, "commit", err)
@@ -288,7 +342,10 @@ func (s *Server) handleGitRenameBranch(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "rename_branch", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.RenameBranch(c.Request.Context(), req.NewName)
 	if err != nil {
 		s.handleGitError(c, "rename_branch", err)
@@ -310,7 +367,10 @@ func (s *Server) handleGitStage(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "stage", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Stage(c.Request.Context(), req.Paths)
 	if err != nil {
 		s.handleGitError(c, "stage", err)
@@ -332,7 +392,10 @@ func (s *Server) handleGitUnstage(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "unstage", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Unstage(c.Request.Context(), req.Paths)
 	if err != nil {
 		s.handleGitError(c, "unstage", err)
@@ -363,7 +426,10 @@ func (s *Server) handleGitDiscard(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "discard", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Discard(c.Request.Context(), req.Paths)
 	if err != nil {
 		s.handleGitError(c, "discard", err)
@@ -392,7 +458,14 @@ func (s *Server) handleGitCreatePR(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(req.Repo)
+	if gitOpErr != nil {
+		c.JSON(http.StatusBadRequest, process.PRCreateResult{
+			Success: false,
+			Error:   gitOpErr.Error(),
+		})
+		return
+	}
 	result, err := gitOp.CreatePR(c.Request.Context(), req.Title, req.Body, req.BaseBranch, req.Draft)
 	if err != nil {
 		if errors.Is(err, process.ErrOperationInProgress) {
@@ -434,7 +507,10 @@ func (s *Server) handleGitRevertCommit(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "revert_commit", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.RevertCommit(c.Request.Context(), req.CommitSHA)
 	if err != nil {
 		s.handleGitError(c, "revert_commit", err)
@@ -455,7 +531,16 @@ func (s *Server) handleGitShowCommit(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	// ShowCommit accepts an optional ?repo= query param.
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(c.Query("repo"))
+	if gitOpErr != nil {
+		c.JSON(http.StatusBadRequest, process.CommitDiffResult{
+			Success:   false,
+			CommitSHA: req.CommitSHA,
+			Error:     gitOpErr.Error(),
+		})
+		return
+	}
 	result, err := gitOp.ShowCommit(c.Request.Context(), req.CommitSHA)
 	if err != nil {
 		s.logger.Error("git show commit failed", zap.String("commit_sha", req.CommitSHA), zap.Error(err))
@@ -504,7 +589,10 @@ func (s *Server) handleGitReset(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp := s.gitOpForRepo(c, "reset", req.Repo)
+	if gitOp == nil {
+		return
+	}
 	result, err := gitOp.Reset(c.Request.Context(), req.CommitSHA, req.Mode)
 	if err != nil {
 		s.handleGitError(c, "reset", err)
@@ -541,7 +629,14 @@ func (s *Server) handleGitLog(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(req.Repo)
+	if gitOpErr != nil {
+		c.JSON(http.StatusBadRequest, process.GitLogResult{
+			Success: false,
+			Error:   gitOpErr.Error(),
+		})
+		return
+	}
 
 	// If target_branch is provided, compute merge-base dynamically.
 	// This ensures we only show commits not yet merged into the target branch,
@@ -583,7 +678,14 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 		return
 	}
 
-	gitOp := s.procMgr.GitOperator()
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(req.Repo)
+	if gitOpErr != nil {
+		c.JSON(http.StatusBadRequest, process.CumulativeDiffResult{
+			Success: false,
+			Error:   gitOpErr.Error(),
+		})
+		return
+	}
 	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), req.Base)
 	if err != nil {
 		s.logger.Error("git cumulative diff failed", zap.String("base", req.Base), zap.Error(err))

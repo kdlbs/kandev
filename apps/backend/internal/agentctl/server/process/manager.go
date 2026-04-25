@@ -112,6 +112,10 @@ type Manager struct {
 	// Git operator for git operations (lazy-initialized)
 	gitOperator   *GitOperator
 	gitOperatorMu sync.Mutex
+	// gitOperatorsBySubpath caches per-subpath operators for multi-repo task
+	// roots. Key is the cleaned subpath (relative to cfg.WorkDir); empty key
+	// is reserved for the root operator and lives in gitOperator above.
+	gitOperatorsBySubpath map[string]*GitOperator
 
 	// Final command string (full command with all adapter args)
 	finalCommand string
@@ -198,8 +202,8 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 	return m.processRunner.List(sessionID)
 }
 
-// GitOperator returns the git operator for git operations.
-// The operator is lazy-initialized on first call.
+// GitOperator returns the git operator for git operations against the
+// workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {
 	m.gitOperatorMu.Lock()
 	defer m.gitOperatorMu.Unlock()
@@ -208,6 +212,54 @@ func (m *Manager) GitOperator() *GitOperator {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 	}
 	return m.gitOperator
+}
+
+// GitOperatorFor returns a git operator scoped to a sub-directory of the
+// workspace. Used by multi-repo task roots where each repository lives at
+// {WorkDir}/{subpath}. Empty subpath returns the root operator.
+//
+// The subpath is validated to prevent path-traversal: it must be a clean
+// relative path with no parent-references and must resolve to an existing
+// directory inside cfg.WorkDir.
+func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
+	subpath = strings.TrimSpace(subpath)
+	if subpath == "" || subpath == "." {
+		return m.GitOperator(), nil
+	}
+
+	cleaned := filepath.Clean(subpath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "..") {
+		return nil, fmt.Errorf("invalid repo subpath: %q", subpath)
+	}
+	if filepath.IsAbs(cleaned) {
+		return nil, fmt.Errorf("repo subpath must be relative: %q", subpath)
+	}
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return nil, fmt.Errorf("repo subpath escapes workspace: %q", subpath)
+		}
+	}
+
+	full := filepath.Join(m.cfg.WorkDir, cleaned)
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, fmt.Errorf("repo subpath not found: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("repo subpath is not a directory: %q", subpath)
+	}
+
+	m.gitOperatorMu.Lock()
+	defer m.gitOperatorMu.Unlock()
+	if m.gitOperatorsBySubpath == nil {
+		m.gitOperatorsBySubpath = make(map[string]*GitOperator)
+	}
+	if op, ok := m.gitOperatorsBySubpath[cleaned]; ok {
+		return op, nil
+	}
+	op := NewGitOperator(full, m.logger, m.workspaceTracker)
+	m.gitOperatorsBySubpath[cleaned] = op
+	return op, nil
 }
 
 // Start starts the agent process
