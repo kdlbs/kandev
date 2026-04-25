@@ -16,6 +16,8 @@ import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import { JiraImportBar } from "@/components/jira/jira-import-bar";
+import type { JiraTicket } from "@/lib/types/jira";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -252,6 +254,11 @@ type TaskFormInputsProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  jiraImport?: {
+    workspaceId: string | null;
+    disabled?: boolean;
+    onImport: (ticket: JiraTicket) => void;
+  };
 };
 
 function useFileAttachments() {
@@ -460,6 +467,44 @@ function useDescriptionInput(
   return { description, textareaRef, handleDescriptionChange };
 }
 
+type FormInputsToolbarProps = {
+  onAttach: () => void;
+  disabled?: boolean;
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt?: boolean;
+  isUtilityConfigured?: boolean;
+  jiraImport?: TaskFormInputsProps["jiraImport"];
+};
+
+function FormInputsToolbar({
+  onAttach,
+  disabled,
+  onEnhancePrompt,
+  isEnhancingPrompt,
+  isUtilityConfigured,
+  jiraImport,
+}: FormInputsToolbarProps) {
+  return (
+    <div className="flex items-center px-1 pb-1">
+      <AttachButton onClick={onAttach} disabled={disabled} />
+      {onEnhancePrompt && (
+        <EnhancePromptButton
+          onClick={onEnhancePrompt}
+          isLoading={isEnhancingPrompt ?? false}
+          isConfigured={isUtilityConfigured}
+        />
+      )}
+      {jiraImport && (
+        <JiraImportBar
+          workspaceId={jiraImport.workspaceId}
+          disabled={jiraImport.disabled}
+          onImport={jiraImport.onImport}
+        />
+      )}
+    </div>
+  );
+}
+
 export const TaskFormInputs = memo(function TaskFormInputs({
   isSessionMode,
   autoFocus,
@@ -472,6 +517,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  jiraImport,
 }: TaskFormInputsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
@@ -531,16 +577,14 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           required={isSessionMode}
           disabled={disabled}
         />
-        <div className="flex items-center px-1 pb-1">
-          <AttachButton onClick={handleAttachClick} disabled={disabled} />
-          {onEnhancePrompt && (
-            <EnhancePromptButton
-              onClick={onEnhancePrompt}
-              isLoading={isEnhancingPrompt ?? false}
-              isConfigured={isUtilityConfigured}
-            />
-          )}
-        </div>
+        <FormInputsToolbar
+          onAttach={handleAttachClick}
+          disabled={disabled}
+          onEnhancePrompt={onEnhancePrompt}
+          isEnhancingPrompt={isEnhancingPrompt}
+          isUtilityConfigured={isUtilityConfigured}
+          jiraImport={jiraImport}
+        />
         <input
           ref={fileInputRef}
           type="file"

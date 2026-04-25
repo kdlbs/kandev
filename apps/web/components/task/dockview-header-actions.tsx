@@ -41,6 +41,7 @@ import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
+import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
@@ -93,11 +94,15 @@ function AddPanelMenuItems({
   state,
   onNewSession,
   onAddTerminal,
+  onRunScript,
+  onRunDevScript,
 }: {
   groupId: string;
   state: ReturnType<typeof useLeftHeaderState>;
   onNewSession: () => void;
   onAddTerminal: () => void;
+  onRunScript: (scriptId: string) => void;
+  onRunDevScript: () => void;
 }) {
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
@@ -138,7 +143,10 @@ function AddPanelMenuItems({
         VS Code
       </DropdownMenuItem>
       {!state.isPassthrough && (
-        <DropdownMenuItem onClick={() => addPlanPanel(groupId)} className="cursor-pointer text-xs">
+        <DropdownMenuItem
+          onClick={() => addPlanPanel({ groupId })}
+          className="cursor-pointer text-xs"
+        >
           <IconFileText className="h-3.5 w-3.5 mr-1.5" />
           Plan
         </DropdownMenuItem>
@@ -164,6 +172,7 @@ function AddPanelMenuItems({
           {prPanelLabel(state.pr.pr_number)}
         </DropdownMenuItem>
       )}
+      <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
     </>
   );
 }
@@ -172,6 +181,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group, containerApi } = props;
   const state = useLeftHeaderState(group.id, containerApi);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const devScript = useActiveSessionDevScript();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
 
   const handleAddTerminal = useCallback(async () => {
@@ -183,6 +193,32 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
       console.error("Failed to create terminal:", error);
     }
   }, [state.activeSessionId, addTerminalPanel, group.id]);
+
+  const handleRunScript = useCallback(
+    async (scriptId: string) => {
+      if (!state.activeSessionId) return;
+      try {
+        const result = await createUserShell(state.activeSessionId, { scriptId });
+        addTerminalPanel(result.terminalId, group.id);
+      } catch (error) {
+        console.error("Failed to run script:", error);
+      }
+    },
+    [state.activeSessionId, addTerminalPanel, group.id],
+  );
+
+  const handleRunDevScript = useCallback(async () => {
+    if (!state.activeSessionId || !devScript) return;
+    try {
+      const result = await createUserShell(state.activeSessionId, {
+        command: devScript,
+        label: "Dev Server",
+      });
+      addTerminalPanel(result.terminalId, group.id);
+    } catch (error) {
+      console.error("Failed to start dev script:", error);
+    }
+  }, [state.activeSessionId, devScript, addTerminalPanel, group.id]);
 
   if (state.isSidebarGroup) return null;
 
@@ -205,6 +241,8 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             state={state}
             onNewSession={() => setShowNewSessionDialog(true)}
             onAddTerminal={handleAddTerminal}
+            onRunScript={handleRunScript}
+            onRunDevScript={handleRunDevScript}
           />
         </DropdownMenuContent>
       </DropdownMenu>
@@ -469,18 +507,6 @@ function CenterRightActions() {
   );
 }
 
-function useHasActiveSessionDevScript() {
-  return useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return false;
-    const repoId = state.taskSessions.items[sessionId]?.repository_id;
-    if (!repoId) return false;
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    const repo = allRepos.find((r) => r.id === repoId);
-    return Boolean(repo?.dev_script?.trim());
-  });
-}
-
 function TerminalGroupRightActions() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const repositoryId = useAppStore((state) => {
@@ -488,7 +514,7 @@ function TerminalGroupRightActions() {
     if (!sessionId) return null;
     return state.taskSessions.items[sessionId]?.repository_id ?? null;
   });
-  const hasDevScript = useHasActiveSessionDevScript();
+  const hasDevScript = Boolean(useActiveSessionDevScript());
 
   const { scripts } = useRepositoryScripts(repositoryId);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
@@ -501,7 +527,7 @@ function TerminalGroupRightActions() {
     async (scriptId: string) => {
       if (!activeSessionId) return;
       try {
-        const result = await createUserShell(activeSessionId, scriptId);
+        const result = await createUserShell(activeSessionId, { scriptId });
         addTerminalPanel(result.terminalId, rightBottomGroupId);
       } catch (error) {
         console.error("Failed to run script:", error);

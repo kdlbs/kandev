@@ -441,6 +441,65 @@ func TestWsUserShellCreate_ScriptID_NoScriptService(t *testing.T) {
 	}
 }
 
+func TestResolveShellScript(t *testing.T) {
+	log := newTestLogger()
+	h := NewShellHandlers(nil, nil, log)
+	ctx := context.Background()
+
+	t.Run("plain shell when no script_id and no command", func(t *testing.T) {
+		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{SessionID: "s1"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if label != "" || cmd != "" {
+			t.Errorf("expected empty label/command, got label=%q command=%q", label, cmd)
+		}
+	})
+
+	t.Run("inline command with explicit label", func(t *testing.T) {
+		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
+			SessionID: "s1",
+			Command:   "echo hi",
+			Label:     "Dev Server",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if label != "Dev Server" {
+			t.Errorf("label = %q, want %q", label, "Dev Server")
+		}
+		if cmd != "echo hi" {
+			t.Errorf("command = %q, want %q", cmd, "echo hi")
+		}
+	})
+
+	t.Run("inline command defaults label to Script", func(t *testing.T) {
+		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
+			SessionID: "s1",
+			Command:   "ls",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if label != "Script" {
+			t.Errorf("label = %q, want %q", label, "Script")
+		}
+		if cmd != "ls" {
+			t.Errorf("command = %q, want %q", cmd, "ls")
+		}
+	})
+
+	t.Run("script_id without script service errors", func(t *testing.T) {
+		_, _, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
+			SessionID: "s1",
+			ScriptID:  "abc",
+		})
+		if err == nil {
+			t.Fatal("expected error when script service is nil")
+		}
+	})
+}
+
 func TestWsUserShellStop_InvalidPayload(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, nil, log)

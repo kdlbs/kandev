@@ -21,6 +21,7 @@ import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-execution-message";
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
+import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { ActionMessage } from "@/components/task/chat/messages/action-message";
 
@@ -126,6 +127,21 @@ const adapters: MessageAdapter[] = [
     render: (comment, ctx) => (
       <ToolExecuteMessage comment={comment} worktreePath={ctx.worktreePath} />
     ),
+  },
+  {
+    // Claude-acp's Monitor tool — long-lived background script with streaming
+    // events. Rendered with a dedicated card that shows watching state, event
+    // count, and the most recent event tail. Detected via the structured
+    // `monitor` view the adapter writes into the Generic payload's output
+    // wrapper (presence-based rather than title-based so renames upstream
+    // don't break the match). Must run BEFORE the generic tool_call adapter.
+    matches: (comment) => {
+      if (comment.type !== "tool_call") return false;
+      const meta = comment.metadata as ToolCallMetadata | undefined;
+      const out = meta?.normalized?.generic?.output as { monitor?: unknown } | undefined;
+      return !!out && typeof out === "object" && !!out.monitor;
+    },
+    render: (comment) => <MonitorMessage comment={comment} />,
   },
   {
     // Subagent Task tool calls with nested children

@@ -29,6 +29,9 @@ import (
 	// GitHub integration
 	githubpkg "github.com/kandev/kandev/internal/github"
 
+	// JIRA integration
+	jirapkg "github.com/kandev/kandev/internal/jira"
+
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -331,6 +334,15 @@ func startAgentInfrastructure(
 		ghPoller.Start(ctx)
 		addCleanup(func() error { ghPoller.Stop(); return nil })
 		log.Info("GitHub poller started")
+	}
+
+	// Start JIRA auth-health poller. Probes stored credentials for every
+	// configured workspace on a fixed cadence so the UI can show a real
+	// connected/disconnected status without doing its own polling.
+	if services.Jira != nil {
+		jiraPoller := jirapkg.NewPoller(services.Jira, log)
+		jiraPoller.Start(ctx)
+		addCleanup(func() error { jiraPoller.Stop(); return nil })
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,

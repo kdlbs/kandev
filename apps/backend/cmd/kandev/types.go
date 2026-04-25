@@ -6,6 +6,7 @@ import (
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/jira"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -43,4 +44,5 @@ type Services struct {
 	Utility      *utilityservice.Service
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
+	Jira         *jira.Service
 }

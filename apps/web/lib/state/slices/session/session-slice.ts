@@ -74,7 +74,13 @@ export const defaultSessionState: SessionSliceState = {
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
-  taskPlans: { byTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {}, savingByTaskId: {} },
+  taskPlans: {
+    byTaskId: {},
+    loadingByTaskId: {},
+    loadedByTaskId: {},
+    savingByTaskId: {},
+    lastSeenUpdatedAtByTaskId: {},
+  },
   queue: { bySessionId: {}, isLoading: {} },
 };
 
@@ -176,6 +182,12 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
+        delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
+      }),
+    markTaskPlanSeen: (taskId: string) =>
+      set((draft) => {
+        const plan = draft.taskPlans.byTaskId[taskId];
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
       }),
   };
 }

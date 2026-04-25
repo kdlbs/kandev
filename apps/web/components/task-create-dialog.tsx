@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback } from "react";
+import type { JiraTicket } from "@/lib/types/jira";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -77,6 +78,8 @@ type DialogFormBodyProps = {
   isPassthroughProfile: boolean;
   initialDescription: string;
   hasDescription: boolean;
+  workspaceId: string | null;
+  onJiraImport?: (ticket: JiraTicket) => void;
   branchOptions: ReturnType<typeof useBranchOptions>;
   branchesLoading: boolean;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
@@ -112,6 +115,8 @@ function DialogFormBody({
   isPassthroughProfile,
   initialDescription,
   hasDescription,
+  workspaceId,
+  onJiraImport,
   branchOptions,
   branchesLoading,
   agentProfileOptions,
@@ -146,6 +151,8 @@ function DialogFormBody({
         fs={fs}
         handleKeyDown={handleKeyDown}
         enhance={enhance}
+        workspaceId={workspaceId}
+        onJiraImport={onJiraImport}
       />
       {!isSessionMode &&
         renderCreateEditSelectors({
@@ -265,6 +272,22 @@ function useEnhanceForDialog(fs: DialogFormState) {
     });
   }, [enhancePrompt, fs]);
   return { onEnhance, isLoading: isEnhancingPrompt, isConfigured };
+}
+
+function useJiraImportHandler(fs: DialogFormState) {
+  return useCallback(
+    (ticket: JiraTicket) => {
+      const title = `[${ticket.key}] ${ticket.summary}`;
+      fs.setTaskName(title);
+      fs.setHasTitle(true);
+      const description = ticket.description?.trim()
+        ? `${ticket.description}\n\n---\nJira: ${ticket.url}`
+        : `Jira: ${ticket.url}`;
+      fs.descriptionInputRef.current?.setValue(description);
+      fs.setHasDescription(true);
+    },
+    [fs],
+  );
 }
 
 type SubmitWiringArgs = {
@@ -401,6 +424,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     submitHandlers,
     handleKeyDown,
     enhance: useEnhanceForDialog(fs),
+    handleJiraImport: useJiraImportHandler(fs),
   };
 }
 
@@ -412,6 +436,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { repositoriesLoading, branchesLoading, computed, handlers, handleKeyDown } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
+  const { handleJiraImport } = setup;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -449,6 +474,8 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             isPassthroughProfile={computed.isPassthroughProfile}
             initialDescription={fs.currentDefaults.description}
             hasDescription={fs.hasDescription}
+            workspaceId={workspaceId}
+            onJiraImport={handleJiraImport}
             branchOptions={computed.branchOptions}
             branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
             agentProfileOptions={computed.agentProfileOptions}
