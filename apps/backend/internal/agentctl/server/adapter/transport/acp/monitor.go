@@ -119,6 +119,41 @@ func monitorCommandFromPayload(payload *streams.NormalizedPayload) string {
 	return cmd
 }
 
+// isTrackedMonitor returns true if any taskID -> toolCallID mapping in the
+// session's activeMonitors entry equals the given toolCallID. Used by
+// convertToolCallResultUpdate to recognize agent-emitted terminal updates
+// for Monitors that we already know about, so the rawOutput string doesn't
+// stomp the structured Monitor view in Generic.Output.
+func (a *Adapter) isTrackedMonitor(sessionID, toolCallID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, tcID := range a.activeMonitors[sessionID] {
+		if tcID == toolCallID {
+			return true
+		}
+	}
+	return false
+}
+
+// dropMonitorByToolCallIDLocked is the same as dropMonitorByToolCallID but
+// the caller already holds Adapter.mu. Used inside convertToolCallResultUpdate
+// where the lock is already held for the duration of the payload update
+// block.
+func (a *Adapter) dropMonitorByToolCallIDLocked(sessionID, toolCallID string) {
+	monitors := a.activeMonitors[sessionID]
+	if monitors == nil {
+		return
+	}
+	for taskID, tcID := range monitors {
+		if tcID == toolCallID {
+			delete(monitors, taskID)
+		}
+	}
+	if len(monitors) == 0 {
+		delete(a.activeMonitors, sessionID)
+	}
+}
+
 // trackMonitor records a registered Monitor against a session.
 func (a *Adapter) trackMonitor(sessionID, taskID, toolCallID string) {
 	a.mu.Lock()

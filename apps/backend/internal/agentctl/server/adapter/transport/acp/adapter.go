@@ -1490,6 +1490,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 			zap.String("tool_call_id", toolCallID))
 	}
 
+	// A terminal tool_call_update for an already-tracked Monitor (the agent
+	// proactively ended the watch). NormalizeToolResult would otherwise stomp
+	// the `{monitor: …}` view in Generic.Output with the raw string body, so
+	// we suppress the normalize call and let the closing-out logic below mark
+	// the view as ended instead.
+	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
+
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
 
 	a.mu.Lock()
@@ -1501,8 +1508,10 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput)
 	}
 
-	// Update stored payload with tool result output
-	if tcu.RawOutput != nil && payload != nil {
+	// Update stored payload with tool result output. Skip for tracked-Monitor
+	// terminal updates so Generic.Output stays the structured `{monitor: …}`
+	// view rather than getting clobbered by the rawOutput string.
+	if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
 	}
 
@@ -1513,6 +1522,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// tool_call instead.
 	if isMonitorRegistration && payload != nil {
 		seedMonitorView(payload, monitorTaskID, monitorCommandFromPayload(payload))
+	}
+
+	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
+	// updates so the card flips from "watching" to "ended" without losing
+	// the accumulated event count or recent-events tail.
+	if isTrackedMonitorTerminal && payload != nil {
+		markMonitorEnded(payload, "exited")
 	}
 
 	// Enrich modify_file payload from tool_call_contents.
@@ -1532,6 +1548,12 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 
 	if isTerminal {
 		delete(a.activeToolCalls, toolCallID)
+		// Also drop tracked Monitor: this terminal update is the
+		// agent-emitted close, so the prompt-end sweep must not re-emit a
+		// "Monitor exited" event for this same toolCallID.
+		if isTrackedMonitorTerminal {
+			a.dropMonitorByToolCallIDLocked(sessionID, toolCallID)
+		}
 	}
 	a.mu.Unlock()
 

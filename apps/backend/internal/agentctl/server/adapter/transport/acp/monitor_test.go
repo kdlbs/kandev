@@ -331,6 +331,74 @@ func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
 	}
 }
 
+// TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView is a
+// regression guard for an E2E failure on the first PR push: when the agent
+// emits its own terminal `tool_call_update` for a tracked Monitor (status
+// completed, plain rawOutput like "Monitor exited"), `NormalizeToolResult`
+// would clobber `Generic.Output` with that string and the frontend's
+// MonitorMessage matcher (which checks for `output.monitor`) would no
+// longer fire. Frontend would fall back to the generic tool_call card.
+func TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView(t *testing.T) {
+	a := newTestAdapter()
+
+	// Initial pending tool_call so activeToolCalls has a Generic payload.
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f /var/log/x"},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed tool_call returned nil")
+	}
+
+	// Registration update — establishes the Monitor view and tracks taskID.
+	completed := acp.ToolCallStatus("completed")
+	registerTcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task taskZZ, timeout 60000ms).",
+	}
+	if ev := a.convertToolCallResultUpdate("s1", registerTcu); ev == nil {
+		t.Fatalf("registration update returned nil")
+	}
+
+	// Agent-emitted Monitor end — what mock-agent's e2e:monitor_end produces
+	// and what real claude-acp emits when a Monitor script exits naturally.
+	endTcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor exited",
+	}
+	ev := a.convertToolCallResultUpdate("s1", endTcu)
+	if ev == nil {
+		t.Fatal("expected event for end update, got nil")
+	}
+	if ev.NormalizedPayload == nil || ev.NormalizedPayload.Generic() == nil {
+		t.Fatalf("expected Generic payload to survive, got %+v", ev.NormalizedPayload)
+	}
+	out, ok := ev.NormalizedPayload.Generic().Output.(map[string]any)
+	if !ok {
+		t.Fatalf("Generic.Output = %v (%T), want the {monitor: …} wrapper preserved through agent-emitted end",
+			ev.NormalizedPayload.Generic().Output, ev.NormalizedPayload.Generic().Output)
+	}
+	monitor, ok := out["monitor"].(map[string]any)
+	if !ok {
+		t.Fatal("Generic.Output[monitor] missing — agent-emitted end stomped the view")
+	}
+	if monitor["ended"] != true {
+		t.Errorf("monitor.ended = %v, want true (terminal update should mark ended)", monitor["ended"])
+	}
+	// The tracked entry should be dropped so the prompt-end sweep does not
+	// re-emit a terminal event for the same toolCallID.
+	if a.isTrackedMonitor("s1", "tc-monitor") {
+		t.Error("Monitor still tracked after agent-emitted end — sweep would double-emit")
+	}
+}
+
 // TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls is a
 // regression guard for a real wire-bug discovered in CI: when the parent
 // prompt naturally ends, `cancelActiveToolCalls` would blanket-cancel every
