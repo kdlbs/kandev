@@ -410,6 +410,55 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	// Promote a non-primary session to primary when it becomes RUNNING and the
+	// current primary is idle. Without this the sidebar would keep showing the
+	// idle primary's state while the new chat tab is actively running.
+	if nextState == models.TaskSessionStateRunning {
+		s.maybePromoteToPrimary(ctx, taskID, sessionID)
+	}
+}
+
+// maybePromoteToPrimary promotes a non-primary session to primary when the
+// current primary is not itself running. The sidebar derives task status from
+// the primary session's state, so a secondary chat tab that the user starts
+// after the primary finished its turn would otherwise leave the task showing
+// "Turn Finished" while the new agent is actually working.
+//
+// Called both when a session transitions to RUNNING and when a brand new
+// session is launched (the launch path bypasses updateTaskSessionState — the
+// executor writes STARTING directly via persistLaunchState).
+func (s *Service) maybePromoteToPrimary(ctx context.Context, taskID, sessionID string) {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return
+	}
+	var thisSession, currentPrimary *models.TaskSession
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			thisSession = sess
+		}
+		if sess.IsPrimary {
+			currentPrimary = sess
+		}
+	}
+	if thisSession == nil || thisSession.IsPrimary {
+		return
+	}
+	// Don't steal primary from another session that is itself running —
+	// concurrent RUNNING sessions would otherwise flip-flop the indicator.
+	if currentPrimary != nil && currentPrimary.State == models.TaskSessionStateRunning {
+		return
+	}
+	if err := s.SetPrimarySession(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to promote session to primary",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	s.logger.Info("promoted active session to primary",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
 }
 
 // maybePromotePrimary promotes the next best active session to primary when the
