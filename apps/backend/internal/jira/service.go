@@ -25,12 +25,13 @@ type SecretStore interface {
 // Service orchestrates Jira config storage, the per-workspace client cache, and
 // the fetch/transition operations used by the WebSocket + HTTP handlers.
 type Service struct {
-	store    *Store
-	secrets  SecretStore
-	log      *logger.Logger
-	mu       sync.Mutex
-	clientFn ClientFactory
-	cache    map[string]Client // workspaceID → client, cleared on config change.
+	store     *Store
+	secrets   SecretStore
+	log       *logger.Logger
+	mu        sync.Mutex
+	clientFn  ClientFactory
+	cache     map[string]Client // workspaceID → client, cleared on config change.
+	probeHook func(workspaceID string)
 }
 
 // ClientFactory builds a Client for the given config + secret. Overridable so
@@ -117,13 +118,11 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 	}
 	s.invalidateClient(req.WorkspaceID)
 	// Probe asynchronously so a slow Atlassian doesn't stall the save response.
-	// Use a detached context with its own timeout: the request ctx may be
-	// cancelled when this returns, but we still want the probe to complete and
-	// update the auth-health row that the UI is about to poll.
+	// RecordAuthHealth manages its own probe timeout, so a fresh
+	// context.Background() is enough — the request ctx may be cancelled when
+	// this returns, but the probe and the DB write must still complete.
 	go func(workspaceID string) {
-		probeCtx, cancel := context.WithTimeout(context.Background(), authProbeTimeout)
-		defer cancel()
-		s.RecordAuthHealth(probeCtx, workspaceID)
+		s.RecordAuthHealth(context.Background(), workspaceID)
 	}(req.WorkspaceID)
 	return s.GetConfig(ctx, req.WorkspaceID)
 }
@@ -177,6 +176,20 @@ func (s *Service) Store() *Store {
 // stall the caller. The /myself endpoint typically responds in <500ms.
 const authProbeTimeout = 15 * time.Second
 
+// authHealthWriteTimeout bounds the DB write that persists the probe outcome.
+// Always derived from a fresh context.Background so a probe that exhausted its
+// own deadline can still record the failure.
+const authHealthWriteTimeout = 5 * time.Second
+
+// SetProbeHook installs a callback fired at the end of each RecordAuthHealth
+// call (after the DB write). Production code never sets this; tests use it to
+// synchronize on probe completion without sleep-polling.
+func (s *Service) SetProbeHook(fn func(workspaceID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.probeHook = fn
+}
+
 // RecordAuthHealth probes the workspace's stored credentials and writes the
 // outcome onto the JiraConfig row. Used both at config-save time (so the UI
 // reflects the new credentials immediately) and by the background poller.
@@ -194,9 +207,21 @@ func (s *Service) RecordAuthHealth(ctx context.Context, workspaceID string) {
 	case res != nil && !res.OK:
 		errMsg = res.Error
 	}
-	if updateErr := s.store.UpdateAuthHealth(ctx, workspaceID, ok, errMsg, time.Now().UTC()); updateErr != nil {
+	// Detach the DB write from ctx: a probe that exhausted its 15s deadline
+	// would otherwise pass an already-expired context to UpdateAuthHealth and
+	// drop the failure record on the floor (so the UI never flips to "auth
+	// failed" until the next poll).
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer writeCancel()
+	if updateErr := s.store.UpdateAuthHealth(writeCtx, workspaceID, ok, errMsg, time.Now().UTC()); updateErr != nil {
 		s.log.Warn("jira: update auth health failed",
 			zap.String("workspace_id", workspaceID), zap.Error(updateErr))
+	}
+	s.mu.Lock()
+	hook := s.probeHook
+	s.mu.Unlock()
+	if hook != nil {
+		hook(workspaceID)
 	}
 }
 

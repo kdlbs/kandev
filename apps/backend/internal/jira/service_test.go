@@ -98,6 +98,7 @@ type svcFixture struct {
 	secrets    *fakeSecretStore
 	client     *fakeClient
 	factoryHit int
+	probed     chan string
 }
 
 func newSvcFixture(t *testing.T) *svcFixture {
@@ -106,11 +107,18 @@ func newSvcFixture(t *testing.T) *svcFixture {
 		store:   newTestStore(t),
 		secrets: newFakeSecretStore(),
 		client:  &fakeClient{},
+		probed:  make(chan string, 8),
 	}
 	f.svc = NewService(f.store, f.secrets, func(_ *JiraConfig, _ string) Client {
 		f.factoryHit++
 		return f.client
 	}, logger.Default())
+	f.svc.SetProbeHook(func(workspaceID string) {
+		select {
+		case f.probed <- workspaceID:
+		default:
+		}
+	})
 	return f
 }
 
@@ -150,7 +158,7 @@ func TestService_SetConfig_ProbesAuthImmediately(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f.svc, "ws-1")
+	cfg := waitForAuthProbe(t, f, "ws-1")
 	if !cfg.LastOk {
 		t.Errorf("expected LastOk=true after async probe, got %+v", cfg)
 	}
@@ -170,7 +178,7 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f.svc, "ws-1")
+	cfg := waitForAuthProbe(t, f, "ws-1")
 	if cfg.LastOk {
 		t.Error("expected LastOk=false after failed probe")
 	}
@@ -179,21 +187,27 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 	}
 }
 
-// waitForAuthProbe polls GetConfig until the async probe spawned by SetConfig
-// has populated LastCheckedAt. Polling is bounded; a 2s ceiling is well above
-// the expected sub-millisecond cost of the in-memory fakes.
-func waitForAuthProbe(t *testing.T, svc *Service, workspaceID string) *JiraConfig {
+// waitForAuthProbe blocks until the async probe spawned by SetConfig has
+// completed (signaled via the fixture's probeHook), then returns the persisted
+// config. A 2s ceiling guards against bugs that prevent the hook from firing.
+func waitForAuthProbe(t *testing.T, f *svcFixture, workspaceID string) *JiraConfig {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		cfg, err := svc.GetConfig(context.Background(), workspaceID)
-		if err == nil && cfg != nil && cfg.LastCheckedAt != nil {
+	for {
+		select {
+		case got := <-f.probed:
+			if got != workspaceID {
+				continue
+			}
+			cfg, err := f.svc.GetConfig(context.Background(), workspaceID)
+			if err != nil {
+				t.Fatalf("get config after probe: %v", err)
+			}
 			return cfg
+		case <-time.After(2 * time.Second):
+			t.Fatalf("async probe hook did not fire for %q within 2s", workspaceID)
+			return nil
 		}
-		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("async probe did not record LastCheckedAt for %q within 2s", workspaceID)
-	return nil
 }
 
 func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
