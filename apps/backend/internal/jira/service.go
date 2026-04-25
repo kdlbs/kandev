@@ -78,7 +78,11 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*JiraConfi
 	}
 	cfg.HasSecret = exists
 	if exists && cfg.AuthMethod == AuthMethodSessionCookie {
-		if secret, revealErr := s.secrets.Reveal(ctx, key); revealErr == nil {
+		secret, revealErr := s.secrets.Reveal(ctx, key)
+		if revealErr != nil {
+			s.log.Warn("jira: secret reveal failed",
+				zap.String("workspace_id", workspaceID), zap.Error(revealErr))
+		} else {
 			cfg.SecretExpiresAt = parseSessionCookieExpiry(secret)
 		}
 	}
@@ -127,13 +131,19 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 	return s.GetConfig(ctx, req.WorkspaceID)
 }
 
-// DeleteConfig removes both the config row and the stored secret.
+// DeleteConfig removes both the config row and the stored secret. A failure to
+// delete the secret is logged (not returned) so the config row deletion still
+// surfaces success — the orphaned secret is rare and the user can retry by
+// re-saving + deleting again.
 func (s *Service) DeleteConfig(ctx context.Context, workspaceID string) error {
 	if err := s.store.DeleteConfig(ctx, workspaceID); err != nil {
 		return err
 	}
 	if s.secrets != nil {
-		_ = s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID))
+		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
+			s.log.Warn("jira: secret delete failed",
+				zap.String("workspace_id", workspaceID), zap.Error(err))
+		}
 	}
 	s.invalidateClient(workspaceID)
 	return nil
@@ -284,7 +294,14 @@ func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, er
 	secret := ""
 	if s.secrets != nil {
 		secret, err = s.secrets.Reveal(ctx, SecretKeyForWorkspace(workspaceID))
-		if err != nil || secret == "" {
+		if err != nil {
+			// Don't conflate a transient secret-store failure with "user never
+			// configured Jira". The UI gates on ErrNotConfigured to render a
+			// configure-CTA; surfacing the real error gives the user a path to
+			// retry rather than leaving them stuck.
+			return nil, fmt.Errorf("read jira secret: %w", err)
+		}
+		if secret == "" {
 			return nil, ErrNotConfigured
 		}
 	}

@@ -58,9 +58,11 @@ export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButto
     setError(null);
     try {
       await getJiraTicket(workspaceId, key);
-      const prefix = `${key}: `;
-      const currentTitle = (taskTitle ?? "").trim();
-      const newTitle = currentTitle ? `${prefix}${currentTitle}` : key;
+      // Strip an existing leading "PROJ-123: " so re-linking a task to a
+      // different ticket replaces the prefix instead of stacking
+      // ("PROJ-456: PROJ-123: ...").
+      const stripped = (taskTitle ?? "").trim().replace(/^[A-Z][A-Z0-9]+-\d+:\s*/, "");
+      const newTitle = stripped ? `${key}: ${stripped}` : key;
       await updateTask(taskId, { title: newTitle });
       toast.success(`Linked to ${key}`);
       setOpen(false);

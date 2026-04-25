@@ -459,6 +459,9 @@ function useJiraSettings(workspaceId: string) {
       });
       setConfig(saved);
       setForm(configToForm(saved));
+      // Clear any inline test result from the previous credentials so the
+      // alert reflects only the currently-saved state.
+      setTestResult(null);
       toast({ description: "Jira configuration saved", variant: "success" });
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
@@ -473,6 +476,7 @@ function useJiraSettings(workspaceId: string) {
       await deleteJiraConfig(workspaceId);
       setConfig(null);
       setForm(emptyForm);
+      setTestResult(null);
       toast({ description: "Jira configuration removed", variant: "success" });
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });

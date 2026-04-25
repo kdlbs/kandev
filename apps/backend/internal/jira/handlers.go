@@ -171,6 +171,11 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"transitioned": true})
 }
 
+// errCodeJiraNotConfigured is the wire-level code surfaced to the UI when the
+// workspace has no saved Jira credentials. The same string is used by both the
+// HTTP and WebSocket layers so the frontend can branch on a single value.
+const errCodeJiraNotConfigured = "JIRA_NOT_CONFIGURED"
+
 // writeClientError maps service-level errors to HTTP responses. ErrNotConfigured
 // surfaces as 503 so the UI can prompt the user to configure Jira; upstream
 // API errors propagate their status codes.
@@ -178,7 +183,7 @@ func (c *Controller) writeClientError(ctx *gin.Context, err error) {
 	if errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "Jira is not configured for this workspace",
-			"code":  "jira_not_configured",
+			"code":  errCodeJiraNotConfigured,
 		})
 		return
 	}
@@ -225,7 +230,7 @@ func wsReply(msg *ws.Message, payload interface{}) (*ws.Message, error) {
 
 func wsFail(msg *ws.Message, err error) (*ws.Message, error) {
 	if errors.Is(err, ErrNotConfigured) {
-		return ws.NewError(msg.ID, msg.Action, "JIRA_NOT_CONFIGURED", err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, errCodeJiraNotConfigured, err.Error(), nil)
 	}
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 }

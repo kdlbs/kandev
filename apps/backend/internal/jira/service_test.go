@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,11 +94,13 @@ func (c *fakeClient) SearchTickets(_ context.Context, _, _ string, _ int) (*Sear
 }
 
 type svcFixture struct {
-	svc        *Service
-	store      *Store
-	secrets    *fakeSecretStore
-	client     *fakeClient
-	factoryHit int
+	svc     *Service
+	store   *Store
+	secrets *fakeSecretStore
+	client  *fakeClient
+	// atomic so the async probe goroutine spawned by SetConfig can call
+	// clientFor (and the injected factory) without racing the test thread.
+	factoryHit atomic.Int32
 	probed     chan string
 }
 
@@ -110,7 +113,7 @@ func newSvcFixture(t *testing.T) *svcFixture {
 		probed:  make(chan string, 8),
 	}
 	f.svc = NewService(f.store, f.secrets, func(_ *JiraConfig, _ string) Client {
-		f.factoryHit++
+		f.factoryHit.Add(1)
 		return f.client
 	}, logger.Default())
 	f.svc.SetProbeHook(func(workspaceID string) {
@@ -239,28 +242,33 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t",
 	})
-	// First ticket call builds client.
+	// SetConfig spawns an async probe that also builds the client; wait for it
+	// so the rest of the test sees a stable factoryHit count.
+	waitForAuthProbe(t, f, "ws-1")
 	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-1"); err != nil {
 		t.Fatalf("get1: %v", err)
 	}
-	hits := f.factoryHit
+	hits := f.factoryHit.Load()
 	// Second call reuses cached client.
 	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-2"); err != nil {
 		t.Fatalf("get2: %v", err)
 	}
-	if f.factoryHit != hits {
-		t.Errorf("factory should be cached, hits %d→%d", hits, f.factoryHit)
+	if got := f.factoryHit.Load(); got != hits {
+		t.Errorf("factory should be cached, hits %d→%d", hits, got)
 	}
-	// Updating config invalidates cache.
+	// Updating config invalidates cache. Wait for the async probe spawned by
+	// SetConfig to finish before sampling factoryHit so the second probe can't
+	// race with the GetTicket assertion.
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
 		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t2",
 	})
+	waitForAuthProbe(t, f, "ws-1")
 	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-3"); err != nil {
 		t.Fatalf("get3: %v", err)
 	}
-	if f.factoryHit <= hits {
-		t.Errorf("factory should rebuild after config change, hits=%d", f.factoryHit)
+	if got := f.factoryHit.Load(); got <= hits {
+		t.Errorf("factory should rebuild after config change, hits=%d", got)
 	}
 }
 

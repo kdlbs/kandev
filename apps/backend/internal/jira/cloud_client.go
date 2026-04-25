@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -252,7 +253,7 @@ type transitionsResponse struct {
 // ticket with an empty transitions menu.
 func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket, error) {
 	var issue issueResponse
-	path := "/rest/api/3/issue/" + ticketKey + "?expand=renderedFields"
+	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "?expand=renderedFields"
 	if err := c.do(ctx, http.MethodGet, path, nil, &issue); err != nil {
 		return nil, err
 	}
@@ -274,7 +275,7 @@ func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTic
 // ListTransitions returns the transitions currently available for ticketKey.
 func (c *CloudClient) ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error) {
 	var resp transitionsResponse
-	path := "/rest/api/3/issue/" + ticketKey + "/transitions"
+	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "/transitions"
 	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
@@ -296,7 +297,7 @@ func (c *CloudClient) DoTransition(ctx context.Context, ticketKey, transitionID 
 	body := map[string]interface{}{
 		"transition": map[string]string{"id": transitionID},
 	}
-	path := "/rest/api/3/issue/" + ticketKey + "/transitions"
+	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "/transitions"
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
