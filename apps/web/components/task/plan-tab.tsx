@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { useAppStore } from "@/components/state-provider";
 
@@ -28,9 +28,11 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   }, [api, activeTaskId, markTaskPlanSeen]);
 
   // If the tab is already active when the plan changes (user is viewing it),
-  // treat updates as immediately seen.
+  // treat updates as immediately seen. Use useLayoutEffect so the seen-mark
+  // commits before paint — otherwise the dot flashes for one frame between
+  // the WS update render and the seen-mark render.
   const planUpdatedAt = plan?.updated_at;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (api.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
   }, [api, activeTaskId, markTaskPlanSeen, planUpdatedAt]);
 
