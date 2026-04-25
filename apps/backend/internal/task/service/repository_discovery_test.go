@@ -204,6 +204,20 @@ func TestResolveGitDir(t *testing.T) {
 	}
 }
 
+// canonicalTempDir returns a t.TempDir() path with symlinks resolved. macOS
+// returns `/var/folders/...` from t.TempDir() while EvalSymlinks (used inside
+// resolveGitDirWithin) yields `/private/var/folders/...`; without
+// canonicalization the test's expected paths and the function's output live in
+// different namespaces and equality checks fail. On Linux this is a no-op.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval temp dir: %v", err)
+	}
+	return resolved
+}
+
 // TestResolveGitDirWithin_RejectsEscapedGitdir exercises the security-critical
 // branch of resolveGitDirWithin: a repo whose `.git` is a file pointer
 // (worktree style) whose embedded `gitdir:` points outside any allowed root.
@@ -211,8 +225,8 @@ func TestResolveGitDir(t *testing.T) {
 // removed, callers like readGitCurrentBranch would read arbitrary files on
 // disk.
 func TestResolveGitDirWithin_RejectsEscapedGitdir(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := canonicalTempDir(t)
+	outside := canonicalTempDir(t)
 
 	repoPath := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
@@ -233,8 +247,8 @@ func TestResolveGitDirWithin_RejectsEscapedGitdir(t *testing.T) {
 // The lexical path looks fine — it's `<allowed>/repo/.git` — but following
 // the symlink would read from elsewhere. EvalSymlinks must catch that.
 func TestResolveGitDirWithin_RejectsSymlinkedGitDir(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := canonicalTempDir(t)
+	outside := canonicalTempDir(t)
 	repoPath := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -253,7 +267,7 @@ func TestResolveGitDirWithin_RejectsSymlinkedGitDir(t *testing.T) {
 // worktree case: `.git` file points to a sibling path that's still inside the
 // repo (e.g. main repo's `.git/worktrees/<name>`).
 func TestResolveGitDirWithin_AllowsRepoLocalGitFile(t *testing.T) {
-	repoPath := t.TempDir()
+	repoPath := canonicalTempDir(t)
 	worktreesDir := filepath.Join(repoPath, ".git", "worktrees", "wt")
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatalf("mkdir worktrees: %v", err)
