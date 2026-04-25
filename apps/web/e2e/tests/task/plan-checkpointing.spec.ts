@@ -319,6 +319,93 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await expect(v2Author).toHaveText("You");
   });
 
+  test("preview dialog: row click opens content, restore goes through confirm", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const script = planWriteScript([
+      { content: "Older draft", delayMsAfter: 2500 },
+      { content: "Newer draft" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint preview",
+      script,
+    );
+    await openPlanPanel(session);
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+
+    // Open the older revision via row click.
+    await session.openRevisionPreview(1);
+    await expect(session.previewBody()).toContainText("Older draft", { timeout: 5_000 });
+    await expect(session.previewRestoreButton()).toBeVisible();
+
+    // Restore from preview routes through the confirm dialog.
+    await session.previewRestoreButton().click();
+    await expect(session.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await session.revertConfirmOk().click();
+    await expect(session.revertConfirmDialog()).toBeHidden({ timeout: 5_000 });
+    // HEAD is now the older content again.
+    await expect(
+      session.planPanel.getByText("Older draft", { exact: false }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await session.openRewind();
+    await expectRevisionCount(session, 3);
+  });
+
+  test("compare diff: toggle two revisions and view line-level adds/removes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const script = planWriteScript([
+      { content: "alpha\nbeta\ngamma", delayMsAfter: 2500 },
+      { content: "alpha\nBETA\ngamma\ndelta" },
+    ]);
+    const { session } = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Checkpoint compare",
+      script,
+    );
+    await openPlanPanel(session);
+    await session.openRewind();
+    await expectRevisionCount(session, 2);
+
+    // Toggle compare on both rows.
+    await session.compareToggle(session.revisionRow(1)).click();
+    await session.compareToggle(session.revisionRow(2)).click();
+    await expect(session.compareGoButton()).toBeEnabled({ timeout: 5_000 });
+
+    // Open the diff dialog.
+    await session.compareGoButton().click();
+    await expect(session.diffDialog()).toBeVisible({ timeout: 5_000 });
+    // Header reflects v1 → v2 ordering regardless of toggle order.
+    await expect(session.diffDialog()).toContainText("Compare v1 → v2");
+    // Summary text appears once content has loaded.
+    await expect(session.diffSummary()).toContainText("added", { timeout: 5_000 });
+    await expect(session.diffSummary()).toContainText("removed");
+    // At least one add and one remove line.
+    await expect(session.diffLines("add").first()).toBeVisible();
+    await expect(session.diffLines("remove").first()).toBeVisible();
+
+    // Restore from diff targets the older revision (v1).
+    await session.diffRestoreButton().click();
+    await expect(session.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await expect(session.revertConfirmDialog()).toContainText("version 1");
+    await session.revertConfirmCancel().click();
+  });
+
   test("persistence across reload: revisions survive page refresh", async ({
     testPage,
     apiClient,
