@@ -21,6 +21,8 @@ import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
+import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
+import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -131,6 +133,7 @@ const TaskTopBar = memo(function TaskTopBar({
         />
       )}
       <TopBarRight
+        taskId={taskId}
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
         gitStatus={git}
@@ -140,6 +143,7 @@ const TaskTopBar = memo(function TaskTopBar({
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
+        taskTitle={taskTitle}
       />
     </header>
   );
@@ -292,6 +296,7 @@ function GitAheadBehindBadges({
 
 /** Right section: git badges, debug toggle, document controls, editors, VCS, settings */
 function TopBarRight({
+  taskId,
   activeSessionId,
   baseBranch,
   gitStatus,
@@ -301,7 +306,9 @@ function TopBarRight({
   workspaceId,
   isRemoteExecutor,
   isAgentctlReady,
+  taskTitle,
 }: {
+  taskId?: string | null;
   activeSessionId?: string | null;
   baseBranch?: string;
   gitStatus: { ahead: number; behind: number };
@@ -311,6 +318,7 @@ function TopBarRight({
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
+  taskTitle?: string;
 }) {
   return (
     <div className="flex items-center gap-2 justify-end">
@@ -341,6 +349,11 @@ function TopBarRight({
             isAgentctlReady={isAgentctlReady}
           />
           <PRTopbarButton />
+          {extractJiraKey(taskTitle) ? (
+            <JiraTicketButton workspaceId={workspaceId} taskTitle={taskTitle} />
+          ) : (
+            <JiraLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+          )}
           <QuickChatButton workspaceId={workspaceId} />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
           <LayoutPresetSelector />

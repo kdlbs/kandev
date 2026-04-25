@@ -33,6 +33,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/health"
+	"github.com/kandev/kandev/internal/jira"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
@@ -467,6 +468,11 @@ func registerSecondaryRoutes(
 		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
 		github.RegisterMockRoutes(p.router, p.services.GitHub, p.log)
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Jira != nil {
+		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
+		p.log.Debug("Registered JIRA handlers (HTTP + WebSocket)")
 	}
 
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)

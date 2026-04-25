@@ -385,6 +385,17 @@ const (
 	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
 )
 
+// Jira integration actions
+const (
+	ActionJiraConfigGet        = "jira.config.get"
+	ActionJiraConfigSet        = "jira.config.set"
+	ActionJiraConfigDelete     = "jira.config.delete"
+	ActionJiraConfigTest       = "jira.config.test"
+	ActionJiraTicketGet        = "jira.ticket.get"
+	ActionJiraTicketTransition = "jira.ticket.transition"
+	ActionJiraProjectsList     = "jira.projects.list"
+)
+
 // Error codes
 const (
 	ErrorCodeBadRequest    = "BAD_REQUEST"
