@@ -93,9 +93,11 @@ function MonitorHeader({ vm }: { vm: MonitorViewModel }) {
 
 export const MonitorMessage = memo(function MonitorMessage({ comment }: MonitorMessageProps) {
   const vm = buildMonitorViewModel(comment);
-  // Auto-expand while watching so the user can see the most recent events
-  // stream in. Collapse once it ends to keep finished sessions tidy.
-  const { isExpanded, handleToggle } = useExpandState(vm.status, !vm.ended);
+  // Auto-expand whenever there are events to surface — both during the
+  // watch (so users see the stream live) and after it ends (so they can
+  // review what happened). Empty Monitors collapse since there's nothing
+  // to show.
+  const { isExpanded, handleToggle } = useExpandState(vm.status, vm.recentEvents.length > 0);
 
   return (
     <ExpandableRow

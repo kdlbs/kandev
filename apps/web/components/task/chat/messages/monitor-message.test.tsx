@@ -91,6 +91,25 @@ describe("MonitorMessage", () => {
     expect(html).not.toContain("watching");
   });
 
+  it("keeps the events tail expanded after the monitor ends", () => {
+    // After the run completes the user still wants to see what fired.
+    // Auto-expand keys off `recentEvents.length > 0`, not `!ended`.
+    const html = renderToStaticMarkup(
+      <MonitorMessage
+        comment={monitorMessage({
+          ended: true,
+          endReason: "exited",
+          status: "complete",
+          eventCount: 3,
+          recentEvents: ["queued", "running", "passed"],
+        })}
+      />,
+    );
+    expect(html).toContain(">queued<");
+    expect(html).toContain(">running<");
+    expect(html).toContain(">passed<");
+  });
+
   it("flips to 'ended (session restart)' when the agent process restarted", () => {
     const html = renderToStaticMarkup(
       <MonitorMessage comment={monitorMessage({ ended: true, endReason: "session_restart" })} />,
