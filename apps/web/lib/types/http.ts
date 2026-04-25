@@ -216,11 +216,33 @@ export type TaskRepository = {
   task_id: string;
   repository_id: string;
   base_branch: string;
+  /**
+   * Optional branch to fetch and check out after worktree creation
+   * (e.g. a PR head branch). Empty when no specific branch is requested.
+   */
+  checkout_branch?: string;
   position: number;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
+
+/**
+ * Returns the primary task repository (lowest Position, first by created_at on
+ * tie). Returns undefined for repo-less tasks. Consumers that historically
+ * picked `task.repositories?.[0]` should call this to get position-aware
+ * selection consistent with the backend.
+ */
+export function primaryTaskRepository(
+  repos: TaskRepository[] | undefined,
+): TaskRepository | undefined {
+  if (!repos || repos.length === 0) return undefined;
+  let primary = repos[0];
+  for (const r of repos) {
+    if (r.position < primary.position) primary = r;
+  }
+  return primary;
+}
 
 export type Task = {
   id: string;
