@@ -31,6 +31,14 @@ type wakeupScheduler struct {
 	timer     *time.Timer
 	sessionID string
 	prompt    string
+	// gen is incremented on every schedule/cancel. fireOnce captures the gen
+	// at scheduling time and refuses to fire if it doesn't match the current
+	// gen — that closes the race where time.AfterFunc has already launched a
+	// goroutine for the old timer (timer.Stop() returns false) and the new
+	// schedule() then writes new state before the stale fireOnce acquires the
+	// lock. Without gen, the stale fireOnce would consume the new state and
+	// fire the new wakeup immediately while clobbering w.timer.
+	gen uint64
 }
 
 // pendingWakeup accumulates partial state for an in-flight ScheduleWakeup tool
@@ -79,9 +87,11 @@ func (w *wakeupScheduler) schedule(sessionID, prompt string, unixMs int64) {
 	if w.timer != nil {
 		w.timer.Stop()
 	}
+	w.gen++
+	myGen := w.gen
 	w.sessionID = sessionID
 	w.prompt = prompt
-	w.timer = time.AfterFunc(delay, w.fireOnce)
+	w.timer = time.AfterFunc(delay, func() { w.fireOnce(myGen) })
 	w.mu.Unlock()
 
 	w.logger.Info("scheduled wakeup",
@@ -91,16 +101,23 @@ func (w *wakeupScheduler) schedule(sessionID, prompt string, unixMs int64) {
 }
 
 // fireOnce is invoked by the timer and dispatches to the configured callback.
+// myGen identifies the schedule call that armed this timer; if a later
+// schedule or cancel has bumped w.gen, this fire is stale and is dropped.
 // It clears the pending state before calling the callback so a re-entry from
 // inside the callback (e.g. the synthetic prompt schedules another wakeup)
 // can overwrite cleanly.
-func (w *wakeupScheduler) fireOnce() {
+func (w *wakeupScheduler) fireOnce(myGen uint64) {
 	w.mu.Lock()
+	if myGen != w.gen {
+		w.mu.Unlock()
+		return
+	}
 	sessionID := w.sessionID
 	prompt := w.prompt
 	w.timer = nil
 	w.sessionID = ""
 	w.prompt = ""
+	w.gen++
 	w.mu.Unlock()
 
 	if sessionID == "" {
@@ -112,7 +129,12 @@ func (w *wakeupScheduler) fireOnce() {
 	w.fire(sessionID, prompt)
 }
 
-// cancel stops any pending wakeup. Safe to call multiple times.
+// cancel stops any pending wakeup. Safe to call multiple times. Bumping gen
+// invalidates any in-flight fireOnce that has already been launched but is
+// blocked on the lock — without that, a stale fireOnce after Stop()=false
+// would still observe the cleared state and no-op cleanly, but cancel races
+// with concurrent schedule could otherwise let a stale fire consume newly
+// scheduled state.
 func (w *wakeupScheduler) cancel() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -122,6 +144,7 @@ func (w *wakeupScheduler) cancel() {
 	}
 	w.sessionID = ""
 	w.prompt = ""
+	w.gen++
 }
 
 // extractScheduleWakeup inspects an ACP tool-call meta map and returns

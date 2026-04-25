@@ -231,6 +231,52 @@ func TestWakeupScheduler_RescheduleReplacesPrior(t *testing.T) {
 	}
 }
 
+// TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState reproduces the race
+// where time.AfterFunc has already launched a fireOnce goroutine for the old
+// timer before schedule() runs. The stale fireOnce must observe the gen
+// mismatch and bail out, not consume the newly scheduled wakeup.
+func TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState(t *testing.T) {
+	log := newTestWakeupLogger(t)
+	cap := newWakeupCapture()
+	sched := newWakeupScheduler(log, cap.fire)
+
+	// Manually drive the race: arm a timer, capture its gen, then simulate
+	// a stale fire by calling fireOnce with the captured gen *after* a
+	// rescheduling has bumped gen.
+	sched.mu.Lock()
+	sched.gen++
+	staleGen := sched.gen
+	sched.sessionID = "old-sess"
+	sched.prompt = "old-prompt"
+	sched.mu.Unlock()
+
+	// Reschedule before stale fire executes.
+	sched.schedule("new-sess", "new-prompt", time.Now().Add(time.Hour).UnixMilli())
+
+	// Stale fire arrives now — should be a no-op.
+	sched.fireOnce(staleGen)
+
+	if got := atomic.LoadInt32(&cap.calls); got != 0 {
+		t.Errorf("stale fireOnce fired anyway: calls=%d", got)
+	}
+
+	// New schedule should still fire normally when its timer elapses.
+	sched.cancel()
+	sched.schedule("new-sess", "new-prompt", time.Now().Add(40*time.Millisecond).UnixMilli())
+
+	select {
+	case <-cap.fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-race wakeup did not fire")
+	}
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if cap.lastSess != "new-sess" || cap.lastPrmpt != "new-prompt" {
+		t.Errorf("fired with wrong args: sess=%q prompt=%q", cap.lastSess, cap.lastPrmpt)
+	}
+}
+
 func TestWakeupScheduler_IgnoresMissingFields(t *testing.T) {
 	log := newTestWakeupLogger(t)
 	cap := newWakeupCapture()

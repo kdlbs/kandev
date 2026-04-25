@@ -141,6 +141,13 @@ type Adapter struct {
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
+
+	// lifetimeCtx is cancelled by Close. Background work that may outlive
+	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
+	// context from this one so it aborts when the adapter shuts down rather
+	// than continuing to drive a dead subprocess.
+	lifetimeCtx    context.Context
+	lifetimeCancel context.CancelFunc
 }
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -148,6 +155,7 @@ type Adapter struct {
 // cfg.AgentID is required for debug file naming.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
+	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
 		cfg:             cfg,
 		logger:          l,
@@ -158,6 +166,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		activeMonitors:  make(map[string]map[string]string),
 		pendingWakeups:  make(map[string]*pendingWakeup),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		lifetimeCtx:     ctx,
+		lifetimeCancel:  cancel,
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	return a
@@ -272,10 +282,13 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
-	// A fresh session invalidates any pending wakeup keyed to the prior session.
-	a.wakeup.cancel()
+	// A fresh session invalidates any pending wakeup keyed to the prior
+	// session. Reset pendingWakeups and cancel the scheduler under one
+	// a.mu critical section so a concurrent handleWakeupEvent can't slip
+	// a stale entry between the two operations.
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
 	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
@@ -707,7 +720,9 @@ func (a *Adapter) fireWakeup(sessionID, prompt string) {
 		zap.Int("prompt_len", len(prompt)))
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), wakeupPromptTimeout)
+		// Derive from lifetimeCtx so a concurrent Close aborts the in-flight
+		// prompt instead of letting it run against a dead subprocess.
+		ctx, cancel := context.WithTimeout(a.lifetimeCtx, wakeupPromptTimeout)
 		defer cancel()
 		if err := a.Prompt(ctx, prompt, nil); err != nil {
 			a.logger.Error("synthetic wakeup prompt failed",
@@ -890,9 +905,13 @@ func (a *Adapter) Close() error {
 
 	a.logger.Info("closing ACP adapter")
 
-	// Stop any pending ScheduleWakeup timer so it doesn't fire after close.
+	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
+	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
 	if a.wakeup != nil {
 		a.wakeup.cancel()
+	}
+	if a.lifetimeCancel != nil {
+		a.lifetimeCancel()
 	}
 
 	// Clean up any saved attachments
