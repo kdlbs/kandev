@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconLoader2, IconRestore } from "@tabler/icons-react";
 import {
@@ -14,6 +15,16 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatRelativeTime } from "@/lib/utils";
+
+// Lazy load the Tiptap read-only renderer the same way the live editor does to
+// avoid SSR issues and keep the popover bundle slim.
+const PlanReadOnlyMarkdown = dynamic(
+  () =>
+    import("@/components/editors/tiptap/tiptap-plan-readonly").then(
+      (mod) => mod.PlanReadOnlyMarkdown,
+    ),
+  { ssr: false },
+);
 
 type Props = {
   revision: TaskPlanRevision | null;
@@ -159,8 +170,5 @@ function PreviewBodyInner({ content, error }: { content: string | null; error: s
   if (content.trim() === "") {
     return <div className="text-xs text-muted-foreground italic">(empty plan)</div>;
   }
-  // Markdown source rendered as a monospaced read-only block. Avoids pulling a
-  // second editor into the bundle for what is effectively a consultation view;
-  // the live editor still owns rich rendering.
-  return <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">{content}</pre>;
+  return <PlanReadOnlyMarkdown content={content} />;
 }
