@@ -238,8 +238,15 @@ func (a *jiraSecretAdapter) Reveal(ctx context.Context, id string) (string, erro
 func (a *jiraSecretAdapter) Set(ctx context.Context, id, name, value string) error {
 	// Try update first; on "not found", fall through to create. The secrets
 	// layer only exposes error strings (not typed errors), so we detect the
-	// missing row by attempting a Get and inspecting the result.
-	if _, err := a.store.Get(ctx, id); err == nil {
+	// missing row via Exists which inspects the "secret not found:" prefix.
+	// Treating every Get error as "not found" would turn a transient DB error
+	// on an existing row into a constraint-violation Create that masks the
+	// real cause.
+	exists, err := a.Exists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exists {
 		return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
 	}
 	return a.store.Create(ctx, &secrets.SecretWithValue{
