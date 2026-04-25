@@ -486,6 +486,18 @@ func (h *TaskHandlers) commitFreshBranch(
 	inputs []httpTaskRepositoryInput,
 	repos []dto.TaskRepositoryInput,
 ) bool {
+	hasFresh := false
+	for _, raw := range inputs {
+		if raw.FreshBranch {
+			hasFresh = true
+			break
+		}
+	}
+	if !hasFresh {
+		// No fresh-branch opt-in — repos were already persisted by CreateTask,
+		// so skip the destructive checkout and the DELETE+INSERT rewrite.
+		return true
+	}
 	if !h.applyFreshBranch(c, title, inputs, repos) {
 		if delErr := h.service.DeleteTask(c.Request.Context(), taskID); delErr != nil {
 			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
