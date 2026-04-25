@@ -19,7 +19,7 @@ Orchestrate introduces a skill registry where users create, edit, and manage ski
 - A skill is a directory containing:
   - `SKILL.md` (required): markdown instructions that teach the agent how to perform a specific capability. This is the primary content the agent reads.
   - Optional scripts and reference files: helper scripts, templates, examples, checklists that the agent can invoke or reference during execution.
-- This matches the structure used by Claude Code's native skill discovery, Paperclip's skill system, and other agent CLIs.
+- This matches the structure used by Claude Code's native skill discovery and other agent CLIs.
 
 ### Skill registry
 

@@ -117,7 +117,7 @@ Agents need persistent knowledge that survives across sessions -- who the user i
   - `content`: text content (markdown).
   - `metadata`: JSON (timestamp, source session ID, status active/superseded, access count).
   - `created_at`, `updated_at`.
-- Three layers (inspired by Paperclip's PARA memory system):
+- Three layers (PARA-inspired):
 
 **Layer 1: Knowledge** (`layer=knowledge`)
 - Structured facts organized by topic key (entities, projects, preferences).

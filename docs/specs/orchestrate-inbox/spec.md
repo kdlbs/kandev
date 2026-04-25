@@ -75,18 +75,48 @@ Orchestrate adds an inbox that aggregates all items requiring human attention, a
    - `task_review` approved: the task status moves to `done`.
    - `task_review` rejected: the task returns to `in_progress` with the reviewer's feedback.
 
-### Per-task approval gate
+### Task execution policy (reviewers and approvers)
 
-- Each task has a `requires_approval` boolean field (default: inherited from workspace setting).
-- When `requires_approval=true` and an agent marks the task as done:
-  1. The task status moves to `in_review` instead of `done`.
-  2. A `task_review` approval is created in the inbox.
-  3. The agent's session completes.
-  4. The user reviews the task's output and approves or rejects.
-  5. On approval: task moves to `done`. Downstream blockers are resolved, triggering the next subtask's agent.
-  6. On rejection: task returns to `in_progress` with the user's feedback. The agent receives a wakeup with the rejection note.
-- Users can set `requires_approval` when creating a task manually, or agents can set it during subtask creation (e.g. the CEO marks the "spec" subtask as requiring approval before "build" can start).
-- The blocker system handles sequencing: subtask 2 is `blocked_by: [subtask 1]`. When subtask 1 reaches `done` (after approval if gated), the blocker resolves and a `task_blockers_resolved` wakeup fires for subtask 2's agent.
+- Each task has an optional `execution_policy` JSON field defining review and approval stages.
+- The policy contains ordered stages, each with a type, participants, and an approvals-needed count:
+  ```
+  execution_policy: {
+    stages: [
+      { type: "review", participants: [{type: "agent", id: "security-agent"}, {type: "agent", id: "qa-agent"}], approvals_needed: 2 },
+      { type: "approval", participants: [{type: "user", id: "cfl"}], approvals_needed: 1 }
+    ]
+  }
+  ```
+- **Reviewers** (type=review): N agents/users who review the task output in parallel. Each reviewer runs independently and provides feedback. Useful for parallel review by specialized agents (security, performance, QA).
+- **Approvers** (type=approval): M agents/users who approve before the task can move to done. Requires `approvals_needed` count to be met.
+- An `execution_state` JSON field tracks the current stage, which participants have responded, and the outcome.
+- Stages run sequentially (stage 2 waits for stage 1 to complete). Within a stage, participants run in parallel. To get sequential reviews, use multiple review stages with one participant each:
+  ```
+  stages: [
+    { type: "review", participants: [{id: "security-agent"}], approvals_needed: 1 },
+    { type: "review", participants: [{id: "qa-agent"}], approvals_needed: 1 },
+    { type: "approval", participants: [{id: "user"}], approvals_needed: 1 }
+  ]
+  ```
+
+### Review/approval flow
+
+- When an agent marks a task as done:
+  1. If the task has a review stage: status moves to `in_review`. All reviewer participants are woken in parallel. Each reviewer runs independently, reviews the task's output, and posts comments with an approve or reject verdict.
+  2. The task stays in `in_review` until all `approvals_needed` responses are collected. No action is taken on individual responses -- the system waits for the full set.
+  3. If all reviewers approve: the task advances to the next stage (approval, or `done` if no approval stage).
+  4. If any reviewer rejects: the task waits for all remaining reviewers to finish, then returns to `in_progress`. The assignee agent receives a single wakeup with ALL review comments aggregated, so it can address all feedback at once rather than thrashing on individual reviews.
+  5. If the task has an approval stage: an approval inbox item is created for each approver. When `approvals_needed` approvals are met, the task moves to `done`.
+  6. If any approver rejects: same pattern -- wait for all, then return to `in_progress` with all feedback.
+  7. If no execution policy: task moves directly to `done`.
+- Downstream blockers resolve only when the task reaches `done` (after all stages pass).
+
+### Per-task and workspace defaults
+
+- Users set reviewers/approvers when creating a task (via the properties panel or new issue dialog).
+- Agents can set reviewers/approvers during subtask creation (e.g. the CEO creates a "build" subtask with the QA agent as reviewer).
+- Workspace setting `require_approval_for_task_completion` (default `false`): if true, all orchestrate tasks default to having the user as an approver. Can be overridden per task.
+- The blocker system handles sequencing: subtask 2 is `blocked_by: [subtask 1]`. When subtask 1 reaches `done` (after all review/approval stages), the blocker resolves and a `task_blockers_resolved` wakeup fires for subtask 2's agent.
 
 ### Approval configuration
 
@@ -157,6 +187,10 @@ Orchestrate adds an inbox that aggregates all items requiring human attention, a
 - **GIVEN** the workspace setting `require_approval_for_new_agents=false`, **WHEN** the CEO submits a hire request, **THEN** the agent is auto-approved and activates immediately. An activity entry is still logged.
 
 - **GIVEN** an agent session that fails with an error, **WHEN** the error is detected, **THEN** an `agent.error` inbox item appears with the error message and a link to the failed session.
+
+- **GIVEN** a task with reviewers [security-agent, qa-agent] (approvals_needed=2) and approver [user], **WHEN** the assignee agent completes the task, **THEN** the task moves to `in_review`. Both reviewer agents are woken in parallel. Each reviews the changes and posts comments. When both approve, the task advances to the approval stage and an inbox item is created for the user.
+
+- **GIVEN** a task in review stage where the security-agent rejects, **WHEN** the rejection is recorded, **THEN** the task returns to `in_progress`. The assignee agent receives a wakeup with the security agent's feedback. The QA agent's pending review is cancelled.
 
 - **GIVEN** a parent task "Add auth" with subtasks Spec (requires_approval=true) -> Build (blocked_by Spec) -> Review -> Ship, **WHEN** the spec agent completes the Spec subtask, **THEN** the Spec task moves to `in_review` and an inbox item appears. **WHEN** the user approves, **THEN** Spec moves to `done`, the blocker on Build resolves, and the build agent receives a `task_blockers_resolved` wakeup.
 

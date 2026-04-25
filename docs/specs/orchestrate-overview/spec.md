@@ -18,7 +18,8 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 
 - A new route at `/orchestrate` is accessible from a top-level navigation link on the kandev homepage.
 - The `/orchestrate` page has its own full-replacement sidebar (replaces the default sidebar when on `/orchestrate/*` routes).
-- The sidebar replicates Paperclip's navigation structure:
+- The sidebar replicates a dedicated navigation structure:
+  - **Workspace switcher**: at the top of the sidebar, showing the current workspace name. Dropdown to switch between workspaces (company/workspace selector dropdown).
   - **Top actions**: New Issue, Dashboard, Inbox
   - **Work**: Issues, Routines, Goals
   - **Projects**: expandable project list with `+` to create
@@ -31,7 +32,9 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 |-------|---------|
 | `/orchestrate` | Dashboard: agent status cards, run activity chart (last 14 days), agents enabled count with status breakdown, recent activity feed |
 | `/orchestrate/inbox` | Pending approvals, budget alerts, agent errors, items requiring human review |
-| `/orchestrate/issues` | All orchestrate-managed tasks (assigned to agent instances). Click-through navigates to existing `/t/[taskId]` for detail |
+| `/orchestrate/issues` | Issues list with hierarchical tree view, view modes (list/board), toolbar (search, filters, sort, group, column picker, nesting toggle) |
+| `/orchestrate/issues/[id]` | Task detail - simple mode (default): breadcrumb, description, properties panel, chat/activity tabs, sub-issues. Toggle to advanced mode. |
+| `/orchestrate/issues/[id]?mode=advanced` | Task detail - advanced mode: kandev dockview layout within orchestrate chrome (chat, terminal, plan, files, changes). Auto-launches ACP session (idle until user sends message). |
 | `/orchestrate/routines` | Routine definitions, run history, enable/disable toggles |
 | `/orchestrate/goals` | Goal hierarchy with linked projects |
 | `/orchestrate/projects` | Project list with task counts, budget usage, status |
@@ -40,13 +43,77 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 | `/orchestrate/agents/[id]` | Agent detail with tabs: Overview, Skills, Runs, Memory, Channels |
 | `/orchestrate/company/skills` | Skill catalog CRUD |
 | `/orchestrate/company/costs` | Cost explorer with breakdowns by agent/project/model/time |
+| `/orchestrate/company/org` | Org chart: visual tree of agent hierarchy (`reports_to` relationships). Interactive node cards showing icon, name, role, adapter type, status dot. Zoom/pan/fit controls. Click a node to open agent detail. |
 | `/orchestrate/company/activity` | Full audit log with filtering |
-| `/orchestrate/company/settings` | Global orchestrate configuration |
+| `/orchestrate/company/settings` | Global orchestrate configuration: approval defaults, budget defaults, config source repo, import/export |
+
+### Issues list (`/orchestrate/issues`)
+
+- Hierarchical tree view showing parent/child task relationships with collapsible nesting.
+- View modes:
+  - **List** (default): rows with status icon, identifier (KAN-1), title, timestamp. Nesting toggle for parent/child tree.
+  - **Board**: kanban columns grouped by status.
+- Toolbar: `[+ New Issue] [Search]  |  [List/Board toggle] [Nesting] [Columns] [Filters] [Sort] [Group]`
+- Filters: status, priority, assignee, project, labels.
+- Sort: status, priority, title, created, updated (asc/desc).
+- Group by: status, priority, assignee, project, parent, none.
+- Column picker: status, identifier, assignee, project, labels, updated.
+- Click a row to open the task detail page.
+
+### Task detail - simple mode (`/orchestrate/issues/[id]`)
+
+The default view when opening a task from the issues list. Issue-tracker-style layout:
+
+- **Header**: breadcrumb (Issues > Parent > Task), identifier + status icon + project badge, copy/menu buttons.
+- **Main content area** (left):
+  - Title (editable).
+  - Description (rendered markdown, editable).
+  - Action buttons: + New Sub-Issue, Upload attachment, + New document.
+  - **Tabs**: Chat | Activity.
+    - Chat: comment thread showing agent run transcripts (with collapsible tool call details) and user/agent comments. Input box for posting comments.
+    - Activity: timeline of status changes, assignments, approvals.
+  - Sub-issues section: same list/board toolbar as the main issues page, scoped to children of this task.
+- **Properties panel** (right sidebar, collapsible):
+  - Status (dropdown), Priority (dropdown), Labels (multi-select).
+  - Assignee (agent or user), Project, Parent (link to parent task).
+  - Blocked by (multi-select), Blocking (read-only).
+  - Sub-issues (list with + Add sub-issue).
+  - Reviewers (multi-select: agents/users), Approvers (multi-select: agents/users).
+  - Created by, Started, Completed, Created, Updated timestamps.
+- **Toggle to advanced mode**: button/link that switches to the dockview layout.
+
+### Task detail - advanced mode (`/orchestrate/issues/[id]?mode=advanced`)
+
+For users who want to micro-manage a task with full kandev tooling:
+
+- Layout within orchestrate chrome (sidebar and topbar remain):
+  ```
+  | orchestrate sidebar | orchestrate topbar                                              |
+                        | dockview tabs (chat, terminal, plan, etc.) | right sidebar (files, changes) |
+  ```
+- This is a fixed dockview layout (no layout presets, no left task list sidebar).
+- Reuses existing kandev dockview components: chat panel, terminal, plan panel, file tree, changes panel.
+- **Auto-launches ACP session**: on entering advanced mode, the agent's ACP session is started/resumed (no prompt sent, no tokens consumed). The agent is ready and idle until the user sends a message.
+- Both session types coexist on the same task: one-shot heartbeat runs from the scheduler + interactive sessions from advanced mode.
+- When the user leaves advanced mode (toggles back to simple or navigates away), the session stays open and can be resumed later.
+- Toggle back to simple mode via button/link.
+
+### New issue dialog
+
+- Modal triggered by "+ New Issue" button (from issues list or sidebar).
+- Fields:
+  - Title (auto-expanding textarea).
+  - Quick selector row: "For [Assignee] in [Project]" with overflow menu (three dots) to add Reviewer and Approver.
+  - Description (markdown editor).
+  - Bottom bar chips: Status (default: Todo), Priority, Upload, more options.
+  - Footer: Discard Draft | Create Issue button.
+- Draft auto-saved to localStorage.
+- When creating from a parent task context, shows a "sub-issue of KAN-X" badge.
 
 ### Relationship to existing features
 
 - Orchestrate tasks ARE kandev tasks. The existing `Task` model is extended with new fields (`assignee_agent_instance_id`, `origin`, `project_id`). No separate task table.
-- Clicking a task in `/orchestrate/issues` opens the existing `/t/[taskId]` page with its full session detail (messages, git, PR, file tree).
+- Clicking a task in `/orchestrate/issues` opens the orchestrate task detail page (simple mode). Advanced mode provides the full kandev dockview experience within orchestrate chrome.
 - The existing kanban board at `/` continues to work. Users can use kanban without Orchestrate. Orchestrate-managed tasks appear on the kanban board like any other task.
 - Existing task sessions, turns, messages, executors, and worktrees are reused. Orchestrate creates sessions through the same orchestrator pipeline.
 
@@ -60,11 +127,17 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 
 - **GIVEN** a user on the kandev homepage, **WHEN** they click the "Orchestrate" link in the top navigation, **THEN** they see the Orchestrate dashboard with agent status cards, run activity chart, and recent activity feed. The sidebar shows the Orchestrate navigation instead of the default sidebar.
 
-- **GIVEN** a user on `/orchestrate/issues`, **WHEN** they click a task row, **THEN** they navigate to `/t/[taskId]` and see the full task detail (sessions, messages, git, file tree) -- the same view as tasks opened from the kanban board.
+- **GIVEN** a user on `/orchestrate/issues`, **WHEN** they click a task row, **THEN** they see the task detail in simple mode: description, properties panel, chat/activity tabs, sub-issues section.
+
+- **GIVEN** a user viewing a task in simple mode, **WHEN** they click "Advanced Mode", **THEN** the layout switches to the kandev dockview (chat, terminal, plan, files, changes) within the orchestrate sidebar and topbar. The ACP session is auto-started/resumed (idle, no tokens consumed until the user sends a message).
+
+- **GIVEN** a user in advanced mode, **WHEN** they toggle back to simple mode, **THEN** the dockview layout is replaced with the simple view. The ACP session stays open for later resumption.
 
 - **GIVEN** a user on `/orchestrate`, **WHEN** they click the kandev logo or a "Back to Board" link, **THEN** they return to `/` with the default sidebar restored.
 
 - **GIVEN** a task created by Orchestrate (origin=agent or origin=routine), **WHEN** the user opens the kanban board, **THEN** the task appears in the appropriate workflow step alongside manually-created tasks.
+
+- **GIVEN** a user clicking "+ New Issue", **WHEN** the dialog opens, **THEN** they see title, "For [Assignee] in [Project]", description editor, and a three-dot menu to add Reviewer and Approver participants.
 
 ## Out of scope
 

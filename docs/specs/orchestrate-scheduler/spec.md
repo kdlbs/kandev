@@ -10,7 +10,7 @@ owner: cfl
 
 Kandev's existing scheduler is reactive -- tasks enter the queue only when a user explicitly starts them or sends a prompt. There is no mechanism for agents to be woken autonomously when events happen: a task is assigned, a comment is posted, blockers are resolved, a routine fires, or an approval is decided. Without autonomous wakeups, agents cannot operate independently; every interaction requires a human to initiate it.
 
-Orchestrate adds a wakeup queue that sits alongside the existing task queue. Events in the system generate wakeup requests for agent instances. The scheduler claims and processes wakeups by spawning one-shot agent sessions -- the Paperclip "heartbeat" model adapted to kandev's existing orchestrator pipeline.
+Orchestrate adds a wakeup queue that sits alongside the existing task queue. Events in the system generate wakeup requests for agent instances. The scheduler claims and processes wakeups by spawning one-shot agent sessions -- a heartbeat model integrated with kandev's existing orchestrator pipeline.
 
 ## What
 
@@ -80,7 +80,7 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
 
 - When resuming a session (same agent, same task, session ID preserved), the agent receives only a resume delta -- the new information since the last run.
 - The full instructions and context are skipped (the agent CLI retains them from the previous session).
-- This saves significant tokens on follow-up wakeups (5-10K tokens per heartbeat, matching Paperclip's approach).
+- This saves significant tokens on follow-up wakeups (5-10K tokens per heartbeat).
 
 ### Subtask sequencing via blockers
 
@@ -125,7 +125,7 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
 
 ## Out of scope
 
-- Distributed scheduling across multiple backend instances (single-process scheduler, like Paperclip).
+- Distributed scheduling across multiple backend instances (single-process scheduler).
 - Priority ordering of wakeups (FIFO within the queue; task priority is handled at assignment time).
 - Wakeup scheduling with future timestamps (e.g. "wake at 3pm") -- routines handle scheduled execution.
 - Rate limiting per agent beyond the single-concurrency guard.
