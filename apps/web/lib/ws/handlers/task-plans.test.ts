@@ -26,9 +26,13 @@ function makeMessage(action: string, payload: Record<string, unknown>) {
   return { id: "msg-1", type: "notification", action, payload };
 }
 
-function makeStore(overrides: Record<string, unknown> = {}) {
+function makeStore(
+  overrides: Record<string, unknown> = {},
+  prevPlan: Record<string, unknown> | null = null,
+) {
   const state = {
     tasks: { activeTaskId: TASK_ID, activeSessionId: "s-1" },
+    taskPlans: { byTaskId: prevPlan ? { [TASK_ID]: prevPlan } : {} },
     setTaskPlan: vi.fn(),
     markTaskPlanSeen: vi.fn(),
     ...overrides,
@@ -113,6 +117,44 @@ describe("task.plan.* handlers", () => {
 
     expect(store.getState().setTaskPlan).toHaveBeenCalled();
     expect(store.getState().markTaskPlanSeen).not.toHaveBeenCalled();
+  });
+
+  it("user-authored update with UNCHANGED content does NOT mark seen", () => {
+    // Editor auto-save round-trips the agent's plan content through TipTap
+    // and saves it as user-authored — same content, new updated_at. Without
+    // a content-change check this would erase the agent's unseen indicator.
+    const store = makeStore({}, makePayload({ content: "# Plan", created_by: "agent" }));
+    const handlers = registerTaskPlansHandlers(store);
+
+    const payload = makePayload({
+      content: "# Plan",
+      created_by: "user",
+      updated_at: "2026-04-20T01:00:00Z",
+    });
+    handlers[ACTION_UPDATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_UPDATED, payload) as any,
+    );
+
+    expect(store.getState().setTaskPlan).toHaveBeenCalled();
+    expect(store.getState().markTaskPlanSeen).not.toHaveBeenCalled();
+  });
+
+  it("user-authored update with CHANGED content marks seen", () => {
+    const store = makeStore({}, makePayload({ content: "# Old", created_by: "agent" }));
+    const handlers = registerTaskPlansHandlers(store);
+
+    const payload = makePayload({
+      content: "# New",
+      created_by: "user",
+      updated_at: "2026-04-20T01:00:00Z",
+    });
+    handlers[ACTION_UPDATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_UPDATED, payload) as any,
+    );
+
+    expect(store.getState().markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
   });
 
   it("delete: nulls plan and marks as seen", () => {

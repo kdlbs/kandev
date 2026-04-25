@@ -22,14 +22,7 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   // Clear the indicator when the tab becomes active.
   useEffect(() => {
     const disposable = api.onDidActiveChange((event) => {
-      if (event.isActive && activeTaskId) {
-        console.warn("[plan-tab] markSeen via onDidActiveChange", {
-          activeTaskId,
-          apiIsActive: api.isActive,
-          eventIsActive: event.isActive,
-        });
-        markTaskPlanSeen(activeTaskId);
-      }
+      if (event.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
     });
     return () => disposable.dispose();
   }, [api, activeTaskId, markTaskPlanSeen]);
@@ -40,25 +33,10 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   // the WS update render and the seen-mark render.
   const planUpdatedAt = plan?.updated_at;
   useLayoutEffect(() => {
-    if (api.isActive && activeTaskId) {
-      console.warn("[plan-tab] markSeen via useLayoutEffect", {
-        activeTaskId,
-        planUpdatedAt,
-        apiIsActive: api.isActive,
-      });
-      markTaskPlanSeen(activeTaskId);
-    }
+    if (api.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
   }, [api, activeTaskId, markTaskPlanSeen, planUpdatedAt]);
 
   const hasUnseen = plan?.created_by === "agent" && lastSeen !== plan.updated_at;
-  console.warn("[plan-tab] render", {
-    activeTaskId,
-    apiIsActive: api.isActive,
-    planUpdatedAt: plan?.updated_at,
-    planCreatedBy: plan?.created_by,
-    lastSeen,
-    hasUnseen,
-  });
 
   return (
     <div data-testid="plan-tab" className="relative">

@@ -7,6 +7,7 @@ type PlanMessage = BackendMessageMap["task.plan.created"] | BackendMessageMap["t
 
 function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
   const { task_id, id, title, content, created_by, created_at, updated_at } = message.payload;
+  const prevPlan = store.getState().taskPlans.byTaskId[task_id];
   store.getState().setTaskPlan(task_id, {
     id,
     task_id,
@@ -17,18 +18,12 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  console.warn("[task-plans-ws] handlePlanUpsert", {
-    type: message.type,
-    task_id,
-    created_by,
-    updated_at,
-  });
-
-  // User-authored writes: mark seen so the indicator doesn't fire. Panel
-  // reveal is handled reactively by usePlanPanelAutoOpen when an agent
-  // writes a new version the user hasn't seen.
-  if (created_by === "user") {
-    console.warn("[task-plans-ws] markSeen (user-authored)", { task_id });
+  // User-authored writes mark the plan as seen — but only when the content
+  // actually changed. The plan editor's auto-save on mount can emit a
+  // user-authored update with unchanged content (TipTap markdown round-trip
+  // normalises whitespace), which would otherwise wipe an unseen agent
+  // indicator the moment the panel opens.
+  if (created_by === "user" && prevPlan?.content !== content) {
     store.getState().markTaskPlanSeen(task_id);
   }
 }
@@ -39,7 +34,6 @@ export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers
     "task.plan.updated": (message) => handlePlanUpsert(store, message),
     "task.plan.deleted": (message) => {
       const { task_id } = message.payload;
-      console.warn("[task-plans-ws] markSeen on delete", { task_id });
       store.getState().setTaskPlan(task_id, null);
       store.getState().markTaskPlanSeen(task_id);
     },

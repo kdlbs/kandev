@@ -44,7 +44,6 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
       const fetchedPlan = await getTaskPlan(taskId);
       setTaskPlan(taskId, fetchedPlan);
       // Initial fetch is not a notification — mark as seen so no indicator flashes.
-      console.warn("[use-task-plan] markSeen after fetch", taskId, fetchedPlan?.updated_at, fetchedPlan?.created_by);
       markTaskPlanSeen(taskId);
     } catch (err) {
       console.error("Failed to fetch task plan:", err);

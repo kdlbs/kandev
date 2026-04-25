@@ -31,11 +31,6 @@ export function usePlanPanelAutoOpen() {
     if (lastSeen === plan.updated_at) return;
     if (api.getPanel("plan")) return;
 
-    console.warn("[plan-auto-open] adding plan panel quietly", {
-      activeTaskId,
-      planUpdatedAt: plan.updated_at,
-      lastSeen,
-    });
     addPlanPanel({ quiet: true, inCenter: true });
-  }, [api, isRestoringLayout, plan, lastSeen, addPlanPanel, activeTaskId]);
+  }, [api, isRestoringLayout, plan, lastSeen, addPlanPanel]);
 }
