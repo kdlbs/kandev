@@ -228,6 +228,27 @@ func TestResolveGitDirWithin_RejectsEscapedGitdir(t *testing.T) {
 	}
 }
 
+// TestResolveGitDirWithin_RejectsSymlinkedGitDir covers the case where
+// `.git` itself is a symlink whose target lives outside the allowed roots.
+// The lexical path looks fine — it's `<allowed>/repo/.git` — but following
+// the symlink would read from elsewhere. EvalSymlinks must catch that.
+func TestResolveGitDirWithin_RejectsSymlinkedGitDir(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	// `.git` symlinks to an out-of-root directory containing a HEAD file.
+	if err := os.Symlink(outside, filepath.Join(repoPath, ".git")); err != nil {
+		t.Skipf("symlink not supported on this platform: %v", err)
+	}
+
+	if _, err := resolveGitDirWithin(repoPath, []string{root}); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("expected ErrPathNotAllowed for symlinked .git escaping roots, got %v", err)
+	}
+}
+
 // TestResolveGitDirWithin_AllowsRepoLocalGitFile covers the legitimate
 // worktree case: `.git` file points to a sibling path that's still inside the
 // repo (e.g. main repo's `.git/worktrees/<name>`).

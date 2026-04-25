@@ -424,10 +424,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	if !h.applyFreshBranch(c, body.Title, body.Repositories, repos) {
-		return
-	}
-
 	// Always persist profile IDs in task metadata so they can be used as the
 	// task's "default" agent profile. This is needed both for deferred agent start
 	// (handleTaskMovedNoSession) and for reverting to the default agent when a
@@ -464,6 +460,23 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
+	// Run the destructive fresh-branch step only after the task is durably
+	// persisted, so a DB failure can't mutate the user's repo without leaving
+	// a corresponding task record. If the discard fails after CreateTask
+	// succeeded, compensate by deleting the just-created task.
+	if !h.applyFreshBranch(c, title, body.Repositories, repos) {
+		if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
+			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
+				zap.String("task_id", task.ID), zap.Error(delErr))
+		}
+		return
+	}
+	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
+	if err := h.service.ReplaceTaskRepositories(c.Request.Context(), task.ID, body.WorkspaceID, convertToServiceRepos(repos)); err != nil {
+		h.logger.Warn("failed to persist fresh-branch base branch onto task",
+			zap.String("task_id", task.ID), zap.Error(err))
+	}
+
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
@@ -498,14 +511,10 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs
 		baseBranch := raw.BaseBranch
 		if baseBranch == "" {
 			// User didn't pick one — fall back to the repo's checked-out branch.
-			if branch, _ := h.service.LocalRepositoryCurrentBranch(ctx, repoPath); branch != "" {
-				baseBranch = branch
-			}
+			currentBranch, _ := h.service.LocalRepositoryCurrentBranch(ctx, repoPath)
+			baseBranch = resolveFreshBaseBranch(raw.BaseBranch, currentBranch)
 		}
-		newBranch := strings.TrimSpace(raw.NewBranchName)
-		if newBranch == "" {
-			newBranch = worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
-		}
+		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
 			RepoPath:            repoPath,
 			BaseBranch:          baseBranch,
@@ -521,6 +530,30 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs
 		repos[i].CheckoutBranch = ""
 	}
 	return true
+}
+
+// resolveFreshBranchName returns the user-supplied branch name when present,
+// otherwise generates one from the task title using the same semantic name +
+// random-suffix scheme as the worktree executor. Returns an empty string only
+// when both the raw name and the task title would produce nothing useful;
+// PerformFreshBranch's sanitizeGitRef rejects that downstream.
+func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
+	if name := strings.TrimSpace(rawNewBranch); name != "" {
+		return name
+	}
+	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+}
+
+// resolveFreshBaseBranch picks the base branch the discard+checkout should
+// fork from. When the caller didn't pick one, fall back to whatever branch is
+// currently checked out in the local clone. Returns "" only if both inputs
+// are empty (e.g. detached HEAD with no caller-supplied base) — the caller
+// should propagate this so PerformFreshBranch returns ErrInvalidGitRef.
+func resolveFreshBaseBranch(rawBase, currentBranch string) string {
+	if rawBase != "" {
+		return rawBase
+	}
+	return currentBranch
 }
 
 func (h *TaskHandlers) resolveLocalRepoPath(c *gin.Context, raw httpTaskRepositoryInput) (string, bool) {

@@ -558,7 +558,14 @@ func resolveGitDirWithin(repoPath string, allowedRoots []string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	cleaned := filepath.Clean(gitDir)
+	// Resolve symlinks before the root check — `repoPath/.git` itself can be
+	// a symlink to a directory outside the sandbox, and a lexical Clean on
+	// the gitdir string would not catch that.
+	resolved, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(resolved)
 	if !filepath.IsAbs(cleaned) {
 		abs, absErr := filepath.Abs(cleaned)
 		if absErr != nil {
