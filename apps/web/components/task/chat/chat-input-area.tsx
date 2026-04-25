@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { IconArrowRight, IconGitMerge, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -285,18 +286,23 @@ function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       {showProceed && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-6 gap-1 px-2 text-xs cursor-pointer hover:bg-muted/40"
-          onClick={onProceed}
-          disabled={isMoving}
-          data-testid="proceed-next-step"
-        >
-          <span className="text-muted-foreground">{nextStepName}</span>
-          <IconArrowRight className="h-3.5 w-3.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ml-auto h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary"
+              onClick={onProceed}
+              disabled={isMoving}
+              data-testid="proceed-next-step"
+            >
+              {nextStepName}
+              <IconArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Move task to the next workflow step</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

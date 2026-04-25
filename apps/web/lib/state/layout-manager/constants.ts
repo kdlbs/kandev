@@ -45,7 +45,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
 export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   sidebar: { component: "sidebar", title: "Sidebar" },
   chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
-  plan: { component: "plan", title: "Plan" },
+  plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
   changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },
   files: { component: "files", title: "Files" },
   browser: { component: "browser", title: "Browser", params: { url: "" } },

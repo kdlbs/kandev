@@ -113,7 +113,13 @@ export function focusOrAddPanel(
     }
   }
 
-  const prev = quiet ? api.activePanel : null;
-  api.addPanel(options);
-  if (prev) prev.api.setActive();
+  // For quiet adds use dockview's `inactive` flag so the new panel is never
+  // briefly activated. The save-active / restore-active dance flips the new
+  // panel's `isActive` to true and then back, which fires spurious
+  // onDidActiveChange events on listeners (e.g. PlanTab's seen-mark).
+  if (quiet) {
+    api.addPanel({ ...options, inactive: true });
+  } else {
+    api.addPanel(options);
+  }
 }

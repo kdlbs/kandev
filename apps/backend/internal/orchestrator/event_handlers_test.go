@@ -134,6 +134,9 @@ type mockAgentManager struct {
 	passthroughStdinErr   error
 	markPassthroughCalls  []string // session IDs
 	markPassthroughErr    error
+
+	// Optional override for GetExecutionIDForSession
+	getExecutionIDForSessionFunc func(context.Context, string) (string, error)
 }
 
 type stopAgentCall struct {
@@ -235,7 +238,10 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
 	return nil
 }
-func (m *mockAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
+func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
+	if m.getExecutionIDForSessionFunc != nil {
+		return m.getExecutionIDForSessionFunc(ctx, sessionID)
+	}
 	return "", fmt.Errorf("no execution found")
 }
 func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {

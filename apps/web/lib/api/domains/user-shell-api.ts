@@ -45,14 +45,24 @@ export type CreateUserShellResult = {
 };
 
 /**
+ * Options for {@link createUserShell}. Pass `scriptId` to run a stored
+ * RepositoryScript, or `command` (with optional `label`) to run an arbitrary
+ * command — used for the repository's dev_script. Omit both for a plain shell.
+ */
+export type CreateUserShellOptions = {
+  scriptId?: string;
+  command?: string;
+  label?: string;
+};
+
+/**
  * Create a new user shell terminal.
  * Backend assigns the terminal ID, label, and closable status.
  * First terminal is "Terminal" and not closable, subsequent are "Terminal 2", etc. and closable.
- * If scriptId is provided, creates a script terminal with the script's name and command.
  */
 export async function createUserShell(
   sessionId: string,
-  scriptId?: string,
+  options?: CreateUserShellOptions,
 ): Promise<CreateUserShellResult> {
   const client = getWebSocketClient();
   if (!client) {
@@ -60,9 +70,9 @@ export async function createUserShell(
   }
 
   const payload: Record<string, string> = { session_id: sessionId };
-  if (scriptId) {
-    payload.script_id = scriptId;
-  }
+  if (options?.scriptId) payload.script_id = options.scriptId;
+  if (options?.command) payload.command = options.command;
+  if (options?.label) payload.label = options.label;
 
   const response = (await client.request("user_shell.create", payload)) as {
     terminal_id: string;

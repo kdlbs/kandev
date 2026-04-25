@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,18 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	}
 	cm, ok := session.Metadata["config_mode"].(bool)
 	return ok && cm
+}
+
+// isContainerizedExecutor returns true for executor types that run in containers.
+// These executors need GitHub token injection for git operations since they don't
+// have access to the host's git credentials.
+func isContainerizedExecutor(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
+		return true
+	default:
+		return false
+	}
 }
 
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
@@ -344,8 +357,17 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
+	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory execution
+	// was lost (e.g. backend restart). The session's AgentExecutionID has been cleared,
+	// so we fall through to the full LaunchAgent path below.
 	if session.AgentExecutionID != "" {
-		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		if !errors.Is(err, ErrStaleExecution) {
+			return result, err
+		}
+		e.logger.Info("falling through to full LaunchAgent after stale execution",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID))
 	}
 
 	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
@@ -507,6 +529,41 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
+	// For containerized executors, resolve credentials in this order:
+	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
+	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
+	// 3. Global GITHUB_TOKEN secret (fallback)
+	// 4. Auto-extract from local gh CLI (final fallback)
+	if isContainerizedExecutor(execConfig.ExecutorType) {
+		e.applyContainerCredentials(ctx, req, metadata)
+	}
+
+	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
+	if err != nil {
+		return nil, execConfig, err
+	}
+
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
+		req.McpMode = McpModeConfig
+	}
+
+	if len(metadata) > 0 {
+		req.Metadata = metadata
+	}
+
+	return req, execConfig, nil
+}
+
+// applyContainerCredentials resolves and injects credentials for containerized executors.
+func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
+	e.resolveRemoteCredentials(ctx, req, metadata)
+	e.injectGitHubToken(ctx, req)        // Fallback to global secret
+	e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
+}
+
+// applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
+func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryPath = repoInfo.RepositoryPath
@@ -531,21 +588,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
-			return nil, execConfig, ErrNoCloneURL
+			return metadata, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}
 
-	// Activate config-mode MCP tools when config_mode is set in session metadata.
-	if isConfigModeSession(session) {
-		req.McpMode = McpModeConfig
-	}
-
-	if len(metadata) > 0 {
-		req.Metadata = metadata
-	}
-
-	return req, execConfig, nil
+	return metadata, nil
 }
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
@@ -556,7 +604,24 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	// with a different ID than what the database still holds. Using the stale DB
 	// value would cause "execution not found" errors.
 	executionID := session.AgentExecutionID
-	if liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID); err == nil && liveID != "" && liveID != executionID {
+	liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	if err != nil {
+		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
+		// Clear AgentExecutionID and return ErrStaleExecution so the caller falls through
+		// to the full LaunchAgent path, which creates a complete execution with agent
+		// commands, worktree, and all required configuration.
+		e.logger.Info("stale execution ID, clearing for full re-launch",
+			zap.String("session_id", session.ID),
+			zap.String("stale_execution_id", executionID))
+		session.AgentExecutionID = ""
+		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+			e.logger.Warn("failed to clear stale execution ID",
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
+		return nil, ErrStaleExecution
+	}
+	if liveID != "" && liveID != executionID {
 		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
 			zap.String("session_id", session.ID),
 			zap.String("stale_id", executionID),

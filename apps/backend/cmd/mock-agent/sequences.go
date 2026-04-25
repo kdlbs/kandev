@@ -11,14 +11,18 @@ import (
 type scriptState struct {
 	toolCallCounter int
 	lastToolID      string
+	// monitorTools maps user-supplied Monitor taskID -> generated toolCallID,
+	// so e2e:monitor_event and e2e:monitor_end can reference an earlier
+	// e2e:monitor_start by name without the script needing to track IDs.
+	monitorTools map[string]acp.ToolCallId
 }
 
 // state is the process-wide script state. Use resetState() in tests
 // to get a clean starting point instead of touching fields directly.
-var state = &scriptState{}
+var state = &scriptState{monitorTools: map[string]acp.ToolCallId{}}
 
 func resetState() {
-	state = &scriptState{}
+	state = &scriptState{monitorTools: map[string]acp.ToolCallId{}}
 }
 
 func nextToolID() acp.ToolCallId {

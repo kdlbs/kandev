@@ -77,7 +77,7 @@ func (r *SpritesExecutor) runPrepareScript(
 	defer cancel()
 
 	r.logger.Debug("running prepare script")
-	cmd := sprite.CommandContext(stepCtx, "sh", "-c", script)
+	cmd := sprite.CommandContext(stepCtx, "bash", "-c", script)
 	cmd.Env = r.buildSpriteEnv(req.Env)
 
 	stdout, err := cmd.StdoutPipe()
@@ -149,6 +149,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		WithProvider(scriptengine.WorkspaceProvider(spritesWorkspacePath)).
 		WithProvider(scriptengine.AgentctlProvider(r.agentctlPort, spritesWorkspacePath)).
 		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
+		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
 		WithProvider(scriptengine.AgentInstallProvider(installScripts)).
 		WithProvider(scriptengine.RepositoryProvider(
 			req.Metadata,

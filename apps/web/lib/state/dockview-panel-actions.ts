@@ -408,13 +408,18 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    addPlanPanel: (groupId?: string) => {
-      const { api } = get();
+    addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
+      const { api, centerGroupId } = get();
       if (!api) return;
+      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
       const position = groupId
         ? { referenceGroup: groupId }
         : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(api, { id: "plan", component: "plan", title: "Plan", position });
+      focusOrAddPanel(
+        api,
+        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
+        opts?.quiet ?? false,
+      );
     },
     addPRPanel: () => {
       const { api, centerGroupId } = get();

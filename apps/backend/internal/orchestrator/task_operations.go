@@ -32,6 +32,11 @@ type PromptResult struct {
 // error-recovery state (WAITING_FOR_INPUT with a non-empty ErrorMessage).
 const resumeReasonErrorRecovery = "error_recovery"
 
+// resumeReasonFailedSessionResumable is the resume reason returned when a
+// FAILED session is auto-resumed because its runtime is Resumable. Distinct
+// from "agent_not_running" so log filtering can isolate FAILED auto-resumes.
+const resumeReasonFailedSessionResumable = "failed_session_resumable"
+
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
@@ -108,6 +113,28 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	if executorProfileID == "" {
 		if v, ok := task.Metadata["executor_profile_id"].(string); ok && v != "" {
 			executorProfileID = v
+		}
+	}
+
+	// Inherit agent/executor profile from parent task's primary session when not
+	// explicitly provided. This covers subtasks created with start_agent=false that
+	// are later opened manually from the UI. We check each field independently so
+	// that a caller providing only some fields still gets the rest filled in.
+	if (agentProfileID == "" || executorProfileID == "" || executorID == "") && task.ParentID != "" {
+		agentProfileID, executorProfileID, executorID = s.inheritFromParentSession(
+			ctx, task.ParentID, agentProfileID, executorProfileID, executorID,
+		)
+
+		// Fall back to workspace defaults for agent profile (subtasks only —
+		// regular tasks resolve defaults downstream in the executor layer).
+		if agentProfileID == "" {
+			workspace, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
+			if err == nil && workspace != nil && workspace.DefaultAgentProfileID != nil && *workspace.DefaultAgentProfileID != "" {
+				agentProfileID = *workspace.DefaultAgentProfileID
+			}
+		}
+		if executorID == "" && executorProfileID == "" {
+			executorID = models.ExecutorIDWorktree
 		}
 	}
 
@@ -1015,7 +1042,18 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	// 3. Session can be resumed if it has a resume token
 	if resumeToken != "" {
-		// Don't auto-resume terminal sessions — they failed/completed for a reason.
+		// Auto-resume FAILED sessions when the runtime is resumable: PR #670 made
+		// terminal-state resume safe (cleanup + retry), so recover transparently
+		// before surfacing the error. Frontend falls back to restore_workspace if
+		// the resume itself fails.
+		if session.State == models.TaskSessionStateFailed && running != nil && running.Resumable {
+			out := s.validateResumeEligibility(session, resp)
+			if out.NeedsResume {
+				out.ResumeReason = resumeReasonFailedSessionResumable
+			}
+			return out, nil
+		}
+		// Don't auto-resume other terminal sessions (CANCELLED stays stopped, COMPLETED is done).
 		if !isActiveSessionState(session.State) {
 			resp.IsAgentRunning = false
 			resp.IsResumable = false

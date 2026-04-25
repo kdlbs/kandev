@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -14,6 +15,7 @@ import (
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/jira"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -87,6 +89,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
 	}
+	if githubSvc != nil {
+		// Wire secret manager for token configuration
+		githubSvc.SetSecretManager(secretsAdapter)
+	}
+
+	// Initialize JIRA service
+	jiraSecrets := &jiraSecretAdapter{store: repos.Secrets}
+	jiraSvc, _, jiraErr := jira.Provide(dbPool.Writer(), dbPool.Reader(), jiraSecrets, log)
+	if jiraErr != nil {
+		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(jiraErr))
+	}
 
 	return &Services{
 		Task:     taskSvc,
@@ -96,6 +109,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Utility:  utilitySvc,
 		Workflow: workflowSvc,
 		GitHub:   githubSvc,
+		Jira:     jiraSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
@@ -162,7 +176,7 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
-// githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider.
+// githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
 }
@@ -185,6 +199,79 @@ func (a *githubSecretAdapter) List(ctx context.Context) ([]*github.SecretListIte
 
 func (a *githubSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
 	return a.store.Reveal(ctx, id)
+}
+
+// Create creates a new secret with the given name and value.
+func (a *githubSecretAdapter) Create(ctx context.Context, name, value string) (string, error) {
+	secret := &secrets.SecretWithValue{
+		Secret: secrets.Secret{Name: name},
+		Value:  value,
+	}
+	if err := a.store.Create(ctx, secret); err != nil {
+		return "", err
+	}
+	return secret.ID, nil
+}
+
+// Update updates an existing secret's value.
+func (a *githubSecretAdapter) Update(ctx context.Context, id, value string) error {
+	return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+}
+
+// Delete removes a secret by ID.
+func (a *githubSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
+}
+
+// jiraSecretAdapter adapts secrets.SecretStore to jira.SecretStore. JIRA stores
+// tokens keyed by "jira:{workspaceID}:token"; this adapter translates the
+// upsert-style API the JIRA service expects onto the Create/Update methods the
+// secret store exposes.
+type jiraSecretAdapter struct {
+	store secrets.SecretStore
+}
+
+func (a *jiraSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
+	return a.store.Reveal(ctx, id)
+}
+
+func (a *jiraSecretAdapter) Set(ctx context.Context, id, name, value string) error {
+	// Try update first; on "not found", fall through to create. The secrets
+	// layer only exposes error strings (not typed errors), so we detect the
+	// missing row via Exists which inspects the "secret not found:" prefix.
+	// Treating every Get error as "not found" would turn a transient DB error
+	// on an existing row into a constraint-violation Create that masks the
+	// real cause.
+	exists, err := a.Exists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+	}
+	return a.store.Create(ctx, &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: id, Name: name},
+		Value:  value,
+	})
+}
+
+func (a *jiraSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
+}
+
+func (a *jiraSecretAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	_, err := a.store.Get(ctx, id)
+	if err != nil {
+		// The secrets layer reports "not found" via a fmt.Errorf string with
+		// the "secret not found:" prefix; treat that as the absence case and
+		// surface anything else (DB outage, decoding failure) so the caller
+		// can log it instead of silently reporting "not configured".
+		if strings.HasPrefix(err.Error(), "secret not found:") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

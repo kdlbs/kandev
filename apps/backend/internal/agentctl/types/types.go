@@ -98,6 +98,9 @@ const (
 
 	// Process kinds
 	ProcessKindAgentPassthrough = streams.ProcessKindAgentPassthrough
+	ProcessKindCustom           = streams.ProcessKindCustom
+	ProcessKindCleanup          = streams.ProcessKindCleanup
+	ProcessKindDev              = streams.ProcessKindDev
 )
 
 // PermissionRequest represents a permission request from the agent.

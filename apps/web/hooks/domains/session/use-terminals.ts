@@ -272,7 +272,7 @@ function useTerminalActions({
     async (script: RepositoryScript) => {
       if (!sessionId) return;
       try {
-        const result = await createUserShell(sessionId, script.id);
+        const result = await createUserShell(sessionId, { scriptId: script.id });
         setTerminals((prev) => [
           ...prev,
           { id: result.terminalId, type: "script", label: result.label, closable: result.closable },

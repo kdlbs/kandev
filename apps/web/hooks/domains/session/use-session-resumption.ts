@@ -44,7 +44,7 @@ type ResumeResponse = {
   error?: string;
 };
 
-type ResumeStateSetter = {
+export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
   setError: (e: string | null) => void;
   setWorktreePath: (p: string | null) => void;
@@ -117,6 +117,83 @@ async function resumeViaLaunch(
   );
 }
 
+/** Attempt resume, silently falling back to restore_workspace on any failure.
+ *  Used for sessions where the backend reports needs_resume=true — typically
+ *  WAITING_FOR_INPUT after restart, or FAILED with a resumable token. The user
+ *  only sees an error banner if BOTH attempts fail; otherwise they just see
+ *  the session reload (resumed) or the workspace come back read-only.
+ *  Exported for unit tests. */
+export async function resumeWithSilentFallback(
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+): Promise<void> {
+  setters.setResumptionState("resuming");
+  if (
+    await tryLaunch(
+      buildResumeRequest(taskId, sessionId).request,
+      taskId,
+      sessionId,
+      session,
+      setters,
+    )
+  ) {
+    return;
+  }
+  // Resume failed (returned success=false OR threw). Fall back to read-only
+  // workspace restore so the user keeps file/terminal/git access.
+  if (
+    await tryLaunch(
+      buildRestoreWorkspaceRequest(taskId, sessionId).request,
+      taskId,
+      sessionId,
+      session,
+      setters,
+    )
+  ) {
+    return;
+  }
+  setters.setResumptionState("error");
+  setters.setError("Failed to resume session — workspace restore also unavailable");
+}
+
+/** Run a single launch attempt; returns true on success, false on any failure.
+ *  Logs caught errors to the console so silent fallback paths remain debuggable
+ *  (errors otherwise vanish into the implicit `false` return). */
+async function tryLaunch(
+  request: import("@/lib/services/session-launch-service").LaunchSessionRequest,
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+): Promise<boolean> {
+  try {
+    const resp = await launchSession(request);
+    if (!resp.success) return false;
+    applyResumeResponse(
+      {
+        success: true,
+        state: resp.state,
+        worktree_path: resp.worktree_path,
+        worktree_branch: resp.worktree_branch,
+      },
+      taskId,
+      sessionId,
+      session,
+      setters,
+    );
+    return true;
+  } catch (err) {
+    console.error("[tryLaunch] session launch failed", {
+      intent: request.intent,
+      sessionId,
+      err,
+    });
+    return false;
+  }
+}
+
 type CheckAndResumeParams = {
   taskId: string;
   sessionId: string;
@@ -177,7 +254,7 @@ async function checkAndResume({
     if (status.is_agent_running) {
       setters.setResumptionState("running");
     } else if (status.needs_resume && status.is_resumable) {
-      await resumeViaLaunch(taskId, sessionId, session, setters, buildResumeRequest);
+      await resumeWithSilentFallback(taskId, sessionId, session, setters);
     } else if (status.needs_workspace_restore) {
       await resumeViaLaunch(taskId, sessionId, session, setters, buildRestoreWorkspaceRequest);
     } else {

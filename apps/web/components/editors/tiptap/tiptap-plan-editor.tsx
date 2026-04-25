@@ -25,6 +25,7 @@ import {
   type CommentForEditor,
 } from "./comment-mark";
 import { createPlanSlashExtension, type PlanSlashCommand } from "./plan-slash-commands";
+import { PlanSearchExtension } from "./search-highlight-extension";
 import { PlanSlashMenu } from "./plan-slash-menu";
 import { PlanBubbleMenu } from "./plan-bubble-menu";
 import { PlanDragHandle } from "./plan-drag-handle";
@@ -114,6 +115,7 @@ function buildEditorExtensions(
     TableCell,
     TableHeader,
     CommentMark.configure({ onOrphanedComments }),
+    PlanSearchExtension,
     slashExtension,
   ];
 }

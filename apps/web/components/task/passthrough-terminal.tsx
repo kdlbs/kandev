@@ -22,6 +22,9 @@ import {
   useSendInput,
   useFitAndResize,
 } from "./use-passthrough-terminal";
+import { useTerminalSearch } from "./use-terminal-search";
+import { TerminalSearchBar } from "./terminal-search-bar";
+import { usePanelSearch } from "@/hooks/use-panel-search";
 
 type BaseProps = {
   sessionId?: string | null;
@@ -57,6 +60,25 @@ function useTerminalRefs() {
   };
 }
 
+function useXtermSearchIntegration(
+  xtermRef: React.RefObject<Terminal | null>,
+  isTerminalReady: boolean,
+  containerRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const search = useTerminalSearch({ xtermRef, isTerminalReady });
+  const onFindInPanelRef = useRef<(() => void) | undefined>(search.open);
+  useEffect(() => {
+    onFindInPanelRef.current = search.open;
+  }, [search.open]);
+  usePanelSearch({
+    containerRef,
+    isOpen: search.isOpen,
+    onOpen: search.open,
+    onClose: search.close,
+  });
+  return { search, onFindInPanelRef };
+}
+
 const WS_BASE_URL_FALLBACK = "ws://localhost:38429";
 function useWsBaseUrl() {
   return useMemo(() => {
@@ -69,6 +91,7 @@ function useWsBaseUrl() {
   }, []);
 }
 
+// eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { sessionId: propSessionId, mode, label, autoFocus, pendingCommand, onCommandSent } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
@@ -118,6 +141,12 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   useEffect(() => {
     keyboardShortcutsRef.current = keyboardShortcuts;
   }, [keyboardShortcuts]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { search, onFindInPanelRef } = useXtermSearchIntegration(
+    xtermRef,
+    isTerminalReady,
+    containerRef,
+  );
   useTerminalInit({
     terminalRef: refs.terminalRef,
     xtermRef: refs.xtermRef,
@@ -134,6 +163,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
     keyboardShortcutsRef,
+    onFindInPanelRef,
   });
 
   useWebSocketConnection({
@@ -157,13 +187,17 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   return (
     <div
+      ref={containerRef}
+      tabIndex={-1}
       data-testid={mode === "agent" ? "passthrough-terminal" : undefined}
-      className="relative h-full w-full overflow-hidden bg-background"
+      data-panel-kind="terminal"
+      className="relative h-full w-full overflow-hidden bg-background outline-none"
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     >
       <div className="h-full w-full p-2 pb-3">
         <div ref={terminalRef} className="h-full w-full" />
       </div>
+      <TerminalSearchBar search={search} />
       {!isConnected && (
         <div
           data-testid="passthrough-loading"

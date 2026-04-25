@@ -39,6 +39,7 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 			firstRead = false
 		}
 		if n > 0 {
+			proc.firstOutputOnce.Do(func() { close(proc.firstOutputCh) })
 			recentOutput = r.processOutputData(proc, ptyInstance, buf[:n], recentOutput)
 		}
 		if err != nil {

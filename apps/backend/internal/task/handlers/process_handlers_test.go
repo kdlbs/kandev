@@ -148,6 +148,9 @@ func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]
 func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
 	return nil, false, nil
 }
+func (m *mockRepository) SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }

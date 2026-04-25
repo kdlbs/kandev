@@ -35,6 +35,12 @@ func (s *stubClient) FindPRByBranch(context.Context, string, string, string) (*P
 func (s *stubClient) ListAuthoredPRs(context.Context, string, string) ([]*PR, error) {
 	return nil, nil
 }
+func (s *stubClient) SearchPRs(context.Context, string, string) ([]*PR, error) {
+	return nil, nil
+}
+func (s *stubClient) SearchPRsPaged(context.Context, string, string, int, int) (*PRSearchPage, error) {
+	return &PRSearchPage{PRs: []*PR{}}, nil
+}
 func (s *stubClient) ListReviewRequestedPRs(context.Context, string, string, string) ([]*PR, error) {
 	return nil, nil
 }
@@ -68,6 +74,9 @@ func (s *stubClient) ListRepoBranches(context.Context, string, string) ([]RepoBr
 }
 func (s *stubClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
 	return nil, nil
+}
+func (s *stubClient) ListIssuesPaged(context.Context, string, string, int, int) (*IssueSearchPage, error) {
+	return &IssueSearchPage{Issues: []*Issue{}}, nil
 }
 func (s *stubClient) GetIssueState(context.Context, string, string, int) (string, error) {
 	return defaultPRState, nil
