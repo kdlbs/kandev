@@ -260,9 +260,6 @@ test.describe("Fresh-branch flow", () => {
       await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
       // Placeholder should show actual current branch (main), not the generic copy.
       await expect(branchSelector).toContainText("main", { timeout: 5_000 });
-      // Tooltip trigger is rendered (we don't assert hover content because the
-      // tooltip portal renders outside the dialog DOM in radix; presence is enough).
-      await expect(testPage.getByTestId("fresh-branch-tooltip-trigger")).toBeVisible();
     } finally {
       await apiClient.deleteExecutorProfile(setup.profileId).catch(() => {});
     }
@@ -290,9 +287,6 @@ test.describe("Fresh-branch flow", () => {
         .getByRole("option", { name: /develop/ })
         .first()
         .click();
-      const newBranchInput = testPage.getByTestId("new-branch-name-input");
-      await expect(newBranchInput).toBeVisible();
-      await newBranchInput.fill("feature/from-develop");
 
       // Submit and assert the discard modal never appears (clean tree).
       // Wait for the create-task request to fire so we know the submit path
@@ -325,22 +319,17 @@ test.describe("Fresh-branch flow", () => {
 
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       await testPage.getByTestId("fresh-branch-toggle").click();
-      await testPage.getByTestId("branch-selector").click();
-      await testPage.getByRole("option", { name: /main/ }).first().click();
-      await testPage.getByTestId("new-branch-name-input").fill("feature/dirty-test");
-
-      // Submit using the create-with-plan-mode footer button to trigger the create flow.
-      // Plan-mode goes through the same fresh-branch path as the regular create.
+      // Submit triggers the dirty preflight; the modal lists WIP.txt.
       await testPage.getByTestId("submit-start-agent").click();
 
       const modal = testPage.getByTestId("discard-local-changes-dialog");
       await expect(modal).toBeVisible({ timeout: 5_000 });
       await expect(testPage.getByTestId("discard-local-changes-files")).toContainText("WIP.txt");
 
-      // Cancel returns to the form; new-branch input still has our value.
+      // Cancel returns to the form with the toggle still on.
       await testPage.getByTestId("discard-local-changes-cancel").click();
       await expect(modal).toBeHidden();
-      await expect(testPage.getByTestId("new-branch-name-input")).toHaveValue("feature/dirty-test");
+      await expect(testPage.getByTestId("fresh-branch-toggle")).toBeChecked();
 
       // Untracked file must still exist (we didn't confirm).
       expect(fs.existsSync(path.join(setup.repoDir, "WIP.txt"))).toBe(true);
@@ -366,9 +355,6 @@ test.describe("Fresh-branch flow", () => {
 
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       await testPage.getByTestId("fresh-branch-toggle").click();
-      await testPage.getByTestId("branch-selector").click();
-      await testPage.getByRole("option", { name: /main/ }).first().click();
-      await testPage.getByTestId("new-branch-name-input").fill("feature/discarded");
       await testPage.getByTestId("submit-start-agent").click();
 
       await expect(testPage.getByTestId("discard-local-changes-dialog")).toBeVisible({
@@ -402,9 +388,6 @@ test.describe("Fresh-branch flow", () => {
       }
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       await testPage.getByTestId("fresh-branch-toggle").click();
-      await testPage.getByTestId("branch-selector").click();
-      await testPage.getByRole("option", { name: /main/ }).first().click();
-      await testPage.getByTestId("new-branch-name-input").fill("feature/lots");
       await testPage.getByTestId("submit-start-agent").click();
 
       await expect(testPage.getByTestId("discard-local-changes-dialog")).toBeVisible({
@@ -467,5 +450,60 @@ test.describe("Fresh-branch flow", () => {
     await worktreeOption.click();
     await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
     expect(seedData.worktreeExecutorProfileId).toBeTruthy();
+  });
+
+  test("switching worktree → local resets the disabled selector to current branch", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const setup = await setupLocalRepo(apiClient, backend.tmpDir, seedData.workspaceId, "switch");
+    if (!setup) {
+      test.skip(true, "No local executor available");
+      return;
+    }
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+      await testPage.getByTestId("task-title-input").fill("Switcheroo");
+      await testPage.getByTestId("task-description-input").fill("repro the leftover-branch bug");
+      await testPage.getByTestId("repository-selector").click();
+      await testPage
+        .getByRole("option", { name: new RegExp(`^${setup.repoName}\\b`, "i") })
+        .first()
+        .click();
+
+      // Pick the worktree executor first and select the develop branch.
+      const executorSelector = testPage.getByTestId("executor-profile-selector");
+      await executorSelector.click();
+      await testPage
+        .getByRole("option")
+        .filter({ hasText: /worktree/i })
+        .first()
+        .click();
+      const branchSelector = testPage.getByTestId("branch-selector");
+      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
+      await branchSelector.click();
+      await testPage
+        .getByRole("option", { name: /develop/ })
+        .first()
+        .click();
+      await expect(branchSelector).toContainText("develop");
+
+      // Switch back to local — disabled selector must show the actual current branch (main),
+      // not the develop selection that came from the worktree executor.
+      await executorSelector.click();
+      await testPage
+        .getByRole("option", { name: new RegExp(`^${setup.profileName}\\b`, "i") })
+        .first()
+        .click();
+      await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
+      await expect(branchSelector).toContainText("main", { timeout: 5_000 });
+    } finally {
+      await apiClient.deleteExecutorProfile(setup.profileId).catch(() => {});
+    }
   });
 });

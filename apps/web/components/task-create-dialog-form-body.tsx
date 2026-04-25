@@ -10,7 +10,7 @@ import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import {
-  FreshBranchControls,
+  FreshBranchSwitch,
   computeBranchPlaceholder,
 } from "@/components/task-create-dialog-fresh-branch";
 
@@ -72,8 +72,6 @@ type CreateEditSelectorsProps = {
   workflowAgentLocked: boolean;
   freshBranchEnabled: boolean;
   onToggleFreshBranch: (enabled: boolean) => void;
-  newBranchName: string;
-  onNewBranchNameChange: (value: string) => void;
   currentLocalBranch: string;
 };
 
@@ -146,8 +144,6 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     useGitHubUrl,
     freshBranchEnabled,
     onToggleFreshBranch,
-    newBranchName,
-    onNewBranchNameChange,
     currentLocalBranch,
     BranchSelectorComponent,
     ExecutorProfileSelectorComponent,
@@ -167,14 +163,18 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     branchesLoading ||
     localBranchesLoading ||
     branchOptions.length === 0;
+  // When the local executor locks to the current branch, ignore any branch
+  // value the user picked under a different executor — the placeholder
+  // should reflect the actual checked-out branch instead.
+  const branchValue = lockedToCurrentBranch ? "" : branch;
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-        <div>
+    <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="min-w-0 flex-1">
           <BranchSelectorComponent
             options={branchOptions}
-            value={branch}
+            value={branchValue}
             onValueChange={onBranchChange}
             placeholder={branchPlaceholder}
             searchPlaceholder="Search branches..."
@@ -182,28 +182,26 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             disabled={branchDisabled}
           />
         </div>
-        <div>
-          <AgentColumn {...props} />
-        </div>
-        <div>
-          <ExecutorProfileSelectorComponent
-            options={executorProfileOptions}
-            value={executorProfileId}
-            onValueChange={onExecutorProfileChange}
-            placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
-            disabled={executorsLoading}
+        {isLocalWithoutGitHubUrl && (
+          <FreshBranchSwitch
+            enabled={freshBranchEnabled}
+            onToggle={onToggleFreshBranch}
+            currentLocalBranch={currentLocalBranch}
           />
-        </div>
+        )}
       </div>
-      {isLocalWithoutGitHubUrl && (
-        <FreshBranchControls
-          enabled={freshBranchEnabled}
-          onToggle={onToggleFreshBranch}
-          newBranchName={newBranchName}
-          onNewBranchNameChange={onNewBranchNameChange}
-          currentLocalBranch={currentLocalBranch}
+      <div>
+        <AgentColumn {...props} />
+      </div>
+      <div>
+        <ExecutorProfileSelectorComponent
+          options={executorProfileOptions}
+          value={executorProfileId}
+          onValueChange={onExecutorProfileChange}
+          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+          disabled={executorsLoading}
         />
-      )}
+      </div>
     </div>
   );
 });

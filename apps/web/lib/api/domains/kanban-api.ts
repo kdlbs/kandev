@@ -54,7 +54,6 @@ export async function createTask(
       default_branch?: string;
       github_url?: string;
       fresh_branch?: boolean;
-      new_branch_name?: string;
       confirm_discard?: boolean;
       consented_dirty_files?: string[];
     }>;

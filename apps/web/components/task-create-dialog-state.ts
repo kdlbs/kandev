@@ -56,7 +56,6 @@ type FormResetters = {
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
-  setNewBranchName: (v: string) => void;
   setCurrentLocalBranch: (v: string) => void;
 };
 
@@ -165,7 +164,6 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubUrlError(null);
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
   resetters.setFreshBranchEnabled(false);
-  resetters.setNewBranchName("");
   resetters.setCurrentLocalBranch("");
 }
 
@@ -219,13 +217,10 @@ function useWorkflowAgentProfileState() {
 
 function useFreshBranchState() {
   const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
-  const [newBranchName, setNewBranchName] = useState("");
   const [currentLocalBranch, setCurrentLocalBranch] = useState("");
   return {
     freshBranchEnabled,
     setFreshBranchEnabled,
-    newBranchName,
-    setNewBranchName,
     currentLocalBranch,
     setCurrentLocalBranch,
   };
@@ -395,7 +390,6 @@ export function useDialogFormState(
       setGitHubUrlError: ghUrl.setGitHubUrlError,
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
-      setNewBranchName: freshBranch.setNewBranchName,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
     },
   });

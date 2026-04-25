@@ -103,7 +103,6 @@ type DialogFormBodyProps = {
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
   onToggleFreshBranch: (enabled: boolean) => void;
-  onNewBranchNameChange: (value: string) => void;
 };
 
 function DialogFormBody({
@@ -135,7 +134,6 @@ function DialogFormBody({
   enhance,
   workflowAgentLocked,
   onToggleFreshBranch,
-  onNewBranchNameChange,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -168,7 +166,6 @@ function DialogFormBody({
           onAgentProfileChange,
           onExecutorProfileChange,
           onToggleFreshBranch,
-          onNewBranchNameChange,
         })}
       <WorkflowSection
         isCreateMode={isCreateMode}
@@ -217,7 +214,6 @@ type CreateEditSelectorsRenderArgs = Pick<
   | "onAgentProfileChange"
   | "onExecutorProfileChange"
   | "onToggleFreshBranch"
-  | "onNewBranchNameChange"
 >;
 
 function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
@@ -246,8 +242,6 @@ function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
       workflowAgentLocked={args.workflowAgentLocked}
       freshBranchEnabled={fs.freshBranchEnabled}
       onToggleFreshBranch={args.onToggleFreshBranch}
-      newBranchName={fs.newBranchName}
-      onNewBranchNameChange={args.onNewBranchNameChange}
       currentLocalBranch={fs.currentLocalBranch}
       BranchSelectorComponent={BranchSelector}
       AgentSelectorComponent={AgentSelector}
@@ -331,7 +325,6 @@ function useSubmitHandlersWiring({
     setFetchedSteps: fs.setFetchedSteps,
     clearDraft: fs.clearDraft,
     freshBranchEnabled: fs.freshBranchEnabled,
-    newBranchName: fs.newBranchName,
     isLocalExecutor: computed.isLocalExecutor,
     repositoryLocalPath,
   });
@@ -478,7 +471,6 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
             onToggleFreshBranch={handlers.handleToggleFreshBranch}
-            onNewBranchNameChange={handlers.handleNewBranchNameChange}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

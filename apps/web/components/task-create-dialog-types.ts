@@ -169,9 +169,6 @@ export type DialogFormState = {
   /** Local executor only: opt-in to discard local changes and start the task on a new branch */
   freshBranchEnabled: boolean;
   setFreshBranchEnabled: (v: boolean) => void;
-  /** New branch name for the fresh-branch flow */
-  newBranchName: string;
-  setNewBranchName: (v: string) => void;
   /** Currently checked-out branch in the selected local repo (for the disabled selector placeholder) */
   currentLocalBranch: string;
   setCurrentLocalBranch: (v: string) => void;
@@ -226,7 +223,6 @@ export type SubmitHandlersDeps = {
   setFetchedSteps: (v: null) => void;
   clearDraft: () => void;
   freshBranchEnabled: boolean;
-  newBranchName: string;
   isLocalExecutor: boolean;
   /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
   repositoryLocalPath: string;

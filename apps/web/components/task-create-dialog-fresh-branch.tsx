@@ -1,74 +1,54 @@
 "use client";
 
-import { IconInfoCircle } from "@tabler/icons-react";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
-export type FreshBranchControlsProps = {
+export type FreshBranchSwitchProps = {
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
-  newBranchName: string;
-  onNewBranchNameChange: (value: string) => void;
   currentLocalBranch: string;
 };
 
 function freshBranchTooltip(enabled: boolean, currentLocalBranch: string): string {
   if (enabled) {
-    return "Pick a base branch above. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
+    return "Forks a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
   }
   if (currentLocalBranch) {
-    return `Local clone will use the branch currently checked out (${currentLocalBranch}). Enable to start the task on a new branch instead.`;
+    return `Uses ${currentLocalBranch} (currently checked out). Enable to start the task on a new branch forked from a base of your choice.`;
   }
-  return "Local clone will use the branch currently checked out. Enable to start the task on a new branch instead.";
+  return "Uses the branch currently checked out. Enable to start the task on a new branch.";
 }
 
-export function FreshBranchControls({
+/**
+ * Inline switch shown next to the branch selector for local executors. Toggling
+ * on enables the branch selector for picking a base branch (the new branch
+ * name is generated server-side from the task title).
+ */
+export function FreshBranchSwitch({
   enabled,
   onToggle,
-  newBranchName,
-  onNewBranchNameChange,
   currentLocalBranch,
-}: FreshBranchControlsProps) {
+}: FreshBranchSwitchProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-border px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Switch
-          id="fresh-branch-toggle"
-          checked={enabled}
-          onCheckedChange={onToggle}
-          data-testid="fresh-branch-toggle"
-        />
-        <Label htmlFor="fresh-branch-toggle" className="cursor-pointer text-xs font-medium">
-          New branch
-        </Label>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className="cursor-help text-muted-foreground"
-              aria-label="What does New branch do?"
-              data-testid="fresh-branch-tooltip-trigger"
-            >
-              <IconInfoCircle className="h-3.5 w-3.5" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            {freshBranchTooltip(enabled, currentLocalBranch)}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      {enabled && (
-        <Input
-          value={newBranchName}
-          onChange={(e) => onNewBranchNameChange(e.target.value)}
-          placeholder="new-branch-name"
-          aria-label="New branch name"
-          data-testid="new-branch-name-input"
-          className="h-7 max-w-[260px] text-xs"
-        />
-      )}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input px-2 text-xs">
+          <Switch
+            id="fresh-branch-toggle"
+            checked={enabled}
+            onCheckedChange={onToggle}
+            data-testid="fresh-branch-toggle"
+          />
+          <Label htmlFor="fresh-branch-toggle" className="cursor-pointer font-medium">
+            New branch
+          </Label>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        {freshBranchTooltip(enabled, currentLocalBranch)}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

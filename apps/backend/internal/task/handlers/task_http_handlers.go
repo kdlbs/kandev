@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -423,7 +424,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	if !h.applyFreshBranch(c, body.Repositories, repos) {
+	if !h.applyFreshBranch(c, body.Title, body.Repositories, repos) {
 		return
 	}
 
@@ -480,7 +481,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 // newly-created branch on success so the persisted task uses it as the
 // effective base branch on every session resume. Writes the appropriate
 // HTTP error response and returns false on failure.
-func (h *TaskHandlers) applyFreshBranch(c *gin.Context, inputs []httpTaskRepositoryInput, repos []dto.TaskRepositoryInput) bool {
+//
+// When the caller doesn't supply NewBranchName, the backend generates a
+// semantic name from the task title (matching the worktree executor's
+// branch-naming) so the user only has to flip a switch.
+func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs []httpTaskRepositoryInput, repos []dto.TaskRepositoryInput) bool {
 	ctx := c.Request.Context()
 	for i, raw := range inputs {
 		if !raw.FreshBranch {
@@ -490,10 +495,21 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, inputs []httpTaskReposit
 		if !ok {
 			return false
 		}
+		baseBranch := raw.BaseBranch
+		if baseBranch == "" {
+			// User didn't pick one — fall back to the repo's checked-out branch.
+			if branch, _ := h.service.LocalRepositoryCurrentBranch(ctx, repoPath); branch != "" {
+				baseBranch = branch
+			}
+		}
+		newBranch := strings.TrimSpace(raw.NewBranchName)
+		if newBranch == "" {
+			newBranch = worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+		}
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
 			RepoPath:            repoPath,
-			BaseBranch:          raw.BaseBranch,
-			NewBranch:           raw.NewBranchName,
+			BaseBranch:          baseBranch,
+			NewBranch:           newBranch,
 			ConfirmDiscard:      raw.ConfirmDiscard,
 			ConsentedDirtyFiles: raw.ConsentedDirtyFiles,
 		})
@@ -501,7 +517,7 @@ func (h *TaskHandlers) applyFreshBranch(c *gin.Context, inputs []httpTaskReposit
 			h.respondFreshBranchError(c, err)
 			return false
 		}
-		repos[i].BaseBranch = raw.NewBranchName
+		repos[i].BaseBranch = newBranch
 		repos[i].CheckoutBranch = ""
 	}
 	return true

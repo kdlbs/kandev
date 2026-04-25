@@ -8,7 +8,6 @@ import type { DialogFormState } from "@/components/task-create-dialog-types";
 
 function clearFreshBranch(fs: DialogFormState) {
   fs.setFreshBranchEnabled(false);
-  fs.setNewBranchName("");
   fs.setCurrentLocalBranch("");
 }
 
@@ -112,16 +111,8 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   const handleToggleFreshBranch = useCallback(
     (enabled: boolean) => {
       fs.setFreshBranchEnabled(enabled);
-      if (!enabled) {
-        fs.setNewBranchName("");
-        fs.setBranch("");
-      }
+      if (!enabled) fs.setBranch("");
     },
-    [fs],
-  );
-
-  const handleNewBranchNameChange = useCallback(
-    (value: string) => fs.setNewBranchName(value),
     [fs],
   );
 
@@ -139,7 +130,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   return {
     handleToggleGitHubUrl,
     handleToggleFreshBranch,
-    handleNewBranchNameChange,
     handleGitHubUrlChange,
   };
 }

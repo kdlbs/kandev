@@ -60,7 +60,6 @@ export function useTaskSubmitHandlers({
   setFetchedSteps,
   clearDraft,
   freshBranchEnabled,
-  newBranchName,
   isLocalExecutor,
   repositoryLocalPath,
 }: SubmitHandlersDeps) {
@@ -80,7 +79,7 @@ export function useTaskSubmitHandlers({
     });
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
-    isFreshBranchActive ? { newBranchName, confirmDiscard: true, consentedDirtyFiles } : undefined;
+    isFreshBranchActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
 
   const validateForCreate = useCallback(
     (trimmedTitle: string) =>
@@ -92,19 +91,8 @@ export function useTaskSubmitHandlers({
         selectedLocalRepo,
         githubUrl,
         agentProfileId,
-        freshBranchEnabled: isFreshBranchActive,
-        newBranchName,
       }),
-    [
-      workspaceId,
-      effectiveWorkflowId,
-      repositoryId,
-      selectedLocalRepo,
-      githubUrl,
-      agentProfileId,
-      isFreshBranchActive,
-      newBranchName,
-    ],
+    [workspaceId, effectiveWorkflowId, repositoryId, selectedLocalRepo, githubUrl, agentProfileId],
   );
 
   const resetForm = useCallback(() => {
@@ -152,7 +140,6 @@ export function useTaskSubmitHandlers({
       githubPrHeadBranch,
       selectedLocalRepo,
       isFreshBranchActive,
-      newBranchName,
     ],
   );
 
