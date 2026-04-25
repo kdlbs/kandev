@@ -353,6 +353,24 @@ func TestService_GetTicket_UnconfiguredWorkspace(t *testing.T) {
 	}
 }
 
+func TestService_GetTicket_RevealError_NotConfusedWithUnconfigured(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if err := f.store.UpsertConfig(ctx, &JiraConfig{
+		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		AuthMethod: AuthMethodAPIToken,
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	_, err := f.svc.GetTicket(ctx, "ws-1", "X-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrNotConfigured) {
+		t.Errorf("transient Reveal failure must not be ErrNotConfigured: %v", err)
+	}
+}
+
 func TestService_DoTransition_PassThrough(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
