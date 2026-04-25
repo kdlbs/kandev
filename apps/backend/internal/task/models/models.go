@@ -535,7 +535,7 @@ const (
 type TaskEnvironment struct {
 	ID                string                `json:"id"`
 	TaskID            string                `json:"task_id"`
-	RepositoryID      string                `json:"repository_id"`
+	RepositoryID      string                `json:"repository_id"` // Deprecated: use Repos. Kept for dual-write/backwards compat.
 	ExecutorType      string                `json:"executor_type"`
 	ExecutorID        string                `json:"executor_id"`
 	ExecutorProfileID string                `json:"executor_profile_id"`
@@ -543,16 +543,55 @@ type TaskEnvironment struct {
 	ControlPort       int                   `json:"control_port"`       // agentctl control port
 	Status            TaskEnvironmentStatus `json:"status"`
 
-	// Type-specific fields
-	WorktreeID     string `json:"worktree_id,omitempty"`
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	// Type-specific fields. The single worktree fields below are legacy: with
+	// multi-repo tasks, the per-repo worktrees live on Repos. WorkspacePath
+	// continues to point at the agent workspace root (the task root when
+	// TaskDirName is set, otherwise the single repo's worktree path).
+	WorktreeID     string `json:"worktree_id,omitempty"`     // Deprecated: use Repos[i].WorktreeID
+	WorktreePath   string `json:"worktree_path,omitempty"`   // Deprecated: use Repos[i].WorktreePath
+	WorktreeBranch string `json:"worktree_branch,omitempty"` // Deprecated: use Repos[i].WorktreeBranch
 	WorkspacePath  string `json:"workspace_path,omitempty"`
 	ContainerID    string `json:"container_id,omitempty"`
 	SandboxID      string `json:"sandbox_id,omitempty"`
 
+	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
+	// Set when the task uses the multi-repo task-directory layout
+	// (~/.kandev/tasks/{TaskDirName}/{RepoName}/).
+	TaskDirName string `json:"task_dir_name,omitempty"`
+
+	// Repos contains one entry per repository associated with this environment.
+	// Populated by repository getters. Empty for environments created before the
+	// multi-repo backfill ran with no legacy repository_id.
+	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// RepoFor returns the per-repo environment row for repositoryID, or nil if not present.
+func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
+	for _, r := range te.Repos {
+		if r.RepositoryID == repositoryID {
+			return r
+		}
+	}
+	return nil
+}
+
+// TaskEnvironmentRepo represents the per-repository state of a task environment.
+// One row per repository associated with the task: each carries its own worktree
+// reference and any per-repo preparation error.
+type TaskEnvironmentRepo struct {
+	ID                string    `json:"id"`
+	TaskEnvironmentID string    `json:"task_environment_id"`
+	RepositoryID      string    `json:"repository_id"`
+	WorktreeID        string    `json:"worktree_id,omitempty"`
+	WorktreePath      string    `json:"worktree_path,omitempty"`
+	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
+	Position          int       `json:"position"`
+	ErrorMessage      string    `json:"error_message,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.
@@ -590,7 +629,42 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 	if te.SandboxID != "" {
 		result["sandbox_id"] = te.SandboxID
 	}
+	if te.TaskDirName != "" {
+		result["task_dir_name"] = te.TaskDirName
+	}
+	if len(te.Repos) > 0 {
+		repos := make([]map[string]interface{}, 0, len(te.Repos))
+		for _, repo := range te.Repos {
+			repos = append(repos, repo.ToAPI())
+		}
+		result["repos"] = repos
+	}
 	return result
+}
+
+// ToAPI converts internal TaskEnvironmentRepo to API map.
+func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
+	out := map[string]interface{}{
+		"id":                  r.ID,
+		"task_environment_id": r.TaskEnvironmentID,
+		"repository_id":       r.RepositoryID,
+		"position":            r.Position,
+		"created_at":          r.CreatedAt,
+		"updated_at":          r.UpdatedAt,
+	}
+	if r.WorktreeID != "" {
+		out["worktree_id"] = r.WorktreeID
+	}
+	if r.WorktreePath != "" {
+		out["worktree_path"] = r.WorktreePath
+	}
+	if r.WorktreeBranch != "" {
+		out["worktree_branch"] = r.WorktreeBranch
+	}
+	if r.ErrorMessage != "" {
+		out["error_message"] = r.ErrorMessage
+	}
+	return out
 }
 
 // TaskPlan represents a plan associated with a task

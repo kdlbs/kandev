@@ -352,6 +352,21 @@ func (m *mockRepository) DeleteTaskEnvironment(ctx context.Context, id string) e
 func (m *mockRepository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error {
 	return nil
 }
+func (m *mockRepository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error {
+	return nil
+}
+func (m *mockRepository) ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskEnvironmentRepo(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error {
+	return nil
+}
 
 // Git Snapshot operations
 func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {

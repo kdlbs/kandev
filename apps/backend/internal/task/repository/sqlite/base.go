@@ -109,6 +109,9 @@ func (r *Repository) initSchema() error {
 	if err := r.backfillTaskEnvironments(); err != nil {
 		return err
 	}
+	if err := r.backfillTaskEnvironmentRepos(); err != nil {
+		return err
+	}
 	if err := r.ensureWorkspaceIndexes(); err != nil {
 		return err
 	}
@@ -160,6 +163,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+	// Add task_dir_name column to task_environments for multi-repo task root layout (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	return nil
 }
 
@@ -394,6 +399,67 @@ func (r *Repository) backfillSingleTask(tx *sql.Tx, row backfillRow) error {
 		return fmt.Errorf("backfill: link sessions for task %s: %w", row.taskID, err)
 	}
 	return nil
+}
+
+// backfillTaskEnvironmentRepos populates task_environment_repos from the legacy
+// single-repo fields on task_environments. One row per environment that has a
+// non-empty repository_id and no existing task_environment_repos row.
+// Idempotent.
+func (r *Repository) backfillTaskEnvironmentRepos() error {
+	rows, err := r.db.Query(`
+		SELECT te.id,
+		       te.repository_id,
+		       COALESCE(te.worktree_id, ''),
+		       COALESCE(te.worktree_path, ''),
+		       COALESCE(te.worktree_branch, ''),
+		       te.created_at
+		FROM task_environments te
+		LEFT JOIN task_environment_repos ter ON ter.task_environment_id = te.id
+		WHERE te.repository_id != '' AND ter.id IS NULL
+	`)
+	if err != nil {
+		return fmt.Errorf("backfill repos: query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type envRepoRow struct {
+		envID, repoID, wtID, wtPath, wtBranch, createdAt string
+	}
+	var pending []envRepoRow
+	for rows.Next() {
+		var row envRepoRow
+		if err := rows.Scan(&row.envID, &row.repoID, &row.wtID, &row.wtPath, &row.wtBranch, &row.createdAt); err != nil {
+			return fmt.Errorf("backfill repos: scan: %w", err)
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backfill repos: rows: %w", err)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("backfill repos: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, row := range pending {
+		if _, err := tx.Exec(`
+			INSERT INTO task_environment_repos (
+				id, task_environment_id, repository_id,
+				worktree_id, worktree_path, worktree_branch,
+				position, error_message, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, 0, '', ?, ?)
+		`, uuid.New().String(), row.envID, row.repoID,
+			row.wtID, row.wtPath, row.wtBranch,
+			row.createdAt, row.createdAt); err != nil {
+			return fmt.Errorf("backfill repos: insert env %s: %w", row.envID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) initCoreSchema() error {
@@ -697,6 +763,7 @@ func (r *Repository) initSessionWorktreeSchema() error {
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
+		task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -704,6 +771,24 @@ func (r *Repository) initSessionWorktreeSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status);
+
+	CREATE TABLE IF NOT EXISTS task_environment_repos (
+		id TEXT PRIMARY KEY,
+		task_environment_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		worktree_id TEXT DEFAULT '',
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
+		position INTEGER DEFAULT 0,
+		error_message TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+		UNIQUE(task_environment_id, repository_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id);
+	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id);
 
 	CREATE TABLE IF NOT EXISTS task_session_worktrees (
 		id TEXT PRIMARY KEY,
