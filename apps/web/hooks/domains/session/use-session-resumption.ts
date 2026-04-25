@@ -155,10 +155,12 @@ export async function resumeWithSilentFallback(
     return;
   }
   setters.setResumptionState("error");
-  setters.setError("Failed to resume session");
+  setters.setError("Failed to resume session — workspace restore also unavailable");
 }
 
-/** Run a single launch attempt; returns true on success, false on any failure. */
+/** Run a single launch attempt; returns true on success, false on any failure.
+ *  Logs caught errors to the console so silent fallback paths remain debuggable
+ *  (errors otherwise vanish into the implicit `false` return). */
 async function tryLaunch(
   request: import("@/lib/services/session-launch-service").LaunchSessionRequest,
   taskId: string,
@@ -182,7 +184,12 @@ async function tryLaunch(
       setters,
     );
     return true;
-  } catch {
+  } catch (err) {
+    console.error("[tryLaunch] session launch failed", {
+      intent: request.intent,
+      sessionId,
+      err,
+    });
     return false;
   }
 }

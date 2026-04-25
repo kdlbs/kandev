@@ -32,6 +32,11 @@ type PromptResult struct {
 // error-recovery state (WAITING_FOR_INPUT with a non-empty ErrorMessage).
 const resumeReasonErrorRecovery = "error_recovery"
 
+// resumeReasonFailedSessionResumable is the resume reason returned when a
+// FAILED session is auto-resumed because its runtime is Resumable. Distinct
+// from "agent_not_running" so log filtering can isolate FAILED auto-resumes.
+const resumeReasonFailedSessionResumable = "failed_session_resumable"
+
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
@@ -1042,7 +1047,11 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		// before surfacing the error. Frontend falls back to restore_workspace if
 		// the resume itself fails.
 		if session.State == models.TaskSessionStateFailed && running != nil && running.Resumable {
-			return s.validateResumeEligibility(session, resp), nil
+			out := s.validateResumeEligibility(session, resp)
+			if out.NeedsResume {
+				out.ResumeReason = resumeReasonFailedSessionResumable
+			}
+			return out, nil
 		}
 		// Don't auto-resume other terminal sessions (CANCELLED stays stopped, COMPLETED is done).
 		if !isActiveSessionState(session.State) {

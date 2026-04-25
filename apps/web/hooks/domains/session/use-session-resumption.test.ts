@@ -51,6 +51,9 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
 describe("resumeWithSilentFallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // tryLaunch logs caught errors via console.error; silence in tests so the
+    // expected error paths don't pollute the test output.
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   it("uses resume on first try when it succeeds, never calling restore_workspace", async () => {
@@ -133,7 +136,9 @@ describe("resumeWithSilentFallback", () => {
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
-    expect(calls.errors.at(-1)).toBe("Failed to resume session");
+    expect(calls.errors.at(-1)).toBe(
+      "Failed to resume session — workspace restore also unavailable",
+    );
   });
 
   it("surfaces an error when both resume and restore_workspace throw", async () => {
@@ -146,6 +151,8 @@ describe("resumeWithSilentFallback", () => {
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
-    expect(calls.errors.at(-1)).toBe("Failed to resume session");
+    expect(calls.errors.at(-1)).toBe(
+      "Failed to resume session — workspace restore also unavailable",
+    );
   });
 });

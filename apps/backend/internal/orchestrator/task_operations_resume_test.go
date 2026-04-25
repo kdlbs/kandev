@@ -161,6 +161,10 @@ func TestGetTaskSessionStatus_AutoResumesFailedSessionWithResumeToken(t *testing
 	if resp.NeedsWorkspaceRestore {
 		t.Fatal("expected NeedsWorkspaceRestore=false when auto-resuming")
 	}
+	if resp.ResumeReason != resumeReasonFailedSessionResumable {
+		t.Fatalf("expected ResumeReason=%q for FAILED auto-resume, got %q",
+			resumeReasonFailedSessionResumable, resp.ResumeReason)
+	}
 }
 
 // TestGetTaskSessionStatus_FailedSessionWithoutResumableFlagFallsBack verifies
