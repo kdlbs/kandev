@@ -618,13 +618,6 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 					zap.String("session_id", execution.SessionID), zap.Error(err))
 			}
 		}
-
-		// A new dialog-launched session reaches STARTING via a direct executor
-		// write (persistLaunchState) that bypasses updateTaskSessionState. For
-		// text-only agent output the session never transitions to RUNNING, so
-		// the RUNNING-triggered promotion never fires. Promote here so the
-		// sidebar reflects the new session's state instead of the stale primary.
-		s.maybePromoteToPrimary(ctx, taskID, execution.SessionID)
 	}
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 }
