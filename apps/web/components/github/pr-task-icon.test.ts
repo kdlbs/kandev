@@ -254,6 +254,19 @@ describe("isPRAwaitingReview", () => {
       ),
     ).toBe(false);
   });
+
+  it("is false for an approved PR with extra reviewers still pending", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          pending_review_count: 1,
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("getPRTooltip", () => {

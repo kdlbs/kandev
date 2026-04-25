@@ -7,8 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 // Requires checks_state === "success" (not just "") so repos with no CI configured
-// won't trigger ready-to-merge on mergeable_state=clean alone. Loosen if we start
-// supporting CI-less repos.
+// won't trigger ready-to-merge on mergeable_state=clean alone.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
@@ -25,6 +24,7 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
+  if (pr.review_state === "approved") return false;
   return pr.review_state === "pending" || pr.pending_review_count > 0;
 }
 
