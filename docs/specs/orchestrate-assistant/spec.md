@@ -117,8 +117,6 @@ Agents need persistent knowledge that survives across sessions -- who the user i
     knowledge/
       people-cfl.md
       projects-api-migration.md
-    sessions/
-      2026-04-26-auth-task.md
   ```
 - Each file has YAML frontmatter + markdown content:
   ```markdown
@@ -131,18 +129,14 @@ Agents need persistent knowledge that survives across sessions -- who the user i
 
   User prefers bullet points over paragraphs in summaries.
   ```
-- One file per entry minimizes git conflicts: session notes are unique per session, operating knowledge changes infrequently, knowledge entries are per-topic.
-- Three layers (PARA-inspired):
+- One file per entry minimizes git conflicts: operating knowledge changes infrequently, knowledge entries are per-topic.
+- Two layers (PARA-inspired):
 
 **Layer 1: Knowledge** (`layer=knowledge`)
 - Structured facts organized by topic key (entities, projects, preferences).
 - Facts have metadata: timestamp, source session, status (active/superseded).
 
-**Layer 2: Session notes** (`layer=session`)
-- Per-session summaries: what happened, what was decided, what was learned.
-- Written by the agent at the end of each session.
-
-**Layer 3: Operating knowledge** (`layer=operating`)
+**Layer 2: Operating knowledge** (`layer=operating`)
 - How the user operates: communication preferences, review style, coding conventions, things that went wrong before.
 - Updated when the agent discovers new patterns.
 - Loaded into every session as high-priority context.

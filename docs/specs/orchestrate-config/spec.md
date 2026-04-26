@@ -28,10 +28,8 @@ Orchestrate uses a **filesystem-first** model: `~/.kandev/workspaces/<name>/` is
     │   │   │   └── memory/         # agent memory (one file per entry)
     │   │   │       ├── operating/
     │   │   │       │   └── communication-style.md
-    │   │   │       ├── knowledge/
-    │   │   │       │   └── people-cfl.md
-    │   │   │       └── sessions/
-    │   │   │           └── 2026-04-26-auth-task.md
+    │   │   │       └── knowledge/
+    │   │   │           └── people-cfl.md
     │   │   └── frontend-worker.yml
     │   ├── skills/
     │   │   ├── code-review/
