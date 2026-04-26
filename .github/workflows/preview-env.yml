@@ -48,7 +48,7 @@ jobs:
 
       - name: Deploy preview environment
         working-directory: apps/backend
-        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO"
+        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-web-install
         env:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
@@ -81,6 +81,9 @@ jobs:
         with:
           # pull_request_target checks out base by default; explicitly use PR head.
           # Safe: the preview CLI only reads files to build artifacts and posts comments.
+          # NOTE: The allowlist gate (OWNER/MEMBER/COLLABORATOR, safe-to-test, PREVIEW_ENV_ALLOWLIST)
+          # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
+          # The safe-to-test label must be re-applied after each new push (see strip-safe-to-test job).
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 
@@ -102,7 +105,7 @@ jobs:
 
       - name: Deploy preview environment
         working-directory: apps/backend
-        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO"
+        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO" --skip-web-install
         env:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
@@ -111,13 +114,42 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # -----------------------------------------------------------------------
+  # Strip safe-to-test label on new pushes to fork PRs.
+  # Prevents a once-approved fork from running updated (potentially malicious)
+  # code on subsequent pushes without a fresh maintainer re-approval.
+  # -----------------------------------------------------------------------
+  strip-safe-to-test:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              name: 'safe-to-test',
+            });
+
+  # -----------------------------------------------------------------------
   # Cleanup (all closed PRs — no allowlist check)
   # The sprite must be destroyed regardless of how the PR was closed or
   # whether a preview was ever successfully deployed. Handles gracefully
   # if the sprite does not exist (was never deployed or already destroyed).
+  # Runs only on pull_request_target to avoid duplicate runs — both events
+  # fire `closed`, but only pull_request_target has secrets for all PRs.
   # -----------------------------------------------------------------------
   cleanup-preview:
-    if: github.event.action == 'closed'
+    if: >
+      github.event.action == 'closed' &&
+      github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

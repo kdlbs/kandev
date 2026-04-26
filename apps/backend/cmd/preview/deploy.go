@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	sprites "github.com/superfly/sprites-go"
 )
 
 func runDeploy(ctx context.Context, args []string) int {
@@ -16,6 +17,7 @@ func runDeploy(ctx context.Context, args []string) int {
 	sha := fs.String("sha", "", "commit SHA to display in the comment")
 	repo := fs.String("repo", envOr("GITHUB_REPOSITORY", ""), "owner/repo")
 	port := fs.Int("port", ports.Backend, "kandev backend port exposed by the sprite")
+	skipWebInstall := fs.Bool("skip-web-install", false, "skip pnpm install (CI already ran it)")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
@@ -53,14 +55,9 @@ func runDeploy(ctx context.Context, args []string) int {
 	binDir := filepath.Join(tmpDir, "bin")
 	tarPath := filepath.Join(tmpDir, "kandev-preview.tar.gz")
 
-	if err := deployArtifacts(ctx, binDir, tarPath, spritesToken, spriteName, *port); err != nil {
-		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
-		return 1
-	}
-
-	previewURL, err := enablePublicURL(ctx, spritesToken, spriteName, *port)
+	previewURL, err := deployArtifacts(ctx, binDir, tarPath, spritesToken, spriteName, *port, *skipWebInstall)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "preview deploy: enable public URL: %v\n", err)
+		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
 		return 1
 	}
 
@@ -75,45 +72,70 @@ func runDeploy(ctx context.Context, args []string) int {
 	return 0
 }
 
-func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteName string, port int) error {
-	fmt.Println("building linux/amd64 binaries...")
+// deployArtifacts builds the bundle, deploys it to the sprite, and returns the public URL.
+// Using a single client for the full flow avoids redundant auth round-trips.
+func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteName string, port int, skipWebInstall bool) (string, error) {
+	fmt.Fprintln(os.Stderr, "building linux/amd64 binaries...")
 	if err := buildLinuxBinaries(ctx, binDir); err != nil {
-		return fmt.Errorf("build binaries: %w", err)
+		return "", fmt.Errorf("build binaries: %w", err)
 	}
 
-	fmt.Println("building web frontend...")
-	if err := buildWeb(ctx); err != nil {
-		return fmt.Errorf("build web: %w", err)
+	fmt.Fprintln(os.Stderr, "building web frontend...")
+	if err := buildWeb(ctx, skipWebInstall); err != nil {
+		return "", fmt.Errorf("build web: %w", err)
 	}
 
-	fmt.Println("packaging bundle...")
+	fmt.Fprintln(os.Stderr, "packaging bundle...")
 	if err := packageBundle(binDir, tarPath); err != nil {
-		return fmt.Errorf("package bundle: %w", err)
+		return "", fmt.Errorf("package bundle: %w", err)
 	}
 
 	client := newSpriteClient(spritesToken)
 	defer func() { _ = client.Close() }()
 
-	fmt.Printf("getting or creating sprite %s...\n", spriteName)
+	fmt.Fprintf(os.Stderr, "getting or creating sprite %s...\n", spriteName)
 	sprite, err := getOrCreateSprite(ctx, client, spriteName)
 	if err != nil {
-		return fmt.Errorf("get/create sprite: %w", err)
+		return "", fmt.Errorf("get/create sprite: %w", err)
 	}
 
-	fmt.Println("uploading bundle...")
+	fmt.Fprintln(os.Stderr, "uploading bundle...")
 	if err := uploadBundle(ctx, sprite, tarPath); err != nil {
-		return fmt.Errorf("upload bundle: %w", err)
+		return "", fmt.Errorf("upload bundle: %w", err)
 	}
 
-	fmt.Println("extracting and configuring...")
+	fmt.Fprintln(os.Stderr, "extracting and configuring...")
 	if err := extractBundle(ctx, sprite); err != nil {
-		return fmt.Errorf("extract bundle: %w", err)
+		return "", fmt.Errorf("extract bundle: %w", err)
 	}
 
-	fmt.Println("deploying kandev service...")
+	fmt.Fprintln(os.Stderr, "deploying kandev service...")
 	if err := deployService(ctx, sprite, port); err != nil {
-		return fmt.Errorf("deploy service: %w", err)
+		return "", fmt.Errorf("deploy service: %w", err)
 	}
 
-	return nil
+	return enablePublicURL(ctx, client, spriteName)
+}
+
+// enablePublicURL sets the sprite's URL to public mode and returns the URL.
+// Accepts the already-open client from deployArtifacts to avoid a second auth handshake.
+func enablePublicURL(ctx context.Context, client *sprites.Client, spriteName string) (string, error) {
+	updateCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer cancel()
+
+	if err := client.UpdateURLSettings(updateCtx, spriteName, &sprites.URLSettings{Auth: "public"}); err != nil {
+		return "", fmt.Errorf("update URL settings: %w", err)
+	}
+
+	getCtx, getCancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer getCancel()
+
+	sprite, err := client.GetSprite(getCtx, spriteName)
+	if err != nil {
+		return "", fmt.Errorf("get sprite URL: %w", err)
+	}
+	if sprite.URL == "" {
+		return "", fmt.Errorf("sprite %s has no URL assigned yet", spriteName)
+	}
+	return sprite.URL, nil
 }

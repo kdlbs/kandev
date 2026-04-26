@@ -42,11 +42,11 @@ func runCleanup(ctx context.Context, args []string) int {
 	client := newSpriteClient(spritesToken)
 	defer func() { _ = client.Close() }()
 
-	fmt.Printf("destroying sprite %s...\n", spriteName)
-	createdAt, err := destroySprite(ctx, client, spriteName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "preview cleanup: destroy sprite: %v\n", err)
-		// Don't fail — sprite may already be gone; still try to update comment.
+	fmt.Fprintf(os.Stderr, "destroying sprite %s...\n", spriteName)
+	createdAt, destroyErr := destroySprite(ctx, client, spriteName)
+	if destroyErr != nil {
+		fmt.Fprintf(os.Stderr, "preview cleanup: destroy sprite: %v\n", destroyErr)
+		// Continue to update the PR comment even if destroy failed.
 	}
 
 	runtime := computeRuntime(createdAt)
@@ -56,6 +56,9 @@ func runCleanup(ctx context.Context, args []string) int {
 		return 1
 	}
 
+	if destroyErr != nil {
+		return 1
+	}
 	return 0
 }
 

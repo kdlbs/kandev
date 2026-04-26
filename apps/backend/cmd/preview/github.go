@@ -31,39 +31,43 @@ func upsertComment(ctx context.Context, token, repo string, pr int, body string)
 }
 
 func findPreviewComment(ctx context.Context, token, repo string, pr int) (int64, error) {
-	url := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100", githubAPIBase, repo, pr)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100&page=%d", githubAPIBase, repo, pr, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("list comments status %d: %s", resp.StatusCode, body)
-	}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return 0, fmt.Errorf("list comments status %d: %s", resp.StatusCode, body)
+		}
 
-	var comments []struct {
-		ID   int64  `json:"id"`
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
-		return 0, err
-	}
+		var comments []struct {
+			ID   int64  `json:"id"`
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
+			return 0, err
+		}
 
-	for _, c := range comments {
-		if containsMarker(c.Body) {
-			return c.ID, nil
+		for _, c := range comments {
+			if containsMarker(c.Body) {
+				return c.ID, nil
+			}
+		}
+		if len(comments) < 100 {
+			return 0, nil // last page — marker not found
 		}
 	}
-	return 0, nil
 }
 
 func containsMarker(body string) bool {
@@ -127,8 +131,13 @@ func buildDeployComment(previewURL, sha string) string {
 
 // buildCleanupComment returns the markdown body for a post-close summary comment.
 func buildCleanupComment(runtime time.Duration) string {
-	runtimeStr := "unknown"
-	if runtime > 0 {
+	var runtimeStr string
+	switch {
+	case runtime <= 0:
+		runtimeStr = "unknown"
+	case runtime < time.Minute:
+		runtimeStr = "< 1 minute"
+	default:
 		runtimeStr = fmt.Sprintf("~%d minutes", int(runtime.Minutes()))
 	}
 	return fmt.Sprintf(`%s

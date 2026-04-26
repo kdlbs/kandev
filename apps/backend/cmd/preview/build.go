@@ -34,7 +34,7 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 		{"mock-agent", "./cmd/mock-agent"},
 	} {
 		out := filepath.Join(outDir, b.name)
-		fmt.Printf("  go build %s -> %s\n", b.pkg, out)
+		fmt.Fprintf(os.Stderr, "  go build %s -> %s\n", b.pkg, out)
 		cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-s -w", "-o", out, b.pkg)
 		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -45,7 +45,7 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 
 	// kandev requires CGO for SQLite. Build natively on linux/amd64; use Docker otherwise.
 	kandevOut := filepath.Join(outDir, "kandev")
-	fmt.Printf("  go build ./cmd/kandev -> %s\n", kandevOut)
+	fmt.Fprintf(os.Stderr, "  go build ./cmd/kandev -> %s\n", kandevOut)
 	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
 		return buildKandevNative(ctx, kandevOut)
 	}
@@ -88,21 +88,48 @@ func buildKandevDocker(ctx context.Context, out string) error {
 		return fmt.Errorf("docker build kandev: %w", err)
 	}
 
-	// Move from the temp path (inside /work) to the desired output path.
+	// Copy from temp path (inside /work mount) to the desired output path.
+	// os.Rename fails with EXDEV when hostTmp and out are on different filesystems
+	// (e.g. the repo is on a regular disk and out is under os.TempDir() on tmpfs).
 	hostTmp := filepath.Join(wd, "bin", "kandev-preview-build")
-	return os.Rename(hostTmp, out)
+	defer func() { _ = os.Remove(hostTmp) }()
+	return copyFile(hostTmp, out, 0o755)
 }
 
-// buildWeb installs frontend dependencies and runs the Next.js production build.
-func buildWeb(ctx context.Context) error {
-	for _, step := range []struct {
+func copyFile(src, dst string, mode fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy %s → %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+// buildWeb runs the Next.js production build. When skipInstall is true the
+// pnpm install step is skipped (CI already runs it before invoking the CLI).
+func buildWeb(ctx context.Context, skipInstall bool) error {
+	steps := []struct {
 		desc string
 		args []string
 	}{
 		{"pnpm install", []string{"pnpm", "install", "--frozen-lockfile"}},
 		{"pnpm build web", []string{"pnpm", "--filter", "@kandev/web", "build"}},
-	} {
-		fmt.Printf("  %s\n", step.desc)
+	}
+	for _, step := range steps {
+		if skipInstall && step.desc == "pnpm install" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  %s\n", step.desc)
 		cmd := exec.CommandContext(ctx, step.args[0], step.args[1:]...)
 		cmd.Dir = appsDir
 		cmd.Stdout = os.Stdout
@@ -203,7 +230,7 @@ func addDirToTar(tw *tar.Writer, srcDir, dstPrefix string) error {
 			return err
 		}
 
-		// Handle symlinks by following them.
+		// Preserve symlinks as-is (Next.js standalone relies on them for node_modules).
 		if info.Mode()&fs.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {

@@ -34,6 +34,8 @@ func getOrCreateSprite(ctx context.Context, client *sprites.Client, name string)
 	if err == nil {
 		return sprite, nil
 	}
+	// The SDK returns a plain fmt.Errorf("sprite not found: %s") for 404s —
+	// no typed error is available, so we check the message string.
 	if !strings.Contains(err.Error(), "not found") {
 		return nil, fmt.Errorf("get sprite: %w", err)
 	}
@@ -49,7 +51,7 @@ func getOrCreateSprite(ctx context.Context, client *sprites.Client, name string)
 }
 
 // uploadBundle uploads the bundle tarball to the sprite via the Filesystem API.
-// Retries up to spriteUploadRetries times on transient errors.
+// Retries up to spriteUploadRetries times on transient errors with context-aware backoff.
 func uploadBundle(ctx context.Context, sprite *sprites.Sprite, tarPath string) error {
 	data, err := os.ReadFile(tarPath)
 	if err != nil {
@@ -70,8 +72,12 @@ func uploadBundle(ctx context.Context, sprite *sprites.Sprite, tarPath string) e
 		if attempt == spriteUploadRetries || uploadCtx.Err() != nil {
 			break
 		}
-		fmt.Printf("  upload attempt %d failed (%v), retrying in %v...\n", attempt, err, backoff)
-		time.Sleep(backoff)
+		fmt.Fprintf(os.Stderr, "  upload attempt %d failed (%v), retrying in %v...\n", attempt, err, backoff)
+		select {
+		case <-uploadCtx.Done():
+			return uploadCtx.Err()
+		case <-time.After(backoff):
+		}
 		backoff *= 2
 	}
 	return fmt.Errorf("upload bundle after %d attempts: %w", spriteUploadRetries, lastErr)
@@ -146,9 +152,13 @@ func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error 
 }
 
 func waitForServiceStarted(stream *sprites.ServiceStream) error {
+	started := false
 	for {
 		event, err := stream.Next()
 		if errors.Is(err, io.EOF) {
+			if !started {
+				return fmt.Errorf("service stream closed before 'started' event")
+			}
 			return nil
 		}
 		if err != nil {
@@ -156,17 +166,20 @@ func waitForServiceStarted(stream *sprites.ServiceStream) error {
 		}
 		switch event.Type {
 		case "started":
-			fmt.Println("  kandev service started")
+			fmt.Fprintln(os.Stderr, "  kandev service started")
+			started = true
 			return nil
 		case "error":
 			return fmt.Errorf("service error: %s", event.Data)
 		case "exit":
-			if event.ExitCode != nil && *event.ExitCode != 0 {
-				return fmt.Errorf("service exited with code %d", *event.ExitCode)
+			code := -1
+			if event.ExitCode != nil {
+				code = *event.ExitCode
 			}
+			return fmt.Errorf("service exited (code %d) before 'started'", code)
 		case "stdout", "stderr":
 			if event.Data != "" {
-				fmt.Printf("  [kandev] %s\n", strings.TrimRight(event.Data, "\n"))
+				fmt.Fprintf(os.Stderr, "  [kandev] %s\n", strings.TrimRight(event.Data, "\n"))
 			}
 		}
 	}
@@ -181,31 +194,6 @@ func drainStream(stream *sprites.ServiceStream) error {
 	}
 }
 
-// enablePublicURL sets the sprite's URL to public mode and returns the URL.
-func enablePublicURL(ctx context.Context, token, spriteName string, _ int) (string, error) {
-	client := newSpriteClient(token)
-	defer func() { _ = client.Close() }()
-
-	updateCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer cancel()
-
-	if err := client.UpdateURLSettings(updateCtx, spriteName, &sprites.URLSettings{Auth: "public"}); err != nil {
-		return "", fmt.Errorf("update URL settings: %w", err)
-	}
-
-	getCtx, getCancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer getCancel()
-
-	sprite, err := client.GetSprite(getCtx, spriteName)
-	if err != nil {
-		return "", fmt.Errorf("get sprite URL: %w", err)
-	}
-	if sprite.URL == "" {
-		return "", fmt.Errorf("sprite %s has no URL assigned yet", spriteName)
-	}
-	return sprite.URL, nil
-}
-
 // destroySprite destroys the named sprite and returns its creation time for
 // runtime calculation. Returns zero time if the sprite was not found.
 func destroySprite(ctx context.Context, client *sprites.Client, name string) (time.Time, error) {
@@ -214,8 +202,9 @@ func destroySprite(ctx context.Context, client *sprites.Client, name string) (ti
 
 	sprite, err := client.GetSprite(getCtx, name)
 	if err != nil {
+		// The SDK returns a plain fmt.Errorf("sprite not found: %s") for 404s.
 		if strings.Contains(err.Error(), "not found") {
-			fmt.Printf("sprite %s not found, skipping destroy\n", name)
+			fmt.Fprintf(os.Stderr, "sprite %s not found, skipping destroy\n", name)
 			return time.Time{}, nil
 		}
 		return time.Time{}, fmt.Errorf("get sprite: %w", err)
@@ -228,6 +217,6 @@ func destroySprite(ctx context.Context, client *sprites.Client, name string) (ti
 	if err := sprite.Delete(destroyCtx); err != nil {
 		return createdAt, fmt.Errorf("delete sprite: %w", err)
 	}
-	fmt.Printf("sprite %s destroyed\n", name)
+	fmt.Fprintf(os.Stderr, "sprite %s destroyed\n", name)
 	return createdAt, nil
 }
