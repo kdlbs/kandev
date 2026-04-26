@@ -32,6 +32,7 @@ import { LinearLinkButton } from "@/components/linear/linear-link-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
+import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
@@ -344,6 +345,7 @@ function AttentionStatusGroup({
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
+          <ExecutorSettingsButton taskId={taskId} />
           <PortForwardButton
             isRemoteExecutor={isRemoteExecutor}
             sessionId={activeSessionId}
