@@ -152,24 +152,21 @@ func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error 
 }
 
 func waitForServiceStarted(stream *sprites.ServiceStream) error {
-	// "started" and "complete" are both valid success terminals for CreateService.
-	// The stream may end with EOF after either event, or EOF alone on fast starts.
-	ok := false
+	// CreateService returns HTTP 200 when the service is registered; the stream
+	// carries optional progress events. EOF means the server finished streaming —
+	// treat it as success unless we saw an explicit failure event first.
+	// On existing sprites the service can start fast enough that no events arrive.
 	for {
 		event, err := stream.Next()
 		if errors.Is(err, io.EOF) {
-			if !ok {
-				return fmt.Errorf("service stream closed before 'started' or 'complete' event")
-			}
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("service stream: %w", err)
 		}
+		fmt.Fprintf(os.Stderr, "  [service] type=%s data=%q\n", event.Type, event.Data)
 		switch event.Type {
 		case "started", "complete":
-			fmt.Fprintln(os.Stderr, "  kandev service started")
-			ok = true
 			return nil
 		case "error":
 			return fmt.Errorf("service error: %s", event.Data)
@@ -179,10 +176,6 @@ func waitForServiceStarted(stream *sprites.ServiceStream) error {
 				code = *event.ExitCode
 			}
 			return fmt.Errorf("service exited (code %d) before 'started'", code)
-		case "stdout", "stderr":
-			if event.Data != "" {
-				fmt.Fprintf(os.Stderr, "  [kandev] %s\n", strings.TrimRight(event.Data, "\n"))
-			}
 		}
 	}
 }
