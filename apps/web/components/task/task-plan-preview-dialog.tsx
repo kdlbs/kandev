@@ -14,10 +14,8 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import type { TaskPlanRevision } from "@/lib/types/http";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatPreciseTime } from "@/lib/utils";
 
-// Lazy load the Tiptap read-only renderer the same way the live editor does to
-// avoid SSR issues and keep the popover bundle slim.
 const PlanReadOnlyMarkdown = dynamic(
   () =>
     import("@/components/editors/tiptap/tiptap-plan-readonly").then(
@@ -32,8 +30,13 @@ type Props = {
   loadContent: (revisionId: string) => Promise<string>;
   onClose: () => void;
   onRestore: () => void;
+  /** Open the diff dialog comparing the previewed revision with the previous
+   * revision (vN-1). Disabled if the previewed one is the oldest. */
+  onCompareWithPrevious: (() => void) | null;
+  /** Open the diff dialog comparing the previewed revision with current HEAD. */
   onCompareWithCurrent: () => void;
-  /** True when the revision is the current HEAD — Restore + Compare CTAs hide. */
+  /** True when the revision is the current HEAD — Restore + Compare-with-current
+   * CTAs hide. */
   isCurrent: boolean;
 };
 
@@ -46,6 +49,7 @@ export function PlanRevisionPreviewDialog({
   loadContent,
   onClose,
   onRestore,
+  onCompareWithPrevious,
   onCompareWithCurrent,
   isCurrent,
 }: Props): ReactNode {
@@ -58,7 +62,7 @@ export function PlanRevisionPreviewDialog({
       }}
     >
       <DialogContent
-        className="max-w-2xl max-h-[80vh] flex flex-col"
+        className="!max-w-5xl w-[92vw] max-h-[88vh] flex flex-col"
         data-testid="plan-revision-preview-dialog"
       >
         <DialogHeader>
@@ -73,7 +77,7 @@ export function PlanRevisionPreviewDialog({
           <DialogDescription className="flex items-center gap-2 text-xs">
             <span>{authorLabel}</span>
             <span>·</span>
-            <span>{revision ? formatRelativeTime(revision.updated_at) : ""}</span>
+            <span>{revision ? formatPreciseTime(revision.updated_at) : ""}</span>
             {revision?.revert_of_revision_id && (
               <span className="flex items-center gap-1 text-muted-foreground">
                 <IconRestore className="h-3 w-3" /> restored from earlier version
@@ -95,6 +99,16 @@ export function PlanRevisionPreviewDialog({
           </Button>
           {!isCurrent && revision && (
             <>
+              {onCompareWithPrevious && (
+                <Button
+                  variant="outline"
+                  onClick={onCompareWithPrevious}
+                  className="cursor-pointer"
+                  data-testid="plan-revision-preview-compare-with-previous"
+                >
+                  Compare with previous
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={onCompareWithCurrent}
@@ -147,7 +161,7 @@ function PreviewBody({
 
   return (
     <div
-      className="flex-1 min-h-0 overflow-y-auto rounded border border-border bg-muted/30 p-3 text-sm"
+      className="flex-1 min-h-0 overflow-y-auto rounded border border-border bg-card p-4"
       data-testid="plan-revision-preview-body"
     >
       <PreviewBodyInner content={content} error={error} />

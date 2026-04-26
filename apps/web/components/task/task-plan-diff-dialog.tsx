@@ -67,7 +67,7 @@ export function PlanRevisionDiffDialog({
       }}
     >
       <DialogContent
-        className="max-w-4xl max-h-[85vh] flex flex-col"
+        className="!max-w-6xl w-[95vw] max-h-[90vh] flex flex-col"
         data-testid="plan-revision-diff-dialog"
       >
         <DialogHeader>
@@ -132,10 +132,18 @@ function DiffBody({
           }}
           data-testid="plan-revision-diff-mode-toggle"
         >
-          <ToggleGroupItem value="unified" className="text-xs px-2 cursor-pointer" data-testid="plan-revision-diff-mode-unified">
+          <ToggleGroupItem
+            value="unified"
+            className="text-xs px-2 cursor-pointer"
+            data-testid="plan-revision-diff-mode-unified"
+          >
             Unified
           </ToggleGroupItem>
-          <ToggleGroupItem value="split" className="text-xs px-2 cursor-pointer" data-testid="plan-revision-diff-mode-split">
+          <ToggleGroupItem
+            value="split"
+            className="text-xs px-2 cursor-pointer"
+            data-testid="plan-revision-diff-mode-split"
+          >
             Split
           </ToggleGroupItem>
         </ToggleGroup>
@@ -218,9 +226,11 @@ function DiffLineRow({ line }: { line: DiffLine }) {
   );
 }
 
-/** Side-by-side diff: align lines from `before` and `after` row-by-row using
- * the existing line-diff sequence. Each row holds at most one before-line and
- * one after-line; pure-context rows show both. */
+/** Side-by-side diff: each side has its own column with independent horizontal
+ * scroll (via the outer overflow-auto on `plan-revision-diff-body`). Rows align
+ * because they share the same `display: grid` layout. Cells use
+ * whitespace-pre with min-w-max so the row background extends past the viewport
+ * when content overflows horizontally — same fix as unified mode. */
 function SplitDiff({
   beforeContent,
   afterContent,
@@ -230,23 +240,24 @@ function SplitDiff({
 }) {
   const rows = useMemo(() => alignSplit(beforeContent, afterContent), [beforeContent, afterContent]);
   return (
-    <table
-      className="w-full table-fixed border-collapse"
+    <div
+      // grid forces the two columns to stay side-by-side and equally sized
+      // until the natural content width pushes the whole grid wider, at which
+      // point the parent overflow-auto starts scrolling horizontally.
+      className="grid grid-cols-2 min-w-full w-max divide-x divide-border"
       data-testid="plan-revision-diff-split"
     >
-      <colgroup>
-        <col className="w-1/2" />
-        <col className="w-1/2" />
-      </colgroup>
-      <tbody>
+      <div className="min-w-0">
         {rows.map((row, i) => (
-          <tr key={i} className="align-top">
-            <SplitCell side="before" line={row.before} />
-            <SplitCell side="after" line={row.after} />
-          </tr>
+          <SplitCell key={`b-${i}`} side="before" line={row.before} />
         ))}
-      </tbody>
-    </table>
+      </div>
+      <div className="min-w-0">
+        {rows.map((row, i) => (
+          <SplitCell key={`a-${i}`} side="after" line={row.after} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -261,8 +272,8 @@ function SplitCell({
   // side) get a subtle striped background so the row alignment is visible.
   if (!line) {
     return (
-      <td
-        className="px-3 py-0.5 leading-relaxed bg-muted/40 align-top border-l-2 border-transparent"
+      <div
+        className="px-3 py-0.5 leading-relaxed bg-muted/40 border-l-2 border-transparent min-h-[1.25rem]"
         data-testid="plan-revision-diff-split-cell"
         data-line-kind="empty"
         data-side={side}
@@ -270,17 +281,20 @@ function SplitCell({
     );
   }
   return (
-    <td
+    <div
       className={cn(
-        "px-3 py-0.5 leading-relaxed align-top",
+        "flex gap-2 px-3 py-0.5 leading-relaxed whitespace-pre",
         KIND_CLASS[line.kind],
       )}
       data-testid="plan-revision-diff-split-cell"
       data-line-kind={line.kind}
       data-side={side}
     >
-      <pre className="whitespace-pre font-mono text-xs leading-relaxed">{line.text || " "}</pre>
-    </td>
+      <span className="select-none text-muted-foreground w-3 shrink-0">
+        {KIND_PREFIX[line.kind]}
+      </span>
+      <span className="flex-1">{line.text || " "}</span>
+    </div>
   );
 }
 

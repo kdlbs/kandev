@@ -6,8 +6,6 @@ import {
   IconUser,
   IconRestore,
   IconLoader2,
-  IconArrowsLeftRight,
-  IconX,
 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
@@ -21,9 +19,8 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import type { TaskPlanRevision } from "@/lib/types/http";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatPreciseTime } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
@@ -41,6 +38,10 @@ type TaskPlanRevisionsProps = {
   loadRevisionContent: (revisionId: string) => Promise<string>;
   previewRevisionId: string | null;
   setPreviewRevision: (revisionId: string | null) => void;
+  /** comparePair / toggleCompareSelection / clearComparePair are still threaded
+   * through so the diff dialog can carry an arbitrary pair, but the popover
+   * UI no longer surfaces a selection mode — pairs are seeded from inside the
+   * preview dialog ("Compare with previous" / "Compare with current"). */
   comparePair: ComparePair;
   toggleCompareSelection: (revisionId: string) => void;
   clearComparePair: () => void;
@@ -78,7 +79,6 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
         onOpenChange={handleOpenChange}
         agentName={agentName}
         confirmTargetSetter={setConfirmTarget}
-        diffOpener={() => setDiffOpen(true)}
         {...props}
       />
       <RevisionsDialogStack
@@ -123,12 +123,8 @@ function RevisionsPopover({
   onOpenChange,
   agentName,
   confirmTargetSetter,
-  diffOpener,
   revisions,
   isLoading,
-  comparePair,
-  toggleCompareSelection,
-  clearComparePair,
   setPreviewRevision,
   disabled = false,
 }: TaskPlanRevisionsProps & {
@@ -136,13 +132,7 @@ function RevisionsPopover({
   onOpenChange: (next: boolean) => void;
   agentName: string | null;
   confirmTargetSetter: (rev: TaskPlanRevision | null) => void;
-  diffOpener: () => void;
 }) {
-  const compareReady =
-    comparePair[0] !== null &&
-    comparePair[1] !== null &&
-    revisions.some((r) => r.id === comparePair[0]) &&
-    revisions.some((r) => r.id === comparePair[1]);
   const hasRevisions = revisions.length > 0;
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -163,14 +153,6 @@ function RevisionsPopover({
           <span className="text-sm font-medium">Plan history</span>
           {isLoading && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
-        <CompareChips
-          revisions={revisions}
-          comparePair={comparePair}
-          onRemove={toggleCompareSelection}
-          onClear={clearComparePair}
-          onCompare={diffOpener}
-          ready={compareReady}
-        />
         {/* Plain overflow-y-auto is more reliable than ScrollArea inside a Popover
          * — the popover doesn't constrain its child by default, so a fixed
          * max-height with native scroll keeps the list bounded. */}
@@ -179,10 +161,8 @@ function RevisionsPopover({
             revisions={revisions}
             isLoading={isLoading}
             agentName={agentName}
-            comparePair={comparePair}
             onRevertClick={confirmTargetSetter}
             onRowClick={(rev) => setPreviewRevision(rev.id)}
-            onCompareToggle={toggleCompareSelection}
           />
         </div>
       </PopoverContent>
@@ -226,6 +206,15 @@ function RevisionsDialogStack({
   closePopover,
 }: DialogStackProps) {
   const isPreviewCurrent = previewRevision !== null && previewRevision.id === headRevision?.id;
+  const previousRevision = useMemo(() => {
+    if (!previewRevision) return null;
+    // revisions are sorted newest-first by revision_number; previous = the
+    // first entry whose revision_number is strictly less than the previewed one.
+    return (
+      revisions.find((r) => r.revision_number < previewRevision.revision_number) ?? null
+    );
+  }, [revisions, previewRevision]);
+
   const handleRevert = useCallback(
     async (revision: TaskPlanRevision) => {
       try {
@@ -243,25 +232,27 @@ function RevisionsDialogStack({
     [onRevert, setPreviewRevision, setDiffOpen, closePopover],
   );
 
+  const seedComparePair = useCallback(
+    (a: TaskPlanRevision, b: TaskPlanRevision) => {
+      // Replace any existing pair with [a, b] so the diff opens immediately.
+      clearComparePair();
+      toggleCompareSelection(a.id);
+      if (a.id !== b.id) toggleCompareSelection(b.id);
+      setPreviewRevision(null);
+      setDiffOpen(true);
+    },
+    [clearComparePair, toggleCompareSelection, setPreviewRevision, setDiffOpen],
+  );
+
   const onCompareWithCurrent = useCallback(() => {
     if (!previewRevision || !headRevision) return;
-    // Replace any existing pair with [previewed, head] so the diff opens
-    // immediately without an additional click sequence.
-    clearComparePair();
-    toggleCompareSelection(previewRevision.id);
-    if (previewRevision.id !== headRevision.id) {
-      toggleCompareSelection(headRevision.id);
-    }
-    setPreviewRevision(null);
-    setDiffOpen(true);
-  }, [
-    previewRevision,
-    headRevision,
-    clearComparePair,
-    toggleCompareSelection,
-    setPreviewRevision,
-    setDiffOpen,
-  ]);
+    seedComparePair(previewRevision, headRevision);
+  }, [previewRevision, headRevision, seedComparePair]);
+
+  const onCompareWithPrevious = useMemo(() => {
+    if (!previewRevision || !previousRevision) return null;
+    return () => seedComparePair(previousRevision, previewRevision);
+  }, [previewRevision, previousRevision, seedComparePair]);
 
   return (
     <>
@@ -275,6 +266,7 @@ function RevisionsDialogStack({
         onRestore={() => {
           if (previewRevision) setConfirmTarget(previewRevision);
         }}
+        onCompareWithPrevious={onCompareWithPrevious}
         onCompareWithCurrent={onCompareWithCurrent}
         isCurrent={isPreviewCurrent}
       />
@@ -327,90 +319,18 @@ function useActiveAgentBackendName(): string | null {
   }, [snapshot]);
 }
 
-function CompareChips({
-  revisions,
-  comparePair,
-  onRemove,
-  onClear,
-  onCompare,
-  ready,
-}: {
-  revisions: TaskPlanRevision[];
-  comparePair: ComparePair;
-  onRemove: (revisionId: string) => void;
-  onClear: () => void;
-  onCompare: () => void;
-  ready: boolean;
-}) {
-  const ids = comparePair.filter((id): id is string => id !== null);
-  if (ids.length === 0) return null;
-  const selected = ids.map((id) => revisions.find((r) => r.id === id)).filter(
-    (r): r is TaskPlanRevision => r !== undefined,
-  );
-  return (
-    <div
-      className="flex items-center gap-1.5 px-3 py-2 border-b bg-muted/30"
-      data-testid="plan-revision-compare-chips"
-    >
-      <span className="text-[11px] text-muted-foreground">Compare:</span>
-      {selected.map((rev) => (
-        <Badge
-          key={rev.id}
-          variant="secondary"
-          className="h-5 px-1.5 text-[11px] gap-1 cursor-default"
-          data-testid="plan-revision-compare-chip"
-          data-revision-id={rev.id}
-        >
-          v{rev.revision_number}
-          <button
-            type="button"
-            onClick={() => onRemove(rev.id)}
-            className="cursor-pointer hover:text-foreground"
-            aria-label={`Remove v${rev.revision_number} from compare`}
-          >
-            <IconX className="h-3 w-3" />
-          </button>
-        </Badge>
-      ))}
-      <div className="flex-1" />
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-6 px-2 text-[11px] cursor-pointer"
-        onClick={onClear}
-        data-testid="plan-revision-compare-clear"
-      >
-        Clear
-      </Button>
-      <Button
-        size="sm"
-        className="h-6 px-2 text-[11px] cursor-pointer"
-        disabled={!ready}
-        onClick={onCompare}
-        data-testid="plan-revision-compare-go"
-      >
-        Diff
-      </Button>
-    </div>
-  );
-}
-
 function RevisionList({
   revisions,
   isLoading,
   agentName,
-  comparePair,
   onRevertClick,
   onRowClick,
-  onCompareToggle,
 }: {
   revisions: TaskPlanRevision[];
   isLoading: boolean;
   agentName: string | null;
-  comparePair: ComparePair;
   onRevertClick: (rev: TaskPlanRevision) => void;
   onRowClick: (rev: TaskPlanRevision) => void;
-  onCompareToggle: (revisionId: string) => void;
 }) {
   if (revisions.length === 0 && !isLoading) {
     return (
@@ -427,10 +347,8 @@ function RevisionList({
           revision={rev}
           isCurrent={i === 0}
           agentName={agentName}
-          isCompareSelected={comparePair[0] === rev.id || comparePair[1] === rev.id}
           onRevertClick={onRevertClick}
           onRowClick={onRowClick}
-          onCompareToggle={onCompareToggle}
         />
       ))}
     </ul>
@@ -476,38 +394,31 @@ function RevisionRow({
   revision,
   isCurrent,
   agentName,
-  isCompareSelected,
   onRevertClick,
   onRowClick,
-  onCompareToggle,
 }: {
   revision: TaskPlanRevision;
   isCurrent: boolean;
   agentName: string | null;
-  isCompareSelected: boolean;
   onRevertClick: (rev: TaskPlanRevision) => void;
   onRowClick: (rev: TaskPlanRevision) => void;
-  onCompareToggle: (revisionId: string) => void;
 }) {
-  // Derive relative time on every render so prop changes (and the 30s tick)
-  // both refresh it. The tick state forces re-renders at a coarse cadence.
+  // Force re-render every 30s so the precise timestamp ("5m ago", "Today,
+  // 14:32", …) refreshes as the revision ages — `formatPreciseTime` derives
+  // from `revision.updated_at` on every render.
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-  const relative = formatRelativeTime(revision.updated_at);
+  const timestamp = formatPreciseTime(revision.updated_at);
 
   return (
     <li
-      className={cn(
-        "px-3 py-2.5 flex items-start gap-3 hover:bg-accent/30",
-        isCompareSelected && "bg-accent/40",
-      )}
+      className="px-3 py-2.5 flex items-start gap-3 hover:bg-accent/30"
       data-testid="plan-revision-row"
       data-revision-id={revision.id}
       data-revision-number={revision.revision_number}
-      data-compare-selected={isCompareSelected || undefined}
     >
       <button
         type="button"
@@ -518,12 +429,6 @@ function RevisionRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold">v{revision.revision_number}</span>
           <RevisionAuthor revision={revision} agentName={agentName} />
-          <span
-            className="text-xs text-muted-foreground"
-            data-testid="plan-revision-time"
-          >
-            {relative}
-          </span>
           {isCurrent && (
             <Badge
               variant="secondary"
@@ -533,6 +438,12 @@ function RevisionRow({
               current
             </Badge>
           )}
+        </div>
+        <div
+          className="text-[11px] text-muted-foreground mt-1"
+          data-testid="plan-revision-time"
+        >
+          {timestamp}
         </div>
         {revision.revert_of_revision_id && (
           <div
@@ -544,20 +455,6 @@ function RevisionRow({
           </div>
         )}
       </button>
-      <Button
-        size="icon"
-        variant={isCompareSelected ? "secondary" : "ghost"}
-        className="h-7 w-7 shrink-0 cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onCompareToggle(revision.id);
-        }}
-        data-testid="plan-revision-compare-toggle"
-        data-compare-selected={isCompareSelected || undefined}
-        title={isCompareSelected ? "Remove from compare" : "Add to compare"}
-      >
-        <IconArrowsLeftRight className="h-3.5 w-3.5" />
-      </Button>
       {!isCurrent && (
         <Button
           size="sm"
