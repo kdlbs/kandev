@@ -720,9 +720,18 @@ type GitStatusResult struct {
 	Error           string                 `json:"error,omitempty"`
 }
 
-// handleGitStatus handles GET /api/v1/git/status
+// handleGitStatus handles GET /api/v1/git/status. Accepts an optional
+// ?repo=<subpath> query param that selects a sub-directory of the workspace
+// for multi-repo task roots; empty = workspace root (single-repo behavior).
 func (s *Server) handleGitStatus(c *gin.Context) {
-	wt := s.procMgr.GetWorkspaceTracker()
+	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(c.Query("repo"))
+	if wtErr != nil {
+		c.JSON(http.StatusBadRequest, GitStatusResult{
+			Success: false,
+			Error:   wtErr.Error(),
+		})
+		return
+	}
 	if wt == nil {
 		c.JSON(http.StatusInternalServerError, GitStatusResult{
 			Success: false,
