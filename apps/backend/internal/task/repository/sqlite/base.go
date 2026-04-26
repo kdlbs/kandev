@@ -613,6 +613,13 @@ func (r *Repository) initPlansSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plan_revisions_task_created
 		ON task_plan_revisions(task_id, created_at DESC);
+	-- Hot-path index: GetLatestTaskPlanRevision (called on every plan write
+	-- as part of the coalesce check), ListTaskPlanRevisions, and the
+	-- MAX(revision_number) lookup in WritePlanRevision all order/scan by
+	-- (task_id, revision_number DESC). With this index the latest-row lookup
+	-- is O(1) instead of an O(N) scan + sort per task.
+	CREATE INDEX IF NOT EXISTS idx_task_plan_revisions_task_number
+		ON task_plan_revisions(task_id, revision_number DESC);
 	`); err != nil {
 		return err
 	}

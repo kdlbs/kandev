@@ -233,14 +233,16 @@ func (s *PlanService) resolveAgentDisplayName(ctx context.Context, taskID string
 }
 
 // agentDisplayNameFromSnapshot picks the best available display name from a
-// session's agent_profile_snapshot. The orchestrator stores profile name under
-// "name" (e.g. "Claude Sonnet 4.5") and "agent_display_name" / "label" in some
-// older paths — try each in order. Returns "" if none look usable.
+// session's agent_profile_snapshot. The orchestrator's canonical key is
+// "name" (the profile's display name, e.g. "Claude Sonnet 4.5"); we try it
+// first so a snapshot that carries both "name" and a stale older "label"
+// doesn't render the stale value. Falls back through "label" (older paths)
+// and "agent_display_name" (some DTO mappings) before giving up.
 func agentDisplayNameFromSnapshot(snapshot map[string]interface{}) string {
 	if snapshot == nil {
 		return ""
 	}
-	for _, key := range []string{"label", "name", "agent_display_name"} {
+	for _, key := range []string{"name", "label", "agent_display_name"} {
 		if v, ok := snapshot[key]; ok {
 			if s, ok := v.(string); ok && s != "" {
 				return s

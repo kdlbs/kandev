@@ -184,9 +184,10 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 
 // NextTaskPlanRevisionNumber returns max(revision_number)+1 for a task, or 1 if none exist.
 //
-// Deprecated: Prefer WritePlanRevision, which computes the next number atomically with the
-// insert. This helper reads via the RO replica and is only safe against TOCTOU when followed
-// by a write under a BEGIN IMMEDIATE-equivalent (e.g., within WritePlanRevision).
+// Note: prefer WritePlanRevision when writing a new revision — it computes the next number
+// atomically with the insert. This helper reads via the RO replica and is only safe against
+// TOCTOU when followed by a write under a BEGIN IMMEDIATE-equivalent (e.g., within
+// WritePlanRevision). Direct callers should be confined to read-only inspection / tests.
 func (r *Repository) NextTaskPlanRevisionNumber(ctx context.Context, taskID string) (int, error) {
 	var maxNum sql.NullInt64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`

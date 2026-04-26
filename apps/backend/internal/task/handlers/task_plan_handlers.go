@@ -167,6 +167,13 @@ func (h *TaskHandlers) wsGetTaskPlanRevision(ctx context.Context, msg *ws.Messag
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.RevisionID == "" {
+		// Surface missing argument as a 400, matching wsRevertTaskPlan's
+		// ErrRevisionIDRequired branch — without this guard, an empty id
+		// falls through to the service and returns 404 (lookup miss),
+		// which is misleading for the caller.
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "revision_id is required", nil)
+	}
 
 	rev, err := h.planService.GetRevision(ctx, req.RevisionID)
 	if err != nil {
