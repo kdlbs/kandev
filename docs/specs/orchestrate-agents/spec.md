@@ -77,9 +77,9 @@ Orchestrate introduces agent instances -- long-lived entities that reference an 
 ### Concurrency
 
 - Each agent instance has a `max_concurrent_sessions` setting (default 1).
-- When set to 1, the agent processes tasks sequentially -- a wakeup arriving while a session is active is re-queued.
+- When set to 1, the agent processes tasks sequentially -- wakeups stay queued until the agent finishes its current session.
 - When set to N > 1, the agent can run up to N sessions in parallel on different tasks. This is useful for workers handling independent, lightweight tasks (e.g. code reviews, test runs).
-- The scheduler checks the agent's active session count before launching a new one. If at capacity, the wakeup is re-queued.
+- The scheduler's claim query skips agents at capacity -- wakeups remain in `queued` status indefinitely until the agent has a free slot. No re-queuing, no retry limits, no expiry. This handles slow agents with large backlogs gracefully.
 - Users configure concurrency per agent instance via the agent settings UI.
 
 ### Executor resolution

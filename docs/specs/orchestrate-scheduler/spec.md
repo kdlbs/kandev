@@ -70,7 +70,7 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
 - The scheduler runs a tick loop (configurable interval, default 5 seconds) that processes both the existing task queue and the new wakeup queue.
 - Processing a wakeup:
   1. **Claim**: atomically set `status=claimed`, `claimed_at=now()`. Zero rows updated means another process claimed it.
-  2. **Guard**: check agent instance status. If `paused` or `stopped`, mark wakeup `finished` with no action. If `working` (session already active), re-queue with a short delay.
+  2. **Guard**: check agent instance status. If `paused` or `stopped`, mark wakeup `finished` with no action.
   3. **Build context**: assemble the agent's prompt from the wakeup reason, payload, and context snapshot. Include the workspace state summary for CEO heartbeats.
   4. **Resolve executor**: walk the executor resolution chain: task override -> agent instance preference -> project config -> workspace default. This determines which executor backend (local_pc, local_docker, sprites, etc.) and what resource limits, image, and worktree strategy to use. See [orchestrate-agents](../orchestrate-agents/spec.md) for the resolution chain.
   5. **Create session**: create a `TaskSession` through the existing orchestrator pipeline with the resolved executor config. The session's task is determined by the wakeup payload (the assigned task, or a "coordination" task for CEO heartbeats). If the task targets a repo, a git worktree is created per the project's worktree strategy.
@@ -114,15 +114,32 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
 ### Agent concurrency
 
 - Each agent instance has a configurable `max_concurrent_sessions` (default 1).
-- The scheduler checks the agent's active session count before launching. If at capacity, the wakeup is re-queued with a configurable delay (default 30 seconds).
-- After a configurable number of re-queues (default 10), the wakeup is dropped and logged as `failed`.
+- The scheduler's claim query skips agents that are at capacity by joining against active session counts. Wakeups for busy agents stay in `queued` status and are picked up naturally when the agent has a free slot.
+- No re-queuing, no retry limits, no expiry. A slow QA agent with 20 tasks queued processes them sequentially without failures -- each wakeup waits in the queue until the agent finishes its current work.
 - Concurrency > 1 is useful for agents handling independent tasks (e.g. multiple code reviews in parallel).
+
+### Claim query
+
+The claim query atomically selects the next eligible wakeup, skipping agents at capacity:
+```sql
+SELECT w.* FROM orchestrate_wakeup_queue w
+JOIN orchestrate_agent_instances a ON a.id = w.agent_instance_id
+WHERE w.status = 'queued'
+  AND a.status IN ('idle', 'working')
+  AND (
+    SELECT COUNT(*) FROM task_sessions ts
+    WHERE ts.agent_instance_id = w.agent_instance_id
+      AND ts.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+  ) < a.max_concurrent_sessions
+ORDER BY w.requested_at
+LIMIT 1
+```
 
 ## Scenarios
 
 - **GIVEN** a task is assigned to a worker agent instance, **WHEN** the assignment is saved, **THEN** a `task_assigned` wakeup is queued for that agent. The scheduler claims it, creates a session, and the agent starts working on the task.
 
-- **GIVEN** a worker agent is currently running a session, **WHEN** a `task_comment` wakeup arrives for the same agent, **THEN** the wakeup is re-queued. When the current session completes, the scheduler picks up the re-queued wakeup and the agent processes the comment.
+- **GIVEN** a worker agent is currently running a session (at capacity), **WHEN** a `task_comment` wakeup arrives for the same agent, **THEN** the wakeup stays in `queued` status. When the current session completes, the next scheduler tick picks up the wakeup and the agent processes the comment.
 
 - **GIVEN** a task with three subtasks assigned to different workers, **WHEN** all three subtasks reach `done`, **THEN** a single `task_children_completed` wakeup (coalesced) is queued for the parent task's assignee.
 

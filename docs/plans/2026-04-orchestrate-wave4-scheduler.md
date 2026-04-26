@@ -20,7 +20,7 @@ The existing scheduler is reactive -- tasks only execute when a user explicitly 
 - `Coalesce(ctx, agentInstanceID, reason, windowSecs)` -- find existing queued wakeup for same agent+reason within window, increment coalesced_count and merge payload
 - `ListQueued(ctx, workspaceID)` -- for dashboard status
 - `CleanExpired(ctx, olderThan)` -- purge finished wakeups older than retention period
-- `RequeueStale(ctx, claimedOlderThan)` -- re-queue wakeups claimed but never finished (crash recovery)
+- `RecoverStale(ctx, claimedOlderThan)` -- reset stale `claimed` wakeups back to `queued` (crash recovery)
 
 **Service** (`internal/orchestrate/service/wakeup.go`):
 - `QueueWakeup(ctx, agentInstanceID, reason, payload, idempotencyKey)`:
@@ -56,7 +56,7 @@ New method `processWakeupQueue()` called from the existing tick loop alongside `
 2. If no wakeup: return (loop continues)
 3. **Guard checks:**
    - Load agent instance. If status is `paused`/`stopped`: mark wakeup finished, return
-   - Count active sessions for this agent instance. If >= `max_concurrent_sessions`: re-queue with delay (30s), return
+   - (Concurrency is handled at the claim query level -- agents at capacity are skipped, not re-queued)
 4. **Build context:**
    - Load the task from wakeup payload (if task-related reason)
    - Build `context_snapshot`: task summary, new comments since last run, approval result
@@ -156,7 +156,7 @@ heartbeat (CEO):
 
 ## Tests
 
-- Wakeup queue: enqueue, claim (atomic), coalesce, idempotency, re-queue, cleanup
+- Wakeup queue: enqueue, claim (atomic with concurrency check), coalesce, idempotency, stale recovery, cleanup
 - Event subscribers: task assignment triggers wakeup, comment triggers wakeup, blocker resolution triggers wakeup
 - Scheduler: processes wakeup, respects agent status guards, respects concurrency limits
 - Prompt builder: correct prompt per reason type
@@ -178,5 +178,6 @@ heartbeat (CEO):
 4. Complete a blocker task -> blocked task's agent is woken
 5. CEO heartbeat fires on interval
 6. Paused agents don't get woken
-7. Concurrency limit respected (wakeup re-queued if agent at capacity)
+7. Concurrency limit respected (wakeup stays queued, claim query skips busy agents)
+8. Slow agent with 20 queued tasks: processes them sequentially, no failures, no re-queue limits
 8. Skills symlinked into agent home dir during session
