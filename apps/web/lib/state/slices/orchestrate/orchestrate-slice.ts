@@ -1,6 +1,14 @@
 import type { StateCreator } from "zustand";
 import type { OrchestrateSlice, OrchestrateSliceState } from "./types";
 
+export const defaultIssueFilters = {
+  statuses: [] as string[],
+  priorities: [] as string[],
+  assigneeIds: [] as string[],
+  projectIds: [] as string[],
+  search: "",
+};
+
 export const defaultOrchestrateState: OrchestrateSliceState = {
   orchestrate: {
     agentInstances: [],
@@ -15,6 +23,22 @@ export const defaultOrchestrateState: OrchestrateSliceState = {
     inboxCount: 0,
     wakeups: [],
     dashboard: null,
+    issues: {
+      items: [],
+      filters: {
+        statuses: [],
+        priorities: [],
+        assigneeIds: [],
+        projectIds: [],
+        search: "",
+      },
+      viewMode: "list",
+      sortField: "updated",
+      sortDir: "desc",
+      groupBy: "none",
+      nestingEnabled: true,
+      isLoading: false,
+    },
     isLoading: false,
   },
 };
@@ -120,6 +144,38 @@ export const createOrchestrateSlice: StateCreator<
   setDashboard: (data) =>
     set((draft) => {
       draft.orchestrate.dashboard = data;
+    }),
+  setIssues: (issues) =>
+    set((draft) => {
+      draft.orchestrate.issues.items = issues;
+    }),
+  setIssueFilters: (filters) =>
+    set((draft) => {
+      Object.assign(draft.orchestrate.issues.filters, filters);
+    }),
+  setIssueViewMode: (mode) =>
+    set((draft) => {
+      draft.orchestrate.issues.viewMode = mode;
+    }),
+  setIssueSortField: (field) =>
+    set((draft) => {
+      draft.orchestrate.issues.sortField = field;
+    }),
+  setIssueSortDir: (dir) =>
+    set((draft) => {
+      draft.orchestrate.issues.sortDir = dir;
+    }),
+  setIssueGroupBy: (groupBy) =>
+    set((draft) => {
+      draft.orchestrate.issues.groupBy = groupBy;
+    }),
+  toggleNesting: () =>
+    set((draft) => {
+      draft.orchestrate.issues.nestingEnabled = !draft.orchestrate.issues.nestingEnabled;
+    }),
+  setIssuesLoading: (loading) =>
+    set((draft) => {
+      draft.orchestrate.issues.isLoading = loading;
     }),
   setOrchestrateLoading: (loading) =>
     set((draft) => {

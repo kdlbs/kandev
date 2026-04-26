@@ -11,6 +11,7 @@ import type {
   InboxItem,
   WakeupEntry,
   DashboardData,
+  OrchestrateIssue,
 } from "@/lib/state/slices/orchestrate/types";
 
 const BASE = "/api/v1/orchestrate";
@@ -304,6 +305,15 @@ export function deleteMemory(agentId: string, entryId: string, options?: ApiRequ
 
 export function getMemorySummary(agentId: string, options?: ApiRequestOptions) {
   return fetchJson<{ summary: string }>(`${BASE}/agents/${agentId}/memory/summary`, options);
+}
+
+// --- Issues ---
+
+export function listIssues(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ issues: OrchestrateIssue[] }>(
+    `${BASE}/workspaces/${workspaceId}/issues`,
+    options,
+  );
 }
 
 // --- Dashboard ---

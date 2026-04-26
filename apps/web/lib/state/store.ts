@@ -148,6 +148,12 @@ import type {
   InboxItem,
   WakeupEntry,
   DashboardData,
+  OrchestrateIssue,
+  IssueFilterState,
+  IssueViewMode,
+  IssueSortField,
+  IssueSortDir,
+  IssueGroupBy,
 } from "./slices/orchestrate/types";
 
 // Combined AppState type
@@ -494,6 +500,14 @@ export type AppState = {
   setInboxCount: (count: number) => void;
   setWakeups: (wakeups: WakeupEntry[]) => void;
   setDashboard: (data: DashboardData | null) => void;
+  setIssues: (issues: OrchestrateIssue[]) => void;
+  setIssueFilters: (filters: Partial<IssueFilterState>) => void;
+  setIssueViewMode: (mode: IssueViewMode) => void;
+  setIssueSortField: (field: IssueSortField) => void;
+  setIssueSortDir: (dir: IssueSortDir) => void;
+  setIssueGroupBy: (groupBy: IssueGroupBy) => void;
+  toggleNesting: () => void;
+  setIssuesLoading: (loading: boolean) => void;
   setOrchestrateLoading: (loading: boolean) => void;
 };
 

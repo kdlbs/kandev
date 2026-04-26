@@ -158,6 +158,57 @@ export type WakeupEntry = {
   requestedAt: string;
 };
 
+export type OrchestrateIssueStatus =
+  | "backlog"
+  | "todo"
+  | "in_progress"
+  | "in_review"
+  | "blocked"
+  | "done"
+  | "cancelled";
+
+export type OrchestrateIssuePriority = "critical" | "high" | "medium" | "low" | "none";
+
+export type OrchestrateIssue = {
+  id: string;
+  workspaceId: string;
+  identifier: string;
+  title: string;
+  description?: string;
+  status: OrchestrateIssueStatus;
+  priority: OrchestrateIssuePriority;
+  parentId?: string;
+  projectId?: string;
+  assigneeAgentInstanceId?: string;
+  labels?: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type IssueFilterState = {
+  statuses: OrchestrateIssueStatus[];
+  priorities: OrchestrateIssuePriority[];
+  assigneeIds: string[];
+  projectIds: string[];
+  search: string;
+};
+
+export type IssueSortField = "status" | "priority" | "title" | "created" | "updated";
+export type IssueSortDir = "asc" | "desc";
+export type IssueGroupBy = "status" | "priority" | "assignee" | "project" | "parent" | "none";
+export type IssueViewMode = "list" | "board";
+
+export type IssuesState = {
+  items: OrchestrateIssue[];
+  filters: IssueFilterState;
+  viewMode: IssueViewMode;
+  sortField: IssueSortField;
+  sortDir: IssueSortDir;
+  groupBy: IssueGroupBy;
+  nestingEnabled: boolean;
+  isLoading: boolean;
+};
+
 export type DashboardData = {
   agentCount: number;
   runningCount: number;
@@ -187,6 +238,7 @@ export type OrchestrateSliceState = {
     inboxCount: number;
     wakeups: WakeupEntry[];
     dashboard: DashboardData | null;
+    issues: IssuesState;
     isLoading: boolean;
   };
 };
@@ -213,6 +265,14 @@ export type OrchestrateSliceActions = {
   setInboxCount: (count: number) => void;
   setWakeups: (wakeups: WakeupEntry[]) => void;
   setDashboard: (data: DashboardData | null) => void;
+  setIssues: (issues: OrchestrateIssue[]) => void;
+  setIssueFilters: (filters: Partial<IssueFilterState>) => void;
+  setIssueViewMode: (mode: IssueViewMode) => void;
+  setIssueSortField: (field: IssueSortField) => void;
+  setIssueSortDir: (dir: IssueSortDir) => void;
+  setIssueGroupBy: (groupBy: IssueGroupBy) => void;
+  toggleNesting: () => void;
+  setIssuesLoading: (loading: boolean) => void;
   setOrchestrateLoading: (loading: boolean) => void;
 };
 

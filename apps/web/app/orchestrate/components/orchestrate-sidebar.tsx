@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   IconSquarePlus,
@@ -21,12 +22,14 @@ import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarSection } from "./sidebar-section";
 import { SidebarAgentsList } from "./sidebar-agents-list";
 import { SidebarProjectsList } from "./sidebar-projects-list";
+import { NewIssueDialog } from "./new-issue-dialog";
 
 export function OrchestrateSidebar() {
   const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const inboxCount = useAppStore((s) => s.orchestrate.inboxCount);
+  const [newIssueOpen, setNewIssueOpen] = useState(false);
 
   const handleWorkspaceSelect = (workspaceId: string) => {
     setActiveWorkspace(workspaceId);
@@ -53,7 +56,7 @@ export function OrchestrateSidebar() {
       <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 px-3 py-2">
         {/* Top actions */}
         <div className="flex flex-col gap-0.5">
-          <SidebarNavItem icon={IconSquarePlus} label="New Issue" href="/orchestrate/issues" />
+          <SidebarNavItem icon={IconSquarePlus} label="New Issue" href="/orchestrate/issues" onClick={() => setNewIssueOpen(true)} />
           <SidebarNavItem icon={IconLayoutDashboard} label="Dashboard" href="/orchestrate" />
           <SidebarNavItem icon={IconInbox} label="Inbox" href="/orchestrate/inbox" badge={inboxCount} />
         </div>
@@ -79,6 +82,8 @@ export function OrchestrateSidebar() {
           <SidebarNavItem icon={IconSettings} label="Settings" href="/orchestrate/company/settings" />
         </SidebarSection>
       </nav>
+
+      <NewIssueDialog open={newIssueOpen} onOpenChange={setNewIssueOpen} />
     </aside>
   );
 }
