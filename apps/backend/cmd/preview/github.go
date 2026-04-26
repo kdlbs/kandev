@@ -83,11 +83,17 @@ func replaceSection(body, marked string) string {
 
 // stripSection removes the entire kandev section block (markers + content)
 // including any leading blank line that we added before the section.
+// Mirrors replaceSection's orphan handling: if sectionEnd is missing, the
+// orphaned start marker (and everything after it) is stripped.
 func stripSection(body string) string {
 	start := strings.Index(body, sectionStart)
-	end := strings.Index(body, sectionEnd)
-	if start == -1 || end == -1 {
+	if start == -1 {
 		return body
+	}
+	end := strings.Index(body, sectionEnd)
+	if end == -1 || end < start {
+		// Orphaned start marker — strip from marker to end of string.
+		return strings.TrimRight(body[:start], "\n")
 	}
 	end += len(sectionEnd)
 

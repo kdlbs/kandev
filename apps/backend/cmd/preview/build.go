@@ -60,6 +60,11 @@ func buildKandevDocker(ctx context.Context, out string) error {
 	if err != nil {
 		return err
 	}
+	// Ensure the host-side bin/ directory exists before Docker tries to write
+	// into it. `go build -o` does not create missing parent directories.
+	if err := os.MkdirAll(filepath.Join(wd, "bin"), 0o755); err != nil {
+		return fmt.Errorf("mkdir bin: %w", err)
+	}
 	// Output inside the container (relative to /work mount).
 	containerOut := "/work/bin/kandev-preview-build"
 	goCache := filepath.Join(os.Getenv("HOME"), ".cache", "go-build-linux")

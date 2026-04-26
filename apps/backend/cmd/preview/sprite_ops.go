@@ -120,6 +120,9 @@ mkdir -p /data
 
 # Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
+# Kill any stale web (node) process — nohup'd node survives StopService since
+# it detaches from the process group, and would hold the web port on redeploy.
+pkill -f '/app/apps/web/.next/standalone/web/server.js' || true
 sleep 1
 
 # Start Next.js web server in background.

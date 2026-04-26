@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,13 @@ import (
 const (
 	AuthMethodNone = "none"
 	AuthMethodPAT  = "pat"
+)
+
+// defaultBranchMain and defaultBranchMaster are the conventional default branch
+// names sorted to the top of branch pickers.
+const (
+	defaultBranchMain   = "main"
+	defaultBranchMaster = "master"
 )
 
 // TaskDeleter deletes tasks by ID. Used for cleaning up merged PR tasks.
@@ -1189,9 +1197,9 @@ func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]R
 func sortBranchesMainFirst(branches []RepoBranch) {
 	priority := func(name string) int {
 		switch name {
-		case "main":
+		case defaultBranchMain:
 			return 0
-		case "master":
+		case defaultBranchMaster:
 			return 1
 		default:
 			return 2
@@ -1210,12 +1218,18 @@ func sortBranchesMainFirst(branches []RepoBranch) {
 // Overridden in tests to point at a local httptest server.
 var anonymousAPIBase = githubAPIBase
 
+// anonymousHTTPClient is used by listRepoBranchesAnonymous. The 30 s timeout
+// prevents a slow or unresponsive GitHub API from tying up server goroutines
+// indefinitely across multi-page pagination.
+var anonymousHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // listRepoBranchesAnonymous calls the GitHub REST API without authentication to
 // list branches for public repositories, following pagination via Link headers.
 // Returns ErrNoClient on network errors and a GitHubAPIError for non-2xx
 // responses (404, 403, etc.) so the controller maps them to correct HTTP codes.
 func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
-	next := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100", anonymousAPIBase, owner, repo)
+	next := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100",
+		anonymousAPIBase, url.PathEscape(owner), url.PathEscape(repo))
 	var branches []RepoBranch
 	for next != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
@@ -1225,7 +1239,7 @@ func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoB
 		req.Header.Set("Accept", githubAccept)
 		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := anonymousHTTPClient.Do(req)
 		if err != nil {
 			return nil, ErrNoClient
 		}
@@ -1246,7 +1260,7 @@ func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoB
 		err = json.NewDecoder(resp.Body).Decode(&page)
 		_ = resp.Body.Close()
 		if err != nil {
-			return nil, ErrNoClient
+			return nil, fmt.Errorf("decode branches response: %w", err)
 		}
 		for _, b := range page {
 			branches = append(branches, RepoBranch{Name: b.Name})
