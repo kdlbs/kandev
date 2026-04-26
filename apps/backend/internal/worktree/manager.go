@@ -87,15 +87,6 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 		log = logger.Default()
 	}
 
-	// Ensure base directory exists
-	basePath, err := cfg.ExpandedBasePath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to expand base path: %w", err)
-	}
-	if err := os.MkdirAll(basePath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create worktree base directory: %w", err)
-	}
-
 	// Ensure tasks base directory exists (if configured)
 	if cfg.TasksBasePath != "" {
 		tasksBase, err := cfg.ExpandedTasksBasePath()
@@ -264,67 +255,13 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
 
-	// Task-dir mode: place worktree inside ~/.kandev/tasks/{taskDir}/{repo}/
-	if req.TaskDirName != "" && req.RepoName != "" {
-		return m.createInTaskDir(ctx, req, baseRef)
+	// Worktrees are always placed under ~/.kandev/tasks/{taskDir}/{repo}/.
+	// Callers must populate TaskDirName and RepoName; the legacy flat layout
+	// has been removed, so a missing field is a programming error.
+	if req.TaskDirName == "" || req.RepoName == "" {
+		return nil, ErrTaskDirRequired
 	}
-
-	return m.createWorktree(ctx, req, baseRef)
-}
-
-// createWorktree performs the actual git worktree creation.
-func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
-	worktreeDirName, branchName := m.buildWorktreeNames(req)
-	startPoint := baseRef
-
-	// If a checkout branch is specified (e.g. a PR's head branch), fetch it
-	// and try to check it out directly. If the branch is already checked out
-	// in another worktree, fall back to a unique branch with a random suffix.
-	var fetchResult *FetchBranchResult
-	if req.CheckoutBranch != "" {
-		var err error
-		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch)
-		if err != nil {
-			return nil, err
-		}
-		if fetchResult.StartPoint != "" {
-			startPoint = fetchResult.StartPoint
-		} else {
-			startPoint = req.CheckoutBranch
-		}
-	}
-
-	worktreePath, err := m.config.WorktreePath(worktreeDirName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get worktree path: %w", err)
-	}
-
-	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, req, worktreePath, branchName, startPoint, baseRef)
-	if err != nil {
-		return nil, err
-	}
-
-	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
-	if fetchResult != nil {
-		wt.FetchWarning = fetchResult.Warning
-		wt.FetchWarningDetail = fetchResult.WarningDetail
-	}
-
-	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
-		return nil, err
-	}
-
-	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
-		return nil, err
-	}
-
-	m.logger.Info("created worktree",
-		zap.String("session_id", req.SessionID),
-		zap.String("task_id", req.TaskID),
-		zap.String("path", worktreePath),
-		zap.String("branch", wt.Branch))
-
-	return wt, nil
+	return m.createInTaskDir(ctx, req, baseRef)
 }
 
 // createInTaskDir creates a worktree inside the task directory structure:
@@ -1125,53 +1062,8 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 }
 
 // Reconcile syncs worktree state with active tasks on startup.
-func (m *Manager) Reconcile(ctx context.Context, activeTasks []string) error {
-	basePath, err := m.config.ExpandedBasePath()
-	if err != nil {
-		return fmt.Errorf("failed to expand base path: %w", err)
-	}
-
-	// Create a set of active task IDs
-	activeSet := make(map[string]bool)
-	for _, taskID := range activeTasks {
-		activeSet[taskID] = true
-	}
-
-	// Scan worktree directories
-	entries, err := os.ReadDir(basePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // No worktrees directory yet
-		}
-		return fmt.Errorf("failed to read worktree directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		taskID := entry.Name()
-		worktreePath := filepath.Join(basePath, taskID)
-
-		if !activeSet[taskID] {
-			// Orphaned worktree - no matching active task
-			m.logger.Info("cleaning up orphaned worktree",
-				zap.String("task_id", taskID),
-				zap.String("path", worktreePath))
-
-			// Remove directory
-			if err := os.RemoveAll(worktreePath); err != nil {
-				m.logger.Warn("failed to remove orphaned worktree",
-					zap.String("path", worktreePath),
-					zap.Error(err))
-			}
-		}
-	}
-
-	// Also scan the tasks directory for orphaned task directories
+func (m *Manager) Reconcile(ctx context.Context) error {
 	m.reconcileTasksDir(ctx)
-
 	return nil
 }
 
@@ -1484,9 +1376,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
 
-	worktreePath, err := m.config.WorktreePath(req.TaskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get worktree path: %w", err)
+	// Reuse the original on-disk path so the worktree is recreated in the
+	// same task-dir slot it was first created in.
+	worktreePath := existing.Path
+	if worktreePath == "" {
+		return nil, fmt.Errorf("cannot recreate worktree: existing record has no path")
 	}
 
 	// Try to add worktree using existing branch

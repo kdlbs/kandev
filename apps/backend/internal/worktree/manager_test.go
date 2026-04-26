@@ -23,9 +23,9 @@ func newTestLogger() *logger.Logger {
 func newTestConfig(t *testing.T) Config {
 	tmpDir := t.TempDir()
 	return Config{
-		Enabled:      true,
-		BasePath:     tmpDir,
-		BranchPrefix: "kandev/",
+		Enabled:       true,
+		TasksBasePath: tmpDir,
+		BranchPrefix:  "kandev/",
 	}
 }
 
@@ -147,8 +147,8 @@ func TestNewManager_CustomSyncTimeouts(t *testing.T) {
 func TestNewManager_DisabledConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Enabled:  false,
-		BasePath: tmpDir,
+		Enabled:       false,
+		TasksBasePath: tmpDir,
 	}
 	log := newTestLogger()
 	store := newMockStore()
@@ -178,7 +178,7 @@ func TestManager_IsValid(t *testing.T) {
 	}
 
 	// Create a mock worktree directory
-	worktreePath := filepath.Join(cfg.BasePath, "test-worktree")
+	worktreePath := filepath.Join(cfg.TasksBasePath, "test-worktree")
 	if err := os.MkdirAll(worktreePath, 0755); err != nil {
 		t.Fatalf("failed to create test dir: %v", err)
 	}

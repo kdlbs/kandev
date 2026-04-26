@@ -46,6 +46,12 @@ var (
 
 	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
 	ErrGitCryptFailed = errors.New("git-crypt unlock failed")
+
+	// ErrTaskDirRequired is returned when a worktree create request is missing
+	// TaskDirName or RepoName. Worktrees are always placed inside the per-task
+	// directory (~/.kandev/tasks/{taskDir}/{repo}/), so callers must populate
+	// both fields.
+	ErrTaskDirRequired = errors.New("worktree create requires TaskDirName and RepoName")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

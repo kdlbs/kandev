@@ -287,8 +287,7 @@ func startAgentInfrastructure(
 	}
 	addCleanup(worktreeCleanup)
 	log.Info("Worktree Manager initialized",
-		zap.Bool("enabled", cfg.Worktree.Enabled),
-		zap.String("base_path", cfg.Worktree.BasePath))
+		zap.Bool("enabled", cfg.Worktree.Enabled))
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
