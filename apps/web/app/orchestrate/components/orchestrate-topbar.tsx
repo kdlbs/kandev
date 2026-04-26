@@ -14,6 +14,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/orchestrate/company/costs": "COSTS",
   "/orchestrate/company/activity": "ACTIVITY",
   "/orchestrate/company/settings": "SETTINGS",
+  "/orchestrate/company/settings/export": "SETTINGS > EXPORT",
 };
 
 export function OrchestrateTopbar() {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { IconDownload, IconUpload } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -24,6 +25,7 @@ type ImportPreview = {
 
 export function ConfigSection() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
+  const router = useRouter();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [bundle, setBundle] = useState<Record<string, unknown> | null>(null);
@@ -31,9 +33,8 @@ export function ConfigSection() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(() => {
-    if (!activeWorkspaceId) return;
-    window.location.href = orchestrateApi.exportConfigZipUrl(activeWorkspaceId);
-  }, [activeWorkspaceId]);
+    router.push("/orchestrate/company/settings/export");
+  }, [router]);
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {

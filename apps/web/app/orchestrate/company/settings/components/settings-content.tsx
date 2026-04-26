@@ -1,11 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { IconUpload } from "@tabler/icons-react";
 import { Input } from "@kandev/ui/input";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
+import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { ConfigSection } from "./config-section";
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <h2 className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60 shrink-0">
+        {children}
+      </h2>
+      <div className="h-px bg-border flex-1" />
+    </div>
+  );
+}
+
+function SettingCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-border p-4 space-y-4">
+      {children}
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, checked, onCheckedChange }: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm">{label}</p>
+        {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} className="cursor-pointer" />
+    </div>
+  );
+}
 
 export function SettingsContent() {
   const workspaces = useAppStore((s) => s.workspaces);
@@ -13,68 +50,123 @@ export function SettingsContent() {
 
   const [name, setName] = useState(activeWorkspace?.name || "");
   const [description, setDescription] = useState(activeWorkspace?.description || "");
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [approvalNewAgents, setApprovalNewAgents] = useState(true);
   const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
   const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
 
+  const initial = (name || "W").charAt(0).toUpperCase();
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setLogoPreview(url);
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-8">
-      <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        Settings
-      </h1>
+      {/* Appearance */}
+      <div>
+        <SectionHeader>Appearance</SectionHeader>
+        <SettingCard>
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-lg font-semibold shrink-0 overflow-hidden">
+              {logoPreview ? (
+                <img src={logoPreview} alt="Logo" className="h-full w-full object-cover" />
+              ) : (
+                initial
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-muted-foreground mb-2">Logo</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <IconUpload className="h-3.5 w-3.5 mr-1.5" />
+                Upload logo
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleLogoChange}
+                className="hidden"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground">Name</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Workspace name"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted-foreground">Description</label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description"
+              className="mt-1"
+            />
+          </div>
+        </SettingCard>
+      </div>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Workspace</h2>
-        <div>
-          <label className="text-sm font-medium">Name</label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Workspace name"
-            className="mt-1"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Description</label>
-          <Input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description"
-            className="mt-1"
-          />
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Approval Settings</h2>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <Checkbox
+      {/* Hiring */}
+      <div>
+        <SectionHeader>Hiring</SectionHeader>
+        <SettingCard>
+          <ToggleRow
+            label="Require approval for new agents"
+            description="New agent hires must be approved before activation"
             checked={approvalNewAgents}
-            onCheckedChange={(v) => setApprovalNewAgents(!!v)}
+            onCheckedChange={setApprovalNewAgents}
           />
-          <span className="text-sm">Require approval for new agents</span>
-        </label>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <Checkbox
+        </SettingCard>
+      </div>
+
+      {/* Task Completion */}
+      <div>
+        <SectionHeader>Task Completion</SectionHeader>
+        <SettingCard>
+          <ToggleRow
+            label="Require approval for task completion"
+            description="Tasks must be reviewed before they can be marked as done"
             checked={approvalTaskCompletion}
-            onCheckedChange={(v) => setApprovalTaskCompletion(!!v)}
+            onCheckedChange={setApprovalTaskCompletion}
           />
-          <span className="text-sm">Require approval for task completion</span>
-        </label>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <Checkbox
+        </SettingCard>
+      </div>
+
+      {/* Skills */}
+      <div>
+        <SectionHeader>Skills</SectionHeader>
+        <SettingCard>
+          <ToggleRow
+            label="Require approval for skill changes"
+            description="Agent-created skills must be approved before activation"
             checked={approvalSkillChanges}
-            onCheckedChange={(v) => setApprovalSkillChanges(!!v)}
+            onCheckedChange={setApprovalSkillChanges}
           />
-          <span className="text-sm">Require approval for skill changes</span>
-        </label>
-      </section>
+        </SettingCard>
+      </div>
 
-      <Separator />
-
-      <ConfigSection />
+      {/* Configuration */}
+      <div>
+        <SectionHeader>Configuration</SectionHeader>
+        <SettingCard>
+          <ConfigSection />
+        </SettingCard>
+      </div>
     </div>
   );
 }
