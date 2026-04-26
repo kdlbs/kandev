@@ -6,7 +6,7 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconAlertTriangle,
-  IconPaperclip,
+  IconUpload,
   IconDotsVertical,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -96,7 +96,7 @@ export function NewIssueBottomBar({ draft, onUpdate }: Props) {
       <StatusChip draft={draft} onUpdate={onUpdate} />
       <PriorityChip draft={draft} onUpdate={onUpdate} />
       <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
-        <IconPaperclip className="h-3.5 w-3.5 mr-1" />
+        <IconUpload className="h-3.5 w-3.5 mr-1" />
         Upload
       </Button>
       <Tooltip>

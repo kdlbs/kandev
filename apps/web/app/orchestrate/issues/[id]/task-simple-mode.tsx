@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { IconCode, IconCopy, IconPlus, IconPaperclip } from "@tabler/icons-react";
+import { IconCode, IconCopy, IconPlus, IconUpload } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
@@ -122,7 +122,7 @@ export function TaskSimpleMode({
             <IconPlus className="h-3.5 w-3.5 mr-1" /> New Sub-Issue
           </Button>
           <Button variant="outline" size="sm" className="cursor-pointer">
-            <IconPaperclip className="h-3.5 w-3.5 mr-1" /> Upload attachment
+            <IconUpload className="h-3.5 w-3.5 mr-1" /> Upload attachment
           </Button>
           <Button variant="outline" size="sm" className="cursor-pointer">
             <IconPlus className="h-3.5 w-3.5 mr-1" /> New document

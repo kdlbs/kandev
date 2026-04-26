@@ -16,7 +16,7 @@ export type FreshBranchToggleProps = {
  * Compact icon toggle shown beside the branch selector for local executors.
  * Pressed = "fork a new branch from the chosen base on submit". Matches the
  * affordance pattern used by other inline toggles in the dialog (e.g. the
- * paperclip in the prompt input).
+ * attach-file button in the prompt input).
  */
 export function FreshBranchToggle({ enabled, onToggle }: FreshBranchToggleProps) {
   return (

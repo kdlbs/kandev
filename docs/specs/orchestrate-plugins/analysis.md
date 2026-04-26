@@ -1,45 +1,45 @@
 # Orchestrate Plugins: Ecosystem Analysis
 
-## 1. Paperclip Plugin Ecosystem Inventory
+## 1. Industry Plugin Ecosystem Inventory
 
-### Official SDK & Tooling
+### Official SDK & Tooling (reference implementations)
 
 | Package | Description |
 |---------|-------------|
-| `@paperclipai/plugin-sdk` | Official TypeScript SDK: worker runtime, UI React hooks, testing harness, bundler presets, dev server |
-| `@paperclipai/create-paperclip-plugin` | CLI scaffolding tool. Templates: `default`, `connector`, `workspace`, `environment`. Generates manifest, worker, UI bundle, tests |
+| Plugin SDK | Official TypeScript SDK: worker runtime, UI React hooks, testing harness, bundler presets, dev server |
+| Plugin scaffolding CLI | CLI scaffolding tool. Templates: `default`, `connector`, `workspace`, `environment`. Generates manifest, worker, UI bundle, tests |
 
-### First-Party Plugins (by Paperclip maintainers)
+### First-Party Plugins (by platform maintainers)
 
 | Plugin | Category | Capabilities Used | What It Does |
 |--------|----------|-------------------|--------------|
-| `paperclip-plugin-discord` | connector | events.subscribe, events.emit, webhooks.receive, agent.tools.register, agent.sessions.create/send/close, agents.invoke, plugin.state.read/write, http.outbound, secrets.read-ref, jobs.schedule, activity.log.write, metrics.write | Full bidirectional Discord integration: notifications (issue created/done, agent runs, approvals, budget), slash commands (/clip, /acp), button interactions (approve/reject), multi-agent thread sessions, agent handoffs, community intelligence scanning, custom !commands, proactive watch patterns, media pipeline (Whisper transcription), escalation system with HITL buttons, daily digests. 22 capabilities, 5 scheduled jobs, 6 agent tools. |
-| `paperclip-plugin-github-issues` | connector | issues.read, issues.update, issue.comments.read, issue.comments.create, plugin.state.read/write, events.subscribe, http.outbound, secrets.read-ref, webhooks.receive, agent.tools.register, instance.settings.register, ui.detailTab.register | Bidirectional GitHub Issues sync: status mapping (open/closed to backlog/done), comment bridging, webhook ingestion, periodic reconciliation job (15min), 3 agent tools (search/link/unlink), settings page, issue detail tab showing linked GitHub issue. |
-| `paperclip-plugin-slack` | connector | events.subscribe, http.outbound, secrets.read-ref, plugin.state.read/write | Slack notifications: posts to Slack channels on issue creation, completion, and approval requests. |
-| `paperclip-plugin-telegram` | connector | events.subscribe, http.outbound, secrets.read-ref, plugin.state.read/write | Telegram notifications: same event-to-message pattern as Slack but for Telegram Bot API. |
+| Discord plugin | connector | events.subscribe, events.emit, webhooks.receive, agent.tools.register, agent.sessions.create/send/close, agents.invoke, plugin.state.read/write, http.outbound, secrets.read-ref, jobs.schedule, activity.log.write, metrics.write | Full bidirectional Discord integration: notifications (issue created/done, agent runs, approvals, budget), slash commands, button interactions (approve/reject), multi-agent thread sessions, agent handoffs, community intelligence scanning, custom commands, proactive watch patterns, media pipeline (Whisper transcription), escalation system with HITL buttons, daily digests. 22 capabilities, 5 scheduled jobs, 6 agent tools. |
+| GitHub Issues plugin | connector | issues.read, issues.update, issue.comments.read, issue.comments.create, plugin.state.read/write, events.subscribe, http.outbound, secrets.read-ref, webhooks.receive, agent.tools.register, instance.settings.register, ui.detailTab.register | Bidirectional GitHub Issues sync: status mapping (open/closed to backlog/done), comment bridging, webhook ingestion, periodic reconciliation job (15min), 3 agent tools (search/link/unlink), settings page, issue detail tab showing linked GitHub issue. |
+| Slack plugin | connector | events.subscribe, http.outbound, secrets.read-ref, plugin.state.read/write | Slack notifications: posts to Slack channels on issue creation, completion, and approval requests. |
+| Telegram plugin | connector | events.subscribe, http.outbound, secrets.read-ref, plugin.state.read/write | Telegram notifications: same event-to-message pattern as Slack but for Telegram Bot API. |
 
 ### Third-Party / Community Plugins
 
 | Plugin | Category | What It Does |
 |--------|----------|--------------|
-| `@lucitra/paperclip-plugin-linear` | connector | Bidirectional Linear issue sync: status/priority mapping, comment bridging, project sync, label sync, OAuth flow, full initial import, 4 agent tools, settings page with OAuth connect/disconnect, issue detail tab. 23 capabilities. Most complex community plugin. |
-| `paperclip-plugin-chat` | ui / automation | Interactive AI chat copilot for managing tasks, agents, and workspaces through a conversational interface. |
-| `paperclip-plugin-hindsight` | automation | Persistent long-term memory for agents. Recall before every heartbeat, retain after every run. By Vectorize.io. |
-| `paperclip-plugin-company-wizard` | automation | AI-powered company setup assistant with presets for quick onboarding. |
-| `paperclip-plugin-acp` | connector | ACP runtime that runs Claude Code, Codex, and Gemini CLI from any chat platform (Discord, etc.). Bridges chat platforms to agent CLI processes. |
-| `paperclip-plugin-writbase` | connector | Bidirectional sync between Paperclip issues and WritBase tasks with webhook-driven updates and periodic reconciliation. |
-| `paperclip-plugin-avp` | automation | Trust layer using Agent Veil Protocol: DID identity and reputation scoring for agents. |
-| `paperclip-live-analytics-plugin` | analytics | Live visitor map, dashboard widget, and settings page for viewing Agent Analytics. |
-| `obsidian-paperclip` | ui | Obsidian plugin to browse, comment on, and assign Paperclip issues to AI agents. |
-| `paperclip-aperture` | ui | Alternative Focus interface: deterministically ranks approvals, issue activity, and other human-facing events into now/next/ambient priority tiers. |
+| Linear sync plugin | connector | Bidirectional Linear issue sync: status/priority mapping, comment bridging, project sync, label sync, OAuth flow, full initial import, 4 agent tools, settings page with OAuth connect/disconnect, issue detail tab. 23 capabilities. Most complex community plugin. |
+| Chat copilot plugin | ui / automation | Interactive AI chat copilot for managing tasks, agents, and workspaces through a conversational interface. |
+| Hindsight plugin | automation | Persistent long-term memory for agents. Recall before every heartbeat, retain after every run. By Vectorize.io. |
+| Company wizard plugin | automation | AI-powered company setup assistant with presets for quick onboarding. |
+| ACP bridge plugin | connector | ACP runtime that runs Claude Code, Codex, and Gemini CLI from any chat platform (Discord, etc.). Bridges chat platforms to agent CLI processes. |
+| WritBase sync plugin | connector | Bidirectional sync between issues and WritBase tasks with webhook-driven updates and periodic reconciliation. |
+| AVP trust plugin | automation | Trust layer using Agent Veil Protocol: DID identity and reputation scoring for agents. |
+| Live analytics plugin | analytics | Live visitor map, dashboard widget, and settings page for viewing Agent Analytics. |
+| Obsidian integration | ui | Obsidian plugin to browse, comment on, and assign issues to AI agents. |
+| Aperture plugin | ui | Alternative Focus interface: deterministically ranks approvals, issue activity, and other human-facing events into now/next/ambient priority tiers. |
 
 ### Ecosystem Tooling
 
 | Tool | What It Does |
 |------|--------------|
-| `oh-my-paperclip` | Curated bundle of recommended Paperclip plugins (meta-package). |
-| `paperclip-mcp` | MCP server exposing Paperclip REST API as tools for Claude Code and Claude Desktop. |
-| `paperclip-discord-bot` | Standalone Discord bot (not a plugin) for GitHub OAuth contributor roles and daily AI summaries. |
+| Plugin bundle | Curated bundle of recommended plugins (meta-package). |
+| MCP server | MCP server exposing the platform REST API as tools for Claude Code and Claude Desktop. |
+| Discord bot | Standalone Discord bot (not a plugin) for GitHub OAuth contributor roles and daily AI summaries. |
 
 ### Capability Usage Patterns
 
@@ -75,15 +75,15 @@ Across the ecosystem, the most-used capabilities are:
 |---------|---------------------|--------------------------|
 | **Telegram channel** | Core channel type in orchestrate-assistant | Platform-specific webhook ingestion, message formatting, API client, bot management. Different users need different platforms. A Telegram plugin would receive `orchestrate.comment.created` events and relay outbound messages, plus expose an inbound webhook for Telegram updates. |
 | **Slack channel** | Core channel type in orchestrate-assistant | Same reasoning as Telegram. Slack's OAuth, signing secret verification, Block Kit formatting, and app manifest are substantial platform-specific logic. |
-| **Discord channel** | Core channel type in orchestrate-assistant | Same pattern. The Paperclip Discord plugin is 57K+ lines of worker code alone -- this complexity should not live in kandev core. |
+| **Discord channel** | Core channel type in orchestrate-assistant | Same pattern. Reference Discord plugins in the industry reach 57K+ lines of worker code alone -- this complexity should not live in kandev core. |
 | **Email channel** | Core channel type in orchestrate-assistant | SMTP/IMAP integration, email parsing, HTML rendering. Specialized enough to be a plugin. |
 | **Jira sync** | Existing core integration | Bidirectional Jira-to-orchestrate-task sync. The existing `internal/jira/` package is already cleanly separated -- it could become the first reference plugin. |
-| **Linear sync** | Not planned | The Paperclip Linear plugin shows this is a high-demand integration. As a plugin, it avoids adding Linear-specific code to kandev core. |
+| **Linear sync** | Not planned | Industry examples show Linear sync is a high-demand integration. As a plugin, it avoids adding Linear-specific code to kandev core. |
 | **GitHub Issues sync** | Existing core integration partially covers this | The existing `internal/github/` handles PRs, reviews, and issue watch. Task-level issue sync (status mapping, comment bridging) would be cleaner as a plugin. PR integration might stay in core since it's deeply tied to the development workflow. |
 | **Cost reporting / billing** | Core analytics | External billing integration (Stripe, invoice generation), cost dashboards beyond the built-in one, usage alerts to external systems. |
 | **Custom notification targets** | Apprise provider | Each notification target (PagerDuty, Opsgenie, ntfy, Gotify, Pushover) could be a plugin instead of routing through Apprise CLI. Gives per-target configuration, rich formatting, and delivery tracking. |
 | **Webhook triggers for routines** | Planned in orchestrate-routines | External systems (GitHub Actions, CI/CD, monitoring alerts) POST to kandev, which creates tasks. Generic webhook plugins could transform payloads into task creation requests. |
-| **Custom agent tools** | Not planned | Plugins could register tools that agents can call during sessions -- database queries, API calls to internal systems, Slack lookups, calendar checks. The Paperclip ecosystem shows agent tools are one of the most valuable plugin capabilities. |
+| **Custom agent tools** | Not planned | Plugins could register tools that agents can call during sessions -- database queries, API calls to internal systems, Slack lookups, calendar checks. Existing plugin ecosystems show agent tools are one of the most valuable plugin capabilities. |
 
 ---
 

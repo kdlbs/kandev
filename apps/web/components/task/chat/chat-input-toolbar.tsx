@@ -10,7 +10,7 @@ import {
   IconAt,
   IconPlugConnected,
   IconPlugConnectedX,
-  IconPaperclip,
+  IconUpload,
   IconRocket,
 } from "@tabler/icons-react";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
@@ -407,7 +407,7 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
           className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
           onClick={onClick}
         >
-          <IconPaperclip className="h-4 w-4" />
+          <IconUpload className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Attach files</TooltipContent>

@@ -494,7 +494,7 @@ Subscribes to `orchestrate.cost.recorded`, `orchestrate.wakeup.processed`, `agen
 - **Hot reload.** Changing a plugin's manifest requires re-registration. There is no live manifest update mechanism.
 - **Multi-instance plugins.** Each plugin ID maps to exactly one base URL. Running multiple instances of the same plugin (for different workspaces or for HA) is not supported in v1.
 - **Rate limiting.** No per-plugin rate limits on API calls or event delivery in v1. Misbehaving plugins can be disabled manually.
-- **Plugin database namespaces.** Unlike Paperclip, kandev plugins do not get their own SQLite schemas. The KV state store is sufficient for v1. Plugins that need relational data manage their own database.
+- **Plugin database namespaces.** Kandev plugins do not get their own SQLite schemas. The KV state store is sufficient for v1. Plugins that need relational data manage their own database.
 
 ## Implementation plan
 

@@ -1,7 +1,7 @@
 # Orchestrate UI Reference
 
 **Date:** 2026-04-26
-**Purpose:** Detailed UI component specifications for all orchestrate pages. Referenced by wave plans. Based on Paperclip UI analysis, adapted for kandev's stack (`@kandev/ui` shadcn components, Tailwind CSS, lucide-react icons).
+**Purpose:** Detailed UI component specifications for all orchestrate pages. Referenced by wave plans. Adapted for kandev's stack (`@kandev/ui` shadcn components, Tailwind CSS, lucide-react icons).
 
 ## Global Patterns
 
@@ -290,7 +290,7 @@ low:      ArrowDown, text-blue-600
     {/* Action buttons */}
     <div className="flex gap-2 mt-6">
       <Button variant="outline" size="sm"><Plus className="h-3.5 w-3.5 mr-1" /> New Sub-Issue</Button>
-      <Button variant="outline" size="sm"><Paperclip className="h-3.5 w-3.5 mr-1" /> Upload attachment</Button>
+      <Button variant="outline" size="sm"><Upload className="h-3.5 w-3.5 mr-1" /> Upload attachment</Button>
       <Button variant="outline" size="sm"><Plus className="h-3.5 w-3.5 mr-1" /> New document</Button>
     </div>
 
@@ -568,7 +568,7 @@ async function startOrResumeSession(taskId: string, agentInstanceId: string) {
     <div className="flex items-center gap-2 pt-2 border-t border-border">
       <Button variant="outline" size="sm"><CircleDot className="h-3.5 w-3.5 mr-1" /> Todo</Button>
       <Button variant="outline" size="sm"><Minus className="h-3.5 w-3.5 mr-1" /> Priority</Button>
-      <Button variant="outline" size="sm"><Paperclip className="h-3.5 w-3.5 mr-1" /> Upload</Button>
+      <Button variant="outline" size="sm"><Upload className="h-3.5 w-3.5 mr-1" /> Upload</Button>
       <Button variant="ghost" size="icon-sm"><MoreHorizontal /></Button>
     </div>
 
