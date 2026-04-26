@@ -131,6 +131,8 @@ export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
+# Preview mode: only register the mock agent, suppress real agent discovery.
+export KANDEV_MOCK_AGENT=only
 /app/apps/backend/bin/kandev > /var/log/kandev.log 2>&1
 STARTSCRIPT
 chmod +x /app/start-kandev.sh`, ports.Web, backendPort, ports.Web)

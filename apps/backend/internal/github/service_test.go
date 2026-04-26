@@ -3,6 +3,10 @@ package github
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +18,62 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 )
+
+func TestListRepoBranches_NoopClientFallback(t *testing.T) {
+	// A fake GitHub API that returns two branches for a public repo.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/branches" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"name": "main"},
+			{"name": "develop"},
+		})
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	branches, err := svc.ListRepoBranches(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d", len(branches))
+	}
+	if branches[0].Name != "main" || branches[1].Name != "develop" {
+		t.Errorf("unexpected branches: %+v", branches)
+	}
+}
+
+func TestListRepoBranches_NoopClientFallback_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	_, err := svc.ListRepoBranches(context.Background(), "owner", "private-repo")
+	if err == nil {
+		t.Fatal("expected error for private/missing repo")
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected GitHubAPIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 status, got %d", apiErr.StatusCode)
+	}
+}
 
 func TestGetPR_NilClient(t *testing.T) {
 	svc := &Service{client: nil}

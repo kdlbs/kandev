@@ -2,7 +2,11 @@ package github
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -1153,11 +1157,61 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 }
 
 // ListRepoBranches lists branches for a repository.
+// When no authenticated client is configured, it falls back to the unauthenticated
+// GitHub API so that public repositories remain accessible without a token.
 func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("github client not available")
+	if s.client != nil {
+		branches, err := s.client.ListRepoBranches(ctx, owner, repo)
+		if err == nil || !errors.Is(err, ErrNoClient) {
+			return branches, err
+		}
 	}
-	return s.client.ListRepoBranches(ctx, owner, repo)
+	return listRepoBranchesAnonymous(ctx, owner, repo)
+}
+
+// anonymousAPIBase is the GitHub API base URL used by listRepoBranchesAnonymous.
+// Overridden in tests to point at a local httptest server.
+var anonymousAPIBase = githubAPIBase
+
+// listRepoBranchesAnonymous calls the GitHub REST API without authentication to
+// list branches for public repositories. Returns ErrNoClient on network errors
+// and a GitHubAPIError for non-2xx responses (404, 403, etc.) so the controller
+// can map them to the appropriate HTTP status codes.
+func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100", anonymousAPIBase, owner, repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, ErrNoClient
+	}
+	req.Header.Set("Accept", githubAccept)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, ErrNoClient
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, &GitHubAPIError{
+			StatusCode: resp.StatusCode,
+			Endpoint:   endpoint,
+			Body:       string(body),
+		}
+	}
+
+	var raw []struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, ErrNoClient
+	}
+	branches := make([]RepoBranch, 0, len(raw))
+	for _, b := range raw {
+		branches = append(branches, RepoBranch{Name: b.Name})
+	}
+	return branches, nil
 }
 
 // SearchUserPRs searches for PRs using a filter or custom query. Unless the
