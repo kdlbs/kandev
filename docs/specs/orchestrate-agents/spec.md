@@ -26,6 +26,7 @@ Orchestrate introduces agent instances -- long-lived entities that reference an 
   - **Budget**: remaining spend allowance (see [orchestrate-costs](../orchestrate-costs/spec.md)).
   - **Skills**: list of assigned skill IDs (see [orchestrate-skills](../orchestrate-skills/spec.md)).
   - **Icon**: avatar/icon for UI display.
+  - **Executor preference**: optional executor override for this agent (see executor resolution below).
 - Multiple instances can share the same profile (e.g. three "Claude Sonnet" workers with different skills and budgets).
 
 ### Hierarchy
@@ -80,6 +81,21 @@ Orchestrate introduces agent instances -- long-lived entities that reference an 
 - When set to N > 1, the agent can run up to N sessions in parallel on different tasks. This is useful for workers handling independent, lightweight tasks (e.g. code reviews, test runs).
 - The scheduler checks the agent's active session count before launching a new one. If at capacity, the wakeup is re-queued.
 - Users configure concurrency per agent instance via the agent settings UI.
+
+### Executor resolution
+
+When the scheduler launches a session for an agent instance, the executor is resolved automatically. No agent needs to choose an executor -- it's derived from configuration. Resolution chain (first non-null wins):
+
+1. **Task-level override** (`execution_policy.executor_config` on the task) -- rare, for special cases like "this deploy task must run on the staging server."
+2. **Agent instance executor preference** (`executor_preference` on the agent instance) -- e.g. "QA Bot always runs in sprites for isolated sandbox."
+3. **Project executor config** (`executor_config` on the project, see [orchestrate-projects](../orchestrate-projects/spec.md)) -- e.g. "Backend project uses local_docker with node:20 image."
+4. **Workspace default executor** -- the fallback from workspace settings.
+
+The executor preference on an agent instance is a JSON field with the same shape as project executor config: `{ type, image, resource_limits, environment_id }`. It's set by the user during agent creation or by the CEO in the hire request.
+
+Worktrees are automatic: when a task targets a repository, the system creates a git worktree (branch) for that task's session using the existing `worktree.Manager`. The worktree strategy (per-task or shared) comes from the project config.
+
+The CEO/CTO never explicitly picks an executor -- they assign tasks to projects and agents. The executor is resolved from the chain above. The CEO's skill teaches it: "assign backend tasks to the Backend project; the project's executor config handles the rest."
 
 ### Agent instance lifecycle
 

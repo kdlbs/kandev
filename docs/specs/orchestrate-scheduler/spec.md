@@ -62,8 +62,9 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
   1. **Claim**: atomically set `status=claimed`, `claimed_at=now()`. Zero rows updated means another process claimed it.
   2. **Guard**: check agent instance status. If `paused` or `stopped`, mark wakeup `finished` with no action. If `working` (session already active), re-queue with a short delay.
   3. **Build context**: assemble the agent's prompt from the wakeup reason, payload, and context snapshot. Include the workspace state summary for CEO heartbeats.
-  4. **Create session**: create a `TaskSession` through the existing orchestrator pipeline. The session's task is determined by the wakeup payload (the assigned task, or a "coordination" task for CEO heartbeats).
-  5. **Launch**: start the agent process via the existing lifecycle manager -> executor backend -> agentctl -> agent subprocess chain.
+  4. **Resolve executor**: walk the executor resolution chain: task override -> agent instance preference -> project config -> workspace default. This determines which executor backend (local_pc, local_docker, sprites, etc.) and what resource limits, image, and worktree strategy to use. See [orchestrate-agents](../orchestrate-agents/spec.md) for the resolution chain.
+  5. **Create session**: create a `TaskSession` through the existing orchestrator pipeline with the resolved executor config. The session's task is determined by the wakeup payload (the assigned task, or a "coordination" task for CEO heartbeats). If the task targets a repo, a git worktree is created per the project's worktree strategy.
+  6. **Launch**: start the agent process via the existing lifecycle manager -> executor backend -> agentctl -> agent subprocess chain.
   6. **Complete**: when the session ends, mark the wakeup `finished`. Parse agent output for follow-up actions (new tasks, status changes, comments, approvals).
 
 ### One-shot session model

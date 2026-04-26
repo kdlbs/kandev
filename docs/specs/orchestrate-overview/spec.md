@@ -111,10 +111,63 @@ For users who want to micro-manage a task with full kandev tooling:
 
 ### Relationship to existing features
 
-- Orchestrate tasks ARE kandev tasks. The existing `Task` model is extended with new fields (`assignee_agent_instance_id`, `origin`, `project_id`). No separate task table.
+- Orchestrate tasks ARE kandev tasks. The existing `Task` model is extended with new fields. No separate task table.
 - Clicking a task in `/orchestrate/issues` opens the orchestrate task detail page (simple mode). Advanced mode provides the full kandev dockview experience within orchestrate chrome.
-- The existing kanban board at `/` continues to work. Users can use kanban without Orchestrate. Orchestrate-managed tasks appear on the kanban board like any other task.
+- The existing kanban board at `/` continues to work. Users can use kanban without Orchestrate.
 - Existing task sessions, turns, messages, executors, and worktrees are reused. Orchestrate creates sessions through the same orchestrator pipeline.
+
+### Task model extensions
+
+Orchestrate tasks extend the existing `Task` model with these changes:
+
+**Workflow becomes optional:**
+- `workflow_id` and `workflow_step_id` become nullable. Orchestrate tasks have no workflow -- their lifecycle is driven by the scheduler, blockers, and execution policy.
+- Existing kanban tasks continue to require a workflow (validated at the service layer based on task origin).
+- If a user later wants to put an orchestrate task on a kanban board, they can assign a workflow via the properties panel.
+
+**New status field:**
+- Orchestrate tasks use a `status` field with values: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`.
+- This maps to the existing `State` field: `todo`/`backlog` = `open`, `done`/`cancelled` = `completed`, plus orchestrate-specific states (`in_progress`, `in_review`, `blocked`).
+- The existing `State` field remains for backwards compatibility. The new `status` field provides finer granularity for orchestrate tasks. Non-orchestrate tasks derive their display status from `State` + `WorkflowStepID`.
+
+**Task identifiers:**
+- Each workspace has a `task_sequence` counter (integer, auto-incrementing).
+- Each workspace has a `task_prefix` (string, default "KAN").
+- On task creation, the task gets a human-readable `identifier` field: `{prefix}-{sequence}` (e.g. "KAN-1", "KAN-42").
+- The identifier is immutable once assigned. The sequence is workspace-scoped.
+- Existing tasks created before orchestrate get identifiers assigned via a backfill migration.
+
+**Labels:**
+- Tasks have a `labels` JSON array field (list of label strings, e.g. `["security", "frontend", "urgent"]`).
+- Labels are free-form strings. No separate label registry table for now.
+
+**Blockers:**
+- A new `task_blockers` junction table stores `(task_id, blocker_task_id)` pairs.
+- A task is `blocked` when it has unresolved blockers (any blocker not in `done`/`cancelled` state).
+- Circular dependency detection on insert.
+
+**Comments:**
+- The existing session message system is used for agent-user communication within a session.
+- Orchestrate adds a `task_comments` table for asynchronous comments (outside sessions): agent-to-agent, user notes, channel messages.
+- Comment fields: `id`, `task_id`, `author_type` (user/agent), `author_id`, `body` (text), `source` (user/agent/channel), `reply_channel_id` (for channel relay), `created_at`.
+- Comments trigger `task_comment` wakeups for the assigned agent.
+
+**Other new fields on tasks:**
+- `assignee_agent_instance_id` (nullable) -- which orchestrate agent owns this task.
+- `origin` (enum: manual/agent_created/routine) -- how the task was created.
+- `project_id` (nullable) -- which project this task belongs to.
+- `requires_approval` (boolean, default false) -- shorthand for "add user as approver."
+- `execution_policy` (JSON, nullable) -- multi-stage review/approval config.
+- `execution_state` (JSON, nullable) -- current stage progress.
+
+### Agent API authentication
+
+- When the scheduler launches an agent session, it mints a per-run JWT (short-lived, scoped to the agent instance and task).
+- The JWT is injected as `KANDEV_API_KEY` environment variable in the agent subprocess.
+- Agents use this JWT as a bearer token when calling orchestrate API endpoints (memory, task updates, comments).
+- The JWT encodes: `agent_instance_id`, `task_id`, `workspace_id`, `session_id`, `exp` (expiry).
+- API endpoints validate the JWT and scope access: an agent can only access its own memory, its assigned tasks, and workspace-level read endpoints (skills, project list).
+- The JWT generation reuses the existing per-run auth mechanism in the lifecycle manager.
 
 ### Frontend architecture
 

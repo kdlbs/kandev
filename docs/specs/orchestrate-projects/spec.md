@@ -27,6 +27,7 @@ Projects group tasks into manageable units with their own repositories, budget, 
   - `color`: for UI display (sidebar dot, progress bars).
   - `budget_cents`: optional project-level budget (see [orchestrate-costs](../orchestrate-costs/spec.md)).
   - `repositories`: list of repository sources (see below).
+  - `executor_config`: optional project-level executor configuration (see below).
   - `created_at`, `updated_at`.
 
 ### Project repositories
@@ -39,6 +40,19 @@ Projects group tasks into manageable units with their own repositories, budget, 
 - Single-repo tasks: the agent gets a worktree for that repo (existing `TaskSessionWorktree` model).
 - Multi-repo tasks: the agent gets worktrees for each targeted repo in the same session (existing multi-worktree support via `TaskSessionWorktree[]`).
 - Repository sources are configured at the project level and inherited by tasks. Tasks can target a subset of the project's repos.
+
+### Project executor configuration
+
+- Each project has an optional `executor_config` JSON field defining how agent sessions run for tasks in this project.
+- Fields:
+  - `type`: executor type -- `local_pc` (standalone), `local_docker`, `sprites`, `remote_docker`.
+  - `image`: Docker image (for `local_docker`, `remote_docker`).
+  - `resource_limits`: `{ memory_mb, cpu_cores }` (for container executors).
+  - `worktree_strategy`: `per_task` (default, each task gets its own branch/worktree) or `shared` (tasks share the project's working directory).
+  - `network_policy`: `allow_all` (default), `allow_outbound`, `restricted`.
+  - `environment_id`: reference to an existing kandev environment (Docker image, Dockerfile, etc.).
+  - `prepare_scripts`: commands to run before the agent starts (e.g. `npm install`, `make build`).
+- If not set, the workspace default executor is used.
 
 ### Task-project relationship
 

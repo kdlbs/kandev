@@ -43,11 +43,11 @@ Orchestrate needs a portable configuration format that lives in a `.kandev/` dir
     └── q2-security.yml
 ```
 
-- **`kandev.yml`**: workspace-level settings (approval defaults, budget defaults, default agent profile).
-- **`agents/*.yml`**: one file per agent instance. Contains name, role, hierarchy (`reports_to` by name), permissions, budget, `desired_skills` (by slug), agent profile reference (by agent_name + model + mode signature).
+- **`kandev.yml`**: workspace-level settings (approval defaults, budget defaults, default agent profile, default executor config).
+- **`agents/*.yml`**: one file per agent instance. Contains name, role, hierarchy (`reports_to` by name), permissions, budget, `desired_skills` (by slug), agent profile reference (by agent_name + model + mode signature), optional `executor_preference` (type, image, resource_limits).
 - **`skills/*/`**: one directory per skill. The directory IS the skill content -- `SKILL.md` plus optional scripts and reference files. Same format the skill registry uses.
 - **`routines/*.yml`**: one file per routine. Contains name, description, task template, trigger config, concurrency policy, assignee (by agent name).
-- **`projects/*.yml`**: one file per project. Contains name, description, status, repositories, lead agent (by name).
+- **`projects/*.yml`**: one file per project. Contains name, description, status, repositories, executor config (type, image, resource_limits, worktree_strategy, network_policy), lead agent (by name).
 
 ### What is NOT portable
 
