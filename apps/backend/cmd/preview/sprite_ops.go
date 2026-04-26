@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/ports"
 	sprites "github.com/superfly/sprites-go"
 )
 
@@ -17,8 +18,6 @@ const (
 	spriteStepTimeout   = 2 * time.Minute
 	spriteUploadRetries = 3
 	spriteBackoffInit   = 700 * time.Millisecond
-	kandevBackendPort   = 38429
-	kandevWebPort       = 37429
 )
 
 func newSpriteClient(token string) *sprites.Client {
@@ -118,7 +117,7 @@ export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
 exec /app/apps/backend/bin/kandev
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, kandevWebPort, kandevBackendPort, kandevWebPort)
+chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web)
 }
 
 // deployService registers (or re-registers) kandev as a Sprites managed service.

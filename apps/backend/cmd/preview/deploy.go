@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-)
 
-const defaultPort = 38429
+	"github.com/kandev/kandev/internal/common/ports"
+)
 
 func runDeploy(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	pr := fs.Int("pr", 0, "PR number (required)")
 	sha := fs.String("sha", "", "commit SHA to display in the comment")
 	repo := fs.String("repo", envOr("GITHUB_REPOSITORY", ""), "owner/repo")
-	port := fs.Int("port", defaultPort, "kandev backend port exposed by the sprite")
+	port := fs.Int("port", ports.Backend, "kandev backend port exposed by the sprite")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
