@@ -50,6 +50,7 @@ import (
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
+	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	orchestrateservice "github.com/kandev/kandev/internal/orchestrate/service"
 	"github.com/kandev/kandev/internal/orchestrator"
 
@@ -424,9 +425,45 @@ func startGatewayAndServe(
 	log.Info("Orchestrator initialized")
 
 	// ============================================
-	// ORCHESTRATE WAKEUP SCHEDULER
+	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
 	// ============================================
 	if services.Orchestrate != nil {
+		// Initialize filesystem config loader
+		configBasePath := cfg.ResolvedHomeDir()
+		cfgLoader := configloader.NewConfigLoader(configBasePath)
+		if err := cfgLoader.EnsureDefaultWorkspace(); err != nil {
+			log.Error("Failed to ensure default workspace directory", zap.Error(err))
+		}
+		if err := cfgLoader.Load(); err != nil {
+			log.Error("Failed to load orchestrate config from filesystem", zap.Error(err))
+		} else {
+			log.Info("Orchestrate config loaded from filesystem",
+				zap.String("base_path", configBasePath),
+				zap.Int("workspaces", len(cfgLoader.GetWorkspaces())))
+		}
+
+		// Write bundled system skills
+		if err := configloader.EnsureBundledSkills(configBasePath); err != nil {
+			log.Error("Failed to write bundled skills", zap.Error(err))
+		} else {
+			slugs, _ := configloader.BundledSkillSlugs()
+			log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
+		}
+
+		// Start fsnotify watcher
+		cfgWatcher, err := configloader.NewWatcher(cfgLoader)
+		if err != nil {
+			log.Error("Failed to create config watcher", zap.Error(err))
+		} else {
+			go func() {
+				if watchErr := cfgWatcher.Start(ctx); watchErr != nil {
+					log.Error("Config watcher error", zap.Error(watchErr))
+				}
+			}()
+			log.Info("Orchestrate config watcher started")
+		}
+
+		// Register event subscribers and start scheduler
 		if err := services.Orchestrate.RegisterEventSubscribers(eventBus); err != nil {
 			log.Error("Failed to register orchestrate event subscribers", zap.Error(err))
 			return false
