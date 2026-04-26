@@ -84,7 +84,15 @@ type WorkspaceTracker struct {
 
 // NewWorkspaceTracker creates a new workspace tracker
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
-	resolvedWorkDir := resolveExistingWorkDir(workDir, log.WithFields(zap.String("component", "workspace-tracker")))
+	tlog := log.WithFields(zap.String("component", "workspace-tracker"))
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	// Multi-repo task roots are plain directories that hold one git worktree
+	// per repository as siblings. The git poller can't monitor a non-git path,
+	// so when the configured workDir isn't a git repo, fall back to the first
+	// child subdirectory that is. The user sees that repo's changes in the
+	// uncommitted-changes panel; the per-repo aggregation across all sibling
+	// worktrees is a follow-up.
+	resolvedWorkDir = preferGitRepoChildIfRootIsBare(resolvedWorkDir, tlog)
 
 	// Cache validated git index path (works with worktrees where .git is a file)
 	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
@@ -115,6 +123,38 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		cancelCtx:          ctx,
 		cancelFunc:         cancel,
 	}
+}
+
+// preferGitRepoChildIfRootIsBare returns workDir unchanged when it's already a
+// git repo, otherwise returns the path of the first immediate child directory
+// that is a git repo (or worktree). Used to make the workspace tracker work
+// for multi-repo task roots, which are plain holder directories with each
+// repo's worktree as a child.
+//
+// Returns workDir unchanged when no git child is found — the tracker will
+// then run with no git data, matching the pre-multi-repo behavior for
+// repo-less tasks (e.g. quick chat).
+func preferGitRepoChildIfRootIsBare(workDir string, log *logger.Logger) string {
+	if workDir == "" || resolveGitIndexPath(workDir) != "" {
+		return workDir
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return workDir
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		candidate := filepath.Join(workDir, entry.Name())
+		if resolveGitIndexPath(candidate) != "" {
+			log.Info("workspace tracker falling back to repo subdirectory (multi-repo task root is not itself a git repo)",
+				zap.String("task_root", workDir),
+				zap.String("repo_subdir", candidate))
+			return candidate
+		}
+	}
+	return workDir
 }
 
 // resolveGitIndexPath returns the validated path to the git index file.
