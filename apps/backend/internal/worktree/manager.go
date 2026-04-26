@@ -1061,59 +1061,6 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 	return m.CleanupWorktrees(ctx, worktrees)
 }
 
-// Reconcile syncs worktree state with active tasks on startup.
-func (m *Manager) Reconcile(ctx context.Context) error {
-	m.reconcileTasksDir(ctx)
-	return nil
-}
-
-// reconcileTasksDir scans ~/.kandev/tasks/ for orphaned task directories
-// whose worktrees are no longer referenced by the store.
-func (m *Manager) reconcileTasksDir(ctx context.Context) {
-	tasksBase, err := m.config.ExpandedTasksBasePath()
-	if err != nil || tasksBase == "" {
-		return
-	}
-
-	entries, err := os.ReadDir(tasksBase)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			m.logger.Debug("failed to read tasks directory for reconciliation",
-				zap.String("path", tasksBase), zap.Error(err))
-		}
-		return
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		taskDirPath := filepath.Join(tasksBase, entry.Name())
-		if m.isOrphanedTaskDir(ctx, taskDirPath) {
-			m.logger.Info("cleaning up orphaned task directory",
-				zap.String("path", taskDirPath))
-			if err := os.RemoveAll(taskDirPath); err != nil {
-				m.logger.Warn("failed to remove orphaned task directory",
-					zap.String("path", taskDirPath), zap.Error(err))
-			}
-		}
-	}
-}
-
-// isOrphanedTaskDir checks if a task directory contains no valid worktrees.
-func (m *Manager) isOrphanedTaskDir(ctx context.Context, taskDirPath string) bool {
-	subEntries, err := os.ReadDir(taskDirPath)
-	if err != nil {
-		return true // Can't read it, treat as orphaned
-	}
-	for _, sub := range subEntries {
-		if sub.IsDir() && m.IsValid(filepath.Join(taskDirPath, sub.Name())) {
-			return false // At least one valid worktree
-		}
-	}
-	return true
-}
-
 // isGitRepo checks if a path is a Git repository.
 func (m *Manager) isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
