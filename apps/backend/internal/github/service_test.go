@@ -68,9 +68,12 @@ func TestListRepoBranches_Pagination(t *testing.T) {
 	if len(branches) != 2 {
 		t.Fatalf("expected 2 branches across pages, got %d", len(branches))
 	}
-	names := map[string]bool{branches[0].Name: true, branches[1].Name: true}
-	if !names["main"] || !names["feature-a"] {
-		t.Errorf("unexpected branches: %+v", branches)
+	// main should appear first regardless of which page it was fetched from.
+	if branches[0].Name != "main" {
+		t.Errorf("expected main first, got %q; branches: %+v", branches[0].Name, branches)
+	}
+	if branches[1].Name != "feature-a" {
+		t.Errorf("expected feature-a second, got %q", branches[1].Name)
 	}
 }
 
@@ -127,6 +130,46 @@ func TestListRepoBranches_NoopClientFallback_NotFound(t *testing.T) {
 	}
 	if apiErr.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 status, got %d", apiErr.StatusCode)
+	}
+}
+
+func TestSortBranchesMainFirst(t *testing.T) {
+	tests := []struct {
+		input []string
+		want  []string
+	}{
+		{
+			input: []string{"feature-b", "main", "feature-a", "master"},
+			want:  []string{"main", "master", "feature-a", "feature-b"},
+		},
+		{
+			input: []string{"develop", "master"},
+			want:  []string{"master", "develop"},
+		},
+		{
+			input: []string{"feature-a", "feature-b"},
+			want:  []string{"feature-a", "feature-b"},
+		},
+		{
+			input: []string{"main"},
+			want:  []string{"main"},
+		},
+		{
+			input: []string{},
+			want:  []string{},
+		},
+	}
+	for _, tc := range tests {
+		branches := make([]RepoBranch, len(tc.input))
+		for i, n := range tc.input {
+			branches[i] = RepoBranch{Name: n}
+		}
+		sortBranchesMainFirst(branches)
+		for i, b := range branches {
+			if b.Name != tc.want[i] {
+				t.Errorf("input=%v: got[%d]=%q, want %q", tc.input, i, b.Name, tc.want[i])
+			}
+		}
 	}
 }
 

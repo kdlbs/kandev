@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1159,14 +1160,50 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 // ListRepoBranches lists branches for a repository.
 // When no authenticated client is configured, it falls back to the unauthenticated
 // GitHub API so that public repositories remain accessible without a token.
+// The result is sorted so that "main" appears first, "master" second, then all
+// remaining branches alphabetically — matching the default branch convention and
+// making the most common choices immediately visible in pickers.
 func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	var (
+		branches []RepoBranch
+		err      error
+	)
 	if s.client != nil {
-		branches, err := s.client.ListRepoBranches(ctx, owner, repo)
-		if err == nil || !errors.Is(err, ErrNoClient) {
-			return branches, err
+		branches, err = s.client.ListRepoBranches(ctx, owner, repo)
+		if err != nil && !errors.Is(err, ErrNoClient) {
+			return nil, err
 		}
 	}
-	return listRepoBranchesAnonymous(ctx, owner, repo)
+	if branches == nil {
+		branches, err = listRepoBranchesAnonymous(ctx, owner, repo)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sortBranchesMainFirst(branches)
+	return branches, nil
+}
+
+// sortBranchesMainFirst sorts branches in-place: "main" first, "master" second,
+// then all remaining branches alphabetically.
+func sortBranchesMainFirst(branches []RepoBranch) {
+	priority := func(name string) int {
+		switch name {
+		case "main":
+			return 0
+		case "master":
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(branches, func(i, j int) bool {
+		pi, pj := priority(branches[i].Name), priority(branches[j].Name)
+		if pi != pj {
+			return pi < pj
+		}
+		return branches[i].Name < branches[j].Name
+	})
 }
 
 // anonymousAPIBase is the GitHub API base URL used by listRepoBranchesAnonymous.
