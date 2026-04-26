@@ -4,30 +4,41 @@ created: 2026-04-25
 owner: cfl
 ---
 
-# Orchestrate: Projects & Goals
+# Orchestrate: Projects
 
 ## Why
 
-Kandev tasks live on a flat kanban board organized by workflow steps. There is no way to group tasks into a larger initiative ("Project Alpha: migrate to new API"), track progress across related tasks, or align work to high-level objectives. When agents create dozens of subtasks autonomously, the user loses the forest for the trees. Without projects and goals, there is no rollup view of what the team of agents is working toward.
+Kandev tasks live on a flat kanban board organized by workflow steps. There is no way to group tasks into a larger initiative ("API v2 Migration"), track progress across related tasks, or scope work to specific repositories. When agents create dozens of subtasks autonomously, the user loses the forest for the trees. Without projects, there is no rollup view of what the team of agents is working toward, and no way to define which codebases a set of tasks operates on.
 
-Projects group tasks into manageable units with their own budget and progress tracking. Goals provide the high-level "why" that projects serve.
+Projects group tasks into manageable units with their own repositories, budget, and progress tracking.
 
 ## What
 
 ### Projects
 
-- A project is a container for related tasks.
+- A project is a container for related tasks, scoped to one or more repositories or filesystem folders.
 - Project fields:
   - `id`: unique identifier.
   - `workspace_id`: scoped to workspace.
   - `name`: human-readable label (e.g. "API v2 Migration", "Q2 Security Hardening").
   - `description`: detailed description of the project scope and objectives.
   - `status`: `active`, `completed`, `on_hold`, `archived`.
-  - `goal_id`: optional link to a goal this project serves.
   - `lead_agent_instance_id`: optional agent instance responsible for this project (typically the CEO or a team lead).
   - `color`: for UI display (sidebar dot, progress bars).
   - `budget_cents`: optional project-level budget (see [orchestrate-costs](../orchestrate-costs/spec.md)).
+  - `repositories`: list of repository sources (see below).
   - `created_at`, `updated_at`.
+
+### Project repositories
+
+- A project has one or more repository sources that define the codebases agents work on.
+- Each repository source is:
+  - A **git repository URL** (GitHub, GitLab, Bitbucket, or any git remote): `github.com/team/backend`, `gitlab.com/team/frontend`.
+  - A **local filesystem path**: `/home/user/docs`, `/opt/services/config`.
+- When a task is created in a project, the user or agent selects which repository/repositories the task targets.
+- Single-repo tasks: the agent gets a worktree for that repo (existing `TaskSessionWorktree` model).
+- Multi-repo tasks: the agent gets worktrees for each targeted repo in the same session (existing multi-worktree support via `TaskSessionWorktree[]`).
+- Repository sources are configured at the project level and inherited by tasks. Tasks can target a subset of the project's repos.
 
 ### Task-project relationship
 
@@ -41,66 +52,74 @@ Projects group tasks into manageable units with their own budget and progress tr
 
 - `/orchestrate/projects` shows a list of projects with:
   - Name, status, color indicator.
+  - Repository count and names.
   - Task counts: total, in progress, completed, blocked.
   - Budget utilization (if budget set).
   - Lead agent name and status.
   - Progress bar (completed / total tasks).
 - `/orchestrate/projects/[id]` shows a single project detail:
-  - Description and status.
-  - Task list filtered to this project, grouped by status.
+  - Description, status, and repositories list.
+  - Task list filtered to this project (same list/board UI as `/orchestrate/issues`).
   - Budget breakdown (total spend, remaining, by agent).
   - Agent instances working on this project's tasks.
-  - Clickable tasks navigate to `/t/[taskId]`.
+  - Clickable tasks navigate to `/orchestrate/issues/[taskId]`.
 - The sidebar "Projects" section shows an expandable list of active projects with color dots and task counts. A "+" button creates a new project.
-
-### Goals
-
-- A goal is a high-level objective that one or more projects serve.
-- Goal fields:
-  - `id`: unique identifier.
-  - `workspace_id`: scoped to workspace.
-  - `title`: the objective (e.g. "Reduce API latency by 50%", "Ship v2.0 by end of Q2").
-  - `description`: context and success criteria.
-  - `status`: `active`, `completed`, `archived`.
-  - `parent_id`: optional self-reference for goal hierarchy (company goal -> team goal -> sprint goal).
-  - `owner_agent_instance_id`: optional agent instance responsible for this goal.
-  - `created_at`, `updated_at`.
-
-### Goal-project relationship
-
-- A project has an optional `goal_id` linking it to a goal.
-- Multiple projects can serve the same goal.
-- Goal progress is derived from its linked projects' completion status.
-
-### Goal views
-
-- `/orchestrate/goals` shows:
-  - Goal hierarchy as an indented list or tree view.
-  - Each goal shows: title, status, linked project count, overall progress (derived from projects).
-  - Click a goal to expand and see its linked projects.
-- The sidebar "Goals" link navigates to this page.
 
 ### CEO integration
 
-- The CEO's system prompt includes the current project and goal structure so it can:
+- The CEO's system prompt includes the current project structure so it can:
   - Assign new tasks to the appropriate project.
   - Create new projects when work doesn't fit existing ones.
-  - Report progress toward goals in its heartbeat summaries.
-- The CEO does not create goals -- goals are set by the user as strategic direction.
+  - Select the right repository for each task based on the project's repo list.
 
 ## Scenarios
 
-- **GIVEN** a user on `/orchestrate/projects`, **WHEN** they click "+" and enter "API v2 Migration" with a description and $50 budget, **THEN** the project appears in the list with status `active`, zero tasks, and a budget gauge.
+- **GIVEN** a user on `/orchestrate/projects`, **WHEN** they click "+" and enter "API v2 Migration" with two repositories (github.com/team/backend, github.com/team/frontend) and a $50 budget, **THEN** the project appears in the list with status `active`, two repos listed, zero tasks, and a budget gauge.
 
-- **GIVEN** a project "API v2 Migration" with 10 tasks (7 done, 2 in progress, 1 todo), **WHEN** the user views the project detail, **THEN** they see a 70% progress bar, task counts by status, and the task list grouped by status.
+- **GIVEN** a project with repos [backend, frontend], **WHEN** a user creates a task "Update auth endpoints" and selects the backend repo, **THEN** the task's agent session gets a worktree for the backend repo only.
 
-- **GIVEN** a CEO agent creating subtasks for a user request, **WHEN** the CEO determines the work fits the "API v2 Migration" project, **THEN** the created tasks have `project_id` set to that project. The project's task count increments.
+- **GIVEN** a project with repos [backend, frontend], **WHEN** a user creates a task "Refactor shared types" and selects both repos, **THEN** the task's agent session gets worktrees for both repos in the same session.
 
-- **GIVEN** a goal "Ship v2.0" with two linked projects (one 100% complete, one 50% complete), **WHEN** the user views the goals page, **THEN** the goal shows 75% overall progress derived from its projects.
+- **GIVEN** a project with 10 tasks (7 done, 2 in progress, 1 todo), **WHEN** the user views the project detail, **THEN** they see a 70% progress bar, task counts by status, and the task list grouped by status.
+
+- **GIVEN** a CEO agent creating subtasks for a user request, **WHEN** the CEO determines the work fits the "API v2 Migration" project and involves the backend repo, **THEN** the created task has `project_id` set and targets the backend repo.
 
 - **GIVEN** a task assigned to a project with a budget, **WHEN** the task's agent sessions incur costs, **THEN** the costs roll up to both the agent instance budget and the project budget.
 
 - **GIVEN** a user on the sidebar, **WHEN** they look at the "Projects" section, **THEN** they see active projects listed with color dots and task counts, and can click any project to navigate to its detail page.
+
+### Cross-project feature: delegation and analysis-before-execution
+
+This scenario demonstrates how a feature spanning multiple projects flows through the agent hierarchy. No special schema is needed -- it uses existing primitives (agent hierarchy, subtasks, blockers, `requires_approval`).
+
+- **GIVEN** projects "Frontend" (repos: web-app, mobile-app) and "Backend" (repos: auth-service, api-gateway, user-service), **WHEN** the user asks "Add OAuth2 login across all services", **THEN**:
+
+  1. **CEO** receives the task. The CEO does not analyze code -- it delegates technical work. It assigns the task to the **CTO** agent.
+
+  2. **CTO** creates an analysis subtask: "Analyze OAuth2 impact across projects" with `requires_approval=true`, assigned to an **Analyst** agent. The analyst reads the relevant repos, determines which services need changes, identifies API contract implications, and posts findings as a comment. The task moves to `in_review` for user approval.
+
+  3. **User approves** the analysis. The blocker resolves. The CTO reads the analysis output and creates execution subtasks scoped to specific projects and repos:
+     - "Add OAuth2 provider to auth-service" -> Backend project, auth-service repo -> backend worker
+     - "Add OAuth2 middleware to api-gateway" (blocked_by: auth-service task) -> Backend project, api-gateway repo -> backend worker
+     - "Add OAuth2 flow to web-app" (blocked_by: api-gateway task) -> Frontend project, web-app repo -> frontend worker
+     - "Add OAuth2 flow to mobile-app" (blocked_by: api-gateway task) -> Frontend project, mobile-app repo -> mobile worker
+     - "Integration QA" (blocked_by: all build tasks) -> QA agent, multi-repo session across both projects
+     - "Ship" (blocked_by: QA) -> SRE agent
+
+  4. **Build subtasks** execute sequentially via blockers. Each worker agent operates in its specific repo's worktree.
+
+  5. **QA agent** is woken when all builds complete. It targets multiple repos (multi-worktree session), reads the spec and build PR descriptions, runs cross-service validation (integration tests, API contract checks), and approves or rejects.
+
+  6. **CTO** is woken via `task_children_completed` when all subtasks reach terminal state. It reports completion to the CEO.
+
+Key roles in this pattern:
+- **CEO**: company-level decisions, hiring, budget. Delegates technical work downward.
+- **CTO / project manager**: technical decomposition, task creation, cross-project orchestration.
+- **Analyst**: reads codebases, determines impact, proposes a plan before execution starts.
+- **Workers**: execute specific tasks in specific repos.
+- **QA**: validates changes across repos in an integration environment.
+
+All roles are agent instances with different skills and instructions -- no special schema required.
 
 ## Out of scope
 
@@ -108,5 +127,4 @@ Projects group tasks into manageable units with their own budget and progress tr
 - Project-level permissions (all users in the workspace can see and edit all projects).
 - Gantt charts or timeline views for project scheduling.
 - Cross-workspace project visibility.
-- Milestones within a project (use goals or subtask grouping instead).
-- Goal OKR-style key results with quantitative targets.
+- Automatic repository discovery (users manually add repos to projects).

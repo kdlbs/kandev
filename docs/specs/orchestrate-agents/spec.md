@@ -43,7 +43,7 @@ Orchestrate introduces agent instances -- long-lived entities that reference an 
 - The CEO's system prompt includes:
   - Its delegation rules (which roles handle which types of work).
   - The current org tree (all agent instances and their status).
-  - The workspace's project/goal structure.
+  - The workspace's project structure.
   - The current task backlog (unassigned and in-progress tasks).
 - The CEO creates worker agents when no suitable worker exists for a task type (via the hire flow -- see permissions below).
 - The CEO is configured with a high-capability reasoning model (user-configurable via profile selection).

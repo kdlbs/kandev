@@ -47,7 +47,7 @@ Orchestrate needs a portable configuration format that lives in a `.kandev/` dir
 - **`agents/*.yml`**: one file per agent instance. Contains name, role, hierarchy (`reports_to` by name), permissions, budget, `desired_skills` (by slug), agent profile reference (by agent_name + model + mode signature).
 - **`skills/*/`**: one directory per skill. The directory IS the skill content -- `SKILL.md` plus optional scripts and reference files. Same format the skill registry uses.
 - **`routines/*.yml`**: one file per routine. Contains name, description, task template, trigger config, concurrency policy, assignee (by agent name).
-- **`projects/*.yml`**: one file per project. Contains name, description, status, goal, lead agent (by name).
+- **`projects/*.yml`**: one file per project. Contains name, description, status, repositories, lead agent (by name).
 
 ### What is NOT portable
 
@@ -154,8 +154,21 @@ Config sync uses the same orchestrate primitives as everything else -- tasks, ag
 
 - **GIVEN** a config-sync agent assigned to export changes, **WHEN** the agent fails to push (e.g. auth error), **THEN** the task fails, an error inbox item is created, and the activity log records the failure.
 
+### Future: template marketplace
+
+Config bundles are the foundation for a template marketplace. A template is a curated `.kandev/` bundle containing agents, skills, routines, and workspace settings for a specific workflow. Examples:
+
+- **Developer Team**: CEO, CTO, Architect, Frontend/Backend Workers, QA, SRE. Skills: code-review, test-writer, deploy-runbook.
+- **Solo Developer**: CTO, 2 Workers, QA. Lightweight setup without CEO overhead.
+- **Business Analyst**: CEO, Project Manager, Data Analyst, Report Writer. Skills: spreadsheet-ops, data-viz.
+- **Marketing Team**: CEO, Marketing Lead, Content Writer, Social agents. Skills: content-calendar, social-posting.
+- **DevOps / SRE**: CTO, Infra Worker, Monitoring Agent, Incident Responder. Skills: deploy-runbook, monitoring-check.
+
+"Install a template" = import a config bundle via the existing import flow. The marketplace is a registry/discovery layer on top of the export/import mechanism -- no new primitives required. Not in scope for the initial implementation.
+
 ## Out of scope
 
+- Template marketplace (future layer on top of export/import).
 - Real-time file watching for local `.kandev/` directories (sync is task-based, not filesystem-event-based).
 - Conflict resolution UI (repo is source of truth in repo-backed mode; UI changes create PRs, not direct writes).
 - Secret management in config files (channel tokens, API keys stay in DB, never exported).

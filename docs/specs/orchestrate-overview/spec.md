@@ -21,7 +21,7 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 - The sidebar replicates a dedicated navigation structure:
   - **Workspace switcher**: at the top of the sidebar, showing the current workspace name. Dropdown to switch between workspaces (company/workspace selector dropdown).
   - **Top actions**: New Issue, Dashboard, Inbox
-  - **Work**: Issues, Routines, Goals
+  - **Work**: Issues, Routines
   - **Projects**: expandable project list with `+` to create
   - **Agents**: expandable agent list with `+` to create. Each entry shows a status dot and channel indicators (Telegram, Slack icons) if the agent has configured channels.
   - **Company**: Org, Skills, Costs, Activity, Settings
@@ -36,7 +36,6 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 | `/orchestrate/issues/[id]` | Task detail - simple mode (default): breadcrumb, description, properties panel, chat/activity tabs, sub-issues. Toggle to advanced mode. |
 | `/orchestrate/issues/[id]?mode=advanced` | Task detail - advanced mode: kandev dockview layout within orchestrate chrome (chat, terminal, plan, files, changes). Auto-launches ACP session (idle until user sends message). |
 | `/orchestrate/routines` | Routine definitions, run history, enable/disable toggles |
-| `/orchestrate/goals` | Goal hierarchy with linked projects |
 | `/orchestrate/projects` | Project list with task counts, budget usage, status |
 | `/orchestrate/projects/[id]` | Single project detail with task list, agents, budget |
 | `/orchestrate/agents` | Agent instance cards: name, role, status, skills, budget, current task |
@@ -119,7 +118,7 @@ For users who want to micro-manage a task with full kandev tooling:
 
 ### Frontend architecture
 
-- A new Zustand slice `orchestrate` in `lib/state/slices/orchestrate/` holds agent instances, projects, goals, routines, approvals, activity log, cost summaries, and wakeup queue status.
+- A new Zustand slice `orchestrate` in `lib/state/slices/orchestrate/` holds agent instances, projects, routines, approvals, activity log, cost summaries, and wakeup queue status.
 - The slice follows the existing pattern: SSR fetch -> hydrate store -> components read store -> hooks subscribe via WS.
 - WS subscriptions use the existing gateway with new event types for orchestrate-specific events.
 
@@ -154,6 +153,6 @@ For users who want to micro-manage a task with full kandev tooling:
 - [orchestrate-costs](../orchestrate-costs/spec.md) -- cost tracking and budget management
 - [orchestrate-routines](../orchestrate-routines/spec.md) -- recurring scheduled tasks
 - [orchestrate-inbox](../orchestrate-inbox/spec.md) -- inbox, approvals, activity log
-- [orchestrate-projects](../orchestrate-projects/spec.md) -- projects and goals
+- [orchestrate-projects](../orchestrate-projects/spec.md) -- projects
 - [orchestrate-assistant](../orchestrate-assistant/spec.md) -- personal assistant, channels, agent memory
 - [orchestrate-config](../orchestrate-config/spec.md) -- configuration portability and repository sync
