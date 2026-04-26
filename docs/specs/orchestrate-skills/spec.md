@@ -48,20 +48,53 @@ Orchestrate introduces a skill registry where users create, edit, and manage ski
 - The CEO agent can recommend skills for new hires in its hire requests.
 - Skills are additive -- an agent's effective skill set is the union of its assigned skills.
 
-### Skill injection at session start
+### Skill injection via symlinks
 
-- All skills live on disk at `~/.kandev/workspaces/<name>/skills/<slug>/` (see [orchestrate-config](../orchestrate-config/spec.md)).
-- When the orchestrator creates a session, it resolves the instance's `desired_skills` to their on-disk paths and creates symlinks into the agent's home directory:
-  - Claude: `~/.claude/skills/<slug>/` -> `~/.kandev/workspaces/<name>/skills/<slug>/`
-  - Other agents: adapter-specific skill directories as supported.
-- No materialization or DB-to-disk copy needed -- the skill files are already on disk.
-- The agent CLI discovers the skills through its native mechanism.
-- Symlinks are cleaned up when the session ends.
+Skills live on disk and are symlinked into each agent CLI's native skill discovery directory. No materialization needed -- the agent reads the skill directly via the symlink.
+
+**Skill source directories:**
+- Workspace skills: `~/.kandev/workspaces/<name>/skills/<slug>/`
+- Bundled system skills: `~/.kandev/skills/<slug>/`
+- In dev mode: `.kandev-dev/` instead of `~/.kandev/`
+
+**Agent skill discovery directories** (all get symlinks):
+
+| Path | Agent CLIs |
+|------|-----------|
+| `~/.agents/skills/` | Codex, Copilot, Cursor, Augment, OpenCode, Amp |
+| `~/.claude/skills/` | Claude Code, Copilot, Augment, OpenCode |
+| `~/.codex/skills/` | Codex |
+| `~/.gemini/skills/` | Gemini CLI |
+| `~/.copilot/skills/` | Copilot CLI |
+| `~/.augment/skills/` | Augment |
+| `~/.cursor/skills/` | Cursor |
+| `~/.config/opencode/skills/` | OpenCode |
+
+When an agent runs, symlinks are created in ALL directories that agent type uses. For example, a Claude agent gets symlinks in both `~/.claude/skills/` and `~/.agents/skills/`.
+
+**Symlink lifecycle:**
+
+- **On kandev startup**: scan all agent skill dirs, create symlinks for all active agents' desired skills, remove dangling symlinks (pointing to nonexistent dirs).
+- **Before each session**: ensure symlinks exist for that agent's desired skills + bundled system skills.
+- **On skill removed from agent**: check if any other agent instance (across all workspaces) still uses that skill. If none do, remove the symlink from all agent dirs.
+- **On kandev shutdown**: remove ALL symlinks that point into our kandev base path (`~/.kandev/` or `.kandev-dev/`). Leave symlinks pointing elsewhere untouched (those belong to the user or other tools).
+
+**Conflict handling:**
+- Before creating a symlink, check if the path already exists:
+  - Symlink pointing to our kandev dir -> ours, update if needed.
+  - Symlink pointing elsewhere -> conflict (user's own skill or another tool). Skip, log warning.
+  - Real directory (not a symlink) -> conflict. Skip, log warning.
+  - Doesn't exist -> create symlink.
+- We only manage symlinks that point into our kandev dirs. Never touch anything else.
+
+**No isolation between concurrent agents:**
+- All agents on the same host share the same skill directories. This is an accepted trade-off.
+- Extra skills visible to an agent don't cause harm -- agents only use skills referenced in their instructions.
+- The union of all active agents' skills is present in the skill dirs at any time.
 
 ### Skill compatibility
 
-- Not all agent CLIs support skill discovery. The registry tracks which agent types are compatible with each skill.
-- For agent types that don't support native skill discovery, the skill's `SKILL.md` content is appended to the agent's system prompt as a fallback.
+- Not all agent CLIs support skill discovery. For agent types that don't have a known skill directory, the skill's `SKILL.md` content is appended to the agent's system prompt as a fallback.
 
 ### UI at `/orchestrate/workspace/skills`
 
