@@ -114,6 +114,11 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 		return "", fmt.Errorf("deploy service: %w", err)
 	}
 
+	fmt.Fprintln(os.Stderr, "waiting for kandev to be healthy...")
+	if err := waitForKandev(ctx, sprite); err != nil {
+		return "", fmt.Errorf("health check: %w", err)
+	}
+
 	return enablePublicURL(ctx, client, spriteName)
 }
 

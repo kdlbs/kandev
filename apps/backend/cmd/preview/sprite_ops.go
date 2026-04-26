@@ -110,10 +110,14 @@ cat > /app/start-kandev.sh << 'STARTSCRIPT'
 set -e
 mkdir -p /data
 
+echo "node: $(node --version 2>&1 || echo NOT FOUND)" >&2
+echo "kandev binary: $(ls -lh /app/apps/backend/bin/kandev 2>&1)" >&2
+
 # Start Next.js web server in background.
 PORT=%d HOSTNAME=0.0.0.0 NODE_ENV=production \
   nohup node /app/apps/web/.next/standalone/web/server.js \
   > /var/log/kandev-web.log 2>&1 &
+echo "web server started (pid $!)" >&2
 
 # Start Go backend (main process — Sprites HTTPPort proxies here).
 export KANDEV_HOME_DIR=/data
@@ -121,9 +125,10 @@ export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
+echo "starting kandev on port %d..." >&2
 exec /app/apps/backend/bin/kandev
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web)
+chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web, ports.Backend)
 }
 
 // deployService registers (or re-registers) kandev as a Sprites managed service.
@@ -187,6 +192,52 @@ func drainStream(stream *sprites.ServiceStream) error {
 			return err
 		}
 	}
+}
+
+// waitForKandev polls the kandev health endpoint inside the sprite until it
+// responds or the deadline is exceeded. On failure it fetches log output for
+// diagnostics and returns a combined error.
+func waitForKandev(ctx context.Context, sprite *sprites.Sprite) error {
+	const (
+		timeout   = 60 * time.Second
+		retryWait = 3 * time.Second
+	)
+	healthURL := fmt.Sprintf("http://localhost:%d/health", ports.Backend)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		out, err := sprite.CommandContext(checkCtx, "curl", "-sf", healthURL).Output()
+		cancel()
+
+		if err == nil && len(out) > 0 {
+			fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryWait):
+		}
+	}
+
+	// Health check timed out — fetch logs to help diagnose.
+	diag := fetchSpriteLogs(ctx, sprite)
+	return fmt.Errorf("kandev did not become healthy within %v\n%s", timeout, diag)
+}
+
+// fetchSpriteLogs reads log files from the sprite for failure diagnostics.
+func fetchSpriteLogs(ctx context.Context, sprite *sprites.Sprite) string {
+	logCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	script := `echo "=== /var/log/kandev-web.log ==="; tail -50 /var/log/kandev-web.log 2>/dev/null || echo "(empty)"; echo "=== journalctl/service (last 50 lines) ==="; journalctl -u kandev --no-pager -n 50 2>/dev/null || true`
+	out, err := sprite.CommandContext(logCtx, "bash", "-c", script).CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("[log fetch error: %v]\n%s", err, string(out))
+	}
+	return string(out)
 }
 
 // destroySprite destroys the named sprite and returns its creation time for
