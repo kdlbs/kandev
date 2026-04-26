@@ -82,6 +82,8 @@ low:      ArrowDown, text-blue-600
 <aside className="w-60 h-full min-h-0 border-r border-border bg-background flex flex-col">
   {/* Top: workspace switcher + search, h-12 */}
   <div className="flex items-center gap-1 px-3 h-12 border-b border-border">
+    {/* Reuse existing components/task/workspace-switcher.tsx -- same setActiveWorkspace + router.push flow */}
+    {/* Orchestrate routes use /orchestrate?workspaceId=xxx to persist active workspace in URL */}
     <WorkspaceSwitcher />
     <Button variant="ghost" size="icon-sm"><Search className="h-4 w-4" /></Button>
   </div>

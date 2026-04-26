@@ -120,22 +120,27 @@ For users who want to micro-manage a task with full kandev tooling:
 
 Orchestrate tasks extend the existing `Task` model with these changes:
 
-**Workflow becomes optional:**
-- `workflow_id` and `workflow_step_id` become nullable. Orchestrate tasks have no workflow -- their lifecycle is driven by the scheduler, blockers, and execution policy.
-- Existing kanban tasks continue to require a workflow (validated at the service layer based on task origin).
-- If a user later wants to put an orchestrate task on a kanban board, they can assign a workflow via the properties panel.
-
-**New status field:**
-- Orchestrate tasks use a `status` field with values: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`.
-- This maps to the existing `State` field: `todo`/`backlog` = `open`, `done`/`cancelled` = `completed`, plus orchestrate-specific states (`in_progress`, `in_review`, `blocked`).
-- The existing `State` field remains for backwards compatibility. The new `status` field provides finer granularity for orchestrate tasks. Non-orchestrate tasks derive their display status from `State` + `WorkflowStepID`.
+**System orchestrate workflow:**
+- Instead of making `workflow_id` nullable (which breaks the kanban board, task detail stepper, move operations, and dozens of queries), orchestrate tasks use a **system-created "Orchestrate" workflow** per workspace.
+- The workflow is auto-created when orchestrate is enabled, with steps matching the orchestrate status lifecycle:
+  - Backlog (position 0)
+  - Todo (position 1, is_start_step)
+  - In Progress (position 2)
+  - In Review (position 3)
+  - Blocked (position 4)
+  - Done (position 5)
+  - Cancelled (position 6)
+- Orchestrate tasks get `workflow_id` = this system workflow and `workflow_step_id` = the step matching their current status.
+- When orchestrate changes a task's status (e.g. agent completes -> in_review), it moves the task to the corresponding workflow step. This means the existing workflow engine, kanban board, task detail stepper, and `/t/[taskId]` page all work unchanged.
+- The Orchestrate workflow appears in the kanban board's workflow selector, so users can view orchestrate tasks on the board if they want.
+- The Orchestrate workflow's step events are configured for orchestrate behavior (no on_enter auto_start_agent -- the scheduler handles that).
 
 **Task identifiers:**
 - Each workspace has a `task_sequence` counter (integer, auto-incrementing).
 - Each workspace has a `task_prefix` (string, default "KAN").
 - On task creation, the task gets a human-readable `identifier` field: `{prefix}-{sequence}` (e.g. "KAN-1", "KAN-42").
 - The identifier is immutable once assigned. The sequence is workspace-scoped.
-- Existing tasks created before orchestrate get identifiers assigned via a backfill migration.
+- Only orchestrate tasks (those with a project or non-manual origin) get identifiers. Existing kanban tasks have a null identifier and continue to display by title/UUID as before. No backfill needed.
 
 **Labels:**
 - Tasks have a `labels` JSON array field (list of label strings, e.g. `["security", "frontend", "urgent"]`).

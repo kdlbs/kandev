@@ -161,5 +161,5 @@ Wave 1 -> Wave 3A -> Wave 4A -> Wave 4B is the critical path. Everything else ca
 
 - **No breaking changes**: all work is additive. Existing kanban board, task detail, workflows, sessions continue to work unchanged.
 - **Feature flag**: Orchestrate UI is behind the `/orchestrate` route. Users who don't navigate there see no changes.
-- **Shared models**: Task model extensions use nullable fields with defaults. Existing tasks are unaffected.
+- **Shared models**: Task model extensions are additive columns with defaults. Orchestrate tasks use a system workflow (workflow_id stays NOT NULL). Existing tasks are unaffected.
 - **Isolated package**: `internal/orchestrate/` is a new package. No modifications to existing service/repository code except additive task model fields and event type constants.

@@ -17,12 +17,11 @@ The issues list, task detail pages (simple + advanced mode), and new issue dialo
 **Note:** DB schema changes (ALTER TABLE, new tables) are done in Wave 1. This wave adds the Go structs, service logic, and query extensions.
 
 **Extend existing task model** (`internal/task/models/models.go`):
-- Add fields to Task struct: `AssigneeAgentInstanceID`, `Origin`, `ProjectID`, `Status` (orchestrate status), `RequiresApproval`, `ExecutionPolicy`, `ExecutionState`, `Labels`, `Identifier`
+- Add fields to Task struct: `AssigneeAgentInstanceID`, `Origin`, `ProjectID`, `RequiresApproval`, `ExecutionPolicy`, `ExecutionState`, `Labels`, `Identifier`
 - `Origin` enum: `manual`, `agent_created`, `routine`
-- `Status` enum: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled` (nullable -- nil for non-orchestrate tasks)
 - `ExecutionPolicy` struct: stages array with type (review/approval), participants, approvals_needed
 - `ExecutionState` struct: current stage index, participant responses, status
-- Make `WorkflowID` and `WorkflowStepID` pointer types (nullable)
+- `WorkflowID` and `WorkflowStepID` remain non-nullable -- orchestrate tasks use the system orchestrate workflow
 
 **Extend task repository** (`internal/task/repository/sqlite/`):
 - Query extensions: filter by `project_id`, `assignee_agent_instance_id`, `origin`, `status`, `labels`
@@ -30,10 +29,10 @@ The issues list, task detail pages (simple + advanced mode), and new issue dialo
 - Blocker queries: `GetBlockers(taskID)`, `GetBlocking(taskID)`, `AddBlocker(taskID, blockerID)`, `RemoveBlocker(taskID, blockerID)`, `CheckCircularDependency(taskID, blockerID)`
 - Comment CRUD: `CreateComment`, `ListComments(taskID)`, `GetComment(id)`
 - Include new fields in all CRUD operations
-- Null-safe workflow_id handling in existing queries
+- Orchestrate status changes implemented as MoveTask to the corresponding orchestrate workflow step (e.g. status=in_review -> move to "In Review" step)
 
 **Extend task service** (`internal/task/service/`):
-- `CreateTask`: allow null `workflow_id` when origin is `agent_created` or `routine` (existing validation stays for kanban tasks)
+- `CreateTask` for orchestrate: set workflow_id to workspace's orchestrate_workflow_id, workflow_step_id to "Todo" step (no null workflow_id)
 - `CreateTask`: auto-assign `identifier` from workspace sequence counter (atomic increment)
 - `UpdateTask` handles assignee changes -> emit events for wakeup queue
 - `GetTaskTree(ctx, workspaceID, filters)` -> returns flat list with parent_id for frontend tree building
@@ -48,15 +47,15 @@ The issues list, task detail pages (simple + advanced mode), and new issue dialo
 - `/t/[taskId]` detail page still works for all tasks
 
 **Tests:**
-- Create task without workflow_id (orchestrate origin) -> succeeds
-- Create task without workflow_id (manual origin, no project) -> fails (backwards compatible)
+- Create orchestrate task -> gets system orchestrate workflow_id + "Todo" step automatically
+- Create kanban task -> still requires explicit workflow_id (backwards compatible)
 - CRUD with new fields
 - Tree query tests (parent/child nesting, 3 levels deep)
 - Blocker: add, remove, circular detection, resolution check
 - Comment: create, list, wakeup trigger
-- Identifier generation: sequential, unique per workspace, backfill
+- Identifier generation: sequential, unique per workspace, only for orchestrate tasks (null for existing kanban tasks)
 - Execution policy validation (stages, participants)
-- Status transitions: todo -> in_progress -> in_review -> done
+- Status transitions via MoveTask: todo -> in_progress -> in_review -> done (moves between orchestrate workflow steps)
 
 ### 3B: Issues List Page (frontend, parallelizable with 3C)
 

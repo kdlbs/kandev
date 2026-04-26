@@ -150,15 +150,20 @@ All tables created in a new `internal/orchestrate/repository/sqlite/base.go` usi
     - `created_at DATETIME`
     - INDEX on (task_id, created_at)
 
+**System orchestrate workflow** (created on startup per workspace):
+- Auto-create a system workflow named "Orchestrate" with `is_system=true` for each workspace
+- Steps: Backlog (0), Todo (1, is_start_step), In Progress (2), In Review (3), Blocked (4), Done (5), Cancelled (6)
+- No step events (no on_enter auto_start_agent -- the orchestrate scheduler handles agent lifecycle)
+- Store the workflow ID on the workspace as `orchestrate_workflow_id` for quick lookup
+- This ensures orchestrate tasks have valid workflow_id/workflow_step_id -- kanban board, `/t/[taskId]`, stepper, move operations all work unchanged
+- Created in `internal/task/repository/sqlite/defaults.go` alongside existing default workspace/executor setup
+
 **Task model extensions** (in existing `internal/task/repository/sqlite/base.go`):
 
-Schema changes:
-- Make `workflow_id` nullable: migrate NOT NULL DEFAULT '' to allow NULL (existing tasks keep their workflow_id, new orchestrate tasks have NULL)
-- Make `workflow_step_id` nullable: same migration
+Schema changes (workflow_id stays NOT NULL -- orchestrate tasks use the system orchestrate workflow):
 - `ALTER TABLE tasks ADD COLUMN assignee_agent_instance_id TEXT`
 - `ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'` (manual/agent_created/routine)
 - `ALTER TABLE tasks ADD COLUMN project_id TEXT`
-- `ALTER TABLE tasks ADD COLUMN status TEXT` (backlog/todo/in_progress/in_review/blocked/done/cancelled -- NULL for non-orchestrate tasks which use State + WorkflowStepID)
 - `ALTER TABLE tasks ADD COLUMN requires_approval INTEGER DEFAULT 0`
 - `ALTER TABLE tasks ADD COLUMN execution_policy TEXT` (JSON)
 - `ALTER TABLE tasks ADD COLUMN execution_state TEXT` (JSON)
@@ -168,15 +173,18 @@ Schema changes:
 Workspace extensions:
 - `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`
 - `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`
+- `ALTER TABLE workspaces ADD COLUMN orchestrate_workflow_id TEXT` (FK to the system orchestrate workflow)
 
 Service layer changes:
-- `CreateTask`: if `origin != 'manual'` or `project_id` is set, allow null `workflow_id`. Existing validation for non-ephemeral tasks remains for kanban-originated tasks.
+- `CreateTask` for orchestrate: set `workflow_id` = workspace's orchestrate workflow, `workflow_step_id` = "Todo" step
 - `CreateTask`: auto-assign identifier from workspace sequence (`task_prefix + '-' + task_sequence++`)
+- Orchestrate status changes = move task between steps in the orchestrate workflow (reuse existing MoveTask)
 - Add circular dependency check on blocker insert
 
-Backfill migration:
-- Assign identifiers to existing tasks (ordered by created_at, sequential)
-- Set workspace task_sequence to max assigned number
+Identifier assignment:
+- Only orchestrate tasks get identifiers (origin != manual, or project_id set)
+- Existing kanban tasks keep identifier=NULL, no backfill needed
+- workspace.task_sequence starts at 0, incremented atomically on each orchestrate task creation
 
 **TaskSession extensions:**
 - `ALTER TABLE task_sessions ADD COLUMN cost_cents INTEGER DEFAULT 0`
@@ -297,7 +305,7 @@ apps/web/app/orchestrate/
 └── components/
     ├── orchestrate-sidebar.tsx    # Full sidebar component
     ├── orchestrate-topbar.tsx     # Top navigation bar
-    └── workspace-switcher.tsx     # Workspace dropdown
+    └── workspace-switcher.tsx     # Workspace dropdown (reuse existing components/task/workspace-switcher.tsx, same setActiveWorkspace + router.push pattern)
 ```
 
 **Orchestrate layout** (`layout.tsx`):
