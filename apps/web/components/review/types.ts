@@ -9,6 +9,14 @@ export type ReviewFile = {
   staged: boolean;
   source: "uncommitted" | "committed" | "pr";
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /**
+   * Repository this file belongs to. Set on multi-repo task changes so the
+   * file tree groups files under per-repo top-level nodes. Optional for
+   * single-repo tasks; the tree falls back to flat path-only grouping.
+   */
+  repository_id?: string;
+  /** Human-readable repo name for tree node labels (e.g. "frontend"). */
+  repository_name?: string;
 };
 
 export function diffSkipReasonLabel(reason?: string): string {
@@ -32,6 +40,14 @@ export type FileTreeNode = {
   isDir: boolean;
   children?: FileTreeNode[];
   file?: ReviewFile;
+  /**
+   * True when this node represents a repository root in a multi-repo file
+   * tree. Repo roots are pinned (never collapsed into their first child) so
+   * the user always sees the repo grouping at the top level.
+   */
+  isRepoRoot?: boolean;
+  /** Repository id this node represents (only set when isRepoRoot is true). */
+  repositoryId?: string;
 };
 
 /**
@@ -61,8 +77,54 @@ export const hashDiff = djb2Hash;
 /**
  * Build a hierarchical file tree from flat file paths.
  * Collapses single-child directories (e.g., `src/components` as one node if `src` has no other children).
+ *
+ * Multi-repo: when files carry repository_name and 2+ distinct repos are
+ * present, the tree gets a top-level repo node per repository so the user
+ * sees per-repo grouping. Repo roots are pinned (never collapsed) and the
+ * file paths inside them stay relative to the repo root.
  */
 export function buildFileTree(files: ReviewFile[]): FileTreeNode[] {
+  const repoNames = new Set<string>();
+  for (const f of files) {
+    if (f.repository_name) repoNames.add(f.repository_name);
+  }
+  const isMultiRepo = repoNames.size > 1;
+
+  if (isMultiRepo) return buildMultiRepoTree(files);
+  return buildFlatTree(files);
+}
+
+function buildMultiRepoTree(files: ReviewFile[]): FileTreeNode[] {
+  // Group by repo first, then build a sub-tree for each.
+  const byRepo = new Map<string, { name: string; id: string; files: ReviewFile[] }>();
+  for (const f of files) {
+    const name = f.repository_name ?? "(unspecified)";
+    const id = f.repository_id ?? name;
+    const key = id;
+    let entry = byRepo.get(key);
+    if (!entry) {
+      entry = { name, id, files: [] };
+      byRepo.set(key, entry);
+    }
+    entry.files.push(f);
+  }
+  const repoRoots: FileTreeNode[] = [];
+  for (const [, entry] of byRepo) {
+    const subtree = buildFlatTree(entry.files);
+    repoRoots.push({
+      name: entry.name,
+      path: `__repo__:${entry.id}`,
+      isDir: true,
+      isRepoRoot: true,
+      repositoryId: entry.id,
+      children: subtree,
+    });
+  }
+  // Stable alphabetical order by repo name.
+  return repoRoots.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {
   const root: FileTreeNode = { name: "", path: "", isDir: true, children: [] };
 
   for (const file of files) {
@@ -92,13 +154,20 @@ export function buildFileTree(files: ReviewFile[]): FileTreeNode[] {
     }
   }
 
-  // Collapse single-child directories
+  // Collapse single-child directories. Repo roots are never collapsed —
+  // they encode user-meaningful grouping that survives even when the repo
+  // has only one changed file.
   function collapse(node: FileTreeNode): FileTreeNode {
     if (!node.isDir || !node.children) return node;
 
     node.children = node.children.map(collapse);
 
-    if (node.children.length === 1 && node.children[0].isDir && node.name !== "") {
+    if (
+      node.children.length === 1 &&
+      node.children[0].isDir &&
+      node.name !== "" &&
+      !node.isRepoRoot
+    ) {
       const child = node.children[0];
       return {
         ...child,

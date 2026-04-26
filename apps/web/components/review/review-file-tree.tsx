@@ -165,11 +165,16 @@ function TreeNode({
   };
 
   if (node.isDir) {
+    // Repo roots get a stronger label so the user sees the multi-repo grouping.
+    const fileCount = node.isRepoRoot ? countLeafFiles(node) : 0;
     return (
-      <div>
+      <div data-testid={node.isRepoRoot ? "repo-root-node" : "dir-node"}>
         <button
           type="button"
-          className="flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer"
+          className={cn(
+            "flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer",
+            node.isRepoRoot && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
+          )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={handleToggle}
         >
@@ -178,7 +183,17 @@ function TreeNode({
           ) : (
             <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="text-[13px] text-muted-foreground truncate">{node.name}</span>
+          <span
+            className={cn(
+              "text-[13px] truncate",
+              node.isRepoRoot ? "font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {node.name}
+          </span>
+          {node.isRepoRoot && fileCount > 0 && (
+            <span className="ml-auto text-[10px] text-muted-foreground/70">{fileCount}</span>
+          )}
         </button>
         {expanded && node.children && (
           <div>
@@ -192,4 +207,13 @@ function TreeNode({
   }
 
   return <FileNode node={node} {...sharedProps} depth={depth} />;
+}
+
+/** Counts leaf (file) nodes anywhere under the given node. Used for the
+ * "N files" badge on multi-repo repo-root headers. */
+function countLeafFiles(node: FileTreeNode): number {
+  if (!node.isDir) return 1;
+  let total = 0;
+  for (const child of node.children ?? []) total += countLeafFiles(child);
+  return total;
 }
