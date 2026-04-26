@@ -11,7 +11,7 @@ import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 import { MetricCard } from "./components/metric-card";
-import { ActivityRow } from "./company/activity/activity-row";
+import { ActivityRow } from "./workspace/activity/activity-row";
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
