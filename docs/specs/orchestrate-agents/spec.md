@@ -110,8 +110,9 @@ The CEO/CTO never explicitly picks an executor -- they assign tasks to projects 
 - Agent list showing cards for each instance: icon, name, role, status indicator, current task (if working), budget gauge, skill badges.
 - "+" button to create a new agent instance (select profile, set name/role/skills/budget).
 - Sidebar "Agents" section shows a compact list of all instances with status dots and channel indicators (Telegram, Slack icons if channels are configured).
+- Each agent card shows pending wakeup count and oldest wait time when the agent has a backlog (e.g. "3 pending, oldest: 12m ago"). This helps users spot bottlenecks -- a slow agent with a growing queue needs attention (increase concurrency, add another worker, or reprioritize).
 - Click an agent card to open the detail page at `/orchestrate/agents/[id]` with tabs:
-  - **Overview**: name, role, status, org position, current task, budget gauge.
+  - **Overview**: name, role, status, org position, current task, budget gauge, pending queue (list of queued wakeups with task title and wait time).
   - **Skills**: assigned skills with enable/disable toggles. Agent-created skills marked with an indicator.
   - **Runs**: session/run history with status, duration, cost, linked task.
   - **Memory**: browsable memory entries grouped by layer (operating, knowledge, session). View, delete, clear all, export, search. See [orchestrate-assistant](../orchestrate-assistant/spec.md).
