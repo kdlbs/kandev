@@ -763,25 +763,6 @@ export class SessionPage {
     return row.getByTestId("plan-revision-row-body");
   }
 
-  /** Per-row compare toggle (icon button); also indicates selection via data-compare-selected. */
-  compareToggle(row: Locator): Locator {
-    return row.getByTestId("plan-revision-compare-toggle");
-  }
-
-  compareChip(revisionId: string): Locator {
-    return this.page.locator(
-      `[data-testid="plan-revision-compare-chip"][data-revision-id="${revisionId}"]`,
-    );
-  }
-
-  compareGoButton(): Locator {
-    return this.page.getByTestId("plan-revision-compare-go");
-  }
-
-  compareClearButton(): Locator {
-    return this.page.getByTestId("plan-revision-compare-clear");
-  }
-
   previewDialog(): Locator {
     return this.page.getByTestId("plan-revision-preview-dialog");
   }
@@ -796,6 +777,10 @@ export class SessionPage {
 
   previewCompareWithCurrentButton(): Locator {
     return this.page.getByTestId("plan-revision-preview-compare-with-current");
+  }
+
+  previewCompareWithPreviousButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-compare-with-previous");
   }
 
   previewCloseButton(): Locator {

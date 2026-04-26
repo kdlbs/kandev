@@ -360,7 +360,7 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await expectRevisionCount(session, 3);
   });
 
-  test("compare diff: toggle two revisions and view line-level adds/removes", async ({
+  test("compare diff: open from preview, view unified + split, restore older", async ({
     testPage,
     apiClient,
     seedData,
@@ -382,29 +382,25 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.openRewind();
     await expectRevisionCount(session, 2);
 
-    // Toggle compare on both rows.
-    await session.compareToggle(session.revisionRow(1)).click();
-    await session.compareToggle(session.revisionRow(2)).click();
-    await expect(session.compareGoButton()).toBeEnabled({ timeout: 5_000 });
-
-    // Open the diff dialog.
-    await session.compareGoButton().click();
+    // Open the older revision in preview, then "Compare with current" — this
+    // is the only entry point now; there is no per-row compare toggle.
+    await session.openRevisionPreview(1);
+    await session.previewCompareWithCurrentButton().click();
     await expect(session.diffDialog()).toBeVisible({ timeout: 5_000 });
-    // Header reflects v1 → v2 ordering regardless of toggle order.
     await expect(session.diffDialog()).toContainText("Compare v1 → v2");
-    // Summary text appears once content has loaded.
+
+    // Summary + unified diff lines.
     await expect(session.diffSummary()).toContainText("added", { timeout: 5_000 });
     await expect(session.diffSummary()).toContainText("removed");
-    // Default unified mode shows at least one add and one remove line.
     await expect(session.diffLines("add").first()).toBeVisible();
     await expect(session.diffLines("remove").first()).toBeVisible();
 
-    // Switch to split mode: assert side-by-side cells render with kinds.
+    // Switch to split mode: side-by-side cells render with kinds.
     await session.diffModeToggle("split").click();
     await expect(session.diffSplitCells("remove").first()).toBeVisible({ timeout: 5_000 });
     await expect(session.diffSplitCells("add").first()).toBeVisible();
 
-    // Switch back to unified.
+    // Back to unified.
     await session.diffModeToggle("unified").click();
     await expect(session.diffLines("add").first()).toBeVisible();
 
