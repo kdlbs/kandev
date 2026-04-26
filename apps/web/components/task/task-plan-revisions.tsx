@@ -148,7 +148,13 @@ function RevisionsPopover({
           <IconHistory className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 p-0" data-testid="plan-revisions-popover">
+      <PopoverContent
+        align="end"
+        // Override the popover's default `gap-4` between flex children — it
+        // was rendering as visible empty space above the top-most row.
+        className="w-96 p-0 gap-0"
+        data-testid="plan-revisions-popover"
+      >
         <div className="flex items-center justify-between px-3 py-2 border-b">
           <span className="text-sm font-medium">Plan history</span>
           {isLoading && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
@@ -415,7 +421,10 @@ function RevisionRow({
 
   return (
     <li
-      className="px-3 py-2.5 flex items-start gap-3 hover:bg-accent/30"
+      // items-center keeps the Restore button vertically centered against the
+      // row body, even when the body grows taller (timestamp + restored-from
+      // marker on revert rows).
+      className="px-3 py-2.5 flex items-center gap-3 hover:bg-accent/30"
       data-testid="plan-revision-row"
       data-revision-id={revision.id}
       data-revision-number={revision.revision_number}
@@ -459,14 +468,15 @@ function RevisionRow({
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 px-2 text-xs cursor-pointer shrink-0"
+          className="h-7 px-2 text-xs cursor-pointer shrink-0 gap-1"
           onClick={(e) => {
             e.stopPropagation();
             onRevertClick(revision);
           }}
           data-testid="plan-revision-revert-button"
         >
-          Revert
+          <IconRestore className="h-3.5 w-3.5" />
+          Restore
         </Button>
       )}
     </li>
