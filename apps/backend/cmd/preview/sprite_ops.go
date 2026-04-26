@@ -140,14 +140,21 @@ STARTSCRIPT
 chmod +x /app/start-kandev.sh`, ports.Web, backendPort, ports.Web)
 }
 
-// deployService registers (or updates) the kandev service and explicitly starts
-// it. The two-step approach (CreateService then StartService) ensures the
-// process runs on both first deploy and re-deploy:
-//   - CreateService is idempotent: creates the service config if absent, or
-//     updates it if it already exists.
-//   - StartService explicitly starts (or restarts) the process regardless of
-//     whether it was previously running or stopped.
+// deployService stops any running kandev service, registers (or updates) its
+// config, then explicitly starts it. Three-step stop → create → start ensures
+// the process is restarted on re-deploy and started on first deploy:
+//   - StopService terminates any running instance (no-op if none exists).
+//   - CreateService is idempotent: creates or updates the service config.
+//   - StartService explicitly starts the process regardless of prior state.
 func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error {
+	// Stop any running instance so StartService always spawns a fresh process.
+	// Errors here are best-effort — the service may not exist yet on first deploy.
+	stopCtx, stopCancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer stopCancel()
+	if stream, err := sprite.StopService(stopCtx, "kandev"); err == nil {
+		drainStream(stream)
+	}
+
 	createCtx, createCancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer createCancel()
 
@@ -175,7 +182,7 @@ func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error 
 	}
 	_ = createStream.Close()
 
-	// Explicitly start the service so it runs immediately.
+	// Explicitly start the fresh service.
 	startCtx, startCancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer startCancel()
 
@@ -186,6 +193,18 @@ func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error 
 	defer func() { _ = startStream.Close() }()
 
 	return waitForServiceStarted(startStream)
+}
+
+// drainStream reads all events from a ServiceStream and closes it.
+// Used for informational streams where we don't need to act on the content.
+func drainStream(stream *sprites.ServiceStream) {
+	defer func() { _ = stream.Close() }()
+	for {
+		_, err := stream.Next()
+		if err != nil {
+			return
+		}
+	}
 }
 
 func waitForServiceStarted(stream *sprites.ServiceStream) error {
