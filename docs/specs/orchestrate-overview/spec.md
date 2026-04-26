@@ -116,6 +116,13 @@ For users who want to micro-manage a task with full kandev tooling:
 - The existing kanban board at `/` continues to work. Users can use kanban without Orchestrate.
 - Existing task sessions, turns, messages, executors, and worktrees are reused. Orchestrate creates sessions through the same orchestrator pipeline.
 
+### Configuration storage
+
+- Orchestrate config (agents, skills, projects, routines, workspace settings) lives on the **filesystem** at `~/.kandev/workspaces/<name>/`, not in the database. See [orchestrate-config](../orchestrate-config/spec.md).
+- The database stores only runtime/transactional state: tasks, sessions, wakeup queue, cost events, activity log, agent memory, approvals.
+- API requests are served from an in-memory cache of the filesystem. UI writes go to disk first, then invalidate the cache.
+- `fsnotify` watches workspace directories for external changes (manual edits, git pull). Parse errors (git conflicts, invalid YAML) surface as config_error in the UI while stale cache is served.
+
 ### Task model extensions
 
 Orchestrate tasks extend the existing `Task` model with these changes:

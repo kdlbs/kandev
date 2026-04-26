@@ -50,14 +50,12 @@ Orchestrate introduces a skill registry where users create, edit, and manage ski
 
 ### Skill injection at session start
 
-- When the orchestrator creates a session for an agent instance, it resolves the instance's `desired_skills` to their on-disk locations.
-- For inline skills: the content is materialized to a temporary directory under the workspace's skill cache.
-- For local_path skills: the source directory is used directly.
-- For git skills: a cached clone is used (refreshed periodically).
-- Symlinks are created from the agent's home directory skill location to the resolved skill directories:
-  - Claude: `~/.claude/skills/<slug>/` (discovered natively by Claude Code).
+- All skills live on disk at `~/.kandev/workspaces/<name>/skills/<slug>/` (see [orchestrate-config](../orchestrate-config/spec.md)).
+- When the orchestrator creates a session, it resolves the instance's `desired_skills` to their on-disk paths and creates symlinks into the agent's home directory:
+  - Claude: `~/.claude/skills/<slug>/` -> `~/.kandev/workspaces/<name>/skills/<slug>/`
   - Other agents: adapter-specific skill directories as supported.
-- The agent CLI discovers the skills through its native mechanism -- no system prompt injection is needed for skill content.
+- No materialization or DB-to-disk copy needed -- the skill files are already on disk.
+- The agent CLI discovers the skills through its native mechanism.
 - Symlinks are cleaned up when the session ends.
 
 ### Skill compatibility
@@ -65,7 +63,7 @@ Orchestrate introduces a skill registry where users create, edit, and manage ski
 - Not all agent CLIs support skill discovery. The registry tracks which agent types are compatible with each skill.
 - For agent types that don't support native skill discovery, the skill's `SKILL.md` content is appended to the agent's system prompt as a fallback.
 
-### UI at `/orchestrate/company/skills`
+### UI at `/orchestrate/workspace/skills`
 
 - Skill list showing name, description, source type, and which agents use each skill.
 - Inline editor for creating/editing skill content (SKILL.md with markdown preview).
