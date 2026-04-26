@@ -429,13 +429,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.Attachments = opts.Attachments
 	}
 
-	// Check for an existing task environment to reuse its worktree
-	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
-		req.WorktreeID = existingEnv.WorktreeID
-		e.logger.Info("reusing existing task environment worktree",
-			zap.String("task_id", task.ID),
-			zap.String("worktree_id", existingEnv.WorktreeID))
-	}
+	// Check for an existing task environment to reuse worktree, container, or sandbox
+	e.applyExistingEnvironment(req, existingEnv)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -938,9 +933,11 @@ func (e *Executor) persistTaskEnvironment(
 		// is being dropped (executors_running is the single source of truth).
 		// Status, worktree, and container fields are still env-row-owned.
 		existingEnv.Status = models.TaskEnvironmentStatusReady
-		// Refresh worktree + workspace fields. The original update branch only
-		// touched AgentExecutionID/Status, so envs created with empty paths
-		// (e.g. before the worktree resolved) stayed permanently broken.
+		// Refresh worktree + workspace + container/sandbox fields. The original
+		// update branch only touched AgentExecutionID/Status, so envs created
+		// with empty paths (e.g. before the worktree resolved) stayed
+		// permanently broken. Sandbox ID gets refreshed too in case a fallback
+		// created a new sprite.
 		if resp.WorktreeID != "" {
 			existingEnv.WorktreeID = resp.WorktreeID
 		}
@@ -955,6 +952,9 @@ func (e *Executor) persistTaskEnvironment(
 		}
 		if resp.ContainerID != "" {
 			existingEnv.ContainerID = resp.ContainerID
+		}
+		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
+			existingEnv.SandboxID = sandboxID
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
@@ -984,6 +984,7 @@ func (e *Executor) persistTaskEnvironment(
 		WorkspacePath:  workspacePath,
 		ContainerID:    resp.ContainerID,
 		TaskDirName:    req.TaskDirName,
+		SandboxID:      extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction when multi-repo.
 	if len(resp.Worktrees) > 0 {
@@ -1053,4 +1054,47 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 				zap.Error(createErr))
 		}
 	}
+}
+
+// applyExistingEnvironment propagates worktree, container, and sandbox IDs from
+// an existing TaskEnvironment into the launch request so that executor backends
+// can reuse the existing execution environment.
+func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models.TaskEnvironment) {
+	if env == nil {
+		return
+	}
+
+	// Worktree reuse
+	if env.WorktreeID != "" && req.UseWorktree {
+		req.WorktreeID = env.WorktreeID
+		e.logger.Info("reusing existing task environment worktree",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_id", env.WorktreeID))
+	}
+
+	// Container/sandbox reuse
+	if env.ContainerID != "" || env.SandboxID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		if env.ContainerID != "" {
+			req.Metadata["container_id"] = env.ContainerID
+		}
+		if env.SandboxID != "" {
+			// Sprites executor reads "sprite_name" from metadata for reconnection
+			req.Metadata["sprite_name"] = env.SandboxID
+		}
+	}
+}
+
+// extractSandboxID extracts the sandbox identifier from launch response metadata.
+// For Sprites executors, this is the sprite_name.
+func extractSandboxID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	if name, ok := metadata["sprite_name"].(string); ok {
+		return name
+	}
+	return ""
 }
