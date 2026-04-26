@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   IconSquarePlus,
   IconLayoutDashboard,
@@ -16,7 +15,6 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
 import { useAppStore } from "@/components/state-provider";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarSection } from "./sidebar-section";
@@ -25,28 +23,18 @@ import { SidebarProjectsList } from "./sidebar-projects-list";
 import { NewIssueDialog } from "./new-issue-dialog";
 
 export function OrchestrateSidebar() {
-  const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces);
-  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const inboxCount = useAppStore((s) => s.orchestrate.inboxCount);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
 
-  const handleWorkspaceSelect = (workspaceId: string) => {
-    setActiveWorkspace(workspaceId);
-    router.push(`/orchestrate?workspaceId=${workspaceId}`);
-  };
+  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+  const workspaceName = activeWorkspace?.name || "Workspace";
 
   return (
     <aside className="w-60 h-full min-h-0 border-r border-border bg-background flex flex-col">
-      {/* Top: workspace switcher + search */}
+      {/* Top: workspace name + search */}
       <div className="flex items-center gap-1 px-3 h-12 border-b border-border">
-        <div className="flex-1 min-w-0">
-          <WorkspaceSwitcher
-            workspaces={workspaces.items}
-            activeWorkspaceId={workspaces.activeId}
-            onSelect={handleWorkspaceSelect}
-          />
-        </div>
+        <span className="flex-1 min-w-0 text-sm font-bold truncate">{workspaceName}</span>
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 cursor-pointer">
           <IconSearch className="h-4 w-4" />
         </Button>
