@@ -40,16 +40,24 @@ export function WorkspaceRail() {
           return (
             <Tooltip key={ws.id}>
               <TooltipTrigger asChild>
-                <button
-                  onClick={() => handleSelect(ws.id)}
-                  className={`h-10 w-10 rounded-lg flex items-center justify-center text-sm font-semibold cursor-pointer transition-colors ${
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  {initial}
-                </button>
+                <div className="relative flex items-center">
+                  {/* Active indicator bar */}
+                  <div
+                    className={`absolute left-0 w-1 rounded-r-full transition-all ${
+                      isActive ? "h-6 bg-primary" : "h-0"
+                    }`}
+                  />
+                  <button
+                    onClick={() => handleSelect(ws.id)}
+                    className={`h-10 w-10 rounded-lg flex items-center justify-center text-sm font-semibold cursor-pointer transition-colors ml-1 ${
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-accent"
+                    }`}
+                  >
+                    {initial}
+                  </button>
+                </div>
               </TooltipTrigger>
               <TooltipContent side="right">{ws.name}</TooltipContent>
             </Tooltip>
