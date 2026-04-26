@@ -74,8 +74,7 @@ export function OrchestrateSidebar() {
       </nav>
 
       {/* Bottom bar */}
-      <div className="flex items-center gap-1 px-3 h-10 border-t border-border shrink-0">
-        <span className="text-xs text-muted-foreground truncate flex-1">v{process.env.NEXT_PUBLIC_APP_VERSION || "0.1"}</span>
+      <div className="flex items-center justify-end gap-1 px-3 h-10 border-t border-border shrink-0">
         <Link href="/settings/general" className="cursor-pointer">
           <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
             <IconSettings className="h-3.5 w-3.5" />

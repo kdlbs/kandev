@@ -18,13 +18,13 @@ export function WorkspaceRail() {
   };
 
   return (
-    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 gap-2 shrink-0">
+    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0">
       {/* Back to homepage */}
       <Tooltip>
         <TooltipTrigger asChild>
           <Link
             href="/"
-            className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent transition-colors cursor-pointer mb-2"
+            className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent transition-colors cursor-pointer mb-3"
           >
             <IconArrowLeft className="h-4 w-4 text-muted-foreground" />
           </Link>
@@ -32,52 +32,44 @@ export function WorkspaceRail() {
         <TooltipContent side="right">Back to board</TooltipContent>
       </Tooltip>
 
-      {/* Workspace avatars */}
-      <div className="flex-1 flex flex-col gap-2 overflow-y-auto">
+      {/* Workspace avatars + add button together */}
+      <div className="flex flex-col items-center gap-3 overflow-y-auto flex-1">
         {workspaces.items.map((ws) => {
           const isActive = ws.id === workspaces.activeId;
           const initial = (ws.name || "W").charAt(0).toUpperCase();
           return (
             <Tooltip key={ws.id}>
               <TooltipTrigger asChild>
-                <div className="relative flex items-center">
-                  {/* Active indicator bar */}
-                  <div
-                    className={`absolute left-0 w-1 rounded-r-full transition-all ${
-                      isActive ? "h-6 bg-primary" : "h-0"
-                    }`}
-                  />
-                  <button
-                    onClick={() => handleSelect(ws.id)}
-                    className={`h-10 w-10 rounded-lg flex items-center justify-center text-sm font-semibold cursor-pointer transition-colors ml-1 ${
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    {initial}
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleSelect(ws.id)}
+                  className={`relative h-11 w-11 rounded-xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all ${
+                    isActive
+                      ? "bg-primary text-primary-foreground shadow-[0_0_0_2px] shadow-primary/30"
+                      : "bg-muted text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {initial}
+                </button>
               </TooltipTrigger>
               <TooltipContent side="right">{ws.name}</TooltipContent>
             </Tooltip>
           );
         })}
-      </div>
 
-      {/* Add workspace button */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-10 w-10 rounded-full border border-dashed border-border cursor-pointer"
-          >
-            <IconPlus className="h-4 w-4 text-muted-foreground" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right">Add workspace</TooltipContent>
-      </Tooltip>
+        {/* Add workspace button - right below workspaces */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 rounded-full border-2 border-dashed border-muted-foreground/30 cursor-pointer hover:border-muted-foreground/50"
+            >
+              <IconPlus className="h-4 w-4 text-muted-foreground/50" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Add workspace</TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 }
