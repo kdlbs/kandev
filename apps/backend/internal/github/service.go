@@ -1174,44 +1174,67 @@ func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]R
 var anonymousAPIBase = githubAPIBase
 
 // listRepoBranchesAnonymous calls the GitHub REST API without authentication to
-// list branches for public repositories. Returns ErrNoClient on network errors
-// and a GitHubAPIError for non-2xx responses (404, 403, etc.) so the controller
-// can map them to the appropriate HTTP status codes.
+// list branches for public repositories, following pagination via Link headers.
+// Returns ErrNoClient on network errors and a GitHubAPIError for non-2xx
+// responses (404, 403, etc.) so the controller maps them to correct HTTP codes.
 func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
-	endpoint := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100", anonymousAPIBase, owner, repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, ErrNoClient
-	}
-	req.Header.Set("Accept", githubAccept)
-	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, ErrNoClient
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, &GitHubAPIError{
-			StatusCode: resp.StatusCode,
-			Endpoint:   endpoint,
-			Body:       string(body),
+	next := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100", anonymousAPIBase, owner, repo)
+	var branches []RepoBranch
+	for next != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
+		if err != nil {
+			return nil, ErrNoClient
 		}
-	}
+		req.Header.Set("Accept", githubAccept)
+		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 
-	var raw []struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, ErrNoClient
-	}
-	branches := make([]RepoBranch, 0, len(raw))
-	for _, b := range raw {
-		branches = append(branches, RepoBranch{Name: b.Name})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, ErrNoClient
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return nil, &GitHubAPIError{
+				StatusCode: resp.StatusCode,
+				Endpoint:   next,
+				Body:       string(body),
+			}
+		}
+
+		var page []struct {
+			Name string `json:"name"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&page)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, ErrNoClient
+		}
+		for _, b := range page {
+			branches = append(branches, RepoBranch{Name: b.Name})
+		}
+		next = parseLinkNext(resp.Header.Get("Link"))
 	}
 	return branches, nil
+}
+
+// parseLinkNext extracts the URL for rel="next" from a GitHub Link header.
+// Returns "" if no next page is present.
+func parseLinkNext(link string) string {
+	// Format: <url>; rel="next", <url>; rel="last"
+	for part := range strings.SplitSeq(link, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		if start := strings.Index(part, "<"); start != -1 {
+			if end := strings.Index(part, ">"); end != -1 && end > start {
+				return part[start+1 : end]
+			}
+		}
+	}
+	return ""
 }
 
 // SearchUserPRs searches for PRs using a filter or custom query. Unless the

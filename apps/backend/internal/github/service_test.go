@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,60 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 )
+
+func TestParseLinkNext(t *testing.T) {
+	tests := []struct {
+		link string
+		want string
+	}{
+		{
+			link: `<https://api.github.com/repos/o/r/branches?page=2>; rel="next", <https://api.github.com/repos/o/r/branches?page=3>; rel="last"`,
+			want: "https://api.github.com/repos/o/r/branches?page=2",
+		},
+		{
+			link: `<https://api.github.com/repos/o/r/branches?page=3>; rel="last"`,
+			want: "",
+		},
+		{link: "", want: ""},
+	}
+	for _, tc := range tests {
+		got := parseLinkNext(tc.link)
+		if got != tc.want {
+			t.Errorf("parseLinkNext(%q) = %q, want %q", tc.link, got, tc.want)
+		}
+	}
+}
+
+func TestListRepoBranches_Pagination(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page++
+		if page == 1 {
+			w.Header().Set("Link", fmt.Sprintf(`<%s/repos/owner/repo/branches?page=2>; rel="next"`, "http://"+r.Host))
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "feature-a"}})
+		} else {
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "main"}})
+		}
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	branches, err := svc.ListRepoBranches(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches across pages, got %d", len(branches))
+	}
+	names := map[string]bool{branches[0].Name: true, branches[1].Name: true}
+	if !names["main"] || !names["feature-a"] {
+		t.Errorf("unexpected branches: %+v", branches)
+	}
+}
 
 func TestListRepoBranches_NoopClientFallback(t *testing.T) {
 	// A fake GitHub API that returns two branches for a public repo.
