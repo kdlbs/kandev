@@ -44,7 +44,7 @@ export function WorkspaceRail() {
                   onClick={() => handleSelect(ws.id)}
                   className={`h-10 w-10 rounded-lg flex items-center justify-center text-sm font-semibold cursor-pointer transition-colors ${
                     isActive
-                      ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2 ring-offset-background"
+                      ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-accent"
                   }`}
                 >
