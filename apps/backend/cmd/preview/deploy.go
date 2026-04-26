@@ -48,7 +48,7 @@ func runDeploy(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "preview deploy: mktemp: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binDir := filepath.Join(tmpDir, "bin")
 	tarPath := filepath.Join(tmpDir, "kandev-preview.tar.gz")
@@ -92,7 +92,7 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 	}
 
 	client := newSpriteClient(spritesToken)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	fmt.Printf("getting or creating sprite %s...\n", spriteName)
 	sprite, err := getOrCreateSprite(ctx, client, spriteName)

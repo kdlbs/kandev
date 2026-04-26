@@ -40,7 +40,7 @@ func runCleanup(ctx context.Context, args []string) int {
 	spriteName := fmt.Sprintf("kandev-pr-%d", *pr)
 
 	client := newSpriteClient(spritesToken)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	fmt.Printf("destroying sprite %s...\n", spriteName)
 	createdAt, err := destroySprite(ctx, client, spriteName)

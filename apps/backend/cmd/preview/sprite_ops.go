@@ -141,7 +141,7 @@ func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error 
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	return waitForServiceStarted(stream)
 }
@@ -185,7 +185,7 @@ func drainStream(stream *sprites.ServiceStream) error {
 // enablePublicURL sets the sprite's URL to public mode and returns the URL.
 func enablePublicURL(ctx context.Context, token, spriteName string, _ int) (string, error) {
 	client := newSpriteClient(token)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	updateCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer cancel()

@@ -125,12 +125,10 @@ func packageBundle(binDir, tarPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz := gzip.NewWriter(f)
-	defer gz.Close()
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
 
 	// Add binaries.
 	binEntries, err := os.ReadDir(binDir)
@@ -165,7 +163,11 @@ func packageBundle(binDir, tarPath string) error {
 		return fmt.Errorf("add public: %w", err)
 	}
 
-	return nil
+	// Close in order: tar → gzip → file (flush compressed data).
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("close tar: %w", err)
+	}
+	return gz.Close()
 }
 
 func addFileToTar(tw *tar.Writer, src, dst string, mode fs.FileMode) error {
@@ -233,7 +235,7 @@ func addDirToTar(tw *tar.Writer, srcDir, dstPrefix string) error {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
