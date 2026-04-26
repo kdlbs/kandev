@@ -37,6 +37,8 @@ func newTestService(t *testing.T) *service.Service {
 		assignee_agent_instance_id TEXT DEFAULT '',
 		execution_policy TEXT DEFAULT '',
 		execution_state TEXT DEFAULT '',
+		checkout_agent_id TEXT,
+		checkout_at DATETIME,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

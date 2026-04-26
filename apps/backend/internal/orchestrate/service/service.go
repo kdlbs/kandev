@@ -266,11 +266,30 @@ func (s *Service) DeleteAgentMemory(ctx context.Context, id string) error {
 	return s.repo.DeleteAgentMemory(ctx, id)
 }
 
+// -- Task Checkout --
+
+// CheckoutTask atomically acquires an exclusive lock on a task for an agent.
+func (s *Service) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
+	return s.repo.CheckoutTask(ctx, taskID, agentID)
+}
+
+// ReleaseTaskCheckout releases the exclusive lock on a task.
+func (s *Service) ReleaseTaskCheckout(ctx context.Context, taskID string) error {
+	return s.repo.ReleaseTaskCheckout(ctx, taskID)
+}
+
 // -- Wakeups --
 
 // ListWakeupRequests returns wakeup requests for a workspace.
 func (s *Service) ListWakeupRequests(ctx context.Context, wsID string) ([]*models.WakeupRequest, error) {
 	return s.repo.ListWakeupRequests(ctx, wsID)
+}
+
+// -- Task Search --
+
+// SearchTasks searches for tasks matching the query string in a workspace.
+func (s *Service) SearchTasks(ctx context.Context, wsID, query string, limit int) ([]*sqlite.TaskSearchResult, error) {
+	return s.repo.SearchTasks(ctx, wsID, query, limit)
 }
 
 // -- Dashboard --

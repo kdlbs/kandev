@@ -126,3 +126,90 @@ func (r *Repository) GetTaskBasicInfo(ctx context.Context, taskID string) (*Task
 	}
 	return &info, nil
 }
+
+// TaskSearchResult contains fields returned by a task search query.
+type TaskSearchResult struct {
+	ID                      string `db:"id"`
+	WorkspaceID             string `db:"workspace_id"`
+	Identifier              string `db:"identifier"`
+	Title                   string `db:"title"`
+	Description             string `db:"description"`
+	Status                  string `db:"status"`
+	Priority                int    `db:"priority"`
+	ParentID                string `db:"parent_id"`
+	ProjectID               string `db:"project_id"`
+	AssigneeAgentInstanceID string `db:"assignee_agent_instance_id"`
+	Labels                  string `db:"labels"`
+	CreatedAt               string `db:"created_at"`
+	UpdatedAt               string `db:"updated_at"`
+}
+
+// SearchTasks performs a LIKE-based search on title, description, and identifier
+// for non-archived, non-ephemeral tasks in the given workspace.
+func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*TaskSearchResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	pattern := "%" + query + "%"
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id,
+		       COALESCE(workspace_id, '') AS workspace_id,
+		       COALESCE(identifier, '') AS identifier,
+		       COALESCE(title, '') AS title,
+		       COALESCE(description, '') AS description,
+		       COALESCE(state, '') AS status,
+		       COALESCE(priority, 0) AS priority,
+		       COALESCE(parent_id, '') AS parent_id,
+		       COALESCE(project_id, '') AS project_id,
+		       COALESCE(assignee_agent_instance_id, '') AS assignee_agent_instance_id,
+		       COALESCE(labels, '[]') AS labels,
+		       created_at,
+		       updated_at
+		FROM tasks
+		WHERE workspace_id = ?
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+		  AND (title LIKE ? OR description LIKE ? OR identifier LIKE ?)
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`), workspaceID, pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var results []*TaskSearchResult
+	for rows.Next() {
+		var r TaskSearchResult
+		if err := rows.StructScan(&r); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		results = append(results, &r)
+	}
+	return results, rows.Err()
+}
+
+// CheckoutTask atomically acquires an exclusive lock on a task for an agent.
+// Returns true if the lock was acquired, false if another agent holds it.
+func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now')
+		WHERE id = ? AND (checkout_agent_id IS NULL OR checkout_agent_id = '' OR checkout_agent_id = ?)
+	`), agentID, taskID, agentID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// ReleaseTaskCheckout releases the exclusive lock on a task.
+func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL WHERE id = ?
+	`), taskID)
+	return err
+}

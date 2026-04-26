@@ -172,6 +172,27 @@ func (s *Service) logBudgetExceeded(
 			spentCents, policy.LimitCents, policy.ActionOnExceed, policy.ID))
 }
 
+// CheckPreExecutionBudget checks all applicable budget policies before launching
+// an agent session. Returns (allowed, reason, error). If allowed is false, the
+// caller should skip execution and log the reason.
+func (s *Service) CheckPreExecutionBudget(
+	ctx context.Context, agentInstanceID, projectID, workspaceID string,
+) (bool, string, error) {
+	results, err := s.CheckBudget(ctx, workspaceID, agentInstanceID, projectID)
+	if err != nil {
+		return false, "", fmt.Errorf("budget check: %w", err)
+	}
+	for _, r := range results {
+		if r.LimitExceed && r.AgentPaused {
+			reason := fmt.Sprintf(
+				"budget exceeded: spent %d cents of %d limit (policy %s)",
+				r.SpentCents, r.LimitCents, r.PolicyID)
+			return false, reason, nil
+		}
+	}
+	return true, "", nil
+}
+
 func (s *Service) pauseAgentForBudget(ctx context.Context, agentID string) bool {
 	agent, err := s.repo.GetAgentInstance(ctx, agentID)
 	if err != nil {

@@ -62,7 +62,24 @@ func (r *Repository) initSchema() error {
 	if err := r.createTaskExtensionTables(); err != nil {
 		return err
 	}
+	r.migrateSchedulerColumns()
 	return nil
+}
+
+// migrateSchedulerColumns adds scheduler-related columns to existing tables.
+// Each ALTER is idempotent: errors are ignored if the column already exists.
+func (r *Repository) migrateSchedulerColumns() {
+	// Heartbeat cooldown fields on agent instances.
+	_, _ = r.db.Exec(`ALTER TABLE orchestrate_agent_instances ADD COLUMN cooldown_sec INTEGER DEFAULT 10`)
+	_, _ = r.db.Exec(`ALTER TABLE orchestrate_agent_instances ADD COLUMN last_wakeup_finished_at DATETIME`)
+
+	// Retry fields on wakeup queue.
+	_, _ = r.db.Exec(`ALTER TABLE orchestrate_wakeup_queue ADD COLUMN retry_count INTEGER DEFAULT 0`)
+	_, _ = r.db.Exec(`ALTER TABLE orchestrate_wakeup_queue ADD COLUMN scheduled_retry_at DATETIME`)
+
+	// Atomic task checkout fields.
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_at DATETIME`)
 }
 
 func (r *Repository) createAgentTables() error {
@@ -79,6 +96,8 @@ func (r *Repository) createAgentTables() error {
 		permissions TEXT DEFAULT '{}',
 		budget_monthly_cents INTEGER DEFAULT 0,
 		max_concurrent_sessions INTEGER DEFAULT 1,
+		cooldown_sec INTEGER DEFAULT 10,
+		last_wakeup_finished_at DATETIME,
 		desired_skills TEXT DEFAULT '[]',
 		executor_preference TEXT DEFAULT '{}',
 		pause_reason TEXT DEFAULT '',
@@ -171,6 +190,8 @@ func (r *Repository) createWakeupTables() error {
 		coalesced_count INTEGER DEFAULT 1,
 		idempotency_key TEXT,
 		context_snapshot TEXT DEFAULT '{}',
+		retry_count INTEGER DEFAULT 0,
+		scheduled_retry_at DATETIME,
 		requested_at DATETIME NOT NULL,
 		claimed_at DATETIME,
 		finished_at DATETIME

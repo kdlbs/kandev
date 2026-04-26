@@ -35,6 +35,11 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	registerConfigRoutes(api, h)
 	registerDashboardRoutes(api, h)
 	registerWakeupRoutes(api, h)
+	registerIssueRoutes(api, h)
+}
+
+func registerIssueRoutes(api *gin.RouterGroup, h *Handlers) {
+	api.GET("/workspaces/:wsId/tasks/search", h.searchTasks)
 }
 
 func registerAgentRoutes(api *gin.RouterGroup, h *Handlers) {

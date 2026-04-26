@@ -24,11 +24,14 @@ func (r *Repository) CreateAgentInstance(ctx context.Context, agent *models.Agen
 		INSERT INTO orchestrate_agent_instances (
 			id, workspace_id, name, agent_profile_id, role, icon, status,
 			reports_to, permissions, budget_monthly_cents, max_concurrent_sessions,
+			cooldown_sec, last_wakeup_finished_at,
 			desired_skills, executor_preference, pause_reason, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), agent.ID, agent.WorkspaceID, agent.Name, agent.AgentProfileID,
 		agent.Role, agent.Icon, agent.Status, agent.ReportsTo, agent.Permissions,
-		agent.BudgetMonthlyCents, agent.MaxConcurrentSessions, agent.DesiredSkills,
+		agent.BudgetMonthlyCents, agent.MaxConcurrentSessions,
+		agent.CooldownSec, agent.LastWakeupFinishedAt,
+		agent.DesiredSkills,
 		agent.ExecutorPreference, agent.PauseReason, agent.CreatedAt, agent.UpdatedAt)
 	return err
 }
@@ -65,13 +68,23 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 		UPDATE orchestrate_agent_instances SET
 			name = ?, agent_profile_id = ?, role = ?, icon = ?, status = ?,
 			reports_to = ?, permissions = ?, budget_monthly_cents = ?,
-			max_concurrent_sessions = ?, desired_skills = ?, executor_preference = ?,
+			max_concurrent_sessions = ?, cooldown_sec = ?, last_wakeup_finished_at = ?,
+			desired_skills = ?, executor_preference = ?,
 			pause_reason = ?, updated_at = ?
 		WHERE id = ?
 	`), agent.Name, agent.AgentProfileID, agent.Role, agent.Icon, agent.Status,
 		agent.ReportsTo, agent.Permissions, agent.BudgetMonthlyCents,
-		agent.MaxConcurrentSessions, agent.DesiredSkills, agent.ExecutorPreference,
+		agent.MaxConcurrentSessions, agent.CooldownSec, agent.LastWakeupFinishedAt,
+		agent.DesiredSkills, agent.ExecutorPreference,
 		agent.PauseReason, agent.UpdatedAt, agent.ID)
+	return err
+}
+
+// UpdateLastWakeupFinished records the time an agent's wakeup finished.
+func (r *Repository) UpdateLastWakeupFinished(ctx context.Context, agentID string, finishedAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE orchestrate_agent_instances SET last_wakeup_finished_at = ? WHERE id = ?
+	`), finishedAt, agentID)
 	return err
 }
 

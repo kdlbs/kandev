@@ -94,6 +94,9 @@ func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentIn
 	if agent.MaxConcurrentSessions < 1 {
 		agent.MaxConcurrentSessions = 1
 	}
+	if agent.CooldownSec <= 0 {
+		agent.CooldownSec = 10
+	}
 	if agent.DesiredSkills == "" {
 		agent.DesiredSkills = "[]"
 	}

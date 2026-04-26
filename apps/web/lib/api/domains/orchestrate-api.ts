@@ -483,6 +483,19 @@ export function listIssues(workspaceId: string, options?: ApiRequestOptions) {
   );
 }
 
+export function searchTasks(
+  workspaceId: string,
+  query: string,
+  limit = 50,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return fetchJson<{ tasks: OrchestrateIssue[] }>(
+    `${BASE}/workspaces/${workspaceId}/tasks/search?${params.toString()}`,
+    options,
+  );
+}
+
 // --- Dashboard ---
 
 export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {

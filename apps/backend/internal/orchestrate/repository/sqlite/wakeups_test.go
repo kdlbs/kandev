@@ -294,6 +294,158 @@ func TestCleanExpired(t *testing.T) {
 	}
 }
 
+func TestClaimNextEligibleWakeup_SkipsAgentInCooldown(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	// Create agent with 5 second cooldown and recent finish.
+	agent := &models.AgentInstance{
+		ID:                    "a-cd",
+		WorkspaceID:           "ws1",
+		Name:                  "cooldown-agent",
+		Role:                  models.AgentRoleWorker,
+		Status:                models.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
+		CooldownSec:           5,
+		DesiredSkills:         "[]",
+		ExecutorPreference:    "{}",
+		Permissions:           "{}",
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Set last_wakeup_finished_at to now (within cooldown).
+	now := time.Now().UTC()
+	if err := repo.UpdateLastWakeupFinished(ctx, "a-cd", now); err != nil {
+		t.Fatalf("update finished: %v", err)
+	}
+
+	req := &models.WakeupRequest{
+		AgentInstanceID: "a-cd",
+		Reason:          "task_assigned",
+		Payload:         "{}",
+		Status:          "queued",
+		CoalescedCount:  1,
+	}
+	if err := repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := repo.ClaimNextEligibleWakeup(ctx)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("expected sql.ErrNoRows for cooldown agent, got %v", err)
+	}
+}
+
+func TestClaimNextEligibleWakeup_AllowsAgentPastCooldown(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                    "a-cd2",
+		WorkspaceID:           "ws1",
+		Name:                  "past-cooldown-agent",
+		Role:                  models.AgentRoleWorker,
+		Status:                models.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
+		CooldownSec:           5,
+		DesiredSkills:         "[]",
+		ExecutorPreference:    "{}",
+		Permissions:           "{}",
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Set last_wakeup_finished_at to 10 seconds ago (past cooldown).
+	past := time.Now().UTC().Add(-10 * time.Second)
+	if err := repo.UpdateLastWakeupFinished(ctx, "a-cd2", past); err != nil {
+		t.Fatalf("update finished: %v", err)
+	}
+
+	req := &models.WakeupRequest{
+		AgentInstanceID: "a-cd2",
+		Reason:          "task_assigned",
+		Payload:         "{}",
+		Status:          "queued",
+		CoalescedCount:  1,
+	}
+	if err := repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	claimed, err := repo.ClaimNextEligibleWakeup(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.AgentInstanceID != "a-cd2" {
+		t.Errorf("claimed agent = %q, want a-cd2", claimed.AgentInstanceID)
+	}
+}
+
+func TestClaimNextEligibleWakeup_SkipsScheduledRetryInFuture(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	createTestAgent(t, repo, "a-retry", "ws1", 1)
+
+	future := time.Now().UTC().Add(10 * time.Minute)
+	req := &models.WakeupRequest{
+		AgentInstanceID:  "a-retry",
+		Reason:           "task_assigned",
+		Payload:          "{}",
+		Status:           "queued",
+		CoalescedCount:   1,
+		RetryCount:       1,
+		ScheduledRetryAt: &future,
+	}
+	if err := repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := repo.ClaimNextEligibleWakeup(ctx)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("expected sql.ErrNoRows for future retry, got %v", err)
+	}
+}
+
+func TestScheduleRetry_ResetsToQueued(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	createTestAgent(t, repo, "a-sr", "ws1", 1)
+
+	req := &models.WakeupRequest{
+		AgentInstanceID: "a-sr",
+		Reason:          "task_assigned",
+		Payload:         "{}",
+		Status:          "queued",
+		CoalescedCount:  1,
+	}
+	if err := repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Claim it.
+	claimed, err := repo.ClaimNextEligibleWakeup(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// Schedule retry.
+	retryAt := time.Now().UTC().Add(2 * time.Minute)
+	if err := repo.ScheduleRetry(ctx, claimed.ID, retryAt, 1); err != nil {
+		t.Fatalf("schedule retry: %v", err)
+	}
+
+	// Should not be claimable yet (retry in future).
+	_, err = repo.ClaimNextEligibleWakeup(ctx)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("expected sql.ErrNoRows (retry in future), got %v", err)
+	}
+}
+
 func TestRecoverStale(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

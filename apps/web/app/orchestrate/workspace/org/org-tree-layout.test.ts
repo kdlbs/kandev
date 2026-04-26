@@ -147,4 +147,42 @@ describe("collectEdges", () => {
     layoutForest(roots);
     expect(collectEdges(roots)).toHaveLength(0);
   });
+
+  it("provides edge coordinates suitable for L-shaped paths", () => {
+    const agents = [
+      makeAgent("ceo", "CEO"),
+      makeAgent("eng", "Engineer", "ceo"),
+    ];
+    const roots = buildForest(agents);
+    layoutForest(roots);
+    const edges = collectEdges(roots);
+    expect(edges).toHaveLength(1);
+
+    const edge = edges[0];
+    // Parent center-bottom
+    expect(edge.parentX).toBe(roots[0].x + CARD_W / 2);
+    expect(edge.parentY).toBe(roots[0].y + CARD_H);
+    // Child center-top
+    expect(edge.childX).toBe(roots[0].children[0].x + CARD_W / 2);
+    expect(edge.childY).toBe(roots[0].children[0].y);
+
+    // Verify L-shape midpoint is between parent bottom and child top
+    const midY = (edge.parentY + edge.childY) / 2;
+    expect(midY).toBeGreaterThan(edge.parentY);
+    expect(midY).toBeLessThan(edge.childY);
+
+    // Verify the L-shaped path string format
+    const PADDING = 40;
+    const px = edge.parentX + PADDING;
+    const py = edge.parentY + PADDING;
+    const cx = edge.childX + PADDING;
+    const cy = edge.childY + PADDING;
+    const pathMidY = (py + cy) / 2;
+    const d = `M ${px} ${py} L ${px} ${pathMidY} L ${cx} ${pathMidY} L ${cx} ${cy}`;
+    expect(d).toContain("M ");
+    expect(d).toContain("L ");
+    // Should have 4 points: M start + 3 L segments forming the L-shape
+    // split(" L ") gives [M-part, seg1, seg2, seg3] = 4 parts
+    expect(d.split(" L ")).toHaveLength(4);
+  });
 });

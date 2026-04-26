@@ -69,8 +69,8 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 	si.processWakeup(ctx, wakeup)
 }
 
-// processWakeup runs guard checks, resolves executor, builds prompt,
-// logs the result, and marks the wakeup finished.
+// processWakeup runs guard checks, checkout, budget check, resolves executor,
+// builds prompt, logs the result, and marks the wakeup finished.
 func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *models.WakeupRequest) {
 	wakeupID := wakeup.ID
 	agentInstanceID := wakeup.AgentInstanceID
@@ -80,7 +80,7 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
 			zap.String("wakeup_id", wakeupID), zap.Error(err))
-		_ = si.svc.FailWakeup(ctx, wakeupID)
+		_ = si.svc.HandleWakeupFailure(ctx, wakeup, err)
 		return
 	}
 
@@ -92,12 +92,26 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
+	// Atomic task checkout.
+	taskID := si.extractTaskID(wakeup.Payload)
+	if taskID != "" {
+		if !si.tryCheckout(ctx, wakeupID, taskID, agentInstanceID) {
+			return
+		}
+	}
+
+	// Pre-execution budget check.
+	if !si.checkBudget(ctx, wakeup, agent, taskID) {
+		return
+	}
+
 	// Resolve executor config.
 	execCfg, err := si.resolveExecutorForWakeup(ctx, agent, wakeup.Payload)
 	if err != nil {
-		si.logger.Warn("executor resolution failed; failing wakeup",
+		si.logger.Warn("executor resolution failed; retrying wakeup",
 			zap.String("wakeup_id", wakeupID), zap.Error(err))
-		_ = si.svc.FailWakeup(ctx, wakeupID)
+		si.releaseCheckoutIfNeeded(ctx, taskID)
+		_ = si.svc.HandleWakeupFailure(ctx, wakeup, err)
 		return
 	}
 
@@ -113,22 +127,118 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		zap.Int("prompt_len", len(prompt)),
 	)
 
-	// Mark wakeup finished.
-	if err := si.svc.FinishWakeup(ctx, wakeupID); err != nil {
-		si.logger.Error("failed to finish wakeup",
+	si.finishWakeup(ctx, wakeup, agent, taskID)
+}
+
+// tryCheckout attempts to acquire an exclusive lock on the task. Returns true
+// if the checkout succeeded or was not needed, false if blocked.
+func (si *SchedulerIntegration) tryCheckout(
+	ctx context.Context, wakeupID, taskID, agentID string,
+) bool {
+	acquired, err := si.svc.repo.CheckoutTask(ctx, taskID, agentID)
+	if err != nil {
+		si.logger.Error("task checkout error",
 			zap.String("wakeup_id", wakeupID), zap.Error(err))
+		_ = si.svc.FinishWakeup(ctx, wakeupID)
+		return false
+	}
+	if !acquired {
+		si.logger.Info("wakeup skipped (task checked out by another agent)",
+			zap.String("wakeup_id", wakeupID),
+			zap.String("task_id", taskID))
+		_ = si.svc.FinishWakeup(ctx, wakeupID)
+		return false
+	}
+	return true
+}
+
+// checkBudget runs pre-execution budget checks. Returns true if allowed.
+func (si *SchedulerIntegration) checkBudget(
+	ctx context.Context, wakeup *models.WakeupRequest,
+	agent *models.AgentInstance, taskID string,
+) bool {
+	projectID := si.extractProjectID(ctx, wakeup.Payload)
+	allowed, reason, err := si.svc.CheckPreExecutionBudget(
+		ctx, agent.ID, projectID, agent.WorkspaceID)
+	if err != nil {
+		si.logger.Error("budget check failed",
+			zap.String("wakeup_id", wakeup.ID), zap.Error(err))
+		return true // fail-open on error
+	}
+	if !allowed {
+		si.logger.Info("wakeup skipped (budget exceeded)",
+			zap.String("wakeup_id", wakeup.ID), zap.String("reason", reason))
+		si.releaseCheckoutIfNeeded(ctx, taskID)
+		_ = si.svc.FinishWakeup(ctx, wakeup.ID)
+		si.svc.LogActivity(ctx, agent.WorkspaceID,
+			"scheduler", "orchestrate-scheduler",
+			"wakeup_budget_blocked", "wakeup", wakeup.ID,
+			mustJSON(map[string]string{
+				"agent":  agent.Name,
+				"reason": reason,
+			}))
+		return false
+	}
+	return true
+}
+
+// finishWakeup marks the wakeup as finished, releases checkout, records
+// cooldown timestamp, and logs activity.
+func (si *SchedulerIntegration) finishWakeup(
+	ctx context.Context, wakeup *models.WakeupRequest,
+	agent *models.AgentInstance, taskID string,
+) {
+	if err := si.svc.FinishWakeup(ctx, wakeup.ID); err != nil {
+		si.logger.Error("failed to finish wakeup",
+			zap.String("wakeup_id", wakeup.ID), zap.Error(err))
 		return
 	}
 
-	// Log activity.
+	si.releaseCheckoutIfNeeded(ctx, taskID)
+
+	// Record cooldown timestamp.
+	now := time.Now().UTC()
+	if err := si.svc.repo.UpdateLastWakeupFinished(ctx, agent.ID, now); err != nil {
+		si.logger.Error("failed to update last wakeup finished",
+			zap.String("agent_id", agent.ID), zap.Error(err))
+	}
+
 	si.svc.LogActivity(ctx, agent.WorkspaceID,
 		"scheduler", "orchestrate-scheduler",
-		"wakeup_processed", "wakeup", wakeupID,
+		"wakeup_processed", "wakeup", wakeup.ID,
 		mustJSON(map[string]string{
 			"agent":  agent.Name,
 			"reason": wakeup.Reason,
-		}),
-	)
+		}))
+}
+
+// releaseCheckoutIfNeeded releases the task checkout if a task ID is present.
+func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	if err := si.svc.repo.ReleaseTaskCheckout(ctx, taskID); err != nil {
+		si.logger.Error("failed to release task checkout",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+// extractTaskID parses the task_id from a wakeup payload.
+func (si *SchedulerIntegration) extractTaskID(payload string) string {
+	return ParseWakeupPayload(payload)["task_id"]
+}
+
+// extractProjectID looks up the project ID for a task in the payload.
+func (si *SchedulerIntegration) extractProjectID(ctx context.Context, payload string) string {
+	taskID := ParseWakeupPayload(payload)["task_id"]
+	if taskID == "" {
+		return ""
+	}
+	info, err := si.svc.repo.GetTaskBasicInfo(ctx, taskID)
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.ProjectID
 }
 
 // isAgentActive returns true if the agent status allows processing wakeups.

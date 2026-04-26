@@ -7,6 +7,7 @@ import { NewIssueDialog } from "../components/new-issue-dialog";
 import { IssuesToolbar } from "./issues-toolbar";
 import { IssuesContent } from "./issues-content";
 import { useIssuesTree } from "./use-issues-tree";
+import { useServerSearch } from "./use-server-search";
 
 const STORAGE_KEY_PREFIX = "kandev-issues-filters-";
 
@@ -52,35 +53,24 @@ export function IssuesList() {
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
 
   const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
-  // Load persisted filters on mount
   useEffect(() => {
     const persisted = loadPersistedFilters(workspaceId);
-    if (Object.keys(persisted).length > 0) {
-      setIssueFilters(persisted);
-    }
+    if (Object.keys(persisted).length > 0) setIssueFilters(persisted);
   }, [workspaceId, setIssueFilters]);
 
-  // Fetch issues
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
     setIssuesLoading(true);
     listIssues(workspaceId)
-      .then((res) => {
-        if (!cancelled) setIssues(res.issues ?? []);
-      })
-      .catch(() => {
-        // error handled silently
-      })
-      .finally(() => {
-        if (!cancelled) setIssuesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then((res) => { if (!cancelled) setIssues(res.issues ?? []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setIssuesLoading(false); });
+    return () => { cancelled = true; };
   }, [workspaceId, setIssues, setIssuesLoading]);
 
   const handleFilterChange = useCallback(
@@ -94,8 +84,9 @@ export function IssuesList() {
   const handleSearchChange = useCallback(
     (search: string) => {
       setIssueFilters({ search });
+      triggerSearch(search);
     },
-    [setIssueFilters],
+    [setIssueFilters, triggerSearch],
   );
 
   const handleToggleExpand = useCallback((id: string) => {
@@ -107,8 +98,13 @@ export function IssuesList() {
     });
   }, []);
 
+  const activeIssues = searchResults ?? issues;
+  // Skip local search filter when using server results to avoid
+  // rejecting matches on description or identifier.
+  const treeFilters = searchResults ? { ...filters, search: "" } : filters;
+
   const flatNodes = useIssuesTree({
-    issues, filters, sortField, sortDir, nestingEnabled, expandedIds,
+    issues: activeIssues, filters: treeFilters, sortField, sortDir, nestingEnabled, expandedIds,
   });
 
   return (

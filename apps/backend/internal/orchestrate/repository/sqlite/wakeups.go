@@ -19,10 +19,11 @@ func (r *Repository) CreateWakeupRequest(ctx context.Context, req *models.Wakeup
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO orchestrate_wakeup_queue (
 			id, agent_instance_id, reason, payload, status, coalesced_count,
-			idempotency_key, context_snapshot, requested_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			idempotency_key, context_snapshot, retry_count, scheduled_retry_at, requested_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), req.ID, req.AgentInstanceID, req.Reason, req.Payload, req.Status,
-		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot, req.RequestedAt)
+		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot,
+		req.RetryCount, req.ScheduledRetryAt, req.RequestedAt)
 	return err
 }
 
@@ -116,8 +117,8 @@ func (r *Repository) CoalesceWakeup(
 }
 
 // ClaimNextEligibleWakeup atomically claims the next queued wakeup for an agent
-// that is not at capacity. It joins against agent instances to check status and
-// against active wakeups to enforce concurrency limits.
+// that is not at capacity, respects cooldown periods, and skips wakeups
+// with a scheduled retry time in the future.
 func (r *Repository) ClaimNextEligibleWakeup(ctx context.Context) (*models.WakeupRequest, error) {
 	now := time.Now().UTC()
 	var req models.WakeupRequest
@@ -134,15 +135,30 @@ func (r *Repository) ClaimNextEligibleWakeup(ctx context.Context) (*models.Wakeu
 				WHERE cw.agent_instance_id = w.agent_instance_id
 				  AND cw.status = 'claimed'
 			  ) < a.max_concurrent_sessions
+			  AND (a.last_wakeup_finished_at IS NULL
+			       OR datetime(a.last_wakeup_finished_at, '+' || a.cooldown_sec || ' seconds') <= datetime(?))
+			  AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
 			ORDER BY w.requested_at ASC
 			LIMIT 1
 		)
 		RETURNING *
-	`), now).StructScan(&req)
+	`), now, now, now).StructScan(&req)
 	if err != nil {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// ScheduleRetry resets a wakeup to queued with an incremented retry count
+// and a scheduled retry time.
+func (r *Repository) ScheduleRetry(ctx context.Context, wakeupID string, retryAt time.Time, retryCount int) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE orchestrate_wakeup_queue
+		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
+		    claimed_at = NULL, finished_at = NULL
+		WHERE id = ?
+	`), retryCount, retryAt, wakeupID)
+	return err
 }
 
 // CleanExpired deletes finished/failed wakeups older than the given time.

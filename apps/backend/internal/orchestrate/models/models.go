@@ -37,6 +37,8 @@ type AgentInstance struct {
 	Permissions           string      `json:"permissions" db:"permissions"`
 	BudgetMonthlyCents    int         `json:"budget_monthly_cents" db:"budget_monthly_cents"`
 	MaxConcurrentSessions int         `json:"max_concurrent_sessions" db:"max_concurrent_sessions"`
+	CooldownSec           int         `json:"cooldown_sec" db:"cooldown_sec"`
+	LastWakeupFinishedAt  *time.Time  `json:"last_wakeup_finished_at" db:"last_wakeup_finished_at"`
 	DesiredSkills         string      `json:"desired_skills" db:"desired_skills"`
 	ExecutorPreference    string      `json:"executor_preference" db:"executor_preference"`
 	PauseReason           string      `json:"pause_reason" db:"pause_reason"`
@@ -141,17 +143,19 @@ type BudgetPolicy struct {
 
 // WakeupRequest represents a wakeup queue entry.
 type WakeupRequest struct {
-	ID              string     `json:"id" db:"id"`
-	AgentInstanceID string     `json:"agent_instance_id" db:"agent_instance_id"`
-	Reason          string     `json:"reason" db:"reason"`
-	Payload         string     `json:"payload" db:"payload"`
-	Status          string     `json:"status" db:"status"`
-	CoalescedCount  int        `json:"coalesced_count" db:"coalesced_count"`
-	IdempotencyKey  *string    `json:"idempotency_key" db:"idempotency_key"`
-	ContextSnapshot string     `json:"context_snapshot" db:"context_snapshot"`
-	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
-	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
-	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	ID               string     `json:"id" db:"id"`
+	AgentInstanceID  string     `json:"agent_instance_id" db:"agent_instance_id"`
+	Reason           string     `json:"reason" db:"reason"`
+	Payload          string     `json:"payload" db:"payload"`
+	Status           string     `json:"status" db:"status"`
+	CoalescedCount   int        `json:"coalesced_count" db:"coalesced_count"`
+	IdempotencyKey   *string    `json:"idempotency_key" db:"idempotency_key"`
+	ContextSnapshot  string     `json:"context_snapshot" db:"context_snapshot"`
+	RetryCount       int        `json:"retry_count" db:"retry_count"`
+	ScheduledRetryAt *time.Time `json:"scheduled_retry_at" db:"scheduled_retry_at"`
+	RequestedAt      time.Time  `json:"requested_at" db:"requested_at"`
+	ClaimedAt        *time.Time `json:"claimed_at" db:"claimed_at"`
+	FinishedAt       *time.Time `json:"finished_at" db:"finished_at"`
 }
 
 // Routine represents a recurring task definition.

@@ -334,6 +334,30 @@ type ChannelListResponse struct {
 	Channels []*models.Channel `json:"channels"`
 }
 
+// -- Task Search --
+
+// TaskSearchResultDTO represents a single task in search results.
+type TaskSearchResultDTO struct {
+	ID                      string `json:"id"`
+	WorkspaceID             string `json:"workspaceId"`
+	Identifier              string `json:"identifier"`
+	Title                   string `json:"title"`
+	Description             string `json:"description,omitempty"`
+	Status                  string `json:"status"`
+	Priority                int    `json:"priority"`
+	ParentID                string `json:"parentId,omitempty"`
+	ProjectID               string `json:"projectId,omitempty"`
+	AssigneeAgentInstanceID string `json:"assigneeAgentInstanceId,omitempty"`
+	Labels                  string `json:"labels,omitempty"`
+	CreatedAt               string `json:"createdAt"`
+	UpdatedAt               string `json:"updatedAt"`
+}
+
+// TaskSearchResponse wraps search results.
+type TaskSearchResponse struct {
+	Tasks []*TaskSearchResultDTO `json:"tasks"`
+}
+
 // -- Wakeups --
 
 // WakeupListResponse wraps a list of wakeup requests.
