@@ -107,6 +107,8 @@ chmod +x /app/apps/backend/bin/kandev \
          /app/apps/backend/bin/mock-agent
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
+# Reset data directory on each deploy so the DB starts fresh (preview env only).
+rm -rf /data
 mkdir -p /data /var/log
 echo "=== kandev binary info ==="
 ldd /app/apps/backend/bin/kandev 2>&1 || true
