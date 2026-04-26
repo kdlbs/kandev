@@ -38,6 +38,15 @@ func (h *Handlers) costsByProject(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.CostBreakdownResponse{Breakdown: breakdown})
 }
 
+func (h *Handlers) costSummary(c *gin.Context) {
+	total, err := h.ctrl.Svc.GetCostSummary(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total_cents": total})
+}
+
 func (h *Handlers) costsByModel(c *gin.Context) {
 	breakdown, err := h.ctrl.Svc.GetCostsByModel(c.Request.Context(), c.Param("wsId"))
 	if err != nil {
@@ -81,8 +90,43 @@ func (h *Handlers) createBudget(c *gin.Context) {
 }
 
 func (h *Handlers) updateBudget(c *gin.Context) {
-	// Stub: return 200
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	var req dto.UpdateBudgetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	policy, err := h.ctrl.Svc.GetBudgetPolicy(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	applyBudgetPatch(policy, &req)
+	if err := h.ctrl.Svc.UpdateBudgetPolicy(c.Request.Context(), policy); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"budget": policy})
+}
+
+func applyBudgetPatch(policy *models.BudgetPolicy, req *dto.UpdateBudgetRequest) {
+	if req.ScopeType != nil {
+		policy.ScopeType = *req.ScopeType
+	}
+	if req.ScopeID != nil {
+		policy.ScopeID = *req.ScopeID
+	}
+	if req.LimitCents != nil {
+		policy.LimitCents = *req.LimitCents
+	}
+	if req.Period != nil {
+		policy.Period = *req.Period
+	}
+	if req.AlertThresholdPct != nil {
+		policy.AlertThresholdPct = *req.AlertThresholdPct
+	}
+	if req.ActionOnExceed != nil {
+		policy.ActionOnExceed = *req.ActionOnExceed
+	}
 }
 
 func (h *Handlers) deleteBudget(c *gin.Context) {
@@ -128,7 +172,8 @@ func (h *Handlers) decideApproval(c *gin.Context) {
 // -- Activity handler --
 
 func (h *Handlers) listActivity(c *gin.Context) {
-	entries, err := h.ctrl.Svc.ListActivity(c.Request.Context(), c.Param("wsId"), 50)
+	filterType := c.Query("type")
+	entries, err := h.ctrl.Svc.ListActivityFiltered(c.Request.Context(), c.Param("wsId"), filterType, 50)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

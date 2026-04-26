@@ -43,3 +43,23 @@ func (r *Repository) ListActivityEntries(ctx context.Context, workspaceID string
 	}
 	return entries, nil
 }
+
+// ListActivityEntriesByType returns activity entries filtered by target_type or actor_type.
+func (r *Repository) ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var entries []*models.ActivityEntry
+	err := r.ro.SelectContext(ctx, &entries, r.ro.Rebind(
+		`SELECT * FROM orchestrate_activity_log
+		 WHERE workspace_id = ? AND (target_type = ? OR actor_type = ? OR action LIKE ?)
+		 ORDER BY created_at DESC LIMIT ?`),
+		workspaceID, filterType, filterType, filterType+".%", limit)
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []*models.ActivityEntry{}
+	}
+	return entries, nil
+}

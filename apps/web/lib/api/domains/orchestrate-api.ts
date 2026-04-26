@@ -137,6 +137,13 @@ export function getCosts(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<CostSummary>(`${BASE}/workspaces/${workspaceId}/costs`, options);
 }
 
+export function getCostSummary(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ total_cents: number }>(
+    `${BASE}/workspaces/${workspaceId}/costs/summary`,
+    options,
+  );
+}
+
 export function getCostsByAgent(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<CostSummary["byAgent"]>(
     `${BASE}/workspaces/${workspaceId}/costs/by-agent`,
@@ -259,9 +266,14 @@ export function decideApproval(
 
 // --- Activity ---
 
-export function listActivity(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ entries: ActivityEntry[] }>(
-    `${BASE}/workspaces/${workspaceId}/activity`,
+export function listActivity(
+  workspaceId: string,
+  filterType?: string,
+  options?: ApiRequestOptions,
+) {
+  const query = filterType && filterType !== "all" ? `?type=${filterType}` : "";
+  return fetchJson<{ activity: ActivityEntry[] }>(
+    `${BASE}/workspaces/${workspaceId}/activity${query}`,
     options,
   );
 }

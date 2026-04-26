@@ -103,6 +103,12 @@ export type ActivityEntry = {
   createdAt: string;
 };
 
+export type CostBreakdownItem = {
+  group_key: string;
+  total_cents: number;
+  count: number;
+};
+
 export type CostSummary = {
   totalCents: number;
   byAgent: Array<{ agentInstanceId: string; name: string; costCents: number }>;

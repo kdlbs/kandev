@@ -62,6 +62,7 @@ func registerProjectRoutes(api *gin.RouterGroup, h *Handlers) {
 
 func registerCostRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/workspaces/:wsId/costs", h.listCosts)
+	api.GET("/workspaces/:wsId/costs/summary", h.costSummary)
 	api.GET("/workspaces/:wsId/costs/by-agent", h.costsByAgent)
 	api.GET("/workspaces/:wsId/costs/by-project", h.costsByProject)
 	api.GET("/workspaces/:wsId/costs/by-model", h.costsByModel)

@@ -178,6 +178,11 @@ func (s *Service) ListBudgetPolicies(ctx context.Context, wsID string) ([]*model
 	return s.repo.ListBudgetPolicies(ctx, wsID)
 }
 
+// GetBudgetPolicy returns a budget policy by ID.
+func (s *Service) GetBudgetPolicy(ctx context.Context, id string) (*models.BudgetPolicy, error) {
+	return s.repo.GetBudgetPolicy(ctx, id)
+}
+
 // UpdateBudgetPolicy updates a budget policy.
 func (s *Service) UpdateBudgetPolicy(ctx context.Context, policy *models.BudgetPolicy) error {
 	return s.repo.UpdateBudgetPolicy(ctx, policy)
