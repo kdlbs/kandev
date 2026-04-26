@@ -77,7 +77,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     activeProcessBySessionId: {},
     devProcessBySessionId: {},
   },
-  gitStatus: { byEnvironmentId: {} },
+  gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {} },
   contextWindow: { bySessionId: {} },
@@ -211,6 +211,7 @@ export function migrateEnvKeyedData(
     }
   };
   migrate(draft.sessionCommits.byEnvironmentId);
+  migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
   migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
@@ -231,14 +232,26 @@ export const createSessionRuntimeSlice: StateCreator<
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+      // Multi-repo: when the update is tagged with repository_name, route it
+      // into the per-repo map. Single-repo updates (no name) keep the legacy
+      // single-status path; the per-repo map mirrors the same entry under an
+      // empty key so consumers using only byEnvironmentRepo still see it.
+      const repoName = gitStatus.repository_name ?? "";
       const existing = draft.gitStatus.byEnvironmentId[envKey];
-      if (existing && !hasGitStatusChanged(existing, gitStatus)) return;
-      draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+      if (!existing || hasGitStatusChanged(existing, gitStatus)) {
+        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+      }
+      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
+      const existingRepo = repoMap[repoName];
+      if (!existingRepo || hasGitStatusChanged(existingRepo, gitStatus)) {
+        repoMap[repoName] = gitStatus;
+      }
     }),
   clearGitStatus: (sessionId) =>
     set((draft) => {
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       delete draft.gitStatus.byEnvironmentId[envKey];
+      delete draft.gitStatus.byEnvironmentRepo[envKey];
     }),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {

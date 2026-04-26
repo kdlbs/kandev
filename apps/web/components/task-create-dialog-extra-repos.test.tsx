@@ -1,19 +1,17 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-
-afterEach(cleanup);
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, ExtraRepositoryRow } from "./task-create-dialog-types";
 
 // Mock branches hook so the BranchSelector inside the row doesn't blow up.
+// vi.mock is hoisted, so it applies to the static import below.
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useRepositoryBranches: () => ({ branches: [], isLoading: false }),
 }));
 
-// Defer the import until after mocks are set up.
-async function loadComponent() {
-  return (await import("./task-create-dialog-extra-repos")).ExtraRepositoryRows;
-}
+import { ExtraRepositoryRows } from "./task-create-dialog-extra-repos";
+
+afterEach(cleanup);
 
 const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
@@ -45,7 +43,7 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
 
 describe("ExtraRepositoryRows", () => {
   it("disables the Add button until a primary repo is selected", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     render(
       <ExtraRepositoryRows
         fs={makeFs({})}
@@ -59,7 +57,7 @@ describe("ExtraRepositoryRows", () => {
   });
 
   it("calls addExtraRepository when the Add button is clicked", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     const fs = makeFs({});
     render(
       <ExtraRepositoryRows
@@ -76,7 +74,7 @@ describe("ExtraRepositoryRows", () => {
   });
 
   it("renders one editable row per extra repository", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     render(
       <ExtraRepositoryRows
         fs={makeFs({
@@ -98,7 +96,7 @@ describe("ExtraRepositoryRows", () => {
   });
 
   it("hides the section when the task is already started", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     const { container } = render(
       <ExtraRepositoryRows
         fs={makeFs({
@@ -113,7 +111,7 @@ describe("ExtraRepositoryRows", () => {
   });
 
   it("opening a row's dropdown shows the unused workspace repos", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     render(
       <ExtraRepositoryRows
         fs={makeFs({
@@ -139,7 +137,7 @@ describe("ExtraRepositoryRows", () => {
   });
 
   it("disables the Add button when no other workspace repos are available", async () => {
-    const ExtraRepositoryRows = await loadComponent();
+
     render(
       <ExtraRepositoryRows
         fs={makeFs({ repositoryId: "repo-only" })}

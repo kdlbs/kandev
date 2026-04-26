@@ -4,7 +4,10 @@ import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } fr
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import {
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "@/hooks/domains/session/use-session-git-status";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
@@ -46,12 +49,17 @@ type CumulativeFile = { diff?: string; status?: string; additions?: number; dele
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, UncommittedFile>,
+  repositoryName?: string,
 ) {
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     const skipReason = file.diff_skip_reason;
     if (diff || skipReason) {
-      fileMap.set(path, {
+      // For multi-repo workspaces the file tree groups by repository_name
+      // (see components/review/types.ts buildMultiRepoTree). Key the map by
+      // "repo:path" so two repos with the same filename don't collide.
+      const key = repositoryName ? `${repositoryName}:${path}` : path;
+      fileMap.set(key, {
         path,
         diff,
         status: file.status ?? "modified",
@@ -60,6 +68,7 @@ function addUncommittedFiles(
         staged: file.staged ?? false,
         source: "uncommitted",
         diff_skip_reason: skipReason,
+        repository_name: repositoryName,
       });
     }
   }
@@ -119,23 +128,50 @@ export function shouldCloseFileDiffPanel(
   return !entry?.diff;
 }
 
-/** Merge PR + uncommitted + committed files into a single sorted list */
+/** Merge PR + uncommitted + committed files into a single sorted list.
+ *
+ * For multi-repo workspaces statusByRepo carries one entry per repo, each
+ * tagged with repository_name; the merge stamps that name onto every
+ * uncommitted file so the file tree's per-repo grouping (see
+ * components/review/types.ts buildMultiRepoTree) kicks in automatically.
+ *
+ * Falls back to the single-repo gitStatus when statusByRepo is empty so
+ * legacy single-repo tasks keep their pre-multi-repo behavior.
+ */
 function mergeReviewFiles(
   gitStatus: ReturnType<typeof useSessionGitStatus>,
   cumulativeDiff: { files?: Record<string, CumulativeFile> } | null,
   prDiffFiles?: PRDiffFile[],
+  statusByRepo?: ReturnType<typeof useSessionGitStatusByRepo>,
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
-  if (gitStatus?.files)
+  if (statusByRepo && statusByRepo.length > 0) {
+    for (const { repository_name, status } of statusByRepo) {
+      if (status?.files) {
+        addUncommittedFiles(
+          fileMap,
+          status.files as Record<string, UncommittedFile>,
+          repository_name || undefined,
+        );
+      }
+    }
+  } else if (gitStatus?.files) {
     addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
+  }
   if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files);
-  return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+  return Array.from(fileMap.values()).sort((a, b) => {
+    // Sort by repo then path so files cluster within their repo group.
+    const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
+    if (repoCmp !== 0) return repoCmp;
+    return a.path.localeCompare(b.path);
+  });
 }
 
 function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
+  const statusByRepo = useSessionGitStatusByRepo(activeSessionId);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
   const pr = useActiveTaskPR();
   const { files: prDiffFiles, loading: prDiffLoading } = usePRDiff(
@@ -151,8 +187,13 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
 
   const allFiles = useMemo<ReviewFile[]>(
     () =>
-      mergeReviewFiles(gitStatus, cumulativeDiff, prDiffFiles.length > 0 ? prDiffFiles : undefined),
-    [gitStatus, cumulativeDiff, prDiffFiles],
+      mergeReviewFiles(
+        gitStatus,
+        cumulativeDiff,
+        prDiffFiles.length > 0 ? prDiffFiles : undefined,
+        statusByRepo,
+      ),
+    [gitStatus, statusByRepo, cumulativeDiff, prDiffFiles],
   );
 
   const { reviewedFiles, staleFiles } = useMemo(() => {

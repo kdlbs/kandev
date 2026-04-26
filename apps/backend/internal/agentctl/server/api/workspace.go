@@ -27,9 +27,12 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 
 	s.logger.Info("Workspace stream WebSocket connected")
 
-	// Subscribe to unified workspace updates
-	sub := s.procMgr.GetWorkspaceTracker().SubscribeWorkspaceStream()
-	defer s.procMgr.GetWorkspaceTracker().UnsubscribeWorkspaceStream(sub)
+	// Subscribe to unified workspace updates. Manager.SubscribeWorkspaceStream
+	// fans out across the root tracker plus every per-repo tracker, so for
+	// multi-repo task roots the client receives one event per repo (each
+	// tagged with RepositoryName) on a single channel.
+	sub := s.procMgr.SubscribeWorkspaceStream()
+	defer s.procMgr.UnsubscribeWorkspaceStream(sub)
 
 	// Get shell for input handling (may be nil)
 	shell := s.procMgr.Shell()

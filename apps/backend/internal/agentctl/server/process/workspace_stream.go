@@ -11,14 +11,24 @@ import (
 // and sends current git status and file list immediately
 func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
+	wt.AttachWorkspaceStreamSubscriber(sub)
+	return sub
+}
 
+// AttachWorkspaceStreamSubscriber registers an existing subscriber channel with
+// this tracker and immediately replays the current git status. Used by the
+// process Manager to fan out a single client subscription across multiple
+// per-repo trackers (multi-repo task roots) without giving the client a
+// channel per tracker.
+func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceStreamSubscriber) {
 	wt.workspaceSubMu.Lock()
 	wt.workspaceStreamSubscribers[sub] = struct{}{}
 	count := len(wt.workspaceStreamSubscribers)
 	wt.workspaceSubMu.Unlock()
 	wt.logger.Info("workspace stream subscriber added", zap.Int("subscribers", count))
 
-	// Send current git status immediately
+	// Replay current git status so the new subscriber doesn't have to wait for
+	// the next poll tick.
 	wt.mu.RLock()
 	currentStatus := wt.currentStatus
 	wt.mu.RUnlock()
@@ -26,23 +36,32 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 	if currentStatus.Timestamp.IsZero() {
 		currentStatus.Timestamp = time.Now()
 	}
+	if currentStatus.RepositoryName == "" {
+		currentStatus.RepositoryName = wt.repositoryName
+	}
 
-	// Send git status
 	select {
 	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
 	default:
 	}
-
-	return sub
 }
 
-// UnsubscribeWorkspaceStream removes and closes a workspace stream subscriber
+// UnsubscribeWorkspaceStream removes a workspace stream subscriber and closes
+// the channel. Use DetachWorkspaceStreamSubscriber when the same channel is
+// shared across multiple trackers — only the final detach should close it.
 func (wt *WorkspaceTracker) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	wt.DetachWorkspaceStreamSubscriber(sub)
+	close(sub)
+}
+
+// DetachWorkspaceStreamSubscriber removes the subscriber from this tracker
+// without closing its channel. Used by Manager.UnsubscribeWorkspaceStream
+// which detaches from each tracker first and then closes once.
+func (wt *WorkspaceTracker) DetachWorkspaceStreamSubscriber(sub types.WorkspaceStreamSubscriber) {
 	wt.workspaceSubMu.Lock()
 	delete(wt.workspaceStreamSubscribers, sub)
 	count := len(wt.workspaceStreamSubscribers)
 	wt.workspaceSubMu.Unlock()
-	close(sub)
 	wt.logger.Info("workspace stream subscriber removed", zap.Int("subscribers", count))
 }
 

@@ -10,6 +10,12 @@ type GitStatusUpdate struct {
 	// Timestamp is when this status was captured.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this status belongs to when
+	// the agent's workspace contains multiple git repos as siblings (multi-repo
+	// task roots). Empty for single-repo workspaces. Frontends key per-repo
+	// state on this name.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// Modified contains paths of modified files.
 	Modified []string `json:"modified"`
 

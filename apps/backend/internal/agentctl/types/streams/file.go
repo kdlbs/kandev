@@ -45,6 +45,10 @@ type FileListUpdate struct {
 	// Timestamp is when the listing was captured.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this list belongs to in
+	// multi-repo workspaces. Empty for single-repo. See GitStatusUpdate.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// Files contains the list of files in the workspace.
 	Files []FileEntry `json:"files"`
 }

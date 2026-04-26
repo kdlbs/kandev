@@ -67,13 +67,14 @@ func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitS
 // getGitStatus retrieves the current git status
 func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
 	update := types.GitStatusUpdate{
-		Timestamp: time.Now(),
-		Modified:  []string{},
-		Added:     []string{},
-		Deleted:   []string{},
-		Untracked: []string{},
-		Renamed:   []string{},
-		Files:     make(map[string]types.FileInfo),
+		Timestamp:      time.Now(),
+		RepositoryName: wt.repositoryName,
+		Modified:       []string{},
+		Added:          []string{},
+		Deleted:        []string{},
+		Untracked:      []string{},
+		Renamed:        []string{},
+		Files:          make(map[string]types.FileInfo),
 	}
 
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {

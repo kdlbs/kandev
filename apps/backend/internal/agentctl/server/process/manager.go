@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
@@ -84,6 +85,11 @@ type Manager struct {
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+	// repoTrackers holds per-repository trackers for multi-repo task roots.
+	// Each tracker stamps RepositoryName onto its emitted events and shares
+	// subscriber channels with the root via the Manager fan-out.
+	// Empty for single-repo workspaces.
+	repoTrackers []*WorkspaceTracker
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
@@ -139,15 +145,64 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
-		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
 		updatesCh:          make(chan adapter.AgentEvent, 100),
 		pendingPermissions: make(map[string]*PendingPermission),
+	}
+	// Multi-repo task roots hold one git worktree per repository as siblings.
+	// In that case build a per-repo tracker for each child so each emits its
+	// own GitStatusUpdate (tagged with RepositoryName) and the changes panel
+	// can show all repos. The root tracker covers the single-repo case via
+	// preferGitRepoChildIfRootIsBare; we skip its fallback when we've already
+	// detected a multi-repo root to avoid double-tracking the first repo.
+	repoChildren := scanRepositorySubdirs(cfg.WorkDir)
+	if len(repoChildren) >= 2 {
+		// Multi-repo: root tracker bound to the bare task root (no fallback,
+		// no events), plus one tracker per repo subdir.
+		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		for _, child := range repoChildren {
+			m.repoTrackers = append(m.repoTrackers,
+				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+		}
+	} else {
+		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// repositorySubdir is one git-repo child of a multi-repo task root.
+type repositorySubdir struct {
+	name string // directory basename (used as RepositoryName on emitted events)
+	path string // absolute path to the repo subdir
+}
+
+// scanRepositorySubdirs returns the immediate child directories of workDir
+// that are themselves git repositories or worktrees. Returns an empty slice
+// when workDir doesn't exist, isn't readable, or contains zero git children.
+// Used to detect multi-repo task roots at Manager construction.
+func scanRepositorySubdirs(workDir string) []repositorySubdir {
+	if workDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return nil
+	}
+	var out []repositorySubdir
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		candidate := filepath.Join(workDir, entry.Name())
+		if resolveGitIndexPath(candidate) == "" {
+			continue
+		}
+		out = append(out, repositorySubdir{name: entry.Name(), path: candidate})
+	}
+	return out
 }
 
 // Status returns the current process status
@@ -173,6 +228,33 @@ func (m *Manager) ExitError() error {
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
+}
+
+// SubscribeWorkspaceStream creates a single workspace stream subscriber and
+// fans it out across the root tracker plus every per-repo tracker, so the
+// caller receives events from all repositories on one channel. Use
+// UnsubscribeWorkspaceStream to detach and close.
+//
+// For single-repo workspaces this is equivalent to
+// GetWorkspaceTracker().SubscribeWorkspaceStream() — the per-repo list is
+// empty and only the root tracker fires events.
+func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
+	sub := make(types.WorkspaceStreamSubscriber, 100)
+	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
+	for _, t := range m.repoTrackers {
+		t.AttachWorkspaceStreamSubscriber(sub)
+	}
+	return sub
+}
+
+// UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
+// closes the channel exactly once.
+func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
+	for _, t := range m.repoTrackers {
+		t.DetachWorkspaceStreamSubscriber(sub)
+	}
+	close(sub)
 }
 
 // GetWorkspaceTrackerFor returns a workspace tracker scoped to a sub-directory
@@ -390,6 +472,9 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
+	for _, t := range m.repoTrackers {
+		t.Start(context.Background())
+	}
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()
@@ -412,6 +497,9 @@ func (m *Manager) startOneShot() error {
 
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
+	for _, t := range m.repoTrackers {
+		t.Start(context.Background())
+	}
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()
@@ -766,6 +854,9 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	m.logger.Debug("stopping workspace tracker")
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
+	}
+	for _, t := range m.repoTrackers {
+		t.Stop()
 	}
 	m.logger.Debug("workspace tracker stopped")
 }

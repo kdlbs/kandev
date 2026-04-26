@@ -47,8 +47,9 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 // getFileList retrieves the list of files in the workspace
 func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpdate, error) {
 	update := types.FileListUpdate{
-		Timestamp: time.Now(),
-		Files:     []types.FileEntry{},
+		Timestamp:      time.Now(),
+		RepositoryName: wt.repositoryName,
+		Files:          []types.FileEntry{},
 	}
 
 	// Use git ls-files to get tracked files AND untracked files (excluding ignored)

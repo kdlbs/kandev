@@ -31,6 +31,11 @@ type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
 	logger       *logger.Logger
+	// repositoryName identifies the repository this tracker covers when the
+	// agent's workspace is a multi-repo task root. Stamped onto every emitted
+	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
+	// Empty for the single-repo case.
+	repositoryName string
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -82,17 +87,39 @@ type WorkspaceTracker struct {
 	cancelFunc      context.CancelFunc // Cancel function called during Stop
 }
 
-// NewWorkspaceTracker creates a new workspace tracker
+// NewWorkspaceTracker creates a new workspace tracker for a single git
+// repository (or a single workspace root that may or may not be a git repo).
+// For multi-repo task roots use NewWorkspaceTrackerForRepo per repo subdir.
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	tlog := log.WithFields(zap.String("component", "workspace-tracker"))
 	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
 	// Multi-repo task roots are plain directories that hold one git worktree
 	// per repository as siblings. The git poller can't monitor a non-git path,
 	// so when the configured workDir isn't a git repo, fall back to the first
-	// child subdirectory that is. The user sees that repo's changes in the
-	// uncommitted-changes panel; the per-repo aggregation across all sibling
-	// worktrees is a follow-up.
+	// child subdirectory that is. This preserves single-repo behavior for
+	// callers using NewWorkspaceTracker; multi-repo callers should use
+	// NewWorkspaceTrackerForRepo per repo subdir to get per-repo events.
 	resolvedWorkDir = preferGitRepoChildIfRootIsBare(resolvedWorkDir, tlog)
+	return newWorkspaceTracker(resolvedWorkDir, "", log)
+}
+
+// NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository
+// subdirectory. The repositoryName is stamped onto every emitted event so the
+// frontend can route updates per repo for multi-repo task roots.
+func NewWorkspaceTrackerForRepo(workDir, repositoryName string, log *logger.Logger) *WorkspaceTracker {
+	tlog := log.WithFields(
+		zap.String("component", "workspace-tracker"),
+		zap.String("repository_name", repositoryName),
+	)
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	return newWorkspaceTracker(resolvedWorkDir, repositoryName, log)
+}
+
+func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Logger) *WorkspaceTracker {
+	logFields := []zap.Field{zap.String("component", "workspace-tracker")}
+	if repositoryName != "" {
+		logFields = append(logFields, zap.String("repository_name", repositoryName))
+	}
 
 	// Cache validated git index path (works with worktrees where .git is a file)
 	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
@@ -102,7 +129,8 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
 		gitIndexPath:               gitIndexPath,
-		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
+		repositoryName:             repositoryName,
+		logger:                     log.WithFields(logFields...),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,

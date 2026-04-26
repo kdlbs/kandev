@@ -39,6 +39,9 @@ const gitEventHandlers: GitEventHandlers = {
       timestamp: event.timestamp,
       branch_additions: event.status.branch_additions,
       branch_deletions: event.status.branch_deletions,
+      // Multi-repo workspaces tag each status with the repository it belongs to;
+      // setGitStatus routes the entry into byEnvironmentRepo accordingly.
+      repository_name: event.status.repository_name,
     });
     // Invalidate cumulative diff cache when files change
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
