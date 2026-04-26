@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTheme } from "next-themes";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
@@ -38,6 +39,7 @@ const lowlight = createLowlight(common);
  * setContent override is what triggers the markdown -> doc parse.
  */
 export function PlanReadOnlyMarkdown({ content, className, testId }: Props) {
+  const { resolvedTheme } = useTheme();
   const editor = useEditor({
     immediatelyRender: false,
     editable: false,
@@ -65,13 +67,19 @@ export function PlanReadOnlyMarkdown({ content, className, testId }: Props) {
     editor.commands.setContent(content, { emitUpdate: false });
   }, [editor, content]);
 
+  // Reuse the same class names as the live plan editor so the heading sizes,
+  // list spacing, code-block styling, etc. defined in `globals.css` under
+  // `.markdown-body` and `.tiptap-plan-wrapper` apply identically here.
   return (
     <EditorContent
       editor={editor}
       data-testid={testId}
       className={cn(
-        "tiptap-readonly prose prose-sm dark:prose-invert max-w-none",
+        "tiptap-plan-wrapper markdown-body !h-auto",
+        resolvedTheme === "dark" && "dark",
         "[&_.ProseMirror]:outline-none [&_.ProseMirror]:focus:outline-none",
+        // Trim the editor's vertical padding for the more compact preview body.
+        "[&_.tiptap]:!p-0",
         className,
       )}
     />
