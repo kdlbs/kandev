@@ -50,8 +50,13 @@ export default async function OrchestrateLayout({ children }: { children: React.
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
       <div className="flex h-screen">
-        <WorkspaceRail />
-        <OrchestrateSidebar />
+        <WorkspaceRail
+          workspaces={workspaceItems}
+          activeWorkspaceId={activeWorkspaceId}
+        />
+        <OrchestrateSidebar
+          workspaceName={workspaceItems.find((w) => w.id === activeWorkspaceId)?.name || "Workspace"}
+        />
         <div className="flex-1 min-w-0 flex flex-col">
           <OrchestrateTopbar />
           <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>

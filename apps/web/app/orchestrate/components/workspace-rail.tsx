@@ -7,10 +7,24 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 
-export function WorkspaceRail() {
+interface WorkspaceItem {
+  id: string;
+  name: string;
+}
+
+interface WorkspaceRailProps {
+  workspaces: WorkspaceItem[];
+  activeWorkspaceId: string | null;
+}
+
+export function WorkspaceRail({ workspaces: ssrWorkspaces, activeWorkspaceId: ssrActiveId }: WorkspaceRailProps) {
   const router = useRouter();
-  const workspaces = useAppStore((s) => s.workspaces);
+  const storeWorkspaces = useAppStore((s) => s.workspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
+
+  // Use store if hydrated, fall back to SSR props
+  const items = storeWorkspaces.items.length > 0 ? storeWorkspaces.items : ssrWorkspaces;
+  const activeId = storeWorkspaces.activeId ?? ssrActiveId;
 
   const handleSelect = (id: string) => {
     setActiveWorkspace(id);
@@ -18,7 +32,7 @@ export function WorkspaceRail() {
   };
 
   return (
-    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0 relative">
+    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0">
       {/* Back to homepage */}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -32,31 +46,31 @@ export function WorkspaceRail() {
         <TooltipContent side="right">Back to board</TooltipContent>
       </Tooltip>
 
-      {/* Workspace avatars + add button together */}
-      <div className="flex flex-col items-center gap-3 overflow-y-auto flex-1">
-        {workspaces.items.map((ws) => {
-          const isActive = ws.id === workspaces.activeId;
+      {/* Workspace avatars + add button */}
+      <div className="flex flex-col items-center gap-2 overflow-y-auto flex-1 w-full">
+        {items.map((ws) => {
+          const isActive = ws.id === activeId;
           const initial = (ws.name || "W").charAt(0).toUpperCase();
           return (
             <Tooltip key={ws.id}>
               <TooltipTrigger asChild>
-                <div className="group relative flex items-center justify-center w-full px-1">
+                <div className="group relative flex items-center justify-center w-full">
+                  {/* Left edge indicator pill */}
+                  <div
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r transition-all duration-200 bg-foreground ${
+                      isActive ? "h-9" : "h-0 group-hover:h-5"
+                    }`}
+                  />
                   <button
                     onClick={() => handleSelect(ws.id)}
-                    className={`h-11 w-11 rounded-xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all ${
+                    className={`h-12 w-12 rounded-2xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all duration-200 ${
                       isActive
                         ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-accent"
+                        : "bg-muted text-muted-foreground hover:bg-accent hover:rounded-xl"
                     }`}
                   >
                     {initial}
                   </button>
-                  {/* Left edge indicator pill - flush with rail edge */}
-                  <div
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full bg-foreground transition-all ${
-                      isActive ? "h-7" : "h-0 group-hover:h-4"
-                    }`}
-                  />
                 </div>
               </TooltipTrigger>
               <TooltipContent side="right">{ws.name}</TooltipContent>
@@ -64,15 +78,15 @@ export function WorkspaceRail() {
           );
         })}
 
-        {/* Add workspace button - right below workspaces */}
+        {/* Add workspace button */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-11 w-11 rounded-full border-2 border-dashed border-muted-foreground/30 cursor-pointer hover:border-muted-foreground/50"
+              className="h-12 w-12 rounded-full border-2 border-dashed border-muted-foreground/25 cursor-pointer hover:border-muted-foreground/40 hover:bg-accent/50"
             >
-              <IconPlus className="h-4 w-4 text-muted-foreground/50" />
+              <IconPlus className="h-4 w-4 text-muted-foreground/40" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">Add workspace</TooltipContent>

@@ -24,13 +24,18 @@ import { SidebarAgentsList } from "./sidebar-agents-list";
 import { SidebarProjectsList } from "./sidebar-projects-list";
 import { NewIssueDialog } from "./new-issue-dialog";
 
-export function OrchestrateSidebar() {
+interface OrchestrateSidebarProps {
+  workspaceName?: string;
+}
+
+export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSidebarProps) {
   const workspaces = useAppStore((s) => s.workspaces);
   const inboxCount = useAppStore((s) => s.orchestrate.inboxCount);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
 
+  // Use store if hydrated, fall back to SSR prop
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
-  const workspaceName = activeWorkspace?.name || "Workspace";
+  const workspaceName = activeWorkspace?.name || ssrName || "Workspace";
 
   return (
     <aside className="w-60 h-full min-h-0 border-r border-border bg-background flex flex-col">
