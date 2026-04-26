@@ -1,0 +1,140 @@
+name: Preview Environment
+
+# Dual triggers — mirrors the claude-code-review.yml pattern exactly:
+#   pull_request: same-repo PRs (secrets available, safe to run on PR head)
+#   pull_request_target: fork PRs (secrets available via base repo, gated by allowlist)
+# Exactly one job runs per PR event based on event_name AND head repo identity.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Deploy / update preview (same-repo PRs)
+  # Always runs for same-repo pushes that are not a close event.
+  # -----------------------------------------------------------------------
+  deploy-same-repo:
+    if: >
+      github.event.action != 'closed' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install frontend dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - name: Deploy preview environment
+        working-directory: apps/backend
+        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # -----------------------------------------------------------------------
+  # Deploy / update preview (fork PRs, gated by allowlist)
+  # Uses pull_request_target so secrets are available.
+  # Gated by: OWNER/MEMBER/COLLABORATOR author_association,
+  #           `safe-to-test` label (maintainer opt-in), or
+  #           PREVIEW_ENV_ALLOWLIST repo variable (JSON array of logins).
+  # -----------------------------------------------------------------------
+  deploy-fork:
+    if: >
+      github.event.action != 'closed' &&
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
+       contains(github.event.pull_request.labels.*.name, 'safe-to-test') ||
+       (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pull_request_target checks out base by default; explicitly use PR head.
+          # Safe: the preview CLI only reads files to build artifacts and posts comments.
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install frontend dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - name: Deploy preview environment
+        working-directory: apps/backend
+        run: go run ./cmd/preview deploy --pr "$PR" --sha "$SHA" --repo "$REPO"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # -----------------------------------------------------------------------
+  # Cleanup (all closed PRs — no allowlist check)
+  # The sprite must be destroyed regardless of how the PR was closed or
+  # whether a preview was ever successfully deployed. Handles gracefully
+  # if the sprite does not exist (was never deployed or already destroyed).
+  # -----------------------------------------------------------------------
+  cleanup-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Destroy preview environment
+        working-directory: apps/backend
+        run: go run ./cmd/preview cleanup --pr "$PR" --repo "$REPO"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SPRITES_API_TOKEN: ${{ secrets.SPRITES_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
