@@ -96,5 +96,11 @@ export function resolveTaskProps(task: Task | null, repository: Repository | nul
     taskDescription: task?.description,
     repositoryPath: repository?.local_path ?? null,
     repositoryName: repository?.name ?? null,
+    /**
+     * Total number of repositories linked to the task. Used by the top-bar
+     * breadcrumb to render a "+N" chip next to the primary repo name when
+     * the task is multi-repo. 0 / 1 means single-repo (no chip).
+     */
+    repositoryCount: task?.repositories?.length ?? 0,
   };
 }

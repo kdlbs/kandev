@@ -43,6 +43,8 @@ type TaskTopBarProps = {
   worktreeBranch?: string | null;
   repositoryPath?: string | null;
   repositoryName?: string | null;
+  /** Total repositories on the task; used to render a "+N" chip on the breadcrumb. */
+  repositoryCount?: number;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
@@ -69,6 +71,7 @@ const TaskTopBar = memo(function TaskTopBar({
   worktreeBranch,
   repositoryPath,
   repositoryName,
+  repositoryCount,
   showDebugOverlay,
   onToggleDebugOverlay,
   workflowSteps,
@@ -111,6 +114,7 @@ const TaskTopBar = memo(function TaskTopBar({
         activeSessionId={activeSessionId}
         taskTitle={taskTitle}
         repositoryName={repositoryName}
+        repositoryCount={repositoryCount}
         displayBranch={displayBranch}
         repositoryPath={repositoryPath}
         worktreePath={worktreePath}
@@ -149,12 +153,44 @@ const TaskTopBar = memo(function TaskTopBar({
   );
 });
 
+/** Breadcrumb item for the task's repository, with a "+N" chip on multi-repo. */
+function RepositoryBreadcrumb({ name, extraCount }: { name: string; extraCount: number }) {
+  const tooltipText =
+    extraCount > 0
+      ? `${name} (+${extraCount} more ${extraCount === 1 ? "repo" : "repos"})`
+      : name;
+  return (
+    <>
+      <BreadcrumbSeparator className="shrink-0 @max-[900px]/topbar:hidden" />
+      <BreadcrumbItem className="min-w-0 @max-[900px]/topbar:hidden">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-muted-foreground truncate flex items-center gap-1.5">
+              <span className="truncate">{name}</span>
+              {extraCount > 0 && (
+                <span
+                  className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground/80"
+                  data-testid="topbar-extra-repo-count"
+                >
+                  +{extraCount}
+                </span>
+              )}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{tooltipText}</TooltipContent>
+        </Tooltip>
+      </BreadcrumbItem>
+    </>
+  );
+}
+
 /** Left section: breadcrumbs, branch pill */
 function TopBarLeft({
   taskId,
   activeSessionId,
   taskTitle,
   repositoryName,
+  repositoryCount,
   displayBranch,
   repositoryPath,
   worktreePath,
@@ -171,6 +207,7 @@ function TopBarLeft({
   activeSessionId?: string | null;
   taskTitle?: string;
   repositoryName?: string | null;
+  repositoryCount?: number;
   displayBranch?: string;
   repositoryPath?: string | null;
   worktreePath?: string | null;
@@ -183,6 +220,7 @@ function TopBarLeft({
   remoteStatusError?: string | null;
   onRenameBranch?: (newName: string) => Promise<void>;
 }) {
+  const extraRepoCount = (repositoryCount ?? 0) - 1;
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -198,17 +236,7 @@ function TopBarLeft({
             </BreadcrumbLink>
           </BreadcrumbItem>
           {repositoryName && (
-            <>
-              <BreadcrumbSeparator className="shrink-0 @max-[900px]/topbar:hidden" />
-              <BreadcrumbItem className="min-w-0 @max-[900px]/topbar:hidden">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-muted-foreground truncate block">{repositoryName}</span>
-                  </TooltipTrigger>
-                  <TooltipContent>{repositoryName}</TooltipContent>
-                </Tooltip>
-              </BreadcrumbItem>
-            </>
+            <RepositoryBreadcrumb name={repositoryName} extraCount={extraRepoCount} />
           )}
           <BreadcrumbSeparator className="shrink-0" />
           <BreadcrumbItem className="min-w-0">
