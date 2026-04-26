@@ -91,8 +91,11 @@ func extractBundle(ctx context.Context, sprite *sprites.Sprite) error {
 	defer cancel()
 
 	out, err := sprite.CommandContext(stepCtx, "bash", "-c", script).CombinedOutput()
+	if len(out) > 0 {
+		fmt.Fprintf(os.Stderr, "%s\n", string(out))
+	}
 	if err != nil {
-		return fmt.Errorf("extract bundle: %w\n%s", err, string(out))
+		return fmt.Errorf("extract bundle: %w", err)
 	}
 	return nil
 }

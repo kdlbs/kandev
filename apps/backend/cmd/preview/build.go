@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 )
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
@@ -43,20 +42,14 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 		}
 	}
 
-	// kandev requires CGO for SQLite. Build natively on linux/amd64; use Docker otherwise.
+	// kandev requires CGO for SQLite. Always build inside Docker so the resulting
+	// binary targets a known glibc version (Debian Bookworm = 2.36) regardless of
+	// the host OS. Sprites VMs run a compatible glibc; building natively on the
+	// CI runner (Ubuntu 24.04, glibc 2.39) would produce a binary that requires
+	// symbols unavailable in the Sprites environment.
 	kandevOut := filepath.Join(outDir, "kandev")
-	fmt.Fprintf(os.Stderr, "  go build ./cmd/kandev -> %s\n", kandevOut)
-	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
-		return buildKandevNative(ctx, kandevOut)
-	}
+	fmt.Fprintf(os.Stderr, "  go build ./cmd/kandev (docker cross-compile) -> %s\n", kandevOut)
 	return buildKandevDocker(ctx, kandevOut)
-}
-
-func buildKandevNative(ctx context.Context, out string) error {
-	cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-s -w", "-o", out, "./cmd/kandev")
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=1")
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	return cmd.Run()
 }
 
 // buildKandevDocker builds kandev inside a linux/amd64 Docker container.
