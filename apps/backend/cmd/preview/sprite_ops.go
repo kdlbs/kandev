@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -105,6 +106,11 @@ chmod +x /app/apps/backend/bin/kandev \
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
 mkdir -p /data /var/log
+echo "=== binary check ==="
+ldd /app/apps/backend/bin/kandev 2>&1 || true
+echo "=== binary test ==="
+(KANDEV_HOME_DIR=/data KANDEV_DOCKER_ENABLED=false timeout 2 /app/apps/backend/bin/kandev || true) 2>&1 | head -20
+echo "=== end binary check ==="
 cat > /app/start-kandev.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
@@ -195,25 +201,31 @@ func drainStream(stream *sprites.ServiceStream) error {
 	}
 }
 
-// waitForKandev polls the kandev health endpoint inside the sprite until it
-// responds or the deadline is exceeded. On failure it fetches log output for
-// diagnostics and returns a combined error.
-func waitForKandev(ctx context.Context, sprite *sprites.Sprite) error {
+// waitForKandev polls the kandev /health endpoint via the public URL until it
+// responds with HTTP 200 or the deadline is exceeded. Hitting the public URL
+// also triggers the service to start if Sprites uses lazy-startup semantics.
+// On failure it fetches log output for diagnostics.
+func waitForKandev(ctx context.Context, sprite *sprites.Sprite, publicURL string) error {
 	const (
-		timeout   = 60 * time.Second
+		timeout   = 90 * time.Second
 		retryWait = 3 * time.Second
 	)
-	healthURL := fmt.Sprintf("http://localhost:%d/health", ports.Backend)
+	healthURL := strings.TrimRight(publicURL, "/") + "/health"
 	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 5 * time.Second}
 
 	for time.Now().Before(deadline) {
-		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		out, err := sprite.CommandContext(checkCtx, "curl", "-sf", healthURL).Output()
-		cancel()
-
-		if err == nil && len(out) > 0 {
-			fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
-			return nil
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
+					return nil
+				}
+				fmt.Fprintf(os.Stderr, "  health check: HTTP %d\n", resp.StatusCode)
+			}
 		}
 
 		select {

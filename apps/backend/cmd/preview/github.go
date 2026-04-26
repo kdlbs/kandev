@@ -168,4 +168,3 @@ func buildDeploySection(previewURL, sha string) string {
 > Updates automatically on each push. Destroyed when the PR is closed.`,
 		previewURL, shaDisplay)
 }
-

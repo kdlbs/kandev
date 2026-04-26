@@ -114,12 +114,19 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 		return "", fmt.Errorf("deploy service: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "waiting for kandev to be healthy...")
-	if err := waitForKandev(ctx, sprite); err != nil {
+	// Enable the public URL before the health check so that hitting the URL
+	// also triggers any lazy service startup on Sprites' side.
+	previewURL, err := enablePublicURL(ctx, client, spriteName)
+	if err != nil {
+		return "", fmt.Errorf("enable public URL: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "waiting for kandev to be healthy at %s...\n", previewURL)
+	if err := waitForKandev(ctx, sprite, previewURL); err != nil {
 		return "", fmt.Errorf("health check: %w", err)
 	}
 
-	return enablePublicURL(ctx, client, spriteName)
+	return previewURL, nil
 }
 
 // enablePublicURL sets the sprite's URL to public mode and returns the URL.
