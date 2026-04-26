@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	preview deploy  --pr N --sha S [--repo owner/repo] [--port ports.Backend]
+//	preview deploy  --pr N --sha S [--repo owner/repo] [--port 38429]
 //	preview cleanup --pr N [--repo owner/repo]
 //
 // Required environment variables:
@@ -50,7 +50,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `preview — deploy and manage PR preview environments on Sprites.dev
 
 Usage:
-  preview deploy  --pr N --sha S [--repo owner/repo] [--port ports.Backend]
+  preview deploy  --pr N --sha S [--repo owner/repo] [--port 38429]
   preview cleanup --pr N [--repo owner/repo]
 
 Environment variables:
