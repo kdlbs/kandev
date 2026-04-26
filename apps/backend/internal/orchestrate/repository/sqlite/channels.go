@@ -68,9 +68,39 @@ func (r *Repository) UpdateChannel(ctx context.Context, channel *models.Channel)
 	return err
 }
 
+// ListChannelsByAgent returns all channels for an agent instance.
+func (r *Repository) ListChannelsByAgent(ctx context.Context, agentInstanceID string) ([]*models.Channel, error) {
+	var channels []*models.Channel
+	err := r.ro.SelectContext(ctx, &channels, r.ro.Rebind(
+		`SELECT * FROM orchestrate_channels WHERE agent_instance_id = ? ORDER BY created_at`),
+		agentInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	if channels == nil {
+		channels = []*models.Channel{}
+	}
+	return channels, nil
+}
+
 // DeleteChannel deletes a channel by ID.
 func (r *Repository) DeleteChannel(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM orchestrate_channels WHERE id = ?`), id)
 	return err
+}
+
+// CreateChannelTask creates a long-lived task for a channel.
+// Returns the task ID.
+func (r *Repository) CreateChannelTask(ctx context.Context, workspaceID, title string) (string, error) {
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, state, created_at, updated_at)
+		VALUES (?, ?, ?, 'IN_PROGRESS', ?, ?)
+	`), id, workspaceID, title, now, now)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }

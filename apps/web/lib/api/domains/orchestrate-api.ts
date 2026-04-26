@@ -340,7 +340,7 @@ export function getInboxCount(workspaceId: string, options?: ApiRequestOptions) 
 // --- Agent Memory ---
 
 export function getMemory(agentId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ entries: Array<{ id: string; layer: string; key: string; content: string }> }>(
+  return fetchJson<{ memory: Array<{ id: string; layer: string; key: string; content: string; metadata: string; updated_at: string }> }>(
     `${BASE}/agents/${agentId}/memory`,
     options,
   );
@@ -353,7 +353,7 @@ export function putMemory(
 ) {
   return fetchJson<void>(`${BASE}/agents/${agentId}/memory`, {
     ...options,
-    init: { method: "PUT", body: JSON.stringify(data), ...options?.init },
+    init: { method: "PUT", body: JSON.stringify({ entries: [data] }), ...options?.init },
   });
 }
 
@@ -364,8 +364,93 @@ export function deleteMemory(agentId: string, entryId: string, options?: ApiRequ
   });
 }
 
+export function deleteAllMemory(agentId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`${BASE}/agents/${agentId}/memory/all`, {
+    ...options,
+    init: { method: "DELETE", ...options?.init },
+  });
+}
+
+export function exportMemory(agentId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ memory: Array<{ id: string; layer: string; key: string; content: string; metadata: string; updated_at: string }> }>(
+    `${BASE}/agents/${agentId}/memory/export`,
+    options,
+  );
+}
+
 export function getMemorySummary(agentId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ summary: string }>(`${BASE}/agents/${agentId}/memory/summary`, options);
+  return fetchJson<{ count: number }>(`${BASE}/agents/${agentId}/memory/summary`, options);
+}
+
+// --- Channels ---
+
+export function listChannels(agentId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ channels: Array<{ id: string; platform: string; config: string; status: string; task_id: string; created_at: string }> }>(
+    `${BASE}/agents/${agentId}/channels`,
+    options,
+  );
+}
+
+export function setupChannel(
+  agentId: string,
+  data: { workspace_id: string; platform: string; config: string; status: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ channel: { id: string; platform: string; config: string; status: string; task_id: string; created_at: string } }>(
+    `${BASE}/agents/${agentId}/channels`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+    },
+  );
+}
+
+export function deleteChannel(agentId: string, channelId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`${BASE}/agents/${agentId}/channels/${channelId}`, {
+    ...options,
+    init: { method: "DELETE", ...options?.init },
+  });
+}
+
+// --- Config Export/Import ---
+
+export function exportConfig(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ bundle: Record<string, unknown> }>(
+    `${BASE}/workspaces/${workspaceId}/config/export`,
+    options,
+  );
+}
+
+export function exportConfigZipUrl(workspaceId: string) {
+  return `${BASE}/workspaces/${workspaceId}/config/export/zip`;
+}
+
+export function previewImport(
+  workspaceId: string,
+  bundle: Record<string, unknown>,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ preview: { agents: { created: string[]; updated: string[]; deleted: string[] }; skills: { created: string[]; updated: string[]; deleted: string[] }; routines: { created: string[]; updated: string[]; deleted: string[] }; projects: { created: string[]; updated: string[]; deleted: string[] } } }>(
+    `${BASE}/workspaces/${workspaceId}/config/preview`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
+    },
+  );
+}
+
+export function applyImport(
+  workspaceId: string,
+  bundle: Record<string, unknown>,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
+    `${BASE}/workspaces/${workspaceId}/config/import`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
+    },
+  );
 }
 
 // --- Issues ---

@@ -204,7 +204,8 @@ func (h *Handlers) getInbox(c *gin.Context) {
 // -- Memory handlers --
 
 func (h *Handlers) listMemory(c *gin.Context) {
-	entries, err := h.ctrl.Svc.ListAgentMemory(c.Request.Context(), c.Param("id"))
+	layer := c.Query("layer")
+	entries, err := h.ctrl.Svc.ListMemory(c.Request.Context(), c.Param("id"), layer)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -244,12 +245,12 @@ func (h *Handlers) deleteMemory(c *gin.Context) {
 }
 
 func (h *Handlers) memorySummary(c *gin.Context) {
-	entries, err := h.ctrl.Svc.ListAgentMemory(c.Request.Context(), c.Param("id"))
+	entries, err := h.ctrl.Svc.GetMemorySummary(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, dto.MemorySummaryResponse{Count: len(entries)})
+	c.JSON(http.StatusOK, gin.H{"count": len(entries), "memory": entries})
 }
 
 // -- Dashboard handler --

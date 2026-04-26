@@ -31,6 +31,8 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	registerActivityRoutes(api, h)
 	registerInboxRoutes(api, h)
 	registerMemoryRoutes(api, h)
+	registerChannelRoutes(api, h)
+	registerConfigRoutes(api, h)
 	registerDashboardRoutes(api, h)
 	registerWakeupRoutes(api, h)
 }
@@ -106,8 +108,24 @@ func registerInboxRoutes(api *gin.RouterGroup, h *Handlers) {
 func registerMemoryRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/agents/:id/memory", h.listMemory)
 	api.PUT("/agents/:id/memory", h.upsertMemory)
+	api.DELETE("/agents/:id/memory/all", h.deleteAllMemory)
 	api.DELETE("/agents/:id/memory/:entryId", h.deleteMemory)
 	api.GET("/agents/:id/memory/summary", h.memorySummary)
+	api.GET("/agents/:id/memory/export", h.exportMemory)
+}
+
+func registerChannelRoutes(api *gin.RouterGroup, h *Handlers) {
+	api.GET("/agents/:id/channels", h.listChannels)
+	api.POST("/agents/:id/channels", h.setupChannel)
+	api.DELETE("/agents/:id/channels/:channelId", h.deleteChannel)
+	api.POST("/channels/:channelId/inbound", h.channelInbound)
+}
+
+func registerConfigRoutes(api *gin.RouterGroup, h *Handlers) {
+	api.GET("/workspaces/:wsId/config/export", h.exportConfig)
+	api.GET("/workspaces/:wsId/config/export/zip", h.exportConfigZip)
+	api.POST("/workspaces/:wsId/config/preview", h.previewImport)
+	api.POST("/workspaces/:wsId/config/import", h.applyImport)
 }
 
 func registerDashboardRoutes(api *gin.RouterGroup, h *Handlers) {

@@ -46,9 +46,43 @@ func (r *Repository) ListAgentMemory(ctx context.Context, agentInstanceID string
 	return entries, nil
 }
 
+// GetAgentMemory returns a single memory entry by agent, layer, and key.
+func (r *Repository) GetAgentMemory(ctx context.Context, agentInstanceID, layer, key string) (*models.AgentMemory, error) {
+	var mem models.AgentMemory
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT * FROM orchestrate_agent_memory WHERE agent_instance_id = ? AND layer = ? AND key = ?`),
+		agentInstanceID, layer, key).StructScan(&mem)
+	if err != nil {
+		return nil, err
+	}
+	return &mem, nil
+}
+
+// ListAgentMemoryByLayer returns memory entries for an agent filtered by layer.
+func (r *Repository) ListAgentMemoryByLayer(ctx context.Context, agentInstanceID, layer string) ([]*models.AgentMemory, error) {
+	var entries []*models.AgentMemory
+	err := r.ro.SelectContext(ctx, &entries, r.ro.Rebind(
+		`SELECT * FROM orchestrate_agent_memory WHERE agent_instance_id = ? AND layer = ? ORDER BY key`),
+		agentInstanceID, layer)
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []*models.AgentMemory{}
+	}
+	return entries, nil
+}
+
 // DeleteAgentMemory deletes a single memory entry by ID.
 func (r *Repository) DeleteAgentMemory(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM orchestrate_agent_memory WHERE id = ?`), id)
+	return err
+}
+
+// DeleteAllAgentMemory deletes all memory entries for an agent.
+func (r *Repository) DeleteAllAgentMemory(ctx context.Context, agentInstanceID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+		`DELETE FROM orchestrate_agent_memory WHERE agent_instance_id = ?`), agentInstanceID)
 	return err
 }

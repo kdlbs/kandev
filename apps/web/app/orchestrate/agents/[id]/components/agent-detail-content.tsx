@@ -11,6 +11,8 @@ import { AgentRoleBadge } from "../../components/agent-role-badge";
 import { BudgetGauge } from "../../components/budget-gauge";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentSkillsTab } from "./agent-skills-tab";
+import { AgentMemoryTab } from "./agent-memory-tab";
+import { AgentChannelsTab } from "./agent-channels-tab";
 
 type AgentDetailContentProps = {
   agentId: string;
@@ -83,10 +85,10 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
           <PlaceholderTab label="Runs" />
         </TabsContent>
         <TabsContent value="memory">
-          <PlaceholderTab label="Memory" />
+          <AgentMemoryTab agent={agent} />
         </TabsContent>
         <TabsContent value="channels">
-          <PlaceholderTab label="Channels" />
+          <AgentChannelsTab agent={agent} />
         </TabsContent>
       </Tabs>
     </div>
