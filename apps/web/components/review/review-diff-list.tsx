@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
@@ -31,6 +31,7 @@ import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
 import { diffSkipReasonLabel } from "./types";
 import type { ReviewFile } from "./types";
+import { groupFilesByRepository, RepoGroupHeader } from "./review-diff-list-groups";
 
 function isMarkdownPath(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase();
@@ -69,30 +70,48 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Find index of selected file - we need to force-load all files up to it
   const selectedIndex = selectedFile ? files.findIndex((f) => f.path === selectedFile) : -1;
+  const groups = useMemo(() => groupFilesByRepository(files), [files]);
+  const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
     <div ref={scrollContainerRef} className="overflow-y-auto h-full">
-      {files.map((file, index) => (
-        <FileDiffSection
-          key={file.path}
-          file={file}
-          isReviewed={reviewedFiles.has(file.path) && !staleFiles.has(file.path)}
-          isStale={staleFiles.has(file.path)}
-          sessionId={sessionId}
-          autoMarkOnScroll={autoMarkOnScroll}
-          wordWrap={wordWrap}
-          isSelected={selectedFile === file.path}
-          forceLoad={selectedIndex >= 0 && index <= selectedIndex}
-          onToggleReviewed={onToggleReviewed}
-          onDiscard={onDiscard}
-          onOpenFile={onOpenFile}
-          onPreviewMarkdown={onPreviewMarkdown}
-          sectionRef={fileRefs.get(file.path)}
-          scrollContainer={scrollContainerRef}
-        />
+      {groups.map((group) => (
+        <div
+          key={group.repositoryName || "__no_repo__"}
+          data-testid="changes-repo-group"
+          data-repository-name={group.repositoryName || ""}
+        >
+          {showRepoHeaders && (
+            <RepoGroupHeader name={group.repositoryName} fileCount={group.files.length} />
+          )}
+          {group.files.map((file) => (
+            <FileDiffSection
+              key={`${group.repositoryName}:${file.path}`}
+              file={file}
+              isReviewed={reviewedFiles.has(file.path) && !staleFiles.has(file.path)}
+              isStale={staleFiles.has(file.path)}
+              sessionId={sessionId}
+              autoMarkOnScroll={autoMarkOnScroll}
+              wordWrap={wordWrap}
+              isSelected={selectedFile === file.path}
+              forceLoad={
+                selectedIndex >= 0 && files.findIndex((f) => f.path === file.path) <= selectedIndex
+              }
+              onToggleReviewed={onToggleReviewed}
+              onDiscard={onDiscard}
+              onOpenFile={onOpenFile}
+              onPreviewMarkdown={onPreviewMarkdown}
+              sectionRef={fileRefs.get(file.path)}
+              scrollContainer={scrollContainerRef}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );
 });
+
+// Per-repo grouping helpers live in ./review-diff-list-groups so this file
+// stays under the 600-line lint cap.
 
 type FileDiffSectionProps = {
   file: ReviewFile;
