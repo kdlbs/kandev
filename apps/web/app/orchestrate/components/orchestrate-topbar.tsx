@@ -26,7 +26,7 @@ export function OrchestrateTopbar() {
     "ORCHESTRATE";
 
   return (
-    <div className="flex items-center px-6 h-10 border-b border-border bg-background shrink-0">
+    <div className="flex items-center px-6 h-12 border-b border-border bg-background shrink-0">
       <h1 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h1>
