@@ -50,6 +50,7 @@ import (
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
+	orchestrateservice "github.com/kandev/kandev/internal/orchestrate/service"
 	"github.com/kandev/kandev/internal/orchestrator"
 
 	// Repository cloning
@@ -421,6 +422,21 @@ func startGatewayAndServe(
 		return false
 	}
 	log.Info("Orchestrator initialized")
+
+	// ============================================
+	// ORCHESTRATE WAKEUP SCHEDULER
+	// ============================================
+	if services.Orchestrate != nil {
+		if err := services.Orchestrate.RegisterEventSubscribers(eventBus); err != nil {
+			log.Error("Failed to register orchestrate event subscribers", zap.Error(err))
+			return false
+		}
+		orchScheduler := orchestrateservice.NewSchedulerIntegration(
+			services.Orchestrate, orchestrateservice.DefaultTickInterval,
+		)
+		go orchScheduler.Start(ctx)
+		log.Info("Orchestrate wakeup scheduler started")
+	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
 

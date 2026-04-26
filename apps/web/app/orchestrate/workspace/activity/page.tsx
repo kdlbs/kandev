@@ -1,22 +1,18 @@
-"use client";
+import { listActivity } from "@/lib/api/domains/orchestrate-api";
+import { getActiveWorkspaceId } from "../../lib/get-active-workspace";
+import { ActivityPageClient } from "./activity-page-client";
+import type { ActivityEntry } from "@/lib/state/slices/orchestrate/types";
 
-import { useAppStore } from "@/components/state-provider";
-import { ActivityFeed } from "./activity-feed";
+export default async function ActivityPage() {
+  const workspaceId = await getActiveWorkspaceId();
 
-export default function ActivityPage() {
-  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-
-  if (!activeWorkspaceId) {
-    return (
-      <div className="p-6">
-        <p className="text-sm text-muted-foreground">Select a workspace to view activity.</p>
-      </div>
-    );
+  let activity: ActivityEntry[] = [];
+  if (workspaceId) {
+    const res = await listActivity(workspaceId, undefined, { cache: "no-store" }).catch(() => ({
+      activity: [],
+    }));
+    activity = res.activity ?? [];
   }
 
-  return (
-    <div className="p-6">
-      <ActivityFeed workspaceId={activeWorkspaceId} />
-    </div>
-  );
+  return <ActivityPageClient initialActivity={activity} />;
 }

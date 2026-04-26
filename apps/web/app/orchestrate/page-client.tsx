@@ -10,6 +10,7 @@ import {
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
+import type { DashboardData } from "@/lib/state/slices/orchestrate/types";
 import { MetricCard } from "./components/metric-card";
 import { ActivityRow } from "./workspace/activity/activity-row";
 
@@ -17,10 +18,20 @@ function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-export function OrchestratePageClient() {
+type OrchestratePageClientProps = {
+  initialDashboard?: DashboardData | null;
+};
+
+export function OrchestratePageClient({ initialDashboard }: OrchestratePageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const dashboard = useAppStore((s) => s.orchestrate.dashboard);
   const setDashboard = useAppStore((s) => s.setDashboard);
+
+  useEffect(() => {
+    if (initialDashboard) {
+      setDashboard(initialDashboard);
+    }
+  }, [initialDashboard, setDashboard]);
 
   const fetchDashboard = useCallback(async () => {
     if (!workspaceId) return;

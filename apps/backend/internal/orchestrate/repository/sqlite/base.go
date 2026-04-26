@@ -2,6 +2,8 @@
 package sqlite
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -20,6 +22,12 @@ func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
 		return nil, fmt.Errorf("failed to initialize orchestrate schema: %w", err)
 	}
 	return repo, nil
+}
+
+// ExecRaw executes a raw SQL statement against the writer database.
+// Intended for test setup; production code should use typed methods.
+func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 }
 
 // initSchema creates all orchestrate tables if they don't exist.
