@@ -110,12 +110,12 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
             </div>
             <div className="flex-1">
               <Label>Reports to</Label>
-              <Select value={reportsTo} onValueChange={setReportsTo}>
+              <Select value={reportsTo || "__none__"} onValueChange={(v) => setReportsTo(v === "__none__" ? "" : v)}>
                 <SelectTrigger className="mt-1 cursor-pointer">
                   <SelectValue placeholder="None (top-level)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="cursor-pointer">None</SelectItem>
+                  <SelectItem value="__none__" className="cursor-pointer">None</SelectItem>
                   {agents.map((a) => (
                     <SelectItem key={a.id} value={a.id} className="cursor-pointer">
                       {a.name}
@@ -152,12 +152,12 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
 
           <div>
             <Label>Executor preference</Label>
-            <Select value={executorPref} onValueChange={setExecutorPref}>
+            <Select value={executorPref || "__inherit__"} onValueChange={(v) => setExecutorPref(v === "__inherit__" ? "" : v)}>
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue placeholder="Inherit from project/workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="" className="cursor-pointer">Inherit</SelectItem>
+                <SelectItem value="__inherit__" className="cursor-pointer">Inherit</SelectItem>
                 <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
                 <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
                 <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>

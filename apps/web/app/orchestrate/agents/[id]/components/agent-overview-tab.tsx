@@ -130,14 +130,14 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
           <div>
             <Label>Executor preference</Label>
             <Select
-              value={executorType}
-              onValueChange={(v) => { setExecutorType(v); markDirty(); }}
+              value={executorType || "__inherit__"}
+              onValueChange={(v) => { setExecutorType(v === "__inherit__" ? "" : v); markDirty(); }}
             >
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue placeholder="Inherit from project/workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="" className="cursor-pointer">Inherit</SelectItem>
+                <SelectItem value="__inherit__" className="cursor-pointer">Inherit</SelectItem>
                 <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
                 <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
                 <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
