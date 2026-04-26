@@ -18,7 +18,7 @@ export function WorkspaceRail() {
   };
 
   return (
-    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0">
+    <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0 relative">
       {/* Back to homepage */}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -40,16 +40,10 @@ export function WorkspaceRail() {
           return (
             <Tooltip key={ws.id}>
               <TooltipTrigger asChild>
-                <div className="group relative flex items-center w-full">
-                  {/* Left edge indicator pill */}
-                  <div
-                    className={`absolute left-0 w-[3px] rounded-r-full bg-foreground transition-all ${
-                      isActive ? "h-8" : "h-0 group-hover:h-4"
-                    }`}
-                  />
+                <div className="group relative flex items-center justify-center w-full px-1">
                   <button
                     onClick={() => handleSelect(ws.id)}
-                    className={`ml-auto mr-auto h-11 w-11 rounded-xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all ${
+                    className={`h-11 w-11 rounded-xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all ${
                       isActive
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground hover:bg-accent"
@@ -57,6 +51,12 @@ export function WorkspaceRail() {
                   >
                     {initial}
                   </button>
+                  {/* Left edge indicator pill - flush with rail edge */}
+                  <div
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full bg-foreground transition-all ${
+                      isActive ? "h-7" : "h-0 group-hover:h-4"
+                    }`}
+                  />
                 </div>
               </TooltipTrigger>
               <TooltipContent side="right">{ws.name}</TooltipContent>
