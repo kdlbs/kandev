@@ -143,7 +143,7 @@ export function useCommitDiffs(activeSessionId: string | null | undefined) {
 
 export function useGitStagingActions(
   activeSessionId: string | null | undefined,
-  changedFiles: unknown[],
+  changedFiles: Array<{ path?: string; repository_name?: string } | unknown>,
 ) {
   const gitOps = useGitOperations(activeSessionId ?? null);
   const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
@@ -153,11 +153,31 @@ export function useGitStagingActions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changedFiles]);
 
+  // Multi-repo: each agentctl git op needs the repo subpath, otherwise the
+  // command runs at the workspace root (the task holder dir) and silently
+  // no-ops. Build a path → repository_name map from changedFiles.
+  const repoForPath = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of changedFiles) {
+      if (!f || typeof f !== "object") continue;
+      const path = (f as { path?: unknown }).path;
+      const repo = (f as { repository_name?: unknown }).repository_name;
+      if (typeof path === "string" && typeof repo === "string" && repo) {
+        m.set(path, repo);
+      }
+    }
+    return m;
+  }, [changedFiles]);
+
+  // The FileRow now passes the file's repository_name explicitly, which avoids
+  // path-based lookup collisions when two repos share a filename. Fall back to
+  // the lookup only if the caller didn't pass one (older call sites).
   const handleStage = useCallback(
-    async (path: string) => {
+    async (path: string, repo?: string) => {
+      const effectiveRepo = repo ?? repoForPath.get(path);
       setPendingStageFiles((prev) => new Set(prev).add(path));
       try {
-        await gitOps.stage([path]);
+        await gitOps.stage([path], effectiveRepo);
       } catch {
         setPendingStageFiles((prev) => {
           const next = new Set(prev);
@@ -166,14 +186,15 @@ export function useGitStagingActions(
         });
       }
     },
-    [gitOps],
+    [gitOps, repoForPath],
   );
 
   const handleUnstage = useCallback(
-    async (path: string) => {
+    async (path: string, repo?: string) => {
+      const effectiveRepo = repo ?? repoForPath.get(path);
       setPendingStageFiles((prev) => new Set(prev).add(path));
       try {
-        await gitOps.unstage([path]);
+        await gitOps.unstage([path], effectiveRepo);
       } catch {
         setPendingStageFiles((prev) => {
           const next = new Set(prev);
@@ -182,7 +203,7 @@ export function useGitStagingActions(
         });
       }
     },
-    [gitOps],
+    [gitOps, repoForPath],
   );
 
   return { pendingStageFiles, handleStage, handleUnstage };
@@ -241,18 +262,22 @@ export function useFilesPanelTab(
 export function useDiscardDialog(activeSessionId: string | null | undefined) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+  // Multi-repo: capture the file's repo at click time so the discard op runs
+  // against the right git repo (path-only routing collides on same-named files).
+  const [repoToDiscard, setRepoToDiscard] = useState<string | undefined>(undefined);
   const gitOps = useGitOperations(activeSessionId ?? null);
   const { toast } = useToast();
 
-  const handleDiscardClick = useCallback((filePath: string) => {
+  const handleDiscardClick = useCallback((filePath: string, repo?: string) => {
     setFileToDiscard(filePath);
+    setRepoToDiscard(repo);
     setShowDiscardDialog(true);
   }, []);
 
   const handleDiscardConfirm = useCallback(async () => {
     if (!fileToDiscard) return;
     try {
-      const result = await gitOps.discard([fileToDiscard]);
+      const result = await gitOps.discard([fileToDiscard], repoToDiscard);
       if (!result.success)
         toast({
           title: "Failed to discard changes",
@@ -268,8 +293,9 @@ export function useDiscardDialog(activeSessionId: string | null | undefined) {
     } finally {
       setShowDiscardDialog(false);
       setFileToDiscard(null);
+      setRepoToDiscard(undefined);
     }
-  }, [fileToDiscard, gitOps, toast]);
+  }, [fileToDiscard, repoToDiscard, gitOps, toast]);
 
   return {
     showDiscardDialog,

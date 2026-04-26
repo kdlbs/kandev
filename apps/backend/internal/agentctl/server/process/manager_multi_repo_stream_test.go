@@ -82,3 +82,59 @@ func TestManager_SingleRepo_NoPerRepoTrackers(t *testing.T) {
 		t.Errorf("single-repo workspace should not have per-repo trackers; got %d", len(mgr.repoTrackers))
 	}
 }
+
+// RepoSubpaths must list every per-repo tracker's directory name (and
+// nothing else) so the API layer can fan git-log out across repos.
+func TestManager_RepoSubpaths(t *testing.T) {
+	taskRoot := t.TempDir()
+	for _, name := range []string{"frontend", "backend"} {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+		if err := os.Rename(repoDir, filepath.Join(taskRoot, name)); err != nil {
+			t.Fatalf("place %s: %v", name, err)
+		}
+	}
+
+	mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	subs := mgr.RepoSubpaths()
+	want := map[string]bool{"frontend": true, "backend": true}
+	if len(subs) != len(want) {
+		t.Fatalf("RepoSubpaths length = %d, want %d (got %v)", len(subs), len(want), subs)
+	}
+	for _, s := range subs {
+		if !want[s] {
+			t.Errorf("unexpected repo subpath %q", s)
+		}
+	}
+}
+
+// Verifies that SetWorkspacePollMode propagates to every per-repo tracker.
+// Without the fan-out, per-repo trackers stay at their construction-time
+// default and never receive the focus-triggered refresh that delivers a
+// fresh git status snapshot to a subscriber attached after agent boot.
+func TestManager_SetWorkspacePollMode_PropagatesToPerRepoTrackers(t *testing.T) {
+	taskRoot := t.TempDir()
+	for _, name := range []string{"frontend", "backend"} {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+		if err := os.Rename(repoDir, filepath.Join(taskRoot, name)); err != nil {
+			t.Fatalf("place %s: %v", name, err)
+		}
+	}
+
+	mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	if len(mgr.repoTrackers) != 2 {
+		t.Fatalf("expected 2 per-repo trackers, got %d", len(mgr.repoTrackers))
+	}
+
+	mgr.SetWorkspacePollMode(context.Background(), PollModeSlow)
+
+	if got := mgr.workspaceTracker.GetPollMode(); got != PollModeSlow {
+		t.Errorf("root tracker mode = %v, want %v", got, PollModeSlow)
+	}
+	for i, tr := range mgr.repoTrackers {
+		if got := tr.GetPollMode(); got != PollModeSlow {
+			t.Errorf("repoTrackers[%d] mode = %v, want %v", i, got, PollModeSlow)
+		}
+	}
+}

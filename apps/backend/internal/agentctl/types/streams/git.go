@@ -95,6 +95,11 @@ type GitCommitNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this commit belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Commits panel can render per-repo group headers.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// CommitSHA is the SHA of the new commit.
 	CommitSHA string `json:"commit_sha"`
 

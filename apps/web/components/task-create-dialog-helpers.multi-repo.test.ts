@@ -1,68 +1,82 @@
 import { describe, it, expect } from "vitest";
 import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
 
-describe("buildRepositoriesPayload — multi-repo", () => {
-  it("appends extra repositories after the primary in order", () => {
+describe("buildRepositoriesPayload — unified rows", () => {
+  it("maps each row in order, dropping empty ones silently", () => {
     const payload = buildRepositoriesPayload({
       useGitHubUrl: false,
       githubUrl: "",
-      branch: "main",
+      githubBranch: "",
       githubPrHeadBranch: null,
-      repositoryId: "repo-front",
-      selectedLocalRepo: null,
-      extraRepositories: [
-        { repositoryId: "repo-back", branch: "develop" },
-        { repositoryId: "repo-shared", branch: "" },
+      repositories: [
+        { key: "r0", repositoryId: "repo-front", branch: "main" },
+        { key: "r1", repositoryId: "repo-back", branch: "develop" },
+        { key: "r2", branch: "" }, // no repo picked yet — dropped
+        { key: "r3", repositoryId: "repo-shared", branch: "" },
       ],
+      discoveredRepositories: [],
     });
     expect(payload).toEqual([
-      { repository_id: "repo-front", base_branch: "main", checkout_branch: undefined },
+      { repository_id: "repo-front", base_branch: "main" },
       { repository_id: "repo-back", base_branch: "develop" },
       { repository_id: "repo-shared", base_branch: undefined },
     ]);
   });
 
-  it("drops extra rows with empty repository_id", () => {
+  it("emits local_path + default_branch for discovered (on-machine) rows", () => {
     const payload = buildRepositoriesPayload({
       useGitHubUrl: false,
       githubUrl: "",
-      branch: "main",
+      githubBranch: "",
       githubPrHeadBranch: null,
-      repositoryId: "repo-front",
-      selectedLocalRepo: null,
-      extraRepositories: [
-        { repositoryId: "", branch: "" },
-        { repositoryId: "repo-back", branch: "main" },
+      repositories: [
+        { key: "r0", localPath: "/home/me/projects/local-project", branch: "trunk" },
+        { key: "r1", repositoryId: "repo-back", branch: "main" },
       ],
-    });
-    expect(payload).toHaveLength(2);
-    expect(payload[1].repository_id).toBe("repo-back");
-  });
-
-  it("returns extras even when no primary is set (recovery shape)", () => {
-    const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
-      branch: "",
-      githubPrHeadBranch: null,
-      repositoryId: "",
-      selectedLocalRepo: null,
-      extraRepositories: [{ repositoryId: "repo-x", branch: "main" }],
-    });
-    expect(payload).toEqual([{ repository_id: "repo-x", base_branch: "main" }]);
-  });
-
-  it("single-repo single call: behaves identically to before extraRepositories was added", () => {
-    const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
-      branch: "main",
-      githubPrHeadBranch: null,
-      repositoryId: "repo-only",
-      selectedLocalRepo: null,
+      discoveredRepositories: [
+        { path: "/home/me/projects/local-project", default_branch: "trunk" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ] as any,
     });
     expect(payload).toEqual([
-      { repository_id: "repo-only", base_branch: "main", checkout_branch: undefined },
+      {
+        repository_id: "",
+        base_branch: "trunk",
+        local_path: "/home/me/projects/local-project",
+        default_branch: "trunk",
+      },
+      { repository_id: "repo-back", base_branch: "main" },
     ]);
+  });
+
+  it("URL mode produces a single github_url entry and ignores the rows", () => {
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: true,
+      githubUrl: "github.com/owner/repo",
+      githubBranch: "feature-x",
+      githubPrHeadBranch: null,
+      repositories: [{ key: "r0", repositoryId: "ignored", branch: "ignored" }],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      {
+        repository_id: "",
+        base_branch: "feature-x",
+        checkout_branch: undefined,
+        github_url: "github.com/owner/repo",
+      },
+    ]);
+  });
+
+  it("single-row workspace repo: payload mirrors the row", () => {
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: false,
+      githubUrl: "",
+      githubBranch: "",
+      githubPrHeadBranch: null,
+      repositories: [{ key: "r0", repositoryId: "repo-only", branch: "main" }],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([{ repository_id: "repo-only", base_branch: "main" }]);
   });
 });

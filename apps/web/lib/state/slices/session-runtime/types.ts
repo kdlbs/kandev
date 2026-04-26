@@ -110,6 +110,8 @@ export type SessionCommit = {
   insertions: number;
   deletions: number;
   created_at: string;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 export type CumulativeDiff = {

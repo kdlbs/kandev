@@ -31,7 +31,8 @@ import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
 import { diffSkipReasonLabel } from "./types";
 import type { ReviewFile } from "./types";
-import { groupFilesByRepository, RepoGroupHeader } from "./review-diff-list-groups";
+import { RepoGroupHeader } from "./review-diff-list-groups";
+import { groupByRepositoryName } from "@/lib/group-by-repo";
 
 function isMarkdownPath(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase();
@@ -70,7 +71,10 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Find index of selected file - we need to force-load all files up to it
   const selectedIndex = selectedFile ? files.findIndex((f) => f.path === selectedFile) : -1;
-  const groups = useMemo(() => groupFilesByRepository(files), [files]);
+  const groups = useMemo(
+    () => groupByRepositoryName(files, (f) => f.repository_name),
+    [files],
+  );
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
     <div ref={scrollContainerRef} className="overflow-y-auto h-full">
@@ -81,9 +85,9 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           data-repository-name={group.repositoryName || ""}
         >
           {showRepoHeaders && (
-            <RepoGroupHeader name={group.repositoryName} fileCount={group.files.length} />
+            <RepoGroupHeader name={group.repositoryName} fileCount={group.items.length} />
           )}
-          {group.files.map((file) => (
+          {group.items.map((file) => (
             <FileDiffSection
               key={`${group.repositoryName}:${file.path}`}
               file={file}

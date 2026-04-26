@@ -171,6 +171,8 @@ type MergedCommit = {
   insertions: number;
   deletions: number;
   pushed: boolean;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 /**
@@ -185,6 +187,8 @@ export function mergeCommits(
     commit_message: string;
     insertions: number;
     deletions: number;
+    /** Multi-repo: name of the repo this commit was made in. */
+    repository_name?: string;
   }[],
   prCommits: { sha: string; message: string; additions: number; deletions: number }[],
 ): MergedCommit[] {
@@ -289,11 +293,17 @@ type ChangesPanelBodyProps = {
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string) => void;
   onOpenReview?: () => void;
-  onRevertCommit?: (sha: string) => void;
+  // Multi-repo: handlers carry the commit's repository_name so revert/amend/
+  // reset target the right git repo. Without it the op runs at the workspace
+  // root and fails ("can only revert latest commit") on multi-repo tasks.
+  onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
   onUnstageAll: () => void;
-  onStage: (path: string) => Promise<void>;
-  onUnstage: (path: string) => Promise<void>;
+  // Multi-repo: callers pass the file's repository_name so the agentctl op
+  // routes to the right repo. Same-named files across repos can't be
+  // disambiguated by path alone.
+  onStage: (path: string, repo?: string) => Promise<void>;
+  onUnstage: (path: string, repo?: string) => Promise<void>;
   onBulkStage: (paths: string[]) => void;
   onBulkUnstage: (paths: string[]) => void;
   onBulkDiscard: (paths: string[]) => void;
@@ -625,8 +635,8 @@ const ChangesPanel = memo(function ChangesPanel({
         onOpenReview={onOpenReview}
         onStageAll={git.stageAll}
         onUnstageAll={git.unstageAll}
-        onStage={(path) => git.stageFile([path]).then(() => undefined)}
-        onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
+        onStage={(path, repo) => git.stageFile([path], repo).then(() => undefined)}
+        onUnstage={(path, repo) => git.unstageFile([path], repo).then(() => undefined)}
         onBulkStage={(paths) => {
           git.stageFile(paths).catch(() => {});
         }}

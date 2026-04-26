@@ -164,16 +164,6 @@ export async function listRepositoriesAction(
   return fetchJson<ListRepositoriesResponse>(url);
 }
 
-export async function listLocalRepositoryBranchesAction(
-  workspaceId: string,
-  path: string,
-): Promise<RepositoryBranchesResponse> {
-  const params = `?path=${encodeURIComponent(path)}`;
-  return fetchJson<RepositoryBranchesResponse>(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/branches${params}`,
-  );
-}
-
 export async function discoverRepositoriesAction(
   workspaceId: string,
   root?: string,

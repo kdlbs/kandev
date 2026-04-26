@@ -45,6 +45,8 @@ export type GitCommitData = {
   deletions: number;
   committed_at: string;
   created_at?: string;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 // Git reset data

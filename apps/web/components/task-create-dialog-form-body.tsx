@@ -19,12 +19,6 @@ type SelectorOption = {
 
 type CreateEditSelectorsProps = {
   isTaskStarted: boolean;
-  hasRepositorySelection: boolean;
-  branchOptions: SelectorOption[];
-  branch: string;
-  onBranchChange: (value: string) => void;
-  branchesLoading: boolean;
-  localBranchesLoading: boolean;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   agentProfileOptions: SelectorOption[];
@@ -39,15 +33,6 @@ type CreateEditSelectorsProps = {
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
-  BranchSelectorComponent: React.ComponentType<{
-    options: SelectorOption[];
-    value: string;
-    onValueChange: (value: string) => void;
-    disabled: boolean;
-    placeholder: string;
-    searchPlaceholder: string;
-    emptyMessage: string;
-  }>;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
     value: string;
@@ -64,19 +49,11 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     triggerClassName?: string;
   }>;
-  isLocalExecutor: boolean;
-  useGitHubUrl: boolean;
   workflowAgentLocked: boolean;
 };
 
 export const CreateEditSelectors = memo(function CreateEditSelectors({
   isTaskStarted,
-  hasRepositorySelection,
-  branchOptions,
-  branch,
-  onBranchChange,
-  branchesLoading,
-  localBranchesLoading,
   agentProfiles,
   agentProfilesLoading,
   agentProfileOptions,
@@ -87,10 +64,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   executorProfileId,
   onExecutorProfileChange,
   executorsLoading,
-  isLocalExecutor,
-  useGitHubUrl,
   workflowAgentLocked,
-  BranchSelectorComponent,
   AgentSelectorComponent,
   ExecutorProfileSelectorComponent,
 }: CreateEditSelectorsProps) {
@@ -98,41 +72,16 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
 
   const agentLockedByWorkflow = workflowAgentLocked;
 
-  const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
-
-  const branchPlaceholder = (() => {
-    if (isLocalWithoutGitHubUrl) return "Uses current branch";
-    if (!hasRepositorySelection) return "Select repository first";
-    if (branchesLoading || localBranchesLoading) return "Loading branches...";
-    return branchOptions.length > 0 ? "Select branch" : "No branches found";
-  })();
-
-  const branchDisabled =
-    isLocalWithoutGitHubUrl ||
-    !hasRepositorySelection ||
-    branchesLoading ||
-    localBranchesLoading ||
-    branchOptions.length === 0;
-
   const agentPlaceholder = (() => {
     if (agentProfilesLoading) return "Loading agents...";
     if (agentProfiles.length === 0) return "No agents available";
     return "Select agent";
   })();
 
+  // Branch + repo selection moved into the chip row above the description;
+  // this row carries only agent and executor profile selectors now.
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-      <div>
-        <BranchSelectorComponent
-          options={branchOptions}
-          value={branch}
-          onValueChange={onBranchChange}
-          placeholder={branchPlaceholder}
-          searchPlaceholder="Search branches..."
-          emptyMessage="No branch found."
-          disabled={branchDisabled}
-        />
-      </div>
+    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
       <div>
         {agentProfiles.length === 0 && !agentProfilesLoading ? (
           <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">

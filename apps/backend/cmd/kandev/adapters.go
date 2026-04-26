@@ -391,7 +391,7 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if agentClient == nil {
 		return nil, nil
 	}
-	return agentClient.GitLog(ctx, baseCommit, limit, targetBranch)
+	return agentClient.GitLog(ctx, baseCommit, limit, targetBranch, "")
 }
 
 // GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.

@@ -89,15 +89,18 @@ func (c *Client) GitAbort(ctx context.Context, operation string) (*GitOperationR
 // GitCommit creates a commit with the specified message.
 // If stageAll is true, all changes are staged before committing.
 // If amend is true, it amends the previous commit instead of creating a new one.
-func (c *Client) GitCommit(ctx context.Context, message string, stageAll bool, amend bool) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitCommit(ctx context.Context, message string, stageAll bool, amend bool, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		Message  string `json:"message"`
 		StageAll bool   `json:"stage_all"`
 		Amend    bool   `json:"amend"`
+		Repo     string `json:"repo,omitempty"`
 	}{
 		Message:  message,
 		StageAll: stageAll,
 		Amend:    amend,
+		Repo:     repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/commit", payload)
 }
@@ -114,56 +117,71 @@ func (c *Client) GitRenameBranch(ctx context.Context, newName string) (*GitOpera
 
 // GitStage stages files for commit.
 // If paths is empty, stages all changes (git add -A).
-func (c *Client) GitStage(ctx context.Context, paths []string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitStage(ctx context.Context, paths []string, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		Paths []string `json:"paths"`
+		Repo  string   `json:"repo,omitempty"`
 	}{
 		Paths: paths,
+		Repo:  repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/stage", payload)
 }
 
 // GitUnstage unstages files from the index.
 // If paths is empty, unstages all changes (git reset HEAD).
-func (c *Client) GitUnstage(ctx context.Context, paths []string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitUnstage(ctx context.Context, paths []string, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		Paths []string `json:"paths"`
+		Repo  string   `json:"repo,omitempty"`
 	}{
 		Paths: paths,
+		Repo:  repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/unstage", payload)
 }
 
 // GitDiscard discards changes to files, reverting them to HEAD.
 // Paths must not be empty - at least one file must be specified.
-func (c *Client) GitDiscard(ctx context.Context, paths []string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitDiscard(ctx context.Context, paths []string, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		Paths []string `json:"paths"`
+		Repo  string   `json:"repo,omitempty"`
 	}{
 		Paths: paths,
+		Repo:  repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/discard", payload)
 }
 
 // GitRevertCommit undoes the latest commit using git reset --soft, keeping changes staged.
-func (c *Client) GitRevertCommit(ctx context.Context, commitSHA string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitRevertCommit(ctx context.Context, commitSHA, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		CommitSHA string `json:"commit_sha"`
+		Repo      string `json:"repo,omitempty"`
 	}{
 		CommitSHA: commitSHA,
+		Repo:      repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/revert-commit", payload)
 }
 
 // GitReset resets HEAD to the specified commit.
 // Mode can be "soft" (keep changes staged), "mixed" (keep changes unstaged), or "hard" (discard all changes).
-func (c *Client) GitReset(ctx context.Context, commitSHA, mode string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitReset(ctx context.Context, commitSHA, mode, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		CommitSHA string `json:"commit_sha"`
 		Mode      string `json:"mode"`
+		Repo      string `json:"repo,omitempty"`
 	}{
 		CommitSHA: commitSHA,
 		Mode:      mode,
+		Repo:      repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/reset", payload)
 }
@@ -322,16 +340,24 @@ type GitCommitInfo struct {
 	FilesChanged  int    `json:"files_changed"`
 	Insertions    int    `json:"insertions"`
 	Deletions     int    `json:"deletions"`
+	// RepositoryName tags commits when fetched from a multi-repo subpath. Empty
+	// for single-repo workspaces. Stamped client-side after the per-repo call
+	// so callers can fan out across repos and merge.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 // GitLog gets the commit log from baseCommit to HEAD.
 // If baseCommit is empty, returns recent commits (limited by limit).
 // If targetBranch is provided, computes merge-base dynamically for accurate filtering.
-func (c *Client) GitLog(ctx context.Context, baseCommit string, limit int, targetBranch string) (*GitLogResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitLog(ctx context.Context, baseCommit string, limit int, targetBranch, repo string) (*GitLogResult, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/git/log?since=%s&limit=%d",
 		c.baseURL, url.QueryEscape(baseCommit), limit)
 	if targetBranch != "" {
 		reqURL += "&target_branch=" + url.QueryEscape(targetBranch)
+	}
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)

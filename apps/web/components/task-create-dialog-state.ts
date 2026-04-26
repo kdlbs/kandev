@@ -10,7 +10,6 @@ import type {
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { useRepositoryBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   useRepositoryOptions,
@@ -27,8 +26,9 @@ import type {
   DialogFormState,
   DialogComputedValues,
   DialogComputedArgs,
+  TaskRepoRow,
 } from "@/components/task-create-dialog-types";
-import { useExtraRepositoriesState } from "@/components/task-create-dialog-extra-repos-state";
+import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
 import {
   computePassthroughProfile,
   computeEffectiveStepId,
@@ -44,17 +44,14 @@ type FormResetters = {
   setTaskName: (v: string) => void;
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
-  setRepositoryId: (v: string) => void;
-  setBranch: (v: string) => void;
+  setRepositories: (v: TaskRepoRow[]) => void;
+  setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setExecutorProfileId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: StepType[] | null) => void;
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
-  setDiscoveredRepoPath: (v: string) => void;
-  setSelectedLocalRepo: (v: LocalRepository | null) => void;
-  setLocalBranches: (v: Branch[]) => void;
   setDiscoverReposLoaded: (v: boolean) => void;
   setUseGitHubUrl: (v: boolean) => void;
   setGitHubUrl: (v: string) => void;
@@ -145,8 +142,21 @@ function resetTaskForm(
   resetters.setTaskName(name);
   resetters.setHasTitle(name.trim().length > 0);
   resetters.setHasDescription(description.trim().length > 0);
-  resetters.setRepositoryId(initialValues?.repositoryId ?? "");
-  resetters.setBranch(initialValues?.branch ?? "");
+  // Seed the unified repos list from initialValues. A repo + branch pre-fill
+  // becomes a single row; nothing seeds an empty list (the auto-select
+  // effect later picks the user's last-used repo or the first workspace one).
+  if (initialValues?.repositoryId) {
+    resetters.setRepositories([
+      {
+        key: "row-0",
+        repositoryId: initialValues.repositoryId,
+        branch: initialValues.branch ?? "",
+      },
+    ]);
+  } else {
+    resetters.setRepositories([]);
+  }
+  resetters.setGitHubBranch(initialValues?.branch ?? "");
   resetters.setAgentProfileId("");
   resetters.setExecutorId("");
   resetters.setExecutorProfileId("");
@@ -158,9 +168,6 @@ function resetTaskForm(
 function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
   const ghUrl = iv?.githubUrl ?? "";
   resetters.setDiscoveredRepositories([]);
-  resetters.setDiscoveredRepoPath("");
-  resetters.setSelectedLocalRepo(null);
-  resetters.setLocalBranches([]);
   resetters.setDiscoverReposLoaded(false);
   resetters.setUseGitHubUrl(Boolean(ghUrl));
   resetters.setGitHubUrl(ghUrl);
@@ -266,8 +273,9 @@ function useFormStateValues(
   const [draftDescription, setDraftDescription] = useState("");
 
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
-  const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? "");
-  const [branch, setBranch] = useState(initialValues?.branch ?? "");
+  // GitHub URL flow has its own branch field (the per-repo branch lives on
+  // each row in `repositories`). Seed from initialValues for the URL flow only.
+  const [githubBranch, setGitHubBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
@@ -285,10 +293,8 @@ function useFormStateValues(
     draftDescription,
     setDraftDescription,
     descriptionInputRef,
-    repositoryId,
-    setRepositoryId,
-    branch,
-    setBranch,
+    githubBranch,
+    setGitHubBranch,
     agentProfileId,
     setAgentProfileId,
     executorId,
@@ -311,26 +317,17 @@ function useFormStateValues(
   };
 }
 
-/** Repository discovery state */
+/** Repository discovery state — just the discovered list. The previous
+ *  per-form `selectedLocalRepo` / `discoveredRepoPath` / `localBranches`
+ *  primary-only fields are gone; discovered repos now live as ordinary rows
+ *  in `fs.repositories` with `localPath` set. */
 function useDiscoveryState() {
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
-  const [discoveredRepoPath, setDiscoveredRepoPath] = useState("");
-  const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
-  const [localBranches, setLocalBranches] = useState<Branch[]>([]);
-  const [localBranchesLoading, setLocalBranchesLoading] = useState(false);
   const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
   const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
   return {
     discoveredRepositories,
     setDiscoveredRepositories,
-    discoveredRepoPath,
-    setDiscoveredRepoPath,
-    selectedLocalRepo,
-    setSelectedLocalRepo,
-    localBranches,
-    setLocalBranches,
-    localBranchesLoading,
-    setLocalBranchesLoading,
     discoverReposLoading,
     setDiscoverReposLoading,
     discoverReposLoaded,
@@ -348,7 +345,7 @@ export function useDialogFormState(
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
-  const extraRepos = useExtraRepositoriesState();
+  const repos = useRepositoriesState();
 
   useFormResetEffects({
     open,
@@ -363,17 +360,14 @@ export function useDialogFormState(
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,
-      setRepositoryId: form.setRepositoryId,
-      setBranch: form.setBranch,
+      setRepositories: repos.setRepositories,
+      setGitHubBranch: form.setGitHubBranch,
       setAgentProfileId: form.setAgentProfileId,
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
       setSelectedWorkflowId: form.setSelectedWorkflowId,
       setFetchedSteps: form.setFetchedSteps,
       setDiscoveredRepositories: discovery.setDiscoveredRepositories,
-      setDiscoveredRepoPath: discovery.setDiscoveredRepoPath,
-      setSelectedLocalRepo: discovery.setSelectedLocalRepo,
-      setLocalBranches: discovery.setLocalBranches,
       setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
       setUseGitHubUrl: ghUrl.setUseGitHubUrl,
       setGitHubUrl: ghUrl.setGitHubUrl,
@@ -391,13 +385,7 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  // Reset extra repositories whenever the dialog re-opens with a fresh form.
-  useEffect(() => {
-    if (!open) extraRepos.resetExtraRepositories();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...extraRepos, clearDraft };
+  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...repos, clearDraft };
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";
@@ -417,7 +405,6 @@ export function useDialogComputed({
   workspaceId,
   workflowId,
   defaultStepId,
-  branches,
   settingsData,
   agentProfiles,
   workspaces,
@@ -450,15 +437,17 @@ export function useDialogComputed({
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
+  // The form has a repo selection when either: (a) any chip in the unified
+  // list has a repo set, or (b) URL mode has a non-empty URL. The chip row
+  // takes care of branch state per row; there is no global branch.
   const hasRepositorySelection = Boolean(
-    fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl.trim()),
+    fs.repositories.some((r) => r.repositoryId || r.localPath) ||
+      (fs.useGitHubUrl && fs.githubUrl.trim()),
   );
-  const effectiveBranches = (() => {
-    if (fs.useGitHubUrl) return fs.githubBranches;
-    if (fs.repositoryId) return branches;
-    return fs.localBranches;
-  })();
-  const branchOptions = useBranchOptions(effectiveBranches);
+  // Branch options are only used by the URL-mode flow now (the chip's branch
+  // pill loads branches per-repo). Keep the computed value but always feed it
+  // the URL branches when in URL mode.
+  const branchOptions = useBranchOptions(fs.useGitHubUrl ? fs.githubBranches : []);
   const agentProfileOptions = useAgentProfileOptions(agentProfiles);
   const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
@@ -528,17 +517,16 @@ export function useTaskCreateDialogData(
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
-  const { branches, isLoading: branchesLoading } = useRepositoryBranches(
-    fs.repositoryId || null,
-    Boolean(open && fs.repositoryId),
-  );
+  // Per-repo branch loading lives in each chip now (RepoChipsRow). No
+  // global branch query is needed here — the chip uses useRepositoryBranches
+  // for its own row, and the store dedupes by repositoryId.
+  const branchesLoading = false;
   const computed = useDialogComputed({
     fs,
     open,
     workspaceId,
     workflowId,
     defaultStepId,
-    branches,
     settingsData,
     agentProfiles,
     workspaces,
@@ -554,7 +542,6 @@ export function useTaskCreateDialogData(
     snapshots,
     repositories,
     repositoriesLoading,
-    branches,
     branchesLoading,
     computed,
   };

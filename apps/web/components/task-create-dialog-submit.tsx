@@ -31,13 +31,12 @@ export function useTaskSubmitHandlers({
   workflowId,
   effectiveWorkflowId,
   effectiveDefaultStepId,
-  repositoryId,
-  selectedLocalRepo,
+  repositories,
+  discoveredRepositories,
   useGitHubUrl,
   githubUrl,
   githubPrHeadBranch,
-  branch,
-  extraRepositories,
+  githubBranch,
   agentProfileId,
   executorId,
   executorProfileId,
@@ -53,8 +52,8 @@ export function useTaskSubmitHandlers({
   setHasTitle,
   setHasDescription,
   setTaskName,
-  setRepositoryId,
-  setBranch,
+  setRepositories,
+  setGitHubBranch,
   setAgentProfileId,
   setExecutorId,
   setSelectedWorkflowId,
@@ -70,8 +69,8 @@ export function useTaskSubmitHandlers({
     setHasTitle(false);
     setHasDescription(false);
     setTaskName("");
-    setRepositoryId("");
-    setBranch("");
+    setRepositories([]);
+    setGitHubBranch("");
     setAgentProfileId("");
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
@@ -82,8 +81,8 @@ export function useTaskSubmitHandlers({
     setHasTitle,
     setHasDescription,
     setTaskName,
-    setRepositoryId,
-    setBranch,
+    setRepositories,
+    setGitHubBranch,
     setAgentProfileId,
     setExecutorId,
     setSelectedWorkflowId,
@@ -95,23 +94,18 @@ export function useTaskSubmitHandlers({
       buildRepositoriesPayload({
         useGitHubUrl,
         githubUrl,
-        branch,
+        githubBranch,
         githubPrHeadBranch,
-        repositoryId,
-        selectedLocalRepo,
-        extraRepositories: extraRepositories.map((row) => ({
-          repositoryId: row.repositoryId,
-          branch: row.branch,
-        })),
+        repositories,
+        discoveredRepositories,
       }),
     [
       useGitHubUrl,
-      repositoryId,
-      branch,
       githubUrl,
+      githubBranch,
       githubPrHeadBranch,
-      selectedLocalRepo,
-      extraRepositories,
+      repositories,
+      discoveredRepositories,
     ],
   );
 
@@ -403,8 +397,7 @@ export function useTaskSubmitHandlers({
             trimmedTitle,
             workspaceId,
             effectiveWorkflowId,
-            repositoryId,
-            selectedLocalRepo,
+            repositories,
             githubUrl,
             agentProfileId,
           })
@@ -433,8 +426,7 @@ export function useTaskSubmitHandlers({
     taskName,
     workspaceId,
     effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
+    repositories,
     githubUrl,
     agentProfileId,
     getRepositoriesPayload,
@@ -454,8 +446,7 @@ export function useTaskSubmitHandlers({
         trimmedTitle,
         workspaceId,
         effectiveWorkflowId,
-        repositoryId,
-        selectedLocalRepo,
+        repositories,
         githubUrl,
         agentProfileId,
       })
@@ -488,8 +479,7 @@ export function useTaskSubmitHandlers({
     taskName,
     workspaceId,
     effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
+    repositories,
     githubUrl,
     agentProfileId,
     isPassthroughProfile,
@@ -509,8 +499,7 @@ export function useTaskSubmitHandlers({
         trimmedTitle,
         workspaceId,
         effectiveWorkflowId,
-        repositoryId,
-        selectedLocalRepo,
+        repositories,
         githubUrl,
         agentProfileId,
       })
@@ -550,8 +539,7 @@ export function useTaskSubmitHandlers({
     taskName,
     workspaceId,
     effectiveWorkflowId,
-    repositoryId,
-    selectedLocalRepo,
+    repositories,
     githubUrl,
     agentProfileId,
     effectiveDefaultStepId,

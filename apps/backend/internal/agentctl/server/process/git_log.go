@@ -25,6 +25,9 @@ type GitCommitInfo struct {
 	FilesChanged  int    `json:"files_changed"`
 	Insertions    int    `json:"insertions"`
 	Deletions     int    `json:"deletions"`
+	// RepositoryName tags commits returned from a multi-repo log fan-out.
+	// Empty for single-repo workspaces. Set by the API layer after the call.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 // CumulativeDiffResult represents the cumulative diff from base commit to HEAD.

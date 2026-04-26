@@ -321,6 +321,44 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 	return m.processRunner.List(sessionID)
 }
 
+// RepoSubpaths returns the subpath name (relative to cfg.WorkDir) for every
+// per-repo tracker discovered at construction time. Empty for single-repo
+// workspaces. Used by callers that want to fan an op out across repos.
+func (m *Manager) RepoSubpaths() []string {
+	out := make([]string, 0, len(m.repoTrackers))
+	for _, t := range m.repoTrackers {
+		if t.repositoryName != "" {
+			out = append(out, t.repositoryName)
+		}
+	}
+	return out
+}
+
+// SetWorkspacePollMode propagates a poll-mode change to the root tracker and
+// every per-repo tracker, then forces a RefreshGitStatus on each non-paused
+// tracker so a fresh snapshot reaches every subscriber. Without the refresh,
+// monitorTick only pushes on detected change — multi-repo workspaces would
+// leave the per-repo state map sparse (one repo present, the other missing)
+// after a focus event, since the agent's initial pushes happen at boot and
+// no replay path exists for clients that subscribe later.
+func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
+	m.workspaceTracker.SetPollMode(mode)
+	for _, t := range m.repoTrackers {
+		t.SetPollMode(mode)
+	}
+	if mode == PollModePaused {
+		return
+	}
+	// Refresh in background — RefreshGitStatus blocks on git commands which can
+	// take seconds on large repos; the HTTP caller shouldn't wait.
+	go func() {
+		m.workspaceTracker.RefreshGitStatus(ctx)
+		for _, t := range m.repoTrackers {
+			t.RefreshGitStatus(ctx)
+		}
+	}()
+}
+
 // GitOperator returns the git operator for git operations against the
 // workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {
@@ -357,7 +395,7 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	if op, ok := m.gitOperatorsBySubpath[cleaned]; ok {
 		return op, nil
 	}
-	op := NewGitOperator(full, m.logger, m.workspaceTracker)
+	op := NewGitOperatorForRepo(full, cleaned, m.logger, m.workspaceTracker)
 	m.gitOperatorsBySubpath[cleaned] = op
 	return op, nil
 }

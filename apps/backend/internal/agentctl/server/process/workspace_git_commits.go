@@ -71,16 +71,17 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 		}
 
 		commits = append(commits, &types.GitCommitNotification{
-			Timestamp:    time.Now(),
-			CommitSHA:    sha,
-			ParentSHA:    parentSHA,
-			AuthorName:   parts[2],
-			AuthorEmail:  parts[3],
-			Message:      parts[4],
-			FilesChanged: filesChanged,
-			Insertions:   insertions,
-			Deletions:    deletions,
-			CommittedAt:  committedAt,
+			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
+			CommitSHA:      sha,
+			ParentSHA:      parentSHA,
+			AuthorName:     parts[2],
+			AuthorEmail:    parts[3],
+			Message:        parts[4],
+			FilesChanged:   filesChanged,
+			Insertions:     insertions,
+			Deletions:      deletions,
+			CommittedAt:    committedAt,
 		})
 	}
 

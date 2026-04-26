@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import type { Repository, Executor, Branch } from "@/lib/types/http";
+import type { Repository, Executor } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
-import {
-  discoverRepositoriesAction,
-  listLocalRepositoryBranchesAction,
-} from "@/app/actions/workspaces";
+import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
@@ -18,7 +15,6 @@ import type {
   StoreSelections,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
-import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 
 export function useWorkflowAgentProfileEffect(
   fs: DialogFormState,
@@ -79,25 +75,27 @@ export function useRepositoryAutoSelectEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const { repositoryId, selectedLocalRepo, useGitHubUrl, setRepositoryId } = fs;
+  // Auto-seed the unified repos list with the user's last-used repo (or the
+  // workspace's only repo) on open. Skipped when URL mode is active or the
+  // user already has at least one row picked.
+  const { repositories: rows, useGitHubUrl, setRepositories } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || repositoryId || selectedLocalRepo || useGitHubUrl) return;
+    if (!open || !workspaceId || useGitHubUrl) return;
+    const hasPickedRow = rows.some((r) => r.repositoryId || r.localPath);
+    if (hasPickedRow) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
+    let pickId: string | null = null;
     if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
-      void Promise.resolve().then(() => setRepositoryId(lastUsedRepoId));
-      return;
+      pickId = lastUsedRepoId;
+    } else if (repositories.length === 1) {
+      pickId = repositories[0].id;
     }
-    if (repositories.length === 1)
-      void Promise.resolve().then(() => setRepositoryId(repositories[0].id));
-  }, [
-    open,
-    repositories,
-    repositoryId,
-    selectedLocalRepo,
-    useGitHubUrl,
-    workspaceId,
-    setRepositoryId,
-  ]);
+    if (!pickId) return;
+    const id = pickId;
+    void Promise.resolve().then(() =>
+      setRepositories([{ key: "row-0", repositoryId: id, branch: "" }]),
+    );
+  }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
 }
 
 export function useDiscoverReposEffect(
@@ -147,35 +145,9 @@ export function useDiscoverReposEffect(
   ]);
 }
 
-export function useLocalBranchesEffect(
-  fs: DialogFormState,
-  open: boolean,
-  workspaceId: string | null,
-  toast: ReturnType<typeof useToast>["toast"],
-) {
-  const { selectedLocalRepo, setLocalBranches, setLocalBranchesLoading } = fs;
-  useEffect(() => {
-    if (!open || !workspaceId || !selectedLocalRepo) return;
-    const repoPath = selectedLocalRepo.path;
-    void Promise.resolve()
-      .then(() => setLocalBranchesLoading(true))
-      .then(() => listLocalRepositoryBranchesAction(workspaceId, repoPath))
-      .then((r) => {
-        setLocalBranches(r.branches);
-      })
-      .catch((e) => {
-        toast({
-          title: "Failed to load branches",
-          description: e instanceof Error ? e.message : "Request failed",
-          variant: "error",
-        });
-        setLocalBranches([]);
-      })
-      .finally(() => {
-        setLocalBranchesLoading(false);
-      });
-  }, [open, selectedLocalRepo, toast, workspaceId, setLocalBranches, setLocalBranchesLoading]);
-}
+// useLocalBranchesEffect removed: the chip row's RepoChip loads branches per
+// repo via useRepositoryBranches now (the store dedupes by id), so we don't
+// need a per-form "primary local repo branches" cache anymore.
 
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
@@ -267,35 +239,30 @@ export function useDefaultSelectionsEffect(
   }, [executorProfileId, executors, setExecutorId]);
 }
 
-export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[]) {
-  const { repositoryId, branch, localBranches, githubBranches, useGitHubUrl, setBranch } = fs;
+/**
+ * Auto-selects a sensible branch in the GitHub URL flow. Per-repo (workspace
+ * or discovered) branch auto-select happens inside RepoChip when a row's
+ * branches load — that keeps the per-row state confined to the chip.
+ */
+export function useBranchAutoSelectEffect(fs: DialogFormState) {
+  const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
   useEffect(() => {
-    if (!repositoryId || branch) return;
-    autoSelectBranch(branches, setBranch);
-  }, [branch, branches, repositoryId, setBranch]);
-  useEffect(() => {
-    if (repositoryId || localBranches.length === 0 || branch) return;
-    autoSelectBranch(localBranches, setBranch);
-  }, [branch, localBranches, repositoryId, setBranch]);
-  const { githubPrHeadBranch } = fs;
-  useEffect(() => {
-    if (!useGitHubUrl || githubBranches.length === 0 || branch) return;
-    // If a PR URL was detected, prefer the PR's head branch.
+    if (!useGitHubUrl || githubBranches.length === 0 || githubBranch) return;
     if (githubPrHeadBranch) {
       const prBranch = githubBranches.find((b) => b.name === githubPrHeadBranch);
       if (prBranch) {
-        setBranch(prBranch.name);
+        setGitHubBranch(prBranch.name);
         return;
       }
     }
-    // GitHub URL branches are referenced by name only (no remote prefix).
+    // GitHub URL branches are referenced by name only (no remote prefix);
     // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
     const preferred =
       githubBranches.find((b) => b.name === "main") ??
       githubBranches.find((b) => b.name === "master") ??
       githubBranches[0];
-    if (preferred) setBranch(preferred.name);
-  }, [branch, githubBranches, useGitHubUrl, setBranch, githubPrHeadBranch]);
+    if (preferred) setGitHubBranch(preferred.name);
+  }, [githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch]);
 }
 
 /** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
@@ -405,14 +372,13 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
-  const { open, workspaceId, workflowId, repositories, repositoriesLoading, branches } = args;
+  const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
   const { agentProfiles, executors, workspaceDefaults, toast, workflows } = args;
   useWorkflowStepsEffect(fs, workflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
-  useBranchAutoSelectEffect(fs, branches);
-  useLocalBranchesEffect(fs, open, workspaceId, toast);
+  useBranchAutoSelectEffect(fs);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
 }

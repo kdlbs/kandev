@@ -39,6 +39,10 @@ type GitOperator struct {
 	workDir          string
 	logger           *logger.Logger
 	workspaceTracker *WorkspaceTracker
+	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
+	// Empty for the workspace-root operator. Stamped on emitted commit
+	// notifications so the frontend can group commits per repo.
+	repoName string
 
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
@@ -52,6 +56,14 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 		logger:           log.WithFields(zap.String("component", "git-operator")),
 		workspaceTracker: workspaceTracker,
 	}
+}
+
+// NewGitOperatorForRepo creates a GitOperator scoped to a multi-repo subpath
+// so its emitted events (e.g. commit notifications) carry the repo name.
+func NewGitOperatorForRepo(workDir, repoName string, log *logger.Logger, workspaceTracker *WorkspaceTracker) *GitOperator {
+	op := NewGitOperator(workDir, log, workspaceTracker)
+	op.repoName = repoName
+	return op
 }
 
 // runGitCommand executes a git command in the workDir with defense-in-depth validation.
@@ -503,15 +515,16 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 		filesChanged, insertions, deletions := g.getCommitStats(ctx, strings.TrimSpace(commitSHA))
 
 		commit := &streams.GitCommitNotification{
-			CommitSHA:    strings.TrimSpace(commitSHA),
-			ParentSHA:    strings.TrimSpace(parentSHA),
-			Message:      message,
-			AuthorName:   authorName,
-			AuthorEmail:  authorEmail,
-			FilesChanged: filesChanged,
-			Insertions:   insertions,
-			Deletions:    deletions,
-			CommittedAt:  time.Now().UTC(),
+			RepositoryName: g.repoName,
+			CommitSHA:      strings.TrimSpace(commitSHA),
+			ParentSHA:      strings.TrimSpace(parentSHA),
+			Message:        message,
+			AuthorName:     authorName,
+			AuthorEmail:    authorEmail,
+			FilesChanged:   filesChanged,
+			Insertions:     insertions,
+			Deletions:      deletions,
+			CommittedAt:    time.Now().UTC(),
 		}
 
 		g.workspaceTracker.NotifyGitCommit(commit)

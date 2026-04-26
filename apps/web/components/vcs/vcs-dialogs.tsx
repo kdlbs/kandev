@@ -22,6 +22,7 @@ import {
   PRBranchSummary,
 } from "./vcs-dialog-fields";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
@@ -396,7 +397,10 @@ export function VcsDialogsProvider({
   const { toast } = useToast();
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
-  const { commit, createPR, isLoading: isGitLoading } = useGitOperations(sessionId);
+  // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
+  // useGitOperations.commit hits the workspace root, which fails for multi-repo
+  // tasks because the task root isn't itself a git repo (exit 1).
+  const { commit, createPR, isLoading: isGitLoading } = useSessionGit(sessionId);
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,

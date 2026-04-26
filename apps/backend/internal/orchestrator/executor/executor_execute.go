@@ -878,14 +878,7 @@ func (e *Executor) persistTaskEnvironment(
 	}
 
 	// Create a new task environment
-	workspacePath := resp.WorktreePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryPath
-	}
-	// Task directory mode: WorkspacePath = task root, WorktreePath = repo subdir
-	if req.TaskDirName != "" && resp.WorktreePath != "" {
-		workspacePath = filepath.Dir(resp.WorktreePath)
-	}
+	workspacePath := resolveTaskEnvWorkspacePath(req, resp)
 	env := &models.TaskEnvironment{
 		TaskID:            taskID,
 		RepositoryID:      req.RepositoryID,
@@ -929,6 +922,30 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 		})
 	}
 	return out
+}
+
+// resolveTaskEnvWorkspacePath returns the host path that should be persisted on
+// the TaskEnvironment row (and used as agentctl's WorkDir on recreation).
+//
+// In task-directory mode the desired value is always the task root that holds
+// every per-repo worktree as a sibling. The legacy single-repo path passes
+// resp.WorktreePath as that repo's subdir, so the parent is the task root.
+// The multi-repo path on the lifecycle adapter mirrors agentctl's WorkDir
+// (already the task root) into resp.WorktreePath, so it must be used as-is —
+// applying filepath.Dir would walk up one level too far and point at the
+// /tasks holder instead.
+func resolveTaskEnvWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
+	workspacePath := resp.WorktreePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	if req.TaskDirName == "" || resp.WorktreePath == "" {
+		return workspacePath
+	}
+	if len(resp.Worktrees) > 1 {
+		return resp.WorktreePath
+	}
+	return filepath.Dir(resp.WorktreePath)
 }
 
 // persistTaskEnvironmentRepos inserts per-repo rows under an existing env id,

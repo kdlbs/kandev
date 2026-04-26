@@ -153,6 +153,10 @@ type GitCommitRequest struct {
 	Message   string `json:"message"`
 	StageAll  bool   `json:"stage_all"`
 	Amend     bool   `json:"amend"`
+	// Multi-repo: subpath of the repo to commit in (e.g. "kandev"). Empty for
+	// single-repo workspaces. Required for multi-repo — committing at the task
+	// root fails because it isn't itself a git repo.
+	Repo string `json:"repo,omitempty"`
 }
 
 // GitRenameBranchRequest for worktree.rename_branch action
@@ -164,19 +168,22 @@ type GitRenameBranchRequest struct {
 // GitStageRequest for worktree.stage action
 type GitStageRequest struct {
 	SessionID string   `json:"session_id"`
-	Paths     []string `json:"paths"` // Empty = stage all
+	Paths     []string `json:"paths"`          // Empty = stage all
+	Repo      string   `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // GitUnstageRequest for worktree.unstage action
 type GitUnstageRequest struct {
 	SessionID string   `json:"session_id"`
-	Paths     []string `json:"paths"` // Empty = unstage all
+	Paths     []string `json:"paths"`          // Empty = unstage all
+	Repo      string   `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // GitDiscardRequest for worktree.discard action
 type GitDiscardRequest struct {
 	SessionID string   `json:"session_id"`
-	Paths     []string `json:"paths"` // Required - files to discard
+	Paths     []string `json:"paths"`          // Required - files to discard
+	Repo      string   `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // GitCreatePRRequest for worktree.create_pr action
@@ -192,13 +199,15 @@ type GitCreatePRRequest struct {
 type GitRevertCommitRequest struct {
 	SessionID string `json:"session_id"`
 	CommitSHA string `json:"commit_sha"`
+	Repo      string `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // GitResetRequest for worktree.reset action
 type GitResetRequest struct {
 	SessionID string `json:"session_id"`
 	CommitSHA string `json:"commit_sha"`
-	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
+	Mode      string `json:"mode"`           // "soft", "mixed", or "hard"
+	Repo      string `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // GitShowCommitRequest for session.commit_diff action
@@ -359,7 +368,7 @@ func (h *GitHandlers) wsCommit(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, err
 	}
 
-	result, err := client.GitCommit(ctx, req.Message, req.StageAll, req.Amend)
+	result, err := client.GitCommit(ctx, req.Message, req.StageAll, req.Amend, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("commit failed: %w", err)
 	}
@@ -421,7 +430,7 @@ func (h *GitHandlers) wsReset(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, err
 	}
 
-	result, err := client.GitReset(ctx, req.CommitSHA, req.Mode)
+	result, err := client.GitReset(ctx, req.CommitSHA, req.Mode, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("reset failed: %w", err)
 	}
@@ -445,7 +454,7 @@ func (h *GitHandlers) wsStage(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, err
 	}
 
-	result, err := client.GitStage(ctx, req.Paths)
+	result, err := client.GitStage(ctx, req.Paths, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("stage failed: %w", err)
 	}
@@ -469,7 +478,7 @@ func (h *GitHandlers) wsUnstage(ctx context.Context, msg *ws.Message) (*ws.Messa
 		return nil, err
 	}
 
-	result, err := client.GitUnstage(ctx, req.Paths)
+	result, err := client.GitUnstage(ctx, req.Paths, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("unstage failed: %w", err)
 	}
@@ -497,7 +506,7 @@ func (h *GitHandlers) wsDiscard(ctx context.Context, msg *ws.Message) (*ws.Messa
 		return nil, err
 	}
 
-	result, err := client.GitDiscard(ctx, req.Paths)
+	result, err := client.GitDiscard(ctx, req.Paths, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("discard failed: %w", err)
 	}
@@ -567,7 +576,7 @@ func (h *GitHandlers) wsRevertCommit(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, err
 	}
 
-	result, err := client.GitRevertCommit(ctx, req.CommitSHA)
+	result, err := client.GitRevertCommit(ctx, req.CommitSHA, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("revert commit failed: %w", err)
 	}
@@ -702,7 +711,7 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	// Use target branch for dynamic merge-base calculation.
 	// This ensures accurate commit filtering even after rebases.
-	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit, targetBranch)
+	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit, targetBranch, "")
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}

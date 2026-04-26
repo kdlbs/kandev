@@ -29,7 +29,7 @@ function makeProps(
     hasTitle: true,
     hasDescription: true,
     hasRepositorySelection: true,
-    branch: "main",
+    hasAllBranches: true,
     agentProfileId: "agent-1",
     workspaceId: "ws-1",
     effectiveWorkflowId: "wf-1",
@@ -69,7 +69,9 @@ describe("computeDisabledReason (start-task)", () => {
   });
 
   it("flags missing branch", () => {
-    expect(computeDisabledReason(makeProps({ branch: "" }), KIND_START)).toBe(REASON_BRANCH);
+    expect(computeDisabledReason(makeProps({ hasAllBranches: false }), KIND_START)).toBe(
+      REASON_BRANCH,
+    );
   });
 
   it("flags missing workspace in create mode", () => {
@@ -157,7 +159,7 @@ describe("computeDisabledReason (default)", () => {
           isSessionMode: true,
           hasTitle: false,
           hasRepositorySelection: false,
-          branch: "",
+          hasAllBranches: false,
         }),
         KIND_DEFAULT,
       ),

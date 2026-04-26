@@ -216,7 +216,12 @@ export type TaskCreateDialogFooterProps = {
   hasTitle: boolean;
   hasDescription: boolean;
   hasRepositorySelection: boolean;
-  branch: string;
+  /**
+   * True when every selected repo has a base branch picked (and the URL flow's
+   * branch, if active). Was previously `branch: string` for the single-repo
+   * primary; now aggregated upstream because each row has its own branch.
+   */
+  hasAllBranches: boolean;
   agentProfileId: string;
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
@@ -245,7 +250,7 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
     props.isCreatingTask ||
     !props.hasTitle ||
     !props.hasRepositorySelection ||
-    !props.branch ||
+    !props.hasAllBranches ||
     missingCtx
   );
 }
@@ -263,7 +268,7 @@ export const REASON_DESCRIPTION = "Add a session description";
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasTitle) return REASON_TITLE;
   if (!props.hasRepositorySelection) return REASON_REPO;
-  if (!props.branch) return REASON_BRANCH;
+  if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
   return null;

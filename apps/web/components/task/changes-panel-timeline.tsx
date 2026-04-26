@@ -24,6 +24,7 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
 import { FileRow, BulkActionBar, DefaultActionButtons } from "./changes-panel-file-row";
 import { CommitRow, type CommitItem } from "./commit-row";
+import { groupByRepositoryName } from "@/lib/group-by-repo";
 
 // --- Timeline visual components ---
 
@@ -38,27 +39,7 @@ type ChangedFile = {
   repositoryName?: string;
 };
 
-/**
- * Groups changed files by repository name, preserving original order within
- * each group. Returns an empty-name leading group when files lack a
- * repository name (single-repo workspaces) so the renderer can skip the
- * per-repo header in that case.
- */
-function groupChangedFilesByRepository(
-  files: ChangedFile[],
-): Array<{ repositoryName: string; files: ChangedFile[] }> {
-  const order: string[] = [];
-  const buckets = new Map<string, ChangedFile[]>();
-  for (const file of files) {
-    const name = file.repositoryName ?? "";
-    if (!buckets.has(name)) {
-      buckets.set(name, []);
-      order.push(name);
-    }
-    buckets.get(name)!.push(file);
-  }
-  return order.map((name) => ({ repositoryName: name, files: buckets.get(name)! }));
-}
+// Per-repo grouping is shared with the Review dialog — see @/lib/group-by-repo.
 
 // --- Timeline section dot colors ---
 const DOT_COLORS = {
@@ -81,6 +62,7 @@ function TimelineSection({
   isLast,
   children,
   collapsible = true,
+  defaultCollapsed = false,
   "data-testid": testId,
 }: {
   dotColor: string;
@@ -90,9 +72,10 @@ function TimelineSection({
   isLast?: boolean;
   children?: React.ReactNode;
   collapsible?: boolean;
+  defaultCollapsed?: boolean;
   "data-testid"?: string;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const canCollapse = collapsible && !!label;
 
   return (
@@ -151,10 +134,15 @@ type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
-  onRevertCommit?: (sha: string) => void;
-  onAmendCommit?: (currentMessage: string) => void;
-  onResetToCommit?: (sha: string) => void;
+  // Multi-repo: handlers receive the commit's repository_name so amend/revert/
+  // reset land in the right git repo. Without it the op runs at the workspace
+  // root, which fails ("can only revert latest commit") for multi-repo tasks.
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
 };
+
+// Commits grouping shares the helper above with files — see @/lib/group-by-repo.
 
 export function CommitsSection({
   commits,
@@ -164,8 +152,8 @@ export function CommitsSection({
   onAmendCommit,
   onResetToCommit,
 }: CommitsSectionProps) {
-  // Find the first unpushed commit for context menu actions (amend/revert only on latest unpushed)
-  const firstUnpushedIndex = commits.findIndex((c) => c.pushed !== true);
+  const groups = groupByRepositoryName(commits, (c) => c.repository_name);
+  const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
 
   return (
     <TimelineSection
@@ -173,22 +161,101 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
+      // User preference: commits panel starts collapsed — the file changes are
+      // the primary signal; commit history is reference info you expand on demand.
+      defaultCollapsed
       data-testid="commits-section"
     >
       <ul data-testid="commits-list" className="space-y-0.5">
-        {commits.map((commit, index) => (
-          <CommitRow
-            key={`${commit.commit_sha}-${index}`}
-            commit={commit}
-            isLatest={index === firstUnpushedIndex}
-            onOpenCommitDetail={onOpenCommitDetail}
-            onAmendCommit={commit.pushed ? undefined : onAmendCommit}
-            onRevertCommit={commit.pushed ? undefined : onRevertCommit}
-            onResetToCommit={commit.pushed ? undefined : onResetToCommit}
-          />
-        ))}
+        {showRepoHeaders
+          ? groups.map((g) => (
+              <CommitsRepoGroup
+                key={g.repositoryName || "__no_repo__"}
+                repositoryName={g.repositoryName}
+                groupCommits={g.items}
+                onOpenCommitDetail={onOpenCommitDetail}
+                onAmendCommit={onAmendCommit}
+                onRevertCommit={onRevertCommit}
+                onResetToCommit={onResetToCommit}
+              />
+            ))
+          : commits.map((commit, index) => (
+              <CommitRow
+                key={`${commit.commit_sha}-${index}`}
+                commit={commit}
+                // Single-repo: only the newest unpushed commit is "latest"
+                // (revert/amend are gated on this in CommitRow).
+                isLatest={index === commits.findIndex((c) => c.pushed !== true)}
+                onOpenCommitDetail={onOpenCommitDetail}
+                onAmendCommit={commit.pushed ? undefined : onAmendCommit}
+                onRevertCommit={commit.pushed ? undefined : onRevertCommit}
+                onResetToCommit={commit.pushed ? undefined : onResetToCommit}
+              />
+            ))}
       </ul>
     </TimelineSection>
+  );
+}
+
+function CommitsRepoGroup({
+  repositoryName,
+  groupCommits,
+  onOpenCommitDetail,
+  onAmendCommit,
+  onRevertCommit,
+  onResetToCommit,
+}: {
+  repositoryName: string;
+  groupCommits: CommitItem[];
+  onOpenCommitDetail?: (sha: string) => void;
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  // Each repo has its own "latest unpushed commit" — revert/amend in this
+  // group must target THIS repo's newest, not the merged-list newest. Using
+  // the global firstUnpushedIndex would mark only one commit across all repos
+  // as latest and trigger "can only revert latest commit" everywhere else.
+  const firstUnpushedInGroup = groupCommits.findIndex((c) => c.pushed !== true);
+  return (
+    <li
+      data-testid="commits-repo-group"
+      data-repository-name={repositoryName || ""}
+    >
+      <button
+        type="button"
+        className="w-full flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80"
+        data-testid="commits-repo-header"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        {collapsed ? (
+          <IconChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+        ) : (
+          <IconChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+        )}
+        <span className="truncate">{repositoryName || "Other"}</span>
+        <span className="text-muted-foreground/50 normal-case tracking-normal">
+          {groupCommits.length}
+        </span>
+      </button>
+      {!collapsed && (
+        <ul className="space-y-0.5">
+          {groupCommits.map((commit, index) => (
+            <CommitRow
+              key={commit.commit_sha}
+              commit={commit}
+              isLatest={index === firstUnpushedInGroup}
+              onOpenCommitDetail={onOpenCommitDetail}
+              onAmendCommit={commit.pushed ? undefined : onAmendCommit}
+              onRevertCommit={commit.pushed ? undefined : onRevertCommit}
+              onResetToCommit={commit.pushed ? undefined : onResetToCommit}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -313,9 +380,11 @@ type FileListSectionProps = {
   onSecondaryAction?: () => void;
   onOpenDiff: (path: string) => void;
   onEditFile: (path: string) => void;
-  onStage: (path: string) => void;
-  onUnstage: (path: string) => void;
-  onDiscard: (path: string) => void;
+  // Multi-repo: handlers receive the file's repositoryName so each per-file op
+  // hits the right git repo. Same-named files across repos collide by path.
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string) => void;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[]) => void;
@@ -335,13 +404,28 @@ function FileListBody(props: {
   onKeyDown: (e: React.KeyboardEvent) => void;
   onOpenDiff: (path: string) => void;
   onEditFile: (path: string) => void;
-  onStage: (path: string) => void;
-  onUnstage: (path: string) => void;
-  onDiscard: (path: string) => void;
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string) => void;
 }) {
   const { variant, files, pendingStageFiles, multiSelect } = props;
-  const groups = useMemo(() => groupChangedFilesByRepository(files), [files]);
+  const groups = useMemo(
+    () => groupByRepositoryName(files, (f) => f.repositoryName),
+    [files],
+  );
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
+  // Per-repo collapsed state: keyed by repositoryName. Default expanded;
+  // setting an entry to true collapses that group. Persists across re-renders
+  // for the lifetime of this section instance (resets on unmount).
+  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => new Set());
+  const toggleRepo = useCallback((name: string) => {
+    setCollapsedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
 
   const renderRow = (file: ChangedFile) => (
     <FileRow
@@ -373,21 +457,31 @@ function FileListBody(props: {
               data-testid="changes-repo-group"
               data-repository-name={group.repositoryName || ""}
             >
-              <div
-                className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide"
+              <button
+                type="button"
+                className="w-full flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80"
                 data-testid="changes-repo-header"
+                aria-expanded={!collapsedRepos.has(group.repositoryName)}
+                onClick={() => toggleRepo(group.repositoryName)}
               >
+                {collapsedRepos.has(group.repositoryName) ? (
+                  <IconChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                ) : (
+                  <IconChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                )}
                 <span className="truncate">{group.repositoryName || "Other"}</span>
                 <span className="text-muted-foreground/50 normal-case tracking-normal">
-                  {group.files.length}
+                  {group.items.length}
                 </span>
-              </div>
-              <ul className="space-y-0.5">{group.files.map(renderRow)}</ul>
+              </button>
+              {!collapsedRepos.has(group.repositoryName) && (
+                <ul className="space-y-0.5">{group.items.map(renderRow)}</ul>
+              )}
             </li>
           ) : (
             // Single-repo flat list: render rows inline so the DOM shape stays
             // identical to the pre-multi-repo behavior.
-            group.files.map(renderRow)
+            group.items.map(renderRow)
           ),
         )}
       </ul>

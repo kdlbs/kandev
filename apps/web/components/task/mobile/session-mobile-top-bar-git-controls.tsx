@@ -37,6 +37,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -433,15 +434,13 @@ export function useMobileGitActions(
   setPrDialogOpen: (v: boolean) => void,
 ) {
   const { toast } = useToast();
-  const {
-    pull,
-    push,
-    rebase,
-    merge,
-    commit,
-    createPR,
-    isLoading: isGitLoading,
-  } = useGitOperations(sessionId ?? null);
+  // SessionGit's commit fans out per-repo for multi-repo workspaces; the raw
+  // useGitOperations.commit hits the workspace root and fails on multi-repo
+  // tasks. Pull from useGitOperations only what SessionGit doesn't override.
+  const { pull, push, rebase, merge, createPR, isLoading: isGitLoading } = useGitOperations(
+    sessionId ?? null,
+  );
+  const { commit } = useSessionGit(sessionId ?? null);
   const handleGitOperation = useGitToast();
 
   const handlePull = useCallback(

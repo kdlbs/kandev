@@ -1,46 +1,72 @@
+"use client";
+
 import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { listRepositoryBranches } from "@/lib/api";
+import { listBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
 
-export function useRepositoryBranches(repositoryId: string | null, enabled = true) {
+/**
+ * Source of branches for a row: either a workspace repo (by id) or an
+ * on-machine folder (by path). Both routes go through one backend endpoint
+ * (`/workspaces/:id/branches`) and share one Zustand cache slice — id-based
+ * entries are keyed by the repo id, path-based entries get a synthetic key.
+ *
+ * `workspaceId` is always required because the route segment needs it.
+ */
+export type BranchSource =
+  | { kind: "id"; workspaceId: string; repositoryId: string }
+  | { kind: "path"; workspaceId: string; path: string };
+
+function cacheKeyFor(source: BranchSource | null): string {
+  if (!source) return "";
+  return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
+}
+
+/**
+ * Loads git branches for a workspace repo or an on-machine path. One hook,
+ * one cache, one backend endpoint — the source shape decides which query
+ * param goes on the wire and which key the cache uses.
+ */
+export function useBranches(
+  source: BranchSource | null,
+  enabled = true,
+): { branches: Branch[]; isLoading: boolean } {
+  const key = cacheKeyFor(source);
   const branches = useAppStore((state) =>
-    repositoryId
-      ? (state.repositoryBranches.itemsByRepositoryId[repositoryId] ?? EMPTY_BRANCHES)
-      : EMPTY_BRANCHES,
+    key ? (state.repositoryBranches.itemsByRepositoryId[key] ?? EMPTY_BRANCHES) : EMPTY_BRANCHES,
   );
   const isLoaded = useAppStore((state) =>
-    repositoryId ? (state.repositoryBranches.loadedByRepositoryId[repositoryId] ?? false) : false,
+    key ? (state.repositoryBranches.loadedByRepositoryId[key] ?? false) : false,
   );
   const isLoading = useAppStore((state) =>
-    repositoryId ? (state.repositoryBranches.loadingByRepositoryId[repositoryId] ?? false) : false,
+    key ? (state.repositoryBranches.loadingByRepositoryId[key] ?? false) : false,
   );
   const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
   const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
   const inFlightRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || !repositoryId) return;
+    if (!enabled || !source) return;
     if (isLoaded || inFlightRef.current) return;
     inFlightRef.current = true;
-    setRepositoryBranchesLoading(repositoryId, true);
-    // Capture the repositoryId at effect start for the closure
-    const fetchRepoId = repositoryId;
-    listRepositoryBranches(fetchRepoId, { cache: "no-store" })
-      .then((response) => {
-        // Safe to always store: data is keyed by repositoryId in the store
-        setRepositoryBranches(fetchRepoId, response.branches);
-      })
-      .catch(() => {
-        setRepositoryBranches(fetchRepoId, []);
-      })
+    setRepositoryBranchesLoading(key, true);
+
+    const promise =
+      source.kind === "id"
+        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+        : listBranches(source.workspaceId, { path: source.path });
+
+    promise
+      .then((response) => setRepositoryBranches(key, response.branches))
+      .catch(() => setRepositoryBranches(key, []))
       .finally(() => {
         inFlightRef.current = false;
-        setRepositoryBranchesLoading(fetchRepoId, false);
+        setRepositoryBranchesLoading(key, false);
       });
-  }, [enabled, isLoaded, repositoryId, setRepositoryBranches, setRepositoryBranchesLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render
+  }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
 
   return { branches, isLoading };
 }

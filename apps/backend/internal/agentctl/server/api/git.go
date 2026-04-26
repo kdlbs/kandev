@@ -4,11 +4,28 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"go.uber.org/zap"
 )
+
+// sortCommitsByCommittedAtDesc sorts commits newest-first using committed_at.
+// Commits with unparseable timestamps preserve their original relative order
+// (sort.SliceStable). Used when merging logs from multiple repos so the
+// combined timeline reads chronologically.
+func sortCommitsByCommittedAtDesc(commits []*process.GitCommitInfo) {
+	sort.SliceStable(commits, func(i, j int) bool {
+		ti, errI := time.Parse(time.RFC3339, commits[i].CommittedAt)
+		tj, errJ := time.Parse(time.RFC3339, commits[j].CommittedAt)
+		if errI != nil || errJ != nil {
+			return false
+		}
+		return ti.After(tj)
+	})
+}
 
 // Repo selects a repository sub-directory of the workspace for multi-repo
 // task roots. Optional. Empty = workspace root (single-repo behavior).
@@ -602,7 +619,13 @@ func (s *Server) handleGitReset(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// handleGitLog handles GET /api/v1/git/log
+// handleGitLog handles GET /api/v1/git/log.
+//
+// Multi-repo: when the caller doesn't pin a repo (?repo= empty) and the
+// workspace contains per-repo subdirs, fan out one log per repo and merge
+// the results, stamping RepositoryName on each commit so the frontend can
+// group them. Without this, the call would land on the workspace root which
+// for multi-repo task workspaces isn't a git repo and returns nothing.
 func (s *Server) handleGitLog(c *gin.Context) {
 	var req GitLogRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -629,42 +652,90 @@ func (s *Server) handleGitLog(c *gin.Context) {
 		return
 	}
 
-	gitOp, gitOpErr := s.procMgr.GitOperatorFor(req.Repo)
-	if gitOpErr != nil {
-		c.JSON(http.StatusBadRequest, process.GitLogResult{
-			Success: false,
-			Error:   gitOpErr.Error(),
-		})
-		return
+	if req.Repo == "" {
+		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
+			s.handleGitLogMultiRepo(c, req, subs, limit)
+			return
+		}
 	}
 
-	// If target_branch is provided, compute merge-base dynamically.
-	// This ensures we only show commits not yet merged into the target branch,
-	// which is accurate even after rebases.
+	result, err := s.runGitLogForRepo(c, req, limit, req.Repo)
+	if err != nil {
+		s.handleGitError(c, "log", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// runGitLogForRepo runs git log against a single repo subpath. Returns a
+// result-with-error or a non-nil error for transport failures.
+func (s *Server) runGitLogForRepo(
+	c *gin.Context,
+	req GitLogRequest,
+	limit int,
+	repo string,
+) (*process.GitLogResult, error) {
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
+	if gitOpErr != nil {
+		return nil, gitOpErr
+	}
+
 	baseCommit := req.Since
 	if req.TargetBranch != "" {
 		mergeBase, err := gitOp.GetMergeBase(c.Request.Context(), "HEAD", req.TargetBranch)
 		if err != nil {
 			s.logger.Warn("failed to compute merge-base, falling back to since",
 				zap.String("target_branch", req.TargetBranch),
+				zap.String("repo", repo),
 				zap.Error(err))
-			// Fall back to the provided base commit
 		} else if mergeBase != "" {
 			baseCommit = mergeBase
 		}
 	}
 
-	result, err := gitOp.GetLog(c.Request.Context(), baseCommit, limit)
-	if err != nil {
-		s.logger.Error("git log failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, process.GitLogResult{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
+	return gitOp.GetLog(c.Request.Context(), baseCommit, limit)
+}
+
+// handleGitLogMultiRepo fans the request out across every per-repo tracker,
+// stamps RepositoryName on each returned commit, and merges into a single
+// log sorted by committed_at descending. Per-repo limits are applied
+// individually; the merged result is then truncated to the request limit.
+func (s *Server) handleGitLogMultiRepo(
+	c *gin.Context,
+	req GitLogRequest,
+	subpaths []string,
+	limit int,
+) {
+	merged := make([]*process.GitCommitInfo, 0)
+	for _, sub := range subpaths {
+		result, err := s.runGitLogForRepo(c, req, limit, sub)
+		if err != nil {
+			s.logger.Warn("git log for repo failed; skipping",
+				zap.String("repo", sub), zap.Error(err))
+			continue
+		}
+		if !result.Success {
+			s.logger.Warn("git log for repo returned failure; skipping",
+				zap.String("repo", sub), zap.String("error", result.Error))
+			continue
+		}
+		for _, commit := range result.Commits {
+			commit.RepositoryName = sub
+			merged = append(merged, commit)
+		}
 	}
 
-	c.JSON(http.StatusOK, result)
+	// Sort newest-first across repos. Falls back to insertion order if either
+	// timestamp is unparseable.
+	sortCommitsByCommittedAtDesc(merged)
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	c.JSON(http.StatusOK, process.GitLogResult{
+		Success: true,
+		Commits: merged,
+	})
 }
 
 // handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff

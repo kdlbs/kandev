@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -206,5 +207,54 @@ func TestGetWorkspaceInfoForSession_SessionNotFound(t *testing.T) {
 	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+// Multi-repo: the workspace path agentctl boots with must be the task root
+// (parent of every per-repo subdir) so its scanRepositorySubdirs detects all
+// repos and starts a per-repo tracker for each. Returning a single repo's
+// path would collapse fan-out into the legacy single-tracker mode and
+// suppress the per-repo events the Changes panel needs to render headers.
+func TestGetWorkspaceInfoForSession_MultiRepoReturnsTaskRoot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	session := &models.TaskSession{
+		ID:        "session-multi",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	for i, path := range []string{
+		"/tmp/tasks/do-nothing_mvo/kandev",
+		"/tmp/tasks/do-nothing_mvo/thm",
+	} {
+		if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+			ID:           fmt.Sprintf("wt%d", i),
+			SessionID:    session.ID,
+			WorktreeID:   fmt.Sprintf("wid%d", i),
+			RepositoryID: fmt.Sprintf("repo%d", i),
+			Position:     i,
+			WorktreePath: path,
+			CreatedAt:    now,
+		}); err != nil {
+			t.Fatalf("create worktree %d: %v", i, err)
+		}
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", session.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if info.WorkspacePath != "/tmp/tasks/do-nothing_mvo" {
+		t.Errorf("expected WorkspacePath '/tmp/tasks/do-nothing_mvo' (task root), got %q",
+			info.WorkspacePath)
 	}
 }

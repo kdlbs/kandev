@@ -79,6 +79,7 @@ type BranchSelectorProps = {
   placeholder: string;
   searchPlaceholder: string;
   emptyMessage: string;
+  triggerClassName?: string;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -89,6 +90,7 @@ export const BranchSelector = memo(function BranchSelector({
   placeholder,
   searchPlaceholder,
   emptyMessage,
+  triggerClassName,
 }: BranchSelectorProps) {
   return (
     <Combobox
@@ -101,6 +103,7 @@ export const BranchSelector = memo(function BranchSelector({
       disabled={disabled}
       dropdownLabel="Base Branch"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      triggerClassName={triggerClassName}
       testId="branch-selector"
     />
   );
@@ -233,10 +236,9 @@ export const InlineTaskName = memo(function InlineTaskName({
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder="task-name"
+      placeholder="Task name"
       data-testid="task-title-input"
-      size={Math.max(value.length, 9)}
-      className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 -mx-1.5 hover:bg-muted focus:bg-muted transition-colors"
+      className="w-full bg-transparent border-none outline-none focus:ring-0 text-sm font-medium rounded-md px-2 py-1 -mx-2 hover:bg-muted/30 focus:bg-muted/30 transition-colors placeholder:text-muted-foreground/70"
     />
   );
 });

@@ -61,6 +61,8 @@ const gitEventHandlers: GitEventHandlers = {
       deletions: event.commit.deletions,
       committed_at: event.commit.committed_at,
       created_at: event.commit.created_at ?? event.timestamp,
+      // Multi-repo: tag the commit so the Commits panel can group per repo.
+      repository_name: event.commit.repository_name,
     });
     // Invalidate cumulative diff cache when new commit is created
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));

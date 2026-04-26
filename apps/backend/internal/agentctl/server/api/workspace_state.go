@@ -19,6 +19,19 @@ type SetPollModeRequest struct {
 // See plan: focus-gated git polling. The gateway computes a workspace-level
 // mode (fast if any session focused, slow if any subscribed, paused otherwise)
 // and pushes it here so the tracker can throttle expensive git scans.
+//
+// Multi-repo: the per-repo trackers also need the mode update — otherwise they
+// keep their construction-time default (fast) and never throttle, AND they
+// miss the focus-triggered immediate scan that handleMonitorModeChange does
+// on a transition INTO fast. Fanning out keeps every repo in lockstep.
+//
+// Snapshot-on-focus: a transition to fast/slow forces a RefreshGitStatus on
+// every tracker so a fresh git status reaches subscribers. monitorTick
+// otherwise only pushes on detected change; without this, a page opened
+// after the agent has been idle would see no events until the user makes
+// a file change. Multi-repo amplifies it: per-repo state is a Map and the
+// aggregator only renders the repos that have published — missing events
+// = missing files in the Changes panel, not just stale data.
 func (s *Server) handleSetPollMode(c *gin.Context) {
 	var req SetPollModeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -32,7 +45,7 @@ func (s *Server) handleSetPollMode(c *gin.Context) {
 		return
 	}
 
-	s.procMgr.GetWorkspaceTracker().SetPollMode(mode)
+	s.procMgr.SetWorkspacePollMode(c.Request.Context(), mode)
 	s.logger.Debug("workspace poll mode updated", zap.String("mode", req.Mode))
 
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})

@@ -243,6 +243,10 @@ type GitCommitData struct {
 	Deletions    int    `json:"deletions"`
 	CommittedAt  string `json:"committed_at"`
 	CreatedAt    string `json:"created_at,omitempty"`
+	// RepositoryName identifies which repo this commit belongs to in multi-repo
+	// task workspaces. Empty for single-repo. Carried to the frontend so the
+	// Commits panel can render per-repo group headers.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 type GitResetData struct {

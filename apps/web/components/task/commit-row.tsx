@@ -22,6 +22,8 @@ export type CommitItem = {
   insertions: number;
   deletions: number;
   pushed?: boolean;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 /** Context menu for commit items */
@@ -36,9 +38,12 @@ function CommitContextMenu({
   children: React.ReactNode;
   commit: CommitItem;
   isLatest: boolean;
-  onAmendCommit?: (currentMessage: string) => void;
-  onRevertCommit?: (sha: string) => void;
-  onResetToCommit?: (sha: string) => void;
+  // Multi-repo: handlers receive the commit's repository_name so the
+  // amend/revert/reset op runs in the right git repo. Without it, ops hit
+  // the workspace root which fails on multi-repo task workspaces.
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
   const hasActions = onAmendCommit || onRevertCommit || onResetToCommit;
 
@@ -51,19 +56,25 @@ function CommitContextMenu({
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         {isLatest && onAmendCommit && (
-          <ContextMenuItem onSelect={() => onAmendCommit(commit.commit_message)}>
+          <ContextMenuItem
+            onSelect={() => onAmendCommit(commit.commit_message, commit.repository_name)}
+          >
             <IconPencil className="h-3.5 w-3.5" />
             Amend message
           </ContextMenuItem>
         )}
         {isLatest && onRevertCommit && (
-          <ContextMenuItem onSelect={() => onRevertCommit(commit.commit_sha)}>
+          <ContextMenuItem
+            onSelect={() => onRevertCommit(commit.commit_sha, commit.repository_name)}
+          >
             <IconArrowBackUp className="h-3.5 w-3.5" />
             Revert commit
           </ContextMenuItem>
         )}
         {onResetToCommit && (
-          <ContextMenuItem onSelect={() => onResetToCommit(commit.commit_sha)}>
+          <ContextMenuItem
+            onSelect={() => onResetToCommit(commit.commit_sha, commit.repository_name)}
+          >
             <IconHistoryToggle className="h-3.5 w-3.5" />
             Reset to this commit
           </ContextMenuItem>
@@ -83,9 +94,12 @@ function CommitRowActions({
 }: {
   commit: CommitItem;
   isLatest: boolean;
-  onAmendCommit?: (currentMessage: string) => void;
-  onRevertCommit?: (sha: string) => void;
-  onResetToCommit?: (sha: string) => void;
+  // Multi-repo: handlers receive the commit's repository_name so the
+  // amend/revert/reset op runs in the right git repo. Without it, ops hit
+  // the workspace root which fails on multi-repo task workspaces.
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
   return (
     <span className="absolute right-2 top-0 bottom-0 hidden group-hover:flex items-center gap-1">
@@ -98,7 +112,7 @@ function CommitRowActions({
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
-                onAmendCommit(commit.commit_message);
+                onAmendCommit(commit.commit_message, commit.repository_name);
               }}
             >
               <IconPencil className="h-3.5 w-3.5" />
@@ -116,7 +130,7 @@ function CommitRowActions({
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
-                onRevertCommit(commit.commit_sha);
+                onRevertCommit(commit.commit_sha, commit.repository_name);
               }}
             >
               <IconArrowBackUp className="h-3.5 w-3.5" />
@@ -134,7 +148,7 @@ function CommitRowActions({
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
-                onResetToCommit(commit.commit_sha);
+                onResetToCommit(commit.commit_sha, commit.repository_name);
               }}
             >
               <IconHistoryToggle className="h-3.5 w-3.5" />
@@ -159,9 +173,12 @@ export function CommitRow({
   commit: CommitItem;
   isLatest: boolean;
   onOpenCommitDetail?: (sha: string) => void;
-  onAmendCommit?: (currentMessage: string) => void;
-  onRevertCommit?: (sha: string) => void;
-  onResetToCommit?: (sha: string) => void;
+  // Multi-repo: handlers receive the commit's repository_name so the
+  // amend/revert/reset op runs in the right git repo. Without it, ops hit
+  // the workspace root which fails on multi-repo task workspaces.
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
   const showActions = onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit));
 

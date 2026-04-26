@@ -127,50 +127,50 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	}, nil
 }
 
-func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]Branch, error) {
-	repo, err := s.repoEntities.GetRepository(ctx, repoID)
+// ListBranches lists git branches for either an imported workspace repo
+// (by id, path resolved from the DB row) or an on-machine folder (by path
+// directly). Exactly one of `repoID` or `path` should be set; the handler
+// validates that.
+func (s *Service) ListBranches(ctx context.Context, repoID, path string) ([]Branch, error) {
+	resolvedPath, err := s.resolveBranchListingPath(ctx, repoID, path)
 	if err != nil {
 		return nil, err
 	}
-	if repo.LocalPath == "" {
-		return nil, fmt.Errorf("repository local path is empty")
-	}
-	absPath, err := filepath.Abs(repo.LocalPath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid repository path: %w", err)
-	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return nil, ErrPathNotAllowed
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("repository path is not a directory")
-	}
-	return listGitBranches(absPath)
+	return listGitBranches(resolvedPath)
 }
 
-func (s *Service) ListLocalRepositoryBranches(ctx context.Context, path string) ([]Branch, error) {
-	if path == "" {
-		return nil, fmt.Errorf("repository path is required")
+// resolveBranchListingPath turns the request inputs into a validated absolute
+// path to list branches in. Validation is identical for both inputs (must be
+// allowed root, must exist, must be a directory) — only the source differs.
+func (s *Service) resolveBranchListingPath(ctx context.Context, repoID, path string) (string, error) {
+	switch {
+	case repoID != "":
+		repo, err := s.repoEntities.GetRepository(ctx, repoID)
+		if err != nil {
+			return "", err
+		}
+		if repo.LocalPath == "" {
+			return "", fmt.Errorf("repository local path is empty")
+		}
+		path = repo.LocalPath
+	case path == "":
+		return "", fmt.Errorf("repository_id or path is required")
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("invalid repository path: %w", err)
+		return "", fmt.Errorf("invalid repository path: %w", err)
 	}
 	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return nil, ErrPathNotAllowed
+		return "", ErrPathNotAllowed
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("repository path is not a directory")
+		return "", fmt.Errorf("repository path is not a directory")
 	}
-	return listGitBranches(absPath)
+	return absPath, nil
 }
 
 func (s *Service) discoveryRoots() []string {

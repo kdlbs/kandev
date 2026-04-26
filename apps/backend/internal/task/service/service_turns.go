@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -202,9 +203,16 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		taskID = session.TaskID
 	}
 
-	// Get workspace path from the session's worktree
+	// Get workspace path from the session's worktree(s).
+	// Multi-repo: every per-repo worktree sits as a sibling under the task root
+	// (~/.kandev/tasks/{taskDirName}/{repoName}/), so the workspace path agentctl
+	// needs is the parent of any one of them. Picking the first repo's path here
+	// would point agentctl at a single repo subdir and disable the per-repo
+	// tracker fan-out that scanRepositorySubdirs relies on.
 	var workspacePath string
-	if len(session.Worktrees) > 0 {
+	if len(session.Worktrees) > 1 {
+		workspacePath = filepath.Dir(session.Worktrees[0].WorktreePath)
+	} else if len(session.Worktrees) == 1 {
 		workspacePath = session.Worktrees[0].WorktreePath
 	}
 

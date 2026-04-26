@@ -320,11 +320,11 @@ func TestSpritesE2E_FullFlow(t *testing.T) {
 		_, err = client.CreateFile(ctx, "e2e-change.txt")
 		require.NoError(t, err)
 
-		result, err := client.GitStage(ctx, []string{"e2e-change.txt"})
+		result, err := client.GitStage(ctx, []string{"e2e-change.txt"}, "")
 		require.NoError(t, err)
 		require.True(t, result.Success, "git stage should succeed: %s", result.Error)
 
-		result, err = client.GitCommit(ctx, "e2e test commit", false)
+		result, err = client.GitCommit(ctx, "e2e test commit", false, false, "")
 		require.NoError(t, err)
 		require.True(t, result.Success, "git commit should succeed: %s", result.Error)
 		t.Logf("git commit: %s", result.Output)

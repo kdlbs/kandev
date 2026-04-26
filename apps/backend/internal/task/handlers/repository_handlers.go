@@ -38,10 +38,13 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
-	api.GET("/workspaces/:id/repositories/branches", h.httpListLocalRepositoryBranches)
+	// Unified branch listing — accepts either ?repository_id= for an imported
+	// workspace repo, or ?path= for an on-machine folder discovered but not
+	// yet imported. Both paths bottom out in `listGitBranches`; the only
+	// difference is how the absolute path is resolved.
+	api.GET("/workspaces/:id/branches", h.httpListBranches)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/repositories/:id", h.httpGetRepository)
-	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -150,20 +153,33 @@ func (h *RepositoryHandlers) httpValidateRepositoryPath(c *gin.Context) {
 	})
 }
 
-func (h *RepositoryHandlers) httpListLocalRepositoryBranches(c *gin.Context) {
+// httpListBranches handles the unified branch endpoint:
+//
+//	GET /api/v1/workspaces/:id/branches?repository_id=X
+//	GET /api/v1/workspaces/:id/branches?path=/abs/path
+//
+// Exactly one of the two query params must be set. Both bottom out in the
+// same `listGitBranches` call; the difference is just where the absolute
+// path is resolved from (DB row vs request param).
+func (h *RepositoryHandlers) httpListBranches(c *gin.Context) {
+	repoID := c.Query("repository_id")
 	path := c.Query("path")
-	if path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+	if repoID == "" && path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id or path is required"})
 		return
 	}
-	branches, err := h.service.ListLocalRepositoryBranches(c.Request.Context(), path)
+	if repoID != "" && path != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "specify only one of repository_id or path"})
+		return
+	}
+	branches, err := h.service.ListBranches(c.Request.Context(), repoID, path)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
 			return
 		}
-		h.logger.Error("failed to list local repository branches", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list local repository branches"})
+		h.logger.Error("failed to list branches", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list branches"})
 		return
 	}
 	dtoBranches := make([]dto.BranchDTO, len(branches))
@@ -239,26 +255,6 @@ func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromRepository(repository))
 }
 
-func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
-	branches, err := h.service.ListRepositoryBranches(c.Request.Context(), c.Param("id"))
-	if err != nil {
-		if errors.Is(err, service.ErrPathNotAllowed) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
-			return
-		}
-		h.logger.Error("failed to list repository branches", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
-		return
-	}
-	dtoBranches := make([]dto.BranchDTO, len(branches))
-	for i, branch := range branches {
-		dtoBranches[i] = dto.FromBranch(branch)
-	}
-	c.JSON(http.StatusOK, dto.RepositoryBranchesResponse{
-		Branches: dtoBranches,
-		Total:    len(dtoBranches),
-	})
-}
 
 type httpUpdateRepositoryRequest struct {
 	Name                 *string `json:"name"`

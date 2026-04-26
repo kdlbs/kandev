@@ -16,16 +16,22 @@ import type {
 import type { useToast } from "@/components/toast-provider";
 
 /**
- * One extra repository row in the multi-repo task create form. The form
- * tracks these in addition to the primary (repositoryId/branch) so the
- * existing single-repo controls keep working for the common case.
+ * One repository row in the task-create form. The form tracks every repo
+ * (whether one or many) as an entry in `repositories[]`. There is no
+ * "primary" — the backend treats them all equally and uses array order
+ * for position. Removing the last row clears the form's repo selection.
  *
+ * Exactly one of `repositoryId` (workspace repo) or `localPath` (on-machine
+ * git folder discovered via the workspace's repo discovery) is set per row.
  * `key` is a stable client-side id used as React key and for
  * add/update/remove ops; it's not sent to the backend.
  */
-export type ExtraRepositoryRow = {
+export type TaskRepoRow = {
   key: string;
-  repositoryId: string;
+  /** Workspace repo id, when the user picked from the workspace's repos. */
+  repositoryId?: string;
+  /** On-machine repo path, when the user picked from discovered repos. */
+  localPath?: string;
   branch: string;
 };
 
@@ -86,7 +92,6 @@ export type DialogComputedArgs = {
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
-  branches: Branch[];
   settingsData: { agentsLoaded: boolean; executorsLoaded: boolean };
   agentProfiles: AgentProfileOption[];
   workspaces: Workspace[];
@@ -101,7 +106,6 @@ export type TaskCreateEffectsArgs = {
   workflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
-  branches: Branch[];
   agentProfiles: AgentProfileOption[];
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
@@ -131,19 +135,19 @@ export type DialogFormState = {
   /** Computed defaults for current open cycle (includes draft restoration) */
   currentDefaults: { name: string; description: string };
   descriptionInputRef: import("react").RefObject<TaskFormInputsHandle | null>;
-  repositoryId: string;
-  setRepositoryId: (v: string) => void;
-  branch: string;
-  setBranch: (v: string) => void;
   /**
-   * Extra repository rows beyond the primary, for multi-repo tasks.
-   * The primary repo (repositoryId/branch above) is always position 0;
-   * each extra row gets the next position. Empty array = single-repo task.
+   * Unified list of repos on this task. Each row carries either a workspace
+   * `repositoryId` or a discovered `localPath`, plus its base `branch`. The
+   * order is the position the backend sees. There is no "primary" concept.
    */
-  extraRepositories: ExtraRepositoryRow[];
-  addExtraRepository: () => void;
-  removeExtraRepository: (key: string) => void;
-  updateExtraRepository: (key: string, patch: Partial<ExtraRepositoryRow>) => void;
+  repositories: TaskRepoRow[];
+  setRepositories: (v: TaskRepoRow[]) => void;
+  addRepository: () => void;
+  removeRepository: (key: string) => void;
+  updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
+  /** GitHub URL mode: a separate flow that replaces the chip row with a URL input. */
+  githubBranch: string;
+  setGitHubBranch: (v: string) => void;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
   executorId: string;
@@ -152,14 +156,6 @@ export type DialogFormState = {
   setExecutorProfileId: (v: string) => void;
   discoveredRepositories: LocalRepository[];
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
-  discoveredRepoPath: string;
-  setDiscoveredRepoPath: (v: string) => void;
-  selectedLocalRepo: LocalRepository | null;
-  setSelectedLocalRepo: (v: LocalRepository | null) => void;
-  localBranches: Branch[];
-  setLocalBranches: (v: Branch[]) => void;
-  localBranchesLoading: boolean;
-  setLocalBranchesLoading: (v: boolean) => void;
   discoverReposLoading: boolean;
   setDiscoverReposLoading: (v: boolean) => void;
   discoverReposLoaded: boolean;
@@ -200,17 +196,15 @@ export type SubmitHandlersDeps = {
   workflowId: string | null;
   effectiveWorkflowId: string | null;
   effectiveDefaultStepId: string | null;
-  repositoryId: string;
-  selectedLocalRepo: LocalRepository | null;
+  /** Unified repo list from the form. Empty when in GitHub URL mode. */
+  repositories: TaskRepoRow[];
+  /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
+  discoveredRepositories: LocalRepository[];
   useGitHubUrl: boolean;
   githubUrl: string;
   githubPrHeadBranch: string | null;
-  branch: string;
-  /**
-   * Extra repository rows from the multi-repo form. Submit handlers append
-   * these to the primary in the same payload position order.
-   */
-  extraRepositories: ExtraRepositoryRow[];
+  /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
+  githubBranch: string;
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
@@ -237,8 +231,8 @@ export type SubmitHandlersDeps = {
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
   setTaskName: (v: string) => void;
-  setRepositoryId: (v: string) => void;
-  setBranch: (v: string) => void;
+  setRepositories: (v: TaskRepoRow[]) => void;
+  setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
