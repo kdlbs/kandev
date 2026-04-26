@@ -366,6 +366,76 @@ func TestPlanService_RevertRejectsWrongTask(t *testing.T) {
 	}
 }
 
+func TestPlanService_AgentAuthorNameFromSession(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-an")
+
+	// Seed an active session with an agent profile snapshot. The MCP path
+	// resolves the agent's display name from this snapshot when the request
+	// doesn't carry an explicit author_name.
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:               "sess-an",
+		TaskID:           "task-an",
+		AgentExecutionID: "exec-an",
+		AgentProfileID:   "ap-claude",
+		AgentProfileSnapshot: map[string]interface{}{
+			"id":         "ap-claude",
+			"name":       "Claude Sonnet 4.5",
+			"agent_id":   "claude",
+			"agent_name": "claude",
+		},
+		State:     models.TaskSessionState("RUNNING"),
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession failed: %v", err)
+	}
+
+	// MCP path: created_by=agent, no author_name provided.
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:    "task-an",
+		Content:   "first draft",
+		CreatedBy: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-an")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(list))
+	}
+	if list[0].AuthorKind != "agent" {
+		t.Errorf("expected author_kind=agent, got %q", list[0].AuthorKind)
+	}
+	if list[0].AuthorName != "Claude Sonnet 4.5" {
+		t.Errorf("expected author_name resolved from session snapshot, got %q", list[0].AuthorName)
+	}
+}
+
+func TestPlanService_AgentAuthorNameFallsBackWhenNoSession(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-an2")
+
+	// No session seeded → resolution returns "" → resolveAuthor falls back to "Agent".
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:    "task-an2",
+		Content:   "first draft",
+		CreatedBy: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-an2")
+	if list[0].AuthorName != defaultAgentAuthorFallback {
+		t.Errorf("expected fallback %q, got %q", defaultAgentAuthorFallback, list[0].AuthorName)
+	}
+}
+
 func TestPlanService_RevertMissingRevision(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()

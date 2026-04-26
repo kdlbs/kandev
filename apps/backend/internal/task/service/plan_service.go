@@ -34,16 +34,28 @@ const (
 	defaultUserAuthorFallback  = "User"
 )
 
+// planRepo is the repository surface this service depends on. It combines the
+// plan-revision storage with a tiny slice of session lookups used to resolve
+// the active session's agent profile name when the MCP path doesn't provide
+// an explicit author_name.
+type planRepo interface {
+	repository.PlanRepository
+	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+}
+
 // PlanService provides task plan business logic.
 type PlanService struct {
-	repo           repository.PlanRepository
+	repo           planRepo
 	eventBus       bus.EventBus
 	logger         *logger.Logger
 	coalesceWindow time.Duration
 }
 
-// NewPlanService creates a new task plan service.
-func NewPlanService(repo repository.PlanRepository, eventBus bus.EventBus, log *logger.Logger) *PlanService {
+// NewPlanService creates a new task plan service. The concrete repository
+// passed by callers must implement both PlanRepository and the session-lookup
+// methods on planRepo (the SQLite repository does both).
+func NewPlanService(repo planRepo, eventBus bus.EventBus, log *logger.Logger) *PlanService {
 	return &PlanService{
 		repo:           repo,
 		eventBus:       eventBus,
@@ -133,6 +145,20 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 	if title == "" {
 		title = "Plan"
 	}
+	// Resolve a missing AuthorName for agent writes from the active session's
+	// profile snapshot before falling back to the literal "Agent". The MCP path
+	// (handleCreateTaskPlan / handleUpdateTaskPlan) doesn't carry the agent's
+	// display name in the request, so without this lookup every agent revision
+	// would render as "Agent" in the history UI.
+	if req.AuthorName == "" {
+		kindHint := req.AuthorKind
+		if kindHint == "" {
+			kindHint = req.CreatedBy
+		}
+		if kindHint == createdByAgent {
+			req.AuthorName = s.resolveAgentDisplayName(ctx, req.TaskID)
+		}
+	}
 	authorKind, authorName, createdBy := resolveAuthor(req)
 
 	existing, err := s.repo.GetTaskPlan(ctx, req.TaskID)
@@ -188,6 +214,40 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 	s.publishPlanEvent(ctx, eventType, plan)
 	s.publishRevisionEvent(ctx, rev, coalesce)
 	return plan, nil
+}
+
+// resolveAgentDisplayName returns the agent profile's display name for the
+// task's most recent session, or "" if no usable session/snapshot exists.
+// Tries the active session first (running/starting/waiting) and falls back to
+// the most recent session by started_at so plans written between turns still
+// get the right author name.
+func (s *PlanService) resolveAgentDisplayName(ctx context.Context, taskID string) string {
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err != nil || session == nil {
+		session, err = s.repo.GetTaskSessionByTaskID(ctx, taskID)
+		if err != nil || session == nil {
+			return ""
+		}
+	}
+	return agentDisplayNameFromSnapshot(session.AgentProfileSnapshot)
+}
+
+// agentDisplayNameFromSnapshot picks the best available display name from a
+// session's agent_profile_snapshot. The orchestrator stores profile name under
+// "name" (e.g. "Claude Sonnet 4.5") and "agent_display_name" / "label" in some
+// older paths — try each in order. Returns "" if none look usable.
+func agentDisplayNameFromSnapshot(snapshot map[string]interface{}) string {
+	if snapshot == nil {
+		return ""
+	}
+	for _, key := range []string{"label", "name", "agent_display_name"} {
+		if v, ok := snapshot[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func (s *PlanService) canCoalesce(latest *models.TaskPlanRevision, authorKind, authorName string, now time.Time) bool {
