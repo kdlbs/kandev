@@ -23,7 +23,15 @@ Orchestrate uses a **filesystem-first** model: `~/.kandev/workspaces/<name>/` is
     ├── default/                    # local workspace
     │   ├── kandev.yml              # workspace settings (approvals, defaults, executor config)
     │   ├── agents/
-    │   │   ├── ceo.yml
+    │   │   ├── ceo.yml             # agent config
+    │   │   ├── ceo/
+    │   │   │   └── memory/         # agent memory (one file per entry)
+    │   │   │       ├── operating/
+    │   │   │       │   └── communication-style.md
+    │   │   │       ├── knowledge/
+    │   │   │       │   └── people-cfl.md
+    │   │   │       └── sessions/
+    │   │   │           └── 2026-04-26-auth-task.md
     │   │   └── frontend-worker.yml
     │   ├── skills/
     │   │   ├── code-review/
@@ -49,6 +57,7 @@ Orchestrate uses a **filesystem-first** model: `~/.kandev/workspaces/<name>/` is
 
 - **`kandev.yml`**: workspace settings -- approval defaults, budget defaults, default agent profile, default executor config, task prefix.
 - **`agents/*.yml`**: one file per agent instance -- name, role, reports_to (by name), permissions, budget, desired_skills (by slug), agent profile (by signature), executor preference, max concurrent sessions.
+- **`agents/<name>/memory/`**: agent memory as one markdown file per entry, organized by layer (operating/knowledge/sessions). Shareable via git between team members. See [orchestrate-assistant](../orchestrate-assistant/spec.md).
 - **`skills/*/`**: one directory per skill -- `SKILL.md` plus optional scripts and reference files. The directory IS the skill. Agents access skills via symlinks directly from this directory (no materialization needed).
 - **`routines/*.yml`**: one file per routine -- name, description, task template, trigger config, concurrency policy, assignee (by agent name).
 - **`projects/*.yml`**: one file per project -- name, description, status, repositories, executor config, lead agent (by name).
@@ -58,7 +67,6 @@ Orchestrate uses a **filesystem-first** model: `~/.kandev/workspaces/<name>/` is
 - Wakeup queue (atomic claims)
 - Cost events (append-only ledger)
 - Activity log (append-only)
-- Agent memory (key-value with queries)
 - Tasks, sessions, messages, turns (existing kandev data)
 - Budget spend counters
 - Approvals (transactional state)

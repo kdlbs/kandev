@@ -104,19 +104,34 @@ User sends Telegram message
 
 ### Agent memory
 
-Agents need persistent knowledge that survives across sessions -- who the user is, what they prefer, what happened last week, lessons learned from past mistakes. Memory is stored in the database (not the filesystem), because agents run in task workspace directories (repositories, project folders) where agent state should not be mixed with user code.
+Agents need persistent knowledge that survives across sessions -- who the user is, what they prefer, what happened last week, lessons learned from past mistakes. Memory is stored on the **filesystem** alongside the agent's config at `~/.kandev/workspaces/<name>/agents/<agent>/memory/` (see [orchestrate-config](../orchestrate-config/spec.md)). This makes memory versionable, shareable between team members via git, and browsable with standard tools.
 
 #### Memory storage
 
-- Memory entries are stored in an `agent_memory` table, scoped per agent instance.
-- Each entry:
-  - `id`: unique identifier.
-  - `agent_instance_id`: which agent owns this memory.
-  - `layer`: `knowledge`, `session`, or `operating`.
-  - `key`: topic/namespace (e.g. `preferences/formatting`, `people/cfl`, `session/2026-04-25-auth-task`).
-  - `content`: text content (markdown).
-  - `metadata`: JSON (timestamp, source session ID, status active/superseded, access count).
-  - `created_at`, `updated_at`.
+- Memory entries are stored as **one markdown file per entry**, organized by layer:
+  ```
+  agents/ceo/memory/
+    operating/
+      communication-style.md
+      delegation-patterns.md
+    knowledge/
+      people-cfl.md
+      projects-api-migration.md
+    sessions/
+      2026-04-26-auth-task.md
+  ```
+- Each file has YAML frontmatter + markdown content:
+  ```markdown
+  ---
+  category: preference
+  status: active
+  created: 2026-04-26
+  source_session: sess_abc123
+  ---
+
+  User prefers bullet points over paragraphs in summaries.
+  ```
+- One file per entry minimizes git conflicts: session notes are unique per session, operating knowledge changes infrequently, knowledge entries are per-topic.
 - Three layers (PARA-inspired):
 
 **Layer 1: Knowledge** (`layer=knowledge`)
@@ -153,7 +168,9 @@ Agents need persistent knowledge that survives across sessions -- who the user i
 #### Memory lifecycle
 
 - Agents without the memory skill operate statelessly (current behavior). Memory is opt-in via skill assignment.
-- Memory is scoped to the agent instance -- each agent has its own entries. The assistant's memory includes user preferences; a worker's memory includes technical knowledge about the codebase.
+- Memory is scoped to the agent instance -- each agent has its own directory. The assistant's memory includes user preferences; a worker's memory includes technical knowledge about the codebase.
+- For repo-backed workspaces, memory is shared between team members via git. The CEO's learned delegation patterns, the worker's codebase knowledge -- all available to every team member's kandev instance.
+- Memory can be reviewed in PRs (team reviews what an agent learned before merging).
 - The memory skill teaches the agent when to extract facts, write session summaries, and update operating knowledge.
 
 ### Agent self-improvement
