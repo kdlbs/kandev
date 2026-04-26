@@ -35,7 +35,12 @@ func (h *Handlers) createSkill(c *gin.Context) {
 		FileInventory:            req.FileInventory,
 		CreatedByAgentInstanceID: req.CreatedByAgentInstanceID,
 	}
-	if err := h.ctrl.Svc.CreateSkill(c.Request.Context(), skill); err != nil {
+	ctx := c.Request.Context()
+	if err := h.ctrl.Svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.ctrl.Svc.CreateSkill(ctx, skill); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -65,6 +70,10 @@ func (h *Handlers) updateSkill(c *gin.Context) {
 		return
 	}
 	applySkillUpdates(skill, &req)
+	if err := h.ctrl.Svc.ValidateSkillUpdate(ctx, skill); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err := h.ctrl.Svc.UpdateSkill(ctx, skill); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

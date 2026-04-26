@@ -77,3 +77,40 @@ func (r *Repository) DeleteProject(ctx context.Context, id string) error {
 		`DELETE FROM orchestrate_projects WHERE id = ?`), id)
 	return err
 }
+
+// GetTaskCounts returns aggregated task counts by status for a project.
+func (r *Repository) GetTaskCounts(ctx context.Context, projectID string) (*models.TaskCounts, error) {
+	var counts models.TaskCounts
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN state IN ('IN_PROGRESS', 'SCHEDULING') THEN 1 ELSE 0 END), 0) AS in_progress,
+			COALESCE(SUM(CASE WHEN state = 'COMPLETED' THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN state = 'BLOCKED' THEN 1 ELSE 0 END), 0) AS blocked
+		FROM tasks WHERE project_id = ?
+	`), projectID).StructScan(&counts)
+	if err != nil {
+		return nil, fmt.Errorf("get task counts for project %s: %w", projectID, err)
+	}
+	return &counts, nil
+}
+
+// ListProjectsWithCounts returns all projects for a workspace with task counts.
+func (r *Repository) ListProjectsWithCounts(ctx context.Context, workspaceID string) ([]*models.ProjectWithCounts, error) {
+	projects, err := r.ListProjects(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*models.ProjectWithCounts, 0, len(projects))
+	for _, p := range projects {
+		counts, cErr := r.GetTaskCounts(ctx, p.ID)
+		if cErr != nil {
+			counts = &models.TaskCounts{}
+		}
+		result = append(result, &models.ProjectWithCounts{
+			Project:    *p,
+			TaskCounts: *counts,
+		})
+	}
+	return result, nil
+}

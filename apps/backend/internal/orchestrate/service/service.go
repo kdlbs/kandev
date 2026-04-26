@@ -3,6 +3,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrate/models"
@@ -25,32 +28,7 @@ func NewService(repo *sqlite.Repository, log *logger.Logger) *Service {
 	}
 }
 
-// -- Agent Instances --
-
-// CreateAgentInstance creates a new agent instance.
-func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentInstance) error {
-	return s.repo.CreateAgentInstance(ctx, agent)
-}
-
-// GetAgentInstance returns an agent instance by ID.
-func (s *Service) GetAgentInstance(ctx context.Context, id string) (*models.AgentInstance, error) {
-	return s.repo.GetAgentInstance(ctx, id)
-}
-
-// ListAgentInstances returns all agent instances for a workspace.
-func (s *Service) ListAgentInstances(ctx context.Context, workspaceID string) ([]*models.AgentInstance, error) {
-	return s.repo.ListAgentInstances(ctx, workspaceID)
-}
-
-// UpdateAgentInstance updates an existing agent instance.
-func (s *Service) UpdateAgentInstance(ctx context.Context, agent *models.AgentInstance) error {
-	return s.repo.UpdateAgentInstance(ctx, agent)
-}
-
-// DeleteAgentInstance deletes an agent instance.
-func (s *Service) DeleteAgentInstance(ctx context.Context, id string) error {
-	return s.repo.DeleteAgentInstance(ctx, id)
-}
+// Agent instance methods (CRUD + validation + status transitions) are in agents.go.
 
 // -- Skills --
 
@@ -81,9 +59,21 @@ func (s *Service) DeleteSkill(ctx context.Context, id string) error {
 
 // -- Projects --
 
-// CreateProject creates a new project.
+// CreateProject validates and creates a new project.
 func (s *Service) CreateProject(ctx context.Context, project *models.Project) error {
-	return s.repo.CreateProject(ctx, project)
+	if err := s.validateProject(project); err != nil {
+		return err
+	}
+	if project.Status == "" {
+		project.Status = models.ProjectStatusActive
+	}
+	if err := s.repo.CreateProject(ctx, project); err != nil {
+		return err
+	}
+	s.logger.Info("project created",
+		zap.String("project_id", project.ID),
+		zap.String("name", project.Name))
+	return nil
 }
 
 // GetProject returns a project by ID.
@@ -96,14 +86,62 @@ func (s *Service) ListProjects(ctx context.Context, workspaceID string) ([]*mode
 	return s.repo.ListProjects(ctx, workspaceID)
 }
 
-// UpdateProject updates a project.
+// ListProjectsWithCounts returns all projects with aggregated task counts.
+func (s *Service) ListProjectsWithCounts(ctx context.Context, workspaceID string) ([]*models.ProjectWithCounts, error) {
+	return s.repo.ListProjectsWithCounts(ctx, workspaceID)
+}
+
+// GetTaskCounts returns task status counts for a project.
+func (s *Service) GetTaskCounts(ctx context.Context, projectID string) (*models.TaskCounts, error) {
+	return s.repo.GetTaskCounts(ctx, projectID)
+}
+
+// UpdateProject validates and updates a project.
 func (s *Service) UpdateProject(ctx context.Context, project *models.Project) error {
-	return s.repo.UpdateProject(ctx, project)
+	if err := s.validateProject(project); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateProject(ctx, project); err != nil {
+		return err
+	}
+	s.logger.Info("project updated",
+		zap.String("project_id", project.ID),
+		zap.String("name", project.Name))
+	return nil
 }
 
 // DeleteProject deletes a project.
 func (s *Service) DeleteProject(ctx context.Context, id string) error {
 	return s.repo.DeleteProject(ctx, id)
+}
+
+func (s *Service) validateProject(project *models.Project) error {
+	if project.Name == "" {
+		return fmt.Errorf("project name is required")
+	}
+	if project.WorkspaceID == "" {
+		return fmt.Errorf("workspace ID is required")
+	}
+	if project.Status != "" && !models.ValidProjectStatuses[project.Status] {
+		return fmt.Errorf("invalid project status: %s", project.Status)
+	}
+	return validateRepositories(project.Repositories)
+}
+
+func validateRepositories(reposJSON string) error {
+	if reposJSON == "" || reposJSON == "[]" {
+		return nil
+	}
+	var repos []string
+	if err := json.Unmarshal([]byte(reposJSON), &repos); err != nil {
+		return fmt.Errorf("repositories must be a JSON array of strings: %w", err)
+	}
+	for _, repo := range repos {
+		if strings.TrimSpace(repo) == "" {
+			return fmt.Errorf("repository entry must not be empty")
+		}
+	}
+	return nil
 }
 
 // -- Costs --

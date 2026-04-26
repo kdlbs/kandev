@@ -35,6 +35,12 @@ type UpdateAgentRequest struct {
 	PauseReason           *string `json:"pause_reason,omitempty"`
 }
 
+// UpdateAgentStatusRequest is the request body for changing agent status.
+type UpdateAgentStatusRequest struct {
+	Status      string `json:"status"`
+	PauseReason string `json:"pause_reason"`
+}
+
 // AgentResponse wraps a single agent instance.
 type AgentResponse struct {
 	Agent *models.AgentInstance `json:"agent"`
@@ -112,7 +118,7 @@ type ProjectResponse struct {
 
 // ProjectListResponse wraps a list of projects.
 type ProjectListResponse struct {
-	Projects []*models.Project `json:"projects"`
+	Projects []*models.ProjectWithCounts `json:"projects"`
 }
 
 // -- Costs --

@@ -30,13 +30,60 @@ export const createOrchestrateSlice: StateCreator<
     set((draft) => {
       draft.orchestrate.agentInstances = agents;
     }),
+  addAgentInstance: (agent) =>
+    set((draft) => {
+      draft.orchestrate.agentInstances.push(agent);
+    }),
+  updateAgentInstance: (id, patch) =>
+    set((draft) => {
+      const idx = draft.orchestrate.agentInstances.findIndex((a) => a.id === id);
+      if (idx >= 0) {
+        Object.assign(draft.orchestrate.agentInstances[idx], patch);
+      }
+    }),
+  removeAgentInstance: (id) =>
+    set((draft) => {
+      draft.orchestrate.agentInstances = draft.orchestrate.agentInstances.filter(
+        (a) => a.id !== id,
+      );
+    }),
   setSkills: (skills) =>
     set((draft) => {
       draft.orchestrate.skills = skills;
     }),
+  addSkill: (skill) =>
+    set((draft) => {
+      draft.orchestrate.skills.push(skill);
+    }),
+  updateSkill: (id, patch) =>
+    set((draft) => {
+      const idx = draft.orchestrate.skills.findIndex((s) => s.id === id);
+      if (idx >= 0) {
+        Object.assign(draft.orchestrate.skills[idx], patch);
+      }
+    }),
+  removeSkill: (id) =>
+    set((draft) => {
+      draft.orchestrate.skills = draft.orchestrate.skills.filter((s) => s.id !== id);
+    }),
   setProjects: (projects) =>
     set((draft) => {
       draft.orchestrate.projects = projects;
+    }),
+  addProject: (project) =>
+    set((draft) => {
+      draft.orchestrate.projects.push(project);
+    }),
+  updateProject: (id, patch) =>
+    set((draft) => {
+      const idx = draft.orchestrate.projects.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        Object.assign(draft.orchestrate.projects[idx], patch);
+      }
+    }),
+  removeProject: (id) =>
+    set((draft) => {
+      draft.orchestrate.projects = draft.orchestrate.projects.filter((p) => p.id !== id);
     }),
   setApprovals: (approvals) =>
     set((draft) => {

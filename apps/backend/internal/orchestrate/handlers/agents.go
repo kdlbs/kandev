@@ -7,10 +7,26 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrate/dto"
 	"github.com/kandev/kandev/internal/orchestrate/models"
+	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
 )
 
 func (h *Handlers) listAgents(c *gin.Context) {
-	agents, err := h.ctrl.Svc.ListAgentInstances(c.Request.Context(), c.Param("wsId"))
+	filter := sqlite.AgentListFilter{
+		Role:      c.Query("role"),
+		Status:    c.Query("status"),
+		ReportsTo: c.Query("reports_to"),
+	}
+	var (
+		agents []*models.AgentInstance
+		err    error
+	)
+	if filter.Role != "" || filter.Status != "" || filter.ReportsTo != "" {
+		agents, err = h.ctrl.Svc.ListAgentInstancesFiltered(
+			c.Request.Context(), c.Param("wsId"), filter)
+	} else {
+		agents, err = h.ctrl.Svc.ListAgentInstances(
+			c.Request.Context(), c.Param("wsId"))
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -80,6 +96,22 @@ func (h *Handlers) deleteAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handlers) updateAgentStatus(c *gin.Context) {
+	var req dto.UpdateAgentStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	agent, err := h.ctrl.Svc.UpdateAgentStatus(
+		c.Request.Context(), c.Param("id"),
+		models.AgentStatus(req.Status), req.PauseReason)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.AgentResponse{Agent: agent})
 }
 
 func applyAgentUpdates(agent *models.AgentInstance, req *dto.UpdateAgentRequest) {

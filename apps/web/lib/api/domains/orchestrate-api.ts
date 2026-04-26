@@ -68,18 +68,18 @@ export function createSkill(
   data: Partial<Skill>,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<Skill>(`${BASE}/workspaces/${workspaceId}/skills`, {
+  return fetchJson<{ skill: Skill }>(`${BASE}/workspaces/${workspaceId}/skills`, {
     ...options,
     init: { method: "POST", body: JSON.stringify(data), ...options?.init },
   });
 }
 
 export function getSkill(id: string, options?: ApiRequestOptions) {
-  return fetchJson<Skill>(`${BASE}/skills/${id}`, options);
+  return fetchJson<{ skill: Skill }>(`${BASE}/skills/${id}`, options);
 }
 
 export function updateSkill(id: string, data: Partial<Skill>, options?: ApiRequestOptions) {
-  return fetchJson<Skill>(`${BASE}/skills/${id}`, {
+  return fetchJson<{ skill: Skill }>(`${BASE}/skills/${id}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
   });

@@ -1,10 +1,13 @@
-export default function AgentDetailPage() {
-  return (
-    <div className="p-6">
-      <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        Agent Detail
-      </h1>
-      <p className="text-muted-foreground mt-4">Coming soon</p>
-    </div>
-  );
+"use client";
+
+import { use } from "react";
+import { AgentDetailContent } from "./components/agent-detail-content";
+
+type AgentDetailPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default function AgentDetailPage({ params }: AgentDetailPageProps) {
+  const { id } = use(params);
+  return <AgentDetailContent agentId={id} />;
 }

@@ -40,6 +40,7 @@ func registerAgentRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.POST("/workspaces/:wsId/agents", h.createAgent)
 	api.GET("/agents/:id", h.getAgent)
 	api.PATCH("/agents/:id", h.updateAgent)
+	api.PATCH("/agents/:id/status", h.updateAgentStatus)
 	api.DELETE("/agents/:id", h.deleteAgent)
 }
 

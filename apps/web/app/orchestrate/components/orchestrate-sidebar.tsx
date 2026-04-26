@@ -19,7 +19,8 @@ import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
 import { useAppStore } from "@/components/state-provider";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarSection } from "./sidebar-section";
-import { SidebarCollapsibleSection } from "./sidebar-collapsible-section";
+import { SidebarAgentsList } from "./sidebar-agents-list";
+import { SidebarProjectsList } from "./sidebar-projects-list";
 
 export function OrchestrateSidebar() {
   const router = useRouter();
@@ -64,14 +65,10 @@ export function OrchestrateSidebar() {
         </SidebarSection>
 
         {/* Projects section (collapsible) */}
-        <SidebarCollapsibleSection label="Projects" onAdd={() => router.push("/orchestrate/projects")}>
-          <p className="px-3 py-2 text-xs text-muted-foreground">No projects yet</p>
-        </SidebarCollapsibleSection>
+        <SidebarProjectsList />
 
         {/* Agents section (collapsible) */}
-        <SidebarCollapsibleSection label="Agents" onAdd={() => router.push("/orchestrate/agents")}>
-          <p className="px-3 py-2 text-xs text-muted-foreground">No agents yet</p>
-        </SidebarCollapsibleSection>
+        <SidebarAgentsList />
 
         {/* Company section */}
         <SidebarSection label="Company">

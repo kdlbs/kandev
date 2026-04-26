@@ -474,8 +474,17 @@ export type AppState = {
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   // Orchestrate actions
   setAgentInstances: (agents: AgentInstance[]) => void;
+  addAgentInstance: (agent: AgentInstance) => void;
+  updateAgentInstance: (id: string, patch: Partial<AgentInstance>) => void;
+  removeAgentInstance: (id: string) => void;
   setSkills: (skills: Skill[]) => void;
+  addSkill: (skill: Skill) => void;
+  updateSkill: (id: string, patch: Partial<Skill>) => void;
+  removeSkill: (id: string) => void;
   setProjects: (projects: Project[]) => void;
+  addProject: (project: Project) => void;
+  updateProject: (id: string, patch: Partial<Project>) => void;
+  removeProject: (id: string) => void;
   setApprovals: (approvals: Approval[]) => void;
   setActivity: (entries: ActivityEntry[]) => void;
   setCostSummary: (summary: CostSummary | null) => void;

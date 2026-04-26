@@ -81,3 +81,64 @@ func (r *Repository) DeleteAgentInstance(ctx context.Context, id string) error {
 		`DELETE FROM orchestrate_agent_instances WHERE id = ?`), id)
 	return err
 }
+
+// AgentListFilter specifies optional filters for listing agents.
+type AgentListFilter struct {
+	Role      string
+	Status    string
+	ReportsTo string
+}
+
+// ListAgentInstancesFiltered returns agent instances for a workspace matching filters.
+func (r *Repository) ListAgentInstancesFiltered(
+	ctx context.Context, workspaceID string, filter AgentListFilter,
+) ([]*models.AgentInstance, error) {
+	query := `SELECT * FROM orchestrate_agent_instances WHERE workspace_id = ?`
+	args := []interface{}{workspaceID}
+
+	if filter.Role != "" {
+		query += ` AND role = ?`
+		args = append(args, filter.Role)
+	}
+	if filter.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, filter.Status)
+	}
+	if filter.ReportsTo != "" {
+		query += ` AND reports_to = ?`
+		args = append(args, filter.ReportsTo)
+	}
+	query += ` ORDER BY created_at`
+
+	var agents []*models.AgentInstance
+	err := r.ro.SelectContext(ctx, &agents, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if agents == nil {
+		agents = []*models.AgentInstance{}
+	}
+	return agents, nil
+}
+
+// CountAgentInstancesByRole counts instances with a given role in a workspace.
+func (r *Repository) CountAgentInstancesByRole(
+	ctx context.Context, workspaceID string, role models.AgentRole,
+) (int, error) {
+	var count int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COUNT(*) FROM orchestrate_agent_instances WHERE workspace_id = ? AND role = ?`),
+		workspaceID, role).Scan(&count)
+	return count, err
+}
+
+// CountAgentInstancesByRoleExcluding counts instances with a given role excluding one ID.
+func (r *Repository) CountAgentInstancesByRoleExcluding(
+	ctx context.Context, workspaceID string, role models.AgentRole, excludeID string,
+) (int, error) {
+	var count int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COUNT(*) FROM orchestrate_agent_instances WHERE workspace_id = ? AND role = ? AND id != ?`),
+		workspaceID, role, excludeID).Scan(&count)
+	return count, err
+}

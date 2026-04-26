@@ -86,6 +86,28 @@ type Project struct {
 	UpdatedAt           time.Time     `json:"updated_at" db:"updated_at"`
 }
 
+// TaskCounts holds aggregated task status counts for a project.
+type TaskCounts struct {
+	Total      int `json:"total" db:"total"`
+	InProgress int `json:"in_progress" db:"in_progress"`
+	Done       int `json:"done" db:"done"`
+	Blocked    int `json:"blocked" db:"blocked"`
+}
+
+// ProjectWithCounts is a project with aggregated task counts.
+type ProjectWithCounts struct {
+	Project
+	TaskCounts TaskCounts `json:"task_counts"`
+}
+
+// ValidProjectStatuses contains valid project status values.
+var ValidProjectStatuses = map[ProjectStatus]bool{
+	ProjectStatusActive:    true,
+	ProjectStatusCompleted: true,
+	ProjectStatusOnHold:    true,
+	ProjectStatusArchived:  true,
+}
+
 // CostEvent represents a cost tracking event.
 type CostEvent struct {
 	ID              string    `json:"id" db:"id"`

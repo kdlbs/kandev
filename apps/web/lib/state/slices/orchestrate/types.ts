@@ -46,6 +46,13 @@ export type Skill = {
 
 export type ProjectStatus = "active" | "completed" | "on_hold" | "archived";
 
+export type TaskCounts = {
+  total: number;
+  in_progress: number;
+  done: number;
+  blocked: number;
+};
+
 export type Project = {
   id: string;
   workspaceId: string;
@@ -57,6 +64,7 @@ export type Project = {
   budgetCents?: number;
   repositories?: string[];
   executorConfig?: Record<string, unknown>;
+  taskCounts?: TaskCounts;
   createdAt: string;
   updatedAt: string;
 };
@@ -185,8 +193,17 @@ export type OrchestrateSliceState = {
 
 export type OrchestrateSliceActions = {
   setAgentInstances: (agents: AgentInstance[]) => void;
+  addAgentInstance: (agent: AgentInstance) => void;
+  updateAgentInstance: (id: string, patch: Partial<AgentInstance>) => void;
+  removeAgentInstance: (id: string) => void;
   setSkills: (skills: Skill[]) => void;
+  addSkill: (skill: Skill) => void;
+  updateSkill: (id: string, patch: Partial<Skill>) => void;
+  removeSkill: (id: string) => void;
   setProjects: (projects: Project[]) => void;
+  addProject: (project: Project) => void;
+  updateProject: (id: string, patch: Partial<Project>) => void;
+  removeProject: (id: string) => void;
   setApprovals: (approvals: Approval[]) => void;
   setActivity: (entries: ActivityEntry[]) => void;
   setCostSummary: (summary: CostSummary | null) => void;
