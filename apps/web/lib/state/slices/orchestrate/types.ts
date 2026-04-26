@@ -146,6 +146,39 @@ export type Routine = {
   updatedAt: string;
 };
 
+export type RoutineTriggerKind = "cron" | "webhook" | "manual";
+export type RoutineRunStatus = "received" | "task_created" | "skipped" | "coalesced" | "failed" | "done" | "cancelled";
+
+export type RoutineTrigger = {
+  id: string;
+  routineId: string;
+  kind: RoutineTriggerKind;
+  cronExpression?: string;
+  timezone?: string;
+  publicId?: string;
+  signingMode?: string;
+  nextRunAt?: string;
+  lastFiredAt?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RoutineRun = {
+  id: string;
+  routineId: string;
+  triggerId?: string;
+  source: string;
+  status: RoutineRunStatus;
+  triggerPayload?: string;
+  linkedTaskId?: string;
+  coalescedIntoRunId?: string;
+  dispatchFingerprint?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+};
+
 export type InboxItemType = "approval" | "budget_alert" | "agent_error" | "task_review";
 
 export type InboxItem = {

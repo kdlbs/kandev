@@ -78,10 +78,16 @@ func registerBudgetRoutes(api *gin.RouterGroup, h *Handlers) {
 func registerRoutineRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/workspaces/:wsId/routines", h.listRoutines)
 	api.POST("/workspaces/:wsId/routines", h.createRoutine)
+	api.GET("/workspaces/:wsId/routine-runs", h.listAllRuns)
 	api.GET("/routines/:id", h.getRoutine)
 	api.PATCH("/routines/:id", h.updateRoutine)
 	api.DELETE("/routines/:id", h.deleteRoutine)
 	api.POST("/routines/:id/run", h.runRoutine)
+	api.GET("/routines/:id/triggers", h.listTriggers)
+	api.POST("/routines/:id/triggers", h.createTrigger)
+	api.DELETE("/routine-triggers/:triggerId", h.deleteTrigger)
+	api.GET("/routines/:id/runs", h.listRuns)
+	api.POST("/routine-triggers/:publicId/fire", h.fireWebhookTrigger)
 }
 
 func registerApprovalRoutes(api *gin.RouterGroup, h *Handlers) {

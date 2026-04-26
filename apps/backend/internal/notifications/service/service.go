@@ -20,6 +20,7 @@ import (
 
 const (
 	EventTaskSessionWaitingForInput = "session.waiting_for_input"
+	EventOrchestrateInboxItem       = "orchestrate.inbox_item"
 )
 
 var ErrProviderNotFound = errors.New("notification provider not found")
@@ -61,7 +62,7 @@ func (s *Service) AppriseAvailable() bool {
 }
 
 func (s *Service) AvailableEvents() []string {
-	return []string{EventTaskSessionWaitingForInput}
+	return []string{EventTaskSessionWaitingForInput, EventOrchestrateInboxItem}
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
@@ -201,6 +202,48 @@ func (s *Service) HandleTaskSessionStateChanged(ctx context.Context, taskID, ses
 	}
 }
 
+// HandleInboxItem sends notifications for a new orchestrate inbox item.
+func (s *Service) HandleInboxItem(ctx context.Context, itemType, title string) {
+	userID := userstore.DefaultUserID
+	providers, subscriptions, err := s.ListProviders(ctx, userID)
+	if err != nil {
+		s.logger.Error("failed to load notification providers for inbox item", zap.Error(err))
+		return
+	}
+	notifTitle := "New inbox item"
+	body := title
+	if itemType != "" {
+		notifTitle = fmt.Sprintf("Inbox: %s", itemType)
+	}
+	for _, provider := range providers {
+		if !provider.Enabled {
+			continue
+		}
+		events := subscriptions[provider.ID]
+		if !containsEvent(events, EventOrchestrateInboxItem) {
+			continue
+		}
+		if err := s.dispatchGenericNotification(ctx, provider, EventOrchestrateInboxItem, notifTitle, body); err != nil {
+			s.logger.Warn("inbox item notification delivery failed",
+				zap.String("provider_id", provider.ID), zap.Error(err))
+		}
+	}
+}
+
+func (s *Service) dispatchGenericNotification(ctx context.Context, provider *models.Provider, eventType, title, body string) error {
+	adapter := s.providers[provider.Type]
+	if adapter == nil {
+		return fmt.Errorf("unknown provider type: %s", provider.Type)
+	}
+	return adapter.Send(ctx, providers.Message{
+		EventType: eventType,
+		Title:     title,
+		Body:      body,
+		UserID:    userstore.DefaultUserID,
+		Config:    provider.Config,
+	})
+}
+
 type waitingForInputPayload struct {
 	TaskID        string
 	TaskSessionID string
@@ -267,7 +310,10 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 		if err := s.repo.CreateProvider(ctx, provider); err != nil {
 			return err
 		}
-		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput}); err != nil {
+		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
+			EventTaskSessionWaitingForInput,
+			EventOrchestrateInboxItem,
+		}); err != nil {
 			return err
 		}
 	}
@@ -298,7 +344,10 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 	if err := s.repo.CreateProvider(ctx, provider); err != nil {
 		return err
 	}
-	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput})
+	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
+		EventTaskSessionWaitingForInput,
+		EventOrchestrateInboxItem,
+	})
 }
 
 func (s *Service) TestProvider(ctx context.Context, providerID string) error {
@@ -329,6 +378,7 @@ func (s *Service) validateProvider(providerType models.ProviderType, config map[
 func (s *Service) validateEvents(events []string) error {
 	allowed := map[string]struct{}{
 		EventTaskSessionWaitingForInput: {},
+		EventOrchestrateInboxItem:       {},
 	}
 	for _, event := range events {
 		if _, ok := allowed[event]; !ok {

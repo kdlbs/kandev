@@ -240,6 +240,20 @@ func provideGateway(
 		if err != nil {
 			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
 		}
+
+		_, err = eventBus.Subscribe(events.OrchestrateInboxItem, func(ctx context.Context, event *bus.Event) error {
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			itemType, _ := data["type"].(string)
+			title, _ := data["title"].(string)
+			notificationSvc.HandleInboxItem(ctx, itemType, title)
+			return nil
+		})
+		if err != nil {
+			log.Error("Failed to subscribe to orchestrate inbox notifications", zap.Error(err))
+		}
 	}
 
 	return gateway, notificationSvc, notificationCtrl, nil

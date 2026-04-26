@@ -193,6 +193,41 @@ type RoutineListResponse struct {
 	Routines []*models.Routine `json:"routines"`
 }
 
+// RunRoutineRequest is the request body for manually firing a routine.
+type RunRoutineRequest struct {
+	Variables map[string]string `json:"variables"`
+}
+
+// RoutineRunResponse wraps a single routine run.
+type RoutineRunResponse struct {
+	Run *models.RoutineRun `json:"run"`
+}
+
+// RunListResponse wraps a list of routine runs.
+type RunListResponse struct {
+	Runs []*models.RoutineRun `json:"runs"`
+}
+
+// CreateTriggerRequest is the request body for creating a routine trigger.
+type CreateTriggerRequest struct {
+	Kind           string `json:"kind"`
+	CronExpression string `json:"cron_expression"`
+	Timezone       string `json:"timezone"`
+	PublicID       string `json:"public_id"`
+	SigningMode    string `json:"signing_mode"`
+	Secret         string `json:"secret"`
+}
+
+// TriggerResponse wraps a single routine trigger.
+type TriggerResponse struct {
+	Trigger *models.RoutineTrigger `json:"trigger"`
+}
+
+// TriggerListResponse wraps a list of routine triggers.
+type TriggerListResponse struct {
+	Triggers []*models.RoutineTrigger `json:"triggers"`
+}
+
 // -- Approvals --
 
 // DecideApprovalRequest is the request body for deciding an approval.

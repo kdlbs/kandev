@@ -6,6 +6,8 @@ import type {
   CostSummary,
   BudgetPolicy,
   Routine,
+  RoutineTrigger,
+  RoutineRun,
   Approval,
   ActivityEntry,
   InboxItem,
@@ -237,11 +239,55 @@ export function deleteRoutine(id: string, options?: ApiRequestOptions) {
   });
 }
 
-export function runRoutine(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/routines/${id}/run`, {
+export function runRoutine(
+  id: string,
+  variables?: Record<string, string>,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ run: RoutineRun }>(`${BASE}/routines/${id}/run`, {
     ...options,
-    init: { method: "POST", ...options?.init },
+    init: {
+      method: "POST",
+      body: variables ? JSON.stringify({ variables }) : undefined,
+      ...options?.init,
+    },
   });
+}
+
+export function listRoutineTriggers(routineId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ triggers: RoutineTrigger[] }>(
+    `${BASE}/routines/${routineId}/triggers`,
+    options,
+  );
+}
+
+export function createRoutineTrigger(
+  routineId: string,
+  data: Partial<RoutineTrigger>,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ trigger: RoutineTrigger }>(`${BASE}/routines/${routineId}/triggers`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+  });
+}
+
+export function deleteRoutineTrigger(triggerId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`${BASE}/routine-triggers/${triggerId}`, {
+    ...options,
+    init: { method: "DELETE", ...options?.init },
+  });
+}
+
+export function listRoutineRuns(routineId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ runs: RoutineRun[] }>(`${BASE}/routines/${routineId}/runs`, options);
+}
+
+export function listAllRoutineRuns(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ runs: RoutineRun[] }>(
+    `${BASE}/workspaces/${workspaceId}/routine-runs`,
+    options,
+  );
 }
 
 // --- Approvals ---
