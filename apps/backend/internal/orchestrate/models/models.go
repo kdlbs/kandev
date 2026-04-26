@@ -147,7 +147,7 @@ type WakeupRequest struct {
 	Payload         string     `json:"payload" db:"payload"`
 	Status          string     `json:"status" db:"status"`
 	CoalescedCount  int        `json:"coalesced_count" db:"coalesced_count"`
-	IdempotencyKey  string     `json:"idempotency_key" db:"idempotency_key"`
+	IdempotencyKey  *string    `json:"idempotency_key" db:"idempotency_key"`
 	ContextSnapshot string     `json:"context_snapshot" db:"context_snapshot"`
 	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
 	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
