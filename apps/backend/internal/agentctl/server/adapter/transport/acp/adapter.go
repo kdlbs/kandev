@@ -706,6 +706,15 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 // @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued wakeup
 // turn and emits visible ACP frames. The session must still match (the user
 // hasn't started a fresh session) and the adapter must not be closed.
+//
+// Concurrent-prompt safety: if a user prompt is already in flight when this
+// runs, both end up calling conn.Prompt() on the same ClientSideConnection.
+// That's safe at the wire level — the ACP SDK's Connection.sendMessage
+// holds a write mutex, so request frames never interleave on stdin, and
+// JSON-RPC pairs each response back to its originating request via id —
+// but it does mean two prompts can be in flight against the bridge at
+// once. The bridge serialises them in the order it receives them, which
+// is exactly what we want for a wakeup that races a user message.
 func (a *Adapter) fireWakeup(sessionID, prompt string) {
 	a.mu.RLock()
 	closed := a.closed

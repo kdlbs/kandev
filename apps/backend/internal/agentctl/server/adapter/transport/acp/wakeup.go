@@ -77,7 +77,10 @@ func (w *wakeupScheduler) schedule(sessionID, prompt string, unixMs int64) {
 
 	delay := time.Until(time.UnixMilli(unixMs))
 	if delay <= 0 {
-		w.logger.Debug("dropping stale wakeup",
+		// Warn rather than Debug: a stale wakeup typically signals system
+		// suspension, container pause, or significant clock skew — those are
+		// production-relevant and shouldn't be hidden at default log levels.
+		w.logger.Warn("dropping stale wakeup",
 			zap.String("session_id", sessionID),
 			zap.Duration("past_by", -delay))
 		return
@@ -105,7 +108,9 @@ func (w *wakeupScheduler) schedule(sessionID, prompt string, unixMs int64) {
 // schedule or cancel has bumped w.gen, this fire is stale and is dropped.
 // It clears the pending state before calling the callback so a re-entry from
 // inside the callback (e.g. the synthetic prompt schedules another wakeup)
-// can overwrite cleanly.
+// can overwrite cleanly. The gen check guarantees sessionID is non-empty
+// here — schedule() rejects empty sessionID before bumping gen, and any
+// cancel would have bumped gen too — so we don't re-check it.
 func (w *wakeupScheduler) fireOnce(myGen uint64) {
 	w.mu.Lock()
 	if myGen != w.gen {
@@ -119,10 +124,6 @@ func (w *wakeupScheduler) fireOnce(myGen uint64) {
 	w.prompt = ""
 	w.gen++
 	w.mu.Unlock()
-
-	if sessionID == "" {
-		return
-	}
 
 	w.logger.Info("firing wakeup",
 		zap.String("session_id", sessionID))
