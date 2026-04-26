@@ -225,6 +225,10 @@ type GitStatusData struct {
 	Files           interface{} `json:"files,omitempty"`
 	BranchAdditions int         `json:"branch_additions,omitempty"`
 	BranchDeletions int         `json:"branch_deletions,omitempty"`
+	// RepositoryName identifies which repository this status belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Changes panel can render per-repo group headers.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 type GitCommitData struct {
