@@ -41,6 +41,14 @@ export function ExtraRepositoryRows({
   // Hide the section in started/edit modes where the repo set is fixed.
   if (isTaskStarted) return null;
 
+  // Count workspace repositories the user could still add: total minus primary
+  // minus all already-chosen extras. When zero, we disable the Add button so
+  // the user gets a clear signal instead of a row with an empty dropdown.
+  const usedIds = collectUsedRepoIds(fs, "");
+  const remainingCount = repositories.filter((r) => !usedIds.has(r.id)).length;
+  const canAddMore = primarySelected && remainingCount > 0;
+  const addButtonHint = computeAddButtonHint(primarySelected, remainingCount);
+
   return (
     <div className="space-y-2" data-testid="extra-repositories">
       {fs.extraRepositories.map((row) => (
@@ -60,7 +68,8 @@ export function ExtraRepositoryRows({
         variant="ghost"
         size="sm"
         onClick={fs.addExtraRepository}
-        disabled={!primarySelected}
+        disabled={!canAddMore}
+        title={addButtonHint}
         className="text-xs cursor-pointer text-muted-foreground hover:text-foreground"
         data-testid="add-extra-repository"
       >
@@ -69,6 +78,15 @@ export function ExtraRepositoryRows({
       </Button>
     </div>
   );
+}
+
+function computeAddButtonHint(
+  primarySelected: boolean,
+  remainingCount: number,
+): string | undefined {
+  if (!primarySelected) return "Select the primary repository first";
+  if (remainingCount === 0) return "All workspace repositories are already added";
+  return undefined;
 }
 
 function computeBranchPlaceholder(
