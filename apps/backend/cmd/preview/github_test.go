@@ -86,3 +86,37 @@ func TestStripSection_otherBotAppended(t *testing.T) {
 		t.Error("expected other bot section to be preserved")
 	}
 }
+
+func TestReplaceSection_orphanStart(t *testing.T) {
+	// Orphaned start marker (no end) should not produce a duplicate start marker.
+	body := "PR body.\n\n" + sectionStart + "\ntruncated content with no end"
+	newSection := "### Preview\nURL: https://new.example.com"
+	got := replaceOrAppendSection(body, newSection)
+
+	if strings.Count(got, sectionStart) != 1 {
+		t.Errorf("expected exactly one start marker, got %d: %q", strings.Count(got, sectionStart), got)
+	}
+	if !strings.Contains(got, "new.example.com") {
+		t.Error("expected new section content to be present")
+	}
+	if strings.Contains(got, "truncated content") {
+		t.Error("expected orphaned content to be removed")
+	}
+}
+
+func TestBuildDeploySection(t *testing.T) {
+	tests := []struct {
+		sha     string
+		wantSha string
+	}{
+		{"abc1234", "abc1234"},         // exactly 7: no truncation
+		{"abc1234deadbeef", "abc1234"}, // > 7: truncated to 7
+		{"abc", "abc"},                 // < 7: kept as-is
+	}
+	for _, tc := range tests {
+		got := buildDeploySection("https://example.com", tc.sha)
+		if !strings.Contains(got, "`"+tc.wantSha+"`") {
+			t.Errorf("sha=%q: expected %q in output, got: %s", tc.sha, tc.wantSha, got)
+		}
+	}
+}

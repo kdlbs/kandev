@@ -60,11 +60,22 @@ func replaceOrAppendSection(body, section string) string {
 }
 
 // replaceSection replaces everything between our markers (inclusive) with marked.
+// If sectionEnd is missing (orphaned start marker), the orphan is stripped
+// and marked is appended to avoid duplicating sectionStart.
 func replaceSection(body, marked string) string {
 	start := strings.Index(body, sectionStart)
 	end := strings.Index(body, sectionEnd)
-	if start == -1 || end == -1 || end < start {
+	if start == -1 {
 		return body + "\n\n" + marked
+	}
+	if end == -1 || end < start {
+		// Orphaned start marker — strip from the start marker to end of string,
+		// then append the new section.
+		prefix := strings.TrimRight(body[:start], "\n")
+		if prefix == "" {
+			return marked
+		}
+		return prefix + "\n\n" + marked
 	}
 	end += len(sectionEnd)
 	return body[:start] + marked + body[end:]

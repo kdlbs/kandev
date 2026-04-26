@@ -84,8 +84,8 @@ func uploadBundle(ctx context.Context, sprite *sprites.Sprite, tarPath string) e
 }
 
 // extractBundle extracts the bundle tarball and writes the startup script.
-func extractBundle(ctx context.Context, sprite *sprites.Sprite) error {
-	script := buildExtractScript()
+func extractBundle(ctx context.Context, sprite *sprites.Sprite, port int) error {
+	script := buildExtractScript(port)
 	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer cancel()
 
@@ -99,7 +99,7 @@ func extractBundle(ctx context.Context, sprite *sprites.Sprite) error {
 	return nil
 }
 
-func buildExtractScript() string {
+func buildExtractScript(backendPort int) string {
 	return fmt.Sprintf(`set -e
 tar -xzf /tmp/kandev-preview.tar.gz -C /
 chmod +x /app/apps/backend/bin/kandev \
@@ -116,7 +116,7 @@ cat > /app/start-kandev.sh << 'STARTSCRIPT'
 set -e
 mkdir -p /data
 
-# Kill any agentctl orphans from previous runs or extract-time diagnostics.
+# Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
 sleep 1
 
@@ -133,10 +133,9 @@ export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
 /app/apps/backend/bin/kandev > /var/log/kandev.log 2>&1
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web)
+chmod +x /app/start-kandev.sh`, ports.Web, backendPort, ports.Web)
 }
 
-// deployService registers (or re-registers) kandev as a Sprites managed service.
 // deployService registers (or updates) the kandev service and explicitly starts
 // it. The two-step approach (CreateService then StartService) ensures the
 // process runs on both first deploy and re-deploy:
@@ -218,12 +217,12 @@ func waitForServiceStarted(stream *sprites.ServiceStream) error {
 // CommandContext until kandev responds or the deadline is exceeded.
 // Using the internal address (localhost) avoids Sprites routing state that
 // may lag during a service restart triggered by enablePublicURL.
-func waitForKandev(ctx context.Context, sprite *sprites.Sprite) error {
+func waitForKandev(ctx context.Context, sprite *sprites.Sprite, port int) error {
 	const (
 		timeout   = 90 * time.Second
 		retryWait = 3 * time.Second
 	)
-	healthURL := fmt.Sprintf("http://localhost:%d/health", ports.Backend)
+	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {

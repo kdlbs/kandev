@@ -20,8 +20,8 @@ const goDockerImage = "golang:1.26-bookworm"
 
 // buildLinuxBinaries compiles kandev, agentctl, and mock-agent for linux/amd64.
 // Run this from apps/backend/. agentctl and mock-agent use CGO_ENABLED=0 and
-// always build natively. kandev requires CGO (SQLite); on non-linux/amd64 hosts
-// it is built inside a Docker container automatically.
+// always build natively. kandev requires CGO (SQLite) and is always built inside
+// a Docker container to target a known glibc version (Debian Bookworm = 2.36).
 func buildLinuxBinaries(ctx context.Context, outDir string) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err

@@ -105,7 +105,7 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 	}
 
 	fmt.Fprintln(os.Stderr, "extracting and configuring...")
-	if err := extractBundle(ctx, sprite); err != nil {
+	if err := extractBundle(ctx, sprite, port); err != nil {
 		return "", fmt.Errorf("extract bundle: %w", err)
 	}
 
@@ -126,7 +126,7 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 	// service transitions (the external URL may return 502 while the new
 	// service process is starting up).
 	fmt.Fprintln(os.Stderr, "waiting for kandev to be healthy...")
-	if err := waitForKandev(ctx, sprite); err != nil {
+	if err := waitForKandev(ctx, sprite, port); err != nil {
 		return "", fmt.Errorf("health check: %w", err)
 	}
 
