@@ -6,15 +6,7 @@ import { IconRobot } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { SidebarCollapsibleSection } from "./sidebar-collapsible-section";
-
-const statusDotColor: Record<string, string> = {
-  idle: "bg-neutral-400",
-  working: "bg-cyan-400 animate-pulse",
-  paused: "bg-yellow-400",
-  stopped: "bg-neutral-400 opacity-50",
-  pending_approval: "bg-orange-400",
-  error: "bg-red-400",
-};
+import { AgentStatusDot } from "../agents/components/agent-status-dot";
 
 export function SidebarAgentsList() {
   const router = useRouter();
@@ -45,12 +37,7 @@ export function SidebarAgentsList() {
             >
               <IconRobot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="flex-1 truncate">{agent.name}</span>
-              <span
-                className={cn(
-                  "inline-block h-2 w-2 rounded-full shrink-0",
-                  statusDotColor[agent.status] ?? "bg-neutral-400",
-                )}
-              />
+              <AgentStatusDot status={agent.status} />
             </Link>
           );
         })

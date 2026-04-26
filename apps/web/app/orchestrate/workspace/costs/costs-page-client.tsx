@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { CostSummary } from "@/lib/state/slices/orchestrate/types";
 import { CostOverview } from "./cost-overview";
 import { BudgetsTab } from "./budgets-tab";
+import { PageHeader } from "../../components/shared/page-header";
 
 type CostsPageClientProps = {
   initialCostSummary: CostSummary | null;
@@ -31,9 +32,7 @@ export function CostsPageClient({ initialCostSummary }: CostsPageClientProps) {
 
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        Costs
-      </h1>
+      <PageHeader title="Costs" />
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>

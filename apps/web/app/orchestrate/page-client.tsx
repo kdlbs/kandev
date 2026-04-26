@@ -52,7 +52,7 @@ export function OrchestratePageClient({ initialDashboard }: OrchestratePageClien
   const recentActivity = dashboard?.recent_activity ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-6">
       {/* Metric cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
         <MetricCard

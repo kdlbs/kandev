@@ -11,18 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { IconDots, IconPlayerPlay, IconTrash, IconPencil } from "@tabler/icons-react";
 import type { Routine, AgentInstance } from "@/lib/state/slices/orchestrate/types";
-
-function formatTimeAgo(dateStr?: string): string {
-  if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+import { timeAgo } from "../components/shared/time-ago";
 
 type RoutineRowProps = {
   routine: Routine;
@@ -46,14 +35,14 @@ export function RoutineRow({
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 transition-colors cursor-pointer"
+      className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
       onClick={() => onClick(routine.id)}
     >
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{routine.name}</p>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
           {assignee && <span>{assignee.name}</span>}
-          <span>{routine.lastRunAt ? formatTimeAgo(routine.lastRunAt) : "Never run"}</span>
+          <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never run"}</span>
           <span className="capitalize">{routine.concurrencyPolicy.replace(/_/g, " ")}</span>
         </div>
       </div>

@@ -1,19 +1,7 @@
 "use client";
 
 import type { ActivityEntry } from "@/lib/state/slices/orchestrate/types";
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
-}
+import { timeAgo } from "../../components/shared/time-ago";
 
 function formatAction(action: string): string {
   return action.replace(/[._]/g, " ");
@@ -36,7 +24,7 @@ type Props = {
 
 export function ActivityRow({ entry }: Props) {
   return (
-    <div className="flex items-start gap-3 px-4 py-2 text-sm hover:bg-accent/50 transition-colors">
+    <div className="flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-accent/50 transition-colors">
       <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium uppercase text-muted-foreground">
         {actorInitial(entry.actorType)}
       </div>

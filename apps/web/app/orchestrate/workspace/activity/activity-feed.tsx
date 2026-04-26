@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { listActivity } from "@/lib/api/domains/orchestrate-api";
 import type { ActivityEntry } from "@/lib/state/slices/orchestrate/types";
 import { ActivityRow } from "./activity-row";
+import { EmptyState } from "../../components/shared/empty-state";
+import { PageHeader } from "../../components/shared/page-header";
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All types" },
@@ -28,26 +30,26 @@ export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Activity
-        </h1>
-        <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-[140px] h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {FILTER_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PageHeader
+        title="Activity"
+        action={
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-[140px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       {entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
+        <EmptyState message="No activity recorded yet." />
       ) : (
         <div className="border border-border rounded-lg divide-y divide-border">
           {entries.map((entry) => (

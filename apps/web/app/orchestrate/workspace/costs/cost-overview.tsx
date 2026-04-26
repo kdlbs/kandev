@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
-import { Card } from "@kandev/ui/card";
-import { IconCurrencyDollar } from "@tabler/icons-react";
+import { IconCurrencyDollar, IconRobot, IconFolder, IconCpu } from "@tabler/icons-react";
 import { getCostSummary, getCostsByAgent, getCostsByProject, getCostsByModel } from "@/lib/api/domains/orchestrate-api";
+import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/orchestrate/types";
 import { CostBreakdownTable } from "./cost-breakdown-table";
 
@@ -65,10 +65,10 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
       </div>
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
-        <MetricCard label="Total Spend" value={formatCents(totalCents)} icon />
-        <MetricCard label="Active Agents" value={String(byAgent.length)} />
-        <MetricCard label="Projects" value={String(byProject.length)} />
-        <MetricCard label="Models Used" value={String(byModel.length)} />
+        <MetricCard icon={IconCurrencyDollar} label="Total Spend" value={formatCents(totalCents)} />
+        <MetricCard icon={IconRobot} label="Active Agents" value={String(byAgent.length)} />
+        <MetricCard icon={IconFolder} label="Projects" value={String(byProject.length)} />
+        <MetricCard icon={IconCpu} label="Models Used" value={String(byModel.length)} />
       </div>
 
       <div className="space-y-6">
@@ -77,19 +77,5 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
         <CostBreakdownTable title="By Model" items={byModel} labelPrefix="Model" />
       </div>
     </div>
-  );
-}
-
-function MetricCard({ label, value, icon }: { label: string; value: string; icon?: boolean }) {
-  return (
-    <Card className="p-4">
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-2xl sm:text-3xl font-bold">{value}</p>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">{label}</p>
-        </div>
-        {icon && <IconCurrencyDollar className="h-5 w-5 text-muted-foreground" />}
-      </div>
-    </Card>
   );
 }

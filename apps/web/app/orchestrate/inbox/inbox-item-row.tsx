@@ -9,19 +9,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import type { InboxItem } from "@/lib/state/slices/orchestrate/types";
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
-}
+import { timeAgo } from "../components/shared/time-ago";
 
 const typeConfig: Record<string, { icon: typeof IconShieldCheck; label: string }> = {
   approval: { icon: IconShieldCheck, label: "Approval" },
@@ -41,7 +29,7 @@ export function InboxItemRow({ item, onApprove, onReject }: Props) {
   const Icon = config.icon;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 transition-colors">
+    <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors">
       <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
         <Icon className="h-4 w-4 text-muted-foreground" />
       </div>

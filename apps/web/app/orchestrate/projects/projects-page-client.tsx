@@ -8,6 +8,8 @@ import { listProjects } from "@/lib/api/domains/orchestrate-api";
 import type { Project } from "@/lib/state/slices/orchestrate/types";
 import { ProjectCard } from "./project-card";
 import { CreateProjectDialog } from "./create-project-dialog";
+import { EmptyState } from "../components/shared/empty-state";
+import { PageHeader } from "../components/shared/page-header";
 
 type ProjectsPageClientProps = {
   initialProjects: Project[];
@@ -46,32 +48,34 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
 
   return (
     <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Projects
-        </h1>
-        <Button
-          size="sm"
-          onClick={() => setDialogOpen(true)}
-          className="cursor-pointer"
-        >
-          <IconPlus className="h-4 w-4 mr-1" />
-          New Project
-        </Button>
-      </div>
-
-      {projects.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground mb-4">No projects yet</p>
+      <PageHeader
+        title="Projects"
+        action={
           <Button
-            variant="outline"
+            size="sm"
             onClick={() => setDialogOpen(true)}
             className="cursor-pointer"
           >
             <IconPlus className="h-4 w-4 mr-1" />
-            Create your first project
+            New Project
           </Button>
-        </div>
+        }
+      />
+
+      {projects.length === 0 ? (
+        <EmptyState
+          message="No projects yet"
+          action={
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(true)}
+              className="cursor-pointer"
+            >
+              <IconPlus className="h-4 w-4 mr-1" />
+              Create your first project
+            </Button>
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (

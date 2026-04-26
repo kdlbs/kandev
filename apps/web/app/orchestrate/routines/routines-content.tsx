@@ -18,6 +18,8 @@ import type { Routine, AgentInstance, RoutineRun } from "@/lib/state/slices/orch
 import { RoutineRow } from "./routine-row";
 import { RunRow } from "./run-row";
 import { CreateRoutineDialog } from "./create-routine-dialog";
+import { EmptyState } from "../components/shared/empty-state";
+import { PageHeader } from "../components/shared/page-header";
 
 export function RoutinesContent() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -109,14 +111,14 @@ export function RoutinesContent() {
 
   return (
     <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Routines
-        </h1>
-        <Button size="sm" onClick={() => setShowCreate(true)} className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-1" /> New Routine
-        </Button>
-      </div>
+      <PageHeader
+        title="Routines"
+        action={
+          <Button size="sm" onClick={() => setShowCreate(true)} className="cursor-pointer">
+            <IconPlus className="h-4 w-4 mr-1" /> New Routine
+          </Button>
+        }
+      />
 
       <Tabs defaultValue="routines">
         <TabsList>
@@ -164,9 +166,10 @@ function RoutinesList({
 }) {
   if (routines.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground text-sm">
-        No routines yet. Create one to automate recurring tasks.
-      </div>
+      <EmptyState
+        message="No routines yet."
+        description="Create one to automate recurring tasks."
+      />
     );
   }
   return (
@@ -188,11 +191,7 @@ function RoutinesList({
 
 function RunsList({ runs }: { runs: RoutineRun[] }) {
   if (runs.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground text-sm">
-        No runs yet.
-      </div>
-    );
+    return <EmptyState message="No runs yet." />;
   }
   return (
     <div className="border border-border rounded-lg divide-y divide-border">

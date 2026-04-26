@@ -4,6 +4,7 @@ import type { FlatIssueNode } from "./use-issues-tree";
 import type { IssueViewMode, OrchestrateIssue } from "@/lib/state/slices/orchestrate/types";
 import { IssueRow } from "./issue-row";
 import { IssueBoard } from "./issue-board";
+import { EmptyState } from "../components/shared/empty-state";
 
 type IssuesContentProps = {
   viewMode: IssueViewMode;
@@ -13,14 +14,6 @@ type IssuesContentProps = {
   onToggleExpand: (id: string) => void;
   agentMap: Map<string, string>;
 };
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-      {message}
-    </div>
-  );
-}
 
 function IssueListView({
   flatNodes,
