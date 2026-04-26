@@ -125,8 +125,9 @@ export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
+echo "ldd: $(ldd /app/apps/backend/bin/kandev 2>&1 | head -5 || echo NOT AVAILABLE)" >&2
 echo "starting kandev on port %d..." >&2
-exec /app/apps/backend/bin/kandev
+exec /app/apps/backend/bin/kandev >> /var/log/kandev.log 2>&1
 STARTSCRIPT
 chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web, ports.Backend)
 }
@@ -232,7 +233,7 @@ func fetchSpriteLogs(ctx context.Context, sprite *sprites.Sprite) string {
 	logCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	script := `echo "=== /var/log/kandev-web.log ==="; tail -50 /var/log/kandev-web.log 2>/dev/null || echo "(empty)"; echo "=== journalctl/service (last 50 lines) ==="; journalctl -u kandev --no-pager -n 50 2>/dev/null || true`
+	script := `echo "=== /var/log/kandev.log ==="; tail -50 /var/log/kandev.log 2>/dev/null || echo "(empty)"; echo "=== /var/log/kandev-web.log ==="; tail -20 /var/log/kandev-web.log 2>/dev/null || echo "(empty)"`
 	out, err := sprite.CommandContext(logCtx, "bash", "-c", script).CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("[log fetch error: %v]\n%s", err, string(out))

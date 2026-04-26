@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 )
 
 func runCleanup(ctx context.Context, args []string) int {
@@ -43,16 +42,14 @@ func runCleanup(ctx context.Context, args []string) int {
 	defer func() { _ = client.Close() }()
 
 	fmt.Fprintf(os.Stderr, "destroying sprite %s...\n", spriteName)
-	createdAt, destroyErr := destroySprite(ctx, client, spriteName)
+	_, destroyErr := destroySprite(ctx, client, spriteName)
 	if destroyErr != nil {
 		fmt.Fprintf(os.Stderr, "preview cleanup: destroy sprite: %v\n", destroyErr)
-		// Continue to update the PR comment even if destroy failed.
+		// Continue to update the PR description even if destroy failed.
 	}
 
-	runtime := computeRuntime(createdAt)
-	body := buildCleanupComment(runtime)
-	if err := upsertComment(ctx, ghToken, *repo, *pr, body); err != nil {
-		fmt.Fprintf(os.Stderr, "preview cleanup: update comment: %v\n", err)
+	if err := removeDescriptionSection(ctx, ghToken, *repo, *pr); err != nil {
+		fmt.Fprintf(os.Stderr, "preview cleanup: remove PR description section: %v\n", err)
 		return 1
 	}
 
@@ -60,11 +57,4 @@ func runCleanup(ctx context.Context, args []string) int {
 		return 1
 	}
 	return 0
-}
-
-func computeRuntime(createdAt time.Time) time.Duration {
-	if createdAt.IsZero() {
-		return 0
-	}
-	return time.Since(createdAt).Round(time.Minute)
 }

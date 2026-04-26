@@ -8,79 +8,120 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 const (
-	commentMarker = "<!-- kandev-preview -->"
+	sectionStart  = "<!-- kandev-preview-start -->"
+	sectionEnd    = "<!-- kandev-preview-end -->"
 	githubAPIBase = "https://api.github.com"
 )
 
-// upsertComment finds an existing preview comment on the PR and updates it,
-// or creates a new one if none exists.
-func upsertComment(ctx context.Context, token, repo string, pr int, body string) error {
-	existing, err := findPreviewComment(ctx, token, repo, pr)
+// upsertDescriptionSection appends (or updates) the kandev preview section at
+// the end of the PR description. Other bots may also append sections; we only
+// touch the block delimited by our own markers.
+func upsertDescriptionSection(ctx context.Context, token, repo string, pr int, section string) error {
+	body, err := getPRBody(ctx, token, repo, pr)
 	if err != nil {
-		return fmt.Errorf("find comment: %w", err)
+		return fmt.Errorf("get PR body: %w", err)
 	}
 
-	if existing != 0 {
-		return updateComment(ctx, token, repo, existing, body)
+	newBody := replaceOrAppendSection(body, section)
+	return updatePRBody(ctx, token, repo, pr, newBody)
+}
+
+// removeDescriptionSection removes the kandev preview section from the PR
+// description on cleanup. If no section is present this is a no-op.
+func removeDescriptionSection(ctx context.Context, token, repo string, pr int) error {
+	body, err := getPRBody(ctx, token, repo, pr)
+	if err != nil {
+		return fmt.Errorf("get PR body: %w", err)
 	}
-	return createComment(ctx, token, repo, pr, body)
-}
 
-func findPreviewComment(ctx context.Context, token, repo string, pr int) (int64, error) {
-	for page := 1; ; page++ {
-		url := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100&page=%d", githubAPIBase, repo, pr, page)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Accept", "application/vnd.github+json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return 0, err
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return 0, fmt.Errorf("list comments status %d: %s", resp.StatusCode, body)
-		}
-
-		var comments []struct {
-			ID   int64  `json:"id"`
-			Body string `json:"body"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
-			return 0, err
-		}
-
-		for _, c := range comments {
-			if containsMarker(c.Body) {
-				return c.ID, nil
-			}
-		}
-		if len(comments) < 100 {
-			return 0, nil // last page — marker not found
-		}
+	if !strings.Contains(body, sectionStart) {
+		return nil // nothing to remove
 	}
+
+	newBody := stripSection(body)
+	return updatePRBody(ctx, token, repo, pr, newBody)
 }
 
-func containsMarker(body string) bool {
-	return strings.Contains(body, commentMarker)
+// replaceOrAppendSection replaces an existing kandev section in body with
+// section, or appends it if none exists. Preserves any trailing newline.
+func replaceOrAppendSection(body, section string) string {
+	marked := sectionStart + "\n" + section + "\n" + sectionEnd
+	if strings.Contains(body, sectionStart) {
+		return replaceSection(body, marked)
+	}
+	sep := "\n\n"
+	if body == "" {
+		sep = ""
+	}
+	return body + sep + marked
 }
 
-func createComment(ctx context.Context, token, repo string, pr int, body string) error {
-	url := fmt.Sprintf("%s/repos/%s/issues/%d/comments", githubAPIBase, repo, pr)
-	return postJSON(ctx, token, http.MethodPost, url, map[string]string{"body": body})
+// replaceSection replaces everything between our markers (inclusive) with marked.
+func replaceSection(body, marked string) string {
+	start := strings.Index(body, sectionStart)
+	end := strings.Index(body, sectionEnd)
+	if start == -1 || end == -1 || end < start {
+		return body + "\n\n" + marked
+	}
+	end += len(sectionEnd)
+	return body[:start] + marked + body[end:]
 }
 
-func updateComment(ctx context.Context, token, repo string, commentID int64, body string) error {
-	url := fmt.Sprintf("%s/repos/%s/issues/comments/%d", githubAPIBase, repo, commentID)
+// stripSection removes the entire kandev section block (markers + content)
+// including any leading blank line that we added before the section.
+func stripSection(body string) string {
+	start := strings.Index(body, sectionStart)
+	end := strings.Index(body, sectionEnd)
+	if start == -1 || end == -1 {
+		return body
+	}
+	end += len(sectionEnd)
+
+	// Strip the blank line separator we added before the section.
+	prefix := body[:start]
+	prefix = strings.TrimRight(prefix, "\n")
+
+	suffix := body[end:]
+	if prefix == "" {
+		return strings.TrimLeft(suffix, "\n")
+	}
+	return prefix + suffix
+}
+
+func getPRBody(ctx context.Context, token, repo string, pr int) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/pulls/%d", githubAPIBase, repo, pr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get PR status %d: %s", resp.StatusCode, b)
+	}
+
+	var result struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.Body, nil
+}
+
+func updatePRBody(ctx context.Context, token, repo string, pr int, body string) error {
+	url := fmt.Sprintf("%s/repos/%s/pulls/%d", githubAPIBase, repo, pr)
 	return postJSON(ctx, token, http.MethodPatch, url, map[string]string{"body": body})
 }
 
@@ -104,20 +145,19 @@ func postJSON(ctx context.Context, token, method, url string, payload any) error
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%s %s: status %d: %s", method, url, resp.StatusCode, body)
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s %s: status %d: %s", method, url, resp.StatusCode, b)
 	}
 	return nil
 }
 
-// buildDeployComment returns the markdown body for a deploy comment.
-func buildDeployComment(previewURL, sha string) string {
+// buildDeploySection returns the markdown section body for a deploy update.
+func buildDeploySection(previewURL, sha string) string {
 	shaDisplay := sha
 	if len(sha) > 7 {
 		shaDisplay = sha[:7]
 	}
-	return fmt.Sprintf(`%s
-### Preview Environment
+	return fmt.Sprintf(`### Preview Environment
 
 | | |
 |---|---|
@@ -125,28 +165,7 @@ func buildDeployComment(previewURL, sha string) string {
 | **Commit** | `+"`%s`"+` |
 | **Agent** | Mock agent |
 
-> Environment updates automatically on each new commit. Destroyed when the PR is closed.`,
-		commentMarker, previewURL, shaDisplay)
+> Updates automatically on each push. Destroyed when the PR is closed.`,
+		previewURL, shaDisplay)
 }
 
-// buildCleanupComment returns the markdown body for a post-close summary comment.
-func buildCleanupComment(runtime time.Duration) string {
-	var runtimeStr string
-	switch {
-	case runtime <= 0:
-		runtimeStr = "unknown"
-	case runtime < time.Minute:
-		runtimeStr = "< 1 minute"
-	default:
-		runtimeStr = fmt.Sprintf("~%d minutes", int(runtime.Minutes()))
-	}
-	return fmt.Sprintf(`%s
-### Preview Environment — Closed
-
-The preview environment for this PR has been destroyed.
-
-| | |
-|---|---|
-| **Runtime** | %s |`,
-		commentMarker, runtimeStr)
-}

@@ -63,9 +63,9 @@ func runDeploy(ctx context.Context, args []string) int {
 
 	fmt.Printf("preview URL: %s\n", previewURL)
 
-	body := buildDeployComment(previewURL, *sha)
-	if err := upsertComment(ctx, ghToken, *repo, *pr, body); err != nil {
-		fmt.Fprintf(os.Stderr, "preview deploy: post comment: %v\n", err)
+	section := buildDeploySection(previewURL, *sha)
+	if err := upsertDescriptionSection(ctx, ghToken, *repo, *pr, section); err != nil {
+		fmt.Fprintf(os.Stderr, "preview deploy: update PR description: %v\n", err)
 		return 1
 	}
 
