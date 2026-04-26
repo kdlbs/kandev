@@ -135,6 +135,42 @@ ORDER BY w.requested_at
 LIMIT 1
 ```
 
+### Heartbeat cooldown
+
+- Each agent instance has a configurable `cooldown_sec` (default 10 seconds).
+- After a wakeup finishes, the agent cannot be woken again until the cooldown period has elapsed.
+- The claim query checks `last_wakeup_finished_at` on the agent instance and skips agents still in cooldown.
+- Prevents rapid re-runs when multiple events fire in quick succession (e.g. several comments posted, multiple blockers resolved simultaneously).
+- Without cooldown, the agent could be spawned dozens of times per minute in event-heavy scenarios.
+
+### Retry on agent errors
+
+- When an agent session fails (process crash, timeout, unrecoverable error), the wakeup is not simply marked as failed.
+- Instead, the wakeup is retried with exponential backoff: 4 attempts at [2m, 10m, 30m, 2h] with 25% jitter.
+- `retry_count` and `scheduled_retry_at` fields on the wakeup track retry state.
+- The claim query skips wakeups where `scheduled_retry_at > now()`.
+- After 4 failed attempts, the wakeup is marked `failed`, an `agent.error` inbox item is created, and the CEO receives a `agent_error` wakeup.
+
+### Atomic task checkout
+
+- When an agent starts working on a task, it must acquire an exclusive lock via atomic checkout.
+- The checkout uses a CAS (compare-and-swap) pattern:
+  ```sql
+  UPDATE tasks SET checkout_agent_id = $agent, checkout_at = now()
+  WHERE id = $task AND checkout_agent_id IS NULL
+  RETURNING *
+  ```
+- Zero rows returned = another agent already holds the lock -> wakeup skipped, no retry.
+- When the agent finishes (or fails), the lock is released.
+- This prevents two agents from working on the same task simultaneously when concurrency > 1 or multiple agents are assigned.
+
+### Pre-execution budget check
+
+- Before launching an agent session, the scheduler checks all applicable budget policies.
+- If any budget is exceeded with `action_on_exceed=pause_agent`, the agent is paused and the wakeup is skipped.
+- This prevents wasting tokens on a run that will immediately be followed by a budget-exceeded pause.
+- The check evaluates: workspace budget -> project budget -> agent budget.
+
 ## Scenarios
 
 - **GIVEN** a task is assigned to a worker agent instance, **WHEN** the assignment is saved, **THEN** a `task_assigned` wakeup is queued for that agent. The scheduler claims it, creates a session, and the agent starts working on the task.

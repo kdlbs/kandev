@@ -42,7 +42,7 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 | `/orchestrate/agents/[id]` | Agent detail with tabs: Overview, Skills, Runs, Memory, Channels |
 | `/orchestrate/company/skills` | Skill catalog CRUD |
 | `/orchestrate/company/costs` | Cost explorer with breakdowns by agent/project/model/time |
-| `/orchestrate/company/org` | Org chart: visual tree of agent hierarchy (`reports_to` relationships). Interactive node cards showing icon, name, role, adapter type, status dot. Zoom/pan/fit controls. Click a node to open agent detail. |
+| `/orchestrate/workspace/org` | Org chart: visual tree of agent hierarchy (`reports_to` relationships). Interactive node cards showing icon, name, role, adapter type, status dot. Zoom/pan/fit controls. L-shaped SVG edge connectors (vertical->horizontal->vertical). Click a node to open agent detail. Server-side PNG export for sharing. |
 | `/orchestrate/company/activity` | Full audit log with filtering |
 | `/orchestrate/company/settings` | Global orchestrate configuration: approval defaults, budget defaults, config source repo, import/export |
 
@@ -58,6 +58,7 @@ Orchestrate adds an autonomy layer on top of kandev's existing task system. A co
 - Group by: status, priority, assignee, project, parent, none.
 - Column picker: status, identifier, assignee, project, labels, updated.
 - Click a row to open the task detail page.
+- **Server-side search**: the search input queries the backend with full-text search on title, description, and identifier. SQLite FTS5 index for fast matching on large task lists. Client-side filtering is a fallback for quick filtering within loaded results.
 
 ### Task detail - simple mode (`/orchestrate/issues/[id]`)
 
