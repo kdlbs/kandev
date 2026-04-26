@@ -32,11 +32,20 @@ The existing scheduler is reactive -- tasks only execute when a user explicitly 
 - Wakeup reason constants: `task_assigned`, `task_comment`, `task_blockers_resolved`, `task_children_completed`, `approval_resolved`, `routine_trigger`, `heartbeat`, `budget_alert`, `agent_error`
 
 **Event subscribers** (trigger wakeups from system events):
+
+All subscribers guard on `task.assignee_agent_instance_id != ""` -- non-orchestrate tasks are ignored.
+
 - Task assignee changed -> `task_assigned` wakeup
 - Comment posted on task (non-self) -> `task_comment` wakeup
-- Task status -> done: check if any tasks are blocked_by this task, if all blockers resolved -> `task_blockers_resolved` wakeup for blocked task's assignee
-- Task status -> done: check if parent task's children are all terminal -> `task_children_completed` for parent's assignee
+- Task moved to "Done"/"Cancelled" step (via `task.moved` event):
+  - Check if any tasks are blocked_by this task, if all blockers resolved -> `task_blockers_resolved` wakeup for blocked task's assignee
+  - Check if parent task's children are all terminal -> `task_children_completed` for parent's assignee
+- Task moved to "In Progress" step (via `task.moved` event, e.g. kanban drag-drop) -> `task_assigned` wakeup for assignee
+- Task moved to "In Review" step -> if execution_policy has reviewers, wake reviewer agents
+- Task moved from "In Review" to "In Progress" step -> `task_comment` wakeup for assignee with rejection context
 - Approval resolved -> `approval_resolved` wakeup for requesting agent
+
+Note: `task.moved` events are emitted by both the orchestrate scheduler (programmatic status changes) and the kanban drag-drop (manual user moves). The same subscribers handle both -- the user can manually intervene on orchestrate tasks via the kanban board.
 
 ### 4B: Scheduler Extension (backend)
 
@@ -155,6 +164,9 @@ heartbeat (CEO):
 - Executor resolver: worktree created when task targets a repo with per_task strategy
 - Agent JWT: minted with correct claims, validated on API endpoints, scoped access enforced
 - Agent JWT: expired token rejected, wrong agent_instance_id rejected
+- Manual drag-drop: move orchestrate task to "Done" on kanban -> blockers resolve, wakeups fire
+- Manual drag-drop: move orchestrate task to "In Progress" -> assignee agent woken
+- Manual drag-drop: move non-orchestrate task -> no orchestrate wakeups fired (guard works)
 - Skill injection: symlinks created before session, cleaned up after
 - Integration: assign task to agent -> wakeup queued -> scheduler claims -> session created -> agent launched
 

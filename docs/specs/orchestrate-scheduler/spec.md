@@ -42,6 +42,16 @@ Orchestrate adds a wakeup queue that sits alongside the existing task queue. Eve
 | `budget_alert` | Budget threshold crossed for a sub-agent (CEO only) | `{agent_instance_id, budget_pct}` |
 | `agent_error` | A sub-agent's session failed (CEO only) | `{agent_instance_id, session_id, error}` |
 
+### Manual status changes (kanban drag-drop)
+
+- Orchestrate tasks live on the system orchestrate workflow and appear on the kanban board. Users can drag them between columns (steps), which emits a `task.moved` event.
+- The orchestrate event subscribers handle `task.moved` events for orchestrate tasks (identified by `assignee_agent_instance_id != null`) and fire the appropriate wakeups:
+  - Move to "In Progress" step: `task_assigned` wakeup for the assignee agent.
+  - Move to "Done" or "Cancelled" step: resolve blocker dependencies, fire `task_blockers_resolved` / `task_children_completed` wakeups.
+  - Move to "In Review" step: if execution_policy has reviewers, wake reviewer agents.
+  - Move from "In Review" to "In Progress" step: `task_comment` wakeup with rejection context for the assignee.
+- Non-orchestrate tasks (those without `assignee_agent_instance_id`) are ignored by orchestrate subscribers, even if moved on any workflow.
+
 ### Coalescing
 
 - Multiple wakeups for the same agent instance with the same reason within a coalescing window (default 5 seconds) merge into a single queued wakeup.

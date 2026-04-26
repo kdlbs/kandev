@@ -133,7 +133,19 @@ Orchestrate tasks extend the existing `Task` model with these changes:
 - Orchestrate tasks get `workflow_id` = this system workflow and `workflow_step_id` = the step matching their current status.
 - When orchestrate changes a task's status (e.g. agent completes -> in_review), it moves the task to the corresponding workflow step. This means the existing workflow engine, kanban board, task detail stepper, and `/t/[taskId]` page all work unchanged.
 - The Orchestrate workflow appears in the kanban board's workflow selector, so users can view orchestrate tasks on the board if they want.
+- The Orchestrate workflow is visible in the settings workflow page as a system workflow (read-only). Users can view steps and customize colors, but cannot delete, rename steps, add/remove steps, or add step events.
 - The Orchestrate workflow's step events are configured for orchestrate behavior (no on_enter auto_start_agent -- the scheduler handles that).
+
+**Manual status changes via kanban drag-drop:**
+- Users can drag orchestrate tasks between columns on the kanban board. Since orchestrate status IS the workflow step, this changes the task's status.
+- This is intentional -- it lets users manually intervene (unblock a stuck task, manually complete, reject a review).
+- The orchestrate event subscribers listen for `task.moved` events (the same events kanban drag-drop emits) and fire the appropriate side effects:
+  - Move to In Progress: if the task has an assignee agent, queue a `task_assigned` wakeup so the agent starts working.
+  - Move to Done: check blocker dependencies, resolve them, fire `task_blockers_resolved` wakeups for newly-unblocked tasks. Check if parent's children are all terminal, fire `task_children_completed`.
+  - Move to In Review: if the task has an execution_policy with reviewers, wake the reviewer agents.
+  - Move from In Review to In Progress: treat as rejection, wake the assignee agent with context.
+  - Move to Cancelled: same blocker/parent resolution as Done (cancelled is terminal).
+- Side effects only fire for orchestrate tasks (those with `assignee_agent_instance_id` set). Non-orchestrate tasks moved on other workflows are unaffected.
 
 **Task identifiers:**
 - Each workspace has a `task_sequence` counter (integer, auto-incrementing).
