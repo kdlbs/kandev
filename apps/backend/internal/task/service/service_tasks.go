@@ -25,55 +25,38 @@ type taskStopTarget struct {
 
 // Task operations
 
+// isOrchestrateRequest returns true if the request should create an orchestrate task.
+func isOrchestrateRequest(req *CreateTaskRequest) bool {
+	return req.ProjectID != "" ||
+		req.Origin == models.TaskOriginAgentCreated ||
+		req.Origin == models.TaskOriginRoutine
+}
+
 // CreateTask creates a new task and publishes a task.created event.
-// WorkflowID is required for non-ephemeral tasks (kanban tasks).
+// WorkflowID is required for non-ephemeral kanban tasks.
+// Orchestrate tasks (project_id set, or origin is agent_created/routine)
+// auto-resolve to the workspace's orchestrate workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
-	// Non-ephemeral tasks require a workflow for kanban board placement
-	if !req.IsEphemeral && req.WorkflowID == "" {
-		return nil, fmt.Errorf("workflow_id is required for non-ephemeral tasks")
-	}
-	// Ephemeral tasks must not have a workflow - they exist outside the kanban board
-	if req.IsEphemeral && req.WorkflowID != "" {
-		return nil, fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	if err := s.validateCreateTaskRequest(req); err != nil {
+		return nil, err
 	}
 
-	// Auto-resolve start step if not provided
-	workflowStepID := req.WorkflowStepID
-	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
-		var resolvedID string
-		var err error
-		if req.PlanMode {
-			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
-		} else {
-			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
-		}
-		if err != nil {
-			s.logger.Warn("failed to resolve start step, using empty",
-				zap.String("workflow_id", req.WorkflowID),
-				zap.Error(err))
-		} else {
-			workflowStepID = resolvedID
+	// For orchestrate tasks, resolve workflow from workspace
+	if isOrchestrateRequest(req) && req.WorkflowID == "" {
+		if err := s.resolveOrchestrateWorkflow(ctx, req); err != nil {
+			return nil, err
 		}
 	}
 
-	state := v1.TaskStateCreated
-	if req.State != nil {
-		state = *req.State
-	}
-	task := &models.Task{
-		ID:             uuid.New().String(),
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: workflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
-		State:          state,
-		Priority:       req.Priority,
-		Position:       req.Position,
-		Metadata:       req.Metadata,
-		IsEphemeral:    req.IsEphemeral,
-		ParentID:       req.ParentID,
+	workflowStepID := s.resolveWorkflowStep(ctx, req)
+	task := s.buildTask(req, workflowStepID)
+
+	// Auto-assign identifier for orchestrate tasks
+	if isOrchestrateRequest(req) {
+		if err := s.assignIdentifier(ctx, task); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.tasks.CreateTask(ctx, task); err != nil {
@@ -97,6 +80,103 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+// validateCreateTaskRequest validates constraints for task creation.
+func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	isOrchestrate := isOrchestrateRequest(req)
+	if !req.IsEphemeral && !isOrchestrate && req.WorkflowID == "" {
+		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
+	}
+	if req.IsEphemeral && req.WorkflowID != "" {
+		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// resolveOrchestrateWorkflow sets WorkflowID on the request from the workspace's orchestrate workflow.
+func (s *Service) resolveOrchestrateWorkflow(ctx context.Context, req *CreateTaskRequest) error {
+	_, orchWorkflowID, err := s.tasks.GetWorkspaceTaskPrefix(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get orchestrate workflow for workspace: %w", err)
+	}
+	if orchWorkflowID == "" {
+		return fmt.Errorf("workspace %s has no orchestrate workflow configured", req.WorkspaceID)
+	}
+	req.WorkflowID = orchWorkflowID
+	return nil
+}
+
+// resolveWorkflowStep resolves the starting workflow step for a new task.
+func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
+	workflowStepID := req.WorkflowStepID
+	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
+		var resolvedID string
+		var err error
+		if req.PlanMode {
+			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
+		} else {
+			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
+		}
+		if err != nil {
+			s.logger.Warn("failed to resolve start step, using empty",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.Error(err))
+		} else {
+			workflowStepID = resolvedID
+		}
+	}
+	return workflowStepID
+}
+
+// buildTask constructs a Task model from the CreateTaskRequest.
+func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *models.Task {
+	state := v1.TaskStateCreated
+	if req.State != nil {
+		state = *req.State
+	}
+	origin := req.Origin
+	if origin == "" {
+		origin = models.TaskOriginManual
+	}
+	labels := req.Labels
+	if labels == "" {
+		labels = "[]"
+	}
+	return &models.Task{
+		ID:                      uuid.New().String(),
+		WorkspaceID:             req.WorkspaceID,
+		WorkflowID:              req.WorkflowID,
+		WorkflowStepID:          workflowStepID,
+		Title:                   req.Title,
+		Description:             req.Description,
+		State:                   state,
+		Priority:                req.Priority,
+		Position:                req.Position,
+		Metadata:                req.Metadata,
+		IsEphemeral:             req.IsEphemeral,
+		ParentID:                req.ParentID,
+		AssigneeAgentInstanceID: req.AssigneeAgentInstanceID,
+		Origin:                  origin,
+		ProjectID:               req.ProjectID,
+		RequiresApproval:        req.RequiresApproval,
+		ExecutionPolicy:         req.ExecutionPolicy,
+		Labels:                  labels,
+	}
+}
+
+// assignIdentifier generates a sequential identifier (e.g. "KAN-1") for the task.
+func (s *Service) assignIdentifier(ctx context.Context, task *models.Task) error {
+	prefix, _, err := s.tasks.GetWorkspaceTaskPrefix(ctx, task.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get task prefix: %w", err)
+	}
+	seq, err := s.tasks.IncrementTaskSequence(ctx, task.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to increment task sequence: %w", err)
+	}
+	task.Identifier = fmt.Sprintf("%s-%d", prefix, seq)
+	return nil
 }
 
 // createTaskRepositories creates task-repository associations, resolving local paths to repository IDs.

@@ -32,6 +32,13 @@ const (
 	MetaKeyExecutorProfileID = "executor_profile_id"
 )
 
+// Task origin values for the Origin field.
+const (
+	TaskOriginManual       = "manual"
+	TaskOriginAgentCreated = "agent_created"
+	TaskOriginRoutine      = "routine"
+)
+
 // Task represents a task in the database
 type Task struct {
 	ID             string                 `json:"id"`
@@ -50,6 +57,29 @@ type Task struct {
 	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+
+	// Orchestrate extensions
+	AssigneeAgentInstanceID string `json:"assignee_agent_instance_id,omitempty"`
+	Origin                  string `json:"origin,omitempty"`           // manual, agent_created, routine
+	ProjectID               string `json:"project_id,omitempty"`       // FK to orchestrate project
+	RequiresApproval        bool   `json:"requires_approval"`          // shorthand for "add user as approver"
+	ExecutionPolicy         string `json:"execution_policy,omitempty"` // JSON string
+	ExecutionState          string `json:"execution_state,omitempty"`  // JSON string
+	Labels                  string `json:"labels,omitempty"`           // JSON array string, default "[]"
+	Identifier              string `json:"identifier,omitempty"`       // e.g. "KAN-42"
+}
+
+// IsOrchestrateTask returns true if this task belongs to the orchestrate system.
+func (t *Task) IsOrchestrateTask() bool {
+	return t.ProjectID != "" || t.Origin == TaskOriginAgentCreated || t.Origin == TaskOriginRoutine
+}
+
+// TaskTreeFilters provides filter options for the task tree query.
+type TaskTreeFilters struct {
+	ProjectID  string
+	AssigneeID string
+	WorkflowID string
+	Origin     string
 }
 
 // Workflow represents a task workflow
@@ -77,6 +107,11 @@ type Workspace struct {
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+
+	// Orchestrate extensions
+	TaskPrefix            string `json:"task_prefix,omitempty"`             // e.g. "KAN"
+	TaskSequence          int    `json:"task_sequence,omitempty"`           // auto-incrementing counter
+	OrchestrateWorkflowID string `json:"orchestrate_workflow_id,omitempty"` // FK to system orchestrate workflow
 }
 
 // TaskRepository represents a repository associated with a task
@@ -655,7 +690,7 @@ func (t *Task) ToAPI() *v1.Task {
 		})
 	}
 
-	return &v1.Task{
+	result := &v1.Task{
 		ID:           t.ID,
 		WorkspaceID:  t.WorkspaceID,
 		WorkflowID:   t.WorkflowID,
@@ -670,4 +705,8 @@ func (t *Task) ToAPI() *v1.Task {
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
 	}
+	if t.Identifier != "" {
+		result.Identifier = t.Identifier
+	}
+	return result
 }

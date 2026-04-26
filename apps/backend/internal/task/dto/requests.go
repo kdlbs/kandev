@@ -265,6 +265,15 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput
 	Position       int
 	Metadata       map[string]interface{}
+
+	// Orchestrate extensions
+	AssigneeAgentInstanceID string
+	Origin                  string
+	ProjectID               string
+	RequiresApproval        bool
+	ExecutionPolicy         string
+	Labels                  string
+	ParentID                string
 }
 
 type UpdateTaskRequest struct {

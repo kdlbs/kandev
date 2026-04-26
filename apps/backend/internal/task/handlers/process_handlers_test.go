@@ -82,6 +82,21 @@ func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflow
 func (m *mockRepository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
 	return nil
 }
+func (m *mockRepository) ListTasksByProject(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTasksByAssignee(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTaskTree(_ context.Context, _ string, _ models.TaskTreeFilters) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+func (m *mockRepository) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
+	return "KAN", "", nil
+}
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }

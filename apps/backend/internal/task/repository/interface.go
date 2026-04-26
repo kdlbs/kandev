@@ -34,6 +34,11 @@ type TaskRepository interface {
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
 	RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error
+	ListTasksByProject(ctx context.Context, projectID string) ([]*models.Task, error)
+	ListTasksByAssignee(ctx context.Context, agentInstanceID string) ([]*models.Task, error)
+	ListTaskTree(ctx context.Context, workspaceID string, filters models.TaskTreeFilters) ([]*models.Task, error)
+	IncrementTaskSequence(ctx context.Context, workspaceID string) (int, error)
+	GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (prefix, orchestrateWorkflowID string, err error)
 }
 
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).

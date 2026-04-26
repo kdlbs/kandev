@@ -28,6 +28,9 @@ type WorkspaceDTO struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	TaskPrefix                  string    `json:"task_prefix,omitempty"`
+	TaskSequence                int       `json:"task_sequence,omitempty"`
+	OrchestrateWorkflowID       string    `json:"orchestrate_workflow_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 }
@@ -135,6 +138,16 @@ type TaskDTO struct {
 	CreatedAt               time.Time              `json:"created_at"`
 	UpdatedAt               time.Time              `json:"updated_at"`
 	Metadata                map[string]interface{} `json:"metadata,omitempty"`
+
+	// Orchestrate extensions
+	AssigneeAgentInstanceID string `json:"assignee_agent_instance_id,omitempty"`
+	Origin                  string `json:"origin,omitempty"`
+	ProjectID               string `json:"project_id,omitempty"`
+	RequiresApproval        bool   `json:"requires_approval,omitempty"`
+	ExecutionPolicy         string `json:"execution_policy,omitempty"`
+	ExecutionState          string `json:"execution_state,omitempty"`
+	Labels                  string `json:"labels,omitempty"`
+	Identifier              string `json:"identifier,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -382,6 +395,9 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
+		TaskPrefix:                  workspace.TaskPrefix,
+		TaskSequence:                workspace.TaskSequence,
+		OrchestrateWorkflowID:       workspace.OrchestrateWorkflowID,
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
 	}
@@ -547,6 +563,15 @@ func FromTaskWithSessionInfo(
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.UpdatedAt,
 		Metadata:                task.Metadata,
+		// Orchestrate extensions
+		AssigneeAgentInstanceID: task.AssigneeAgentInstanceID,
+		Origin:                  task.Origin,
+		ProjectID:               task.ProjectID,
+		RequiresApproval:        task.RequiresApproval,
+		ExecutionPolicy:         task.ExecutionPolicy,
+		ExecutionState:          task.ExecutionState,
+		Labels:                  task.Labels,
+		Identifier:              task.Identifier,
 	}
 }
 

@@ -76,6 +76,7 @@ type Task struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	IsEphemeral  bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID     string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier   string                 `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

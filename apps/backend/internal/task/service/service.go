@@ -135,6 +135,8 @@ type Service struct {
 	workflowStepGetter  WorkflowStepGetter
 	startStepResolver   StartStepResolver
 	quickChatDir        string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	blockers            BlockerRepository
+	comments            CommentRepository
 }
 
 // NewService creates a new task service
