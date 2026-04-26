@@ -33,7 +33,7 @@ export function ConfigSection() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(() => {
-    router.push("/orchestrate/company/settings/export");
+    router.push("/orchestrate/workspace/settings/export");
   }, [router]);
 
   const handleFileSelect = useCallback(

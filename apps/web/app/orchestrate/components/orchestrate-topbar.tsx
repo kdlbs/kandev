@@ -9,12 +9,12 @@ const PAGE_TITLES: Record<string, string> = {
   "/orchestrate/routines": "ROUTINES",
   "/orchestrate/projects": "PROJECTS",
   "/orchestrate/agents": "AGENTS",
-  "/orchestrate/company/org": "ORG CHART",
-  "/orchestrate/company/skills": "SKILLS",
-  "/orchestrate/company/costs": "COSTS",
-  "/orchestrate/company/activity": "ACTIVITY",
-  "/orchestrate/company/settings": "SETTINGS",
-  "/orchestrate/company/settings/export": "SETTINGS > EXPORT",
+  "/orchestrate/workspace/org": "ORG CHART",
+  "/orchestrate/workspace/skills": "SKILLS",
+  "/orchestrate/workspace/costs": "COSTS",
+  "/orchestrate/workspace/activity": "ACTIVITY",
+  "/orchestrate/workspace/settings": "SETTINGS",
+  "/orchestrate/workspace/settings/export": "SETTINGS > EXPORT",
 };
 
 export function OrchestrateTopbar() {

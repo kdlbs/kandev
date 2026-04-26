@@ -121,9 +121,9 @@ export function SettingsContent() {
         </SettingCard>
       </div>
 
-      {/* Hiring */}
+      {/* Permissions */}
       <div>
-        <SectionHeader>Hiring</SectionHeader>
+        <SectionHeader>Permissions</SectionHeader>
         <SettingCard>
           <ToggleRow
             label="Require approval for new agents"
@@ -131,26 +131,12 @@ export function SettingsContent() {
             checked={approvalNewAgents}
             onCheckedChange={setApprovalNewAgents}
           />
-        </SettingCard>
-      </div>
-
-      {/* Task Completion */}
-      <div>
-        <SectionHeader>Task Completion</SectionHeader>
-        <SettingCard>
           <ToggleRow
             label="Require approval for task completion"
             description="Tasks must be reviewed before they can be marked as done"
             checked={approvalTaskCompletion}
             onCheckedChange={setApprovalTaskCompletion}
           />
-        </SettingCard>
-      </div>
-
-      {/* Skills */}
-      <div>
-        <SectionHeader>Skills</SectionHeader>
-        <SettingCard>
           <ToggleRow
             label="Require approval for skill changes"
             description="Agent-created skills must be approved before activation"

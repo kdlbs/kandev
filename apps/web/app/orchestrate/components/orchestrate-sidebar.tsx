@@ -70,11 +70,11 @@ export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSideba
 
         {/* Company section */}
         <SidebarSection label="Workspace">
-          <SidebarNavItem icon={IconSitemap} label="Org" href="/orchestrate/company/org" />
-          <SidebarNavItem icon={IconBoxMultiple} label="Skills" href="/orchestrate/company/skills" />
-          <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/orchestrate/company/costs" />
-          <SidebarNavItem icon={IconHistory} label="Activity" href="/orchestrate/company/activity" />
-          <SidebarNavItem icon={IconSettings} label="Settings" href="/orchestrate/company/settings" />
+          <SidebarNavItem icon={IconSitemap} label="Org" href="/orchestrate/workspace/org" />
+          <SidebarNavItem icon={IconBoxMultiple} label="Skills" href="/orchestrate/workspace/skills" />
+          <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/orchestrate/workspace/costs" />
+          <SidebarNavItem icon={IconHistory} label="Activity" href="/orchestrate/workspace/activity" />
+          <SidebarNavItem icon={IconSettings} label="Settings" href="/orchestrate/workspace/settings" />
         </SidebarSection>
       </nav>
 
