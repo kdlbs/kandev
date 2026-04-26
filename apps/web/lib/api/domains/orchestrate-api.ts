@@ -95,6 +95,27 @@ export function deleteSkill(id: string, options?: ApiRequestOptions) {
   });
 }
 
+export function importSkill(
+  workspaceId: string,
+  source: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ skills: Skill[]; warnings: string[] }>(
+    `${BASE}/workspaces/${workspaceId}/skills/import`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify({ source }), ...options?.init },
+    },
+  );
+}
+
+export function getSkillFile(skillId: string, path: string, options?: ApiRequestOptions) {
+  return fetchJson<{ path: string; content: string }>(
+    `${BASE}/skills/${skillId}/files?path=${encodeURIComponent(path)}`,
+    options,
+  );
+}
+
 // --- Projects ---
 
 export function listProjects(workspaceId: string, options?: ApiRequestOptions) {

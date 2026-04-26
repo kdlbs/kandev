@@ -27,7 +27,7 @@ export type AgentInstance = {
   updatedAt: string;
 };
 
-export type SkillSourceType = "inline" | "local_path" | "git";
+export type SkillSourceType = "inline" | "local_path" | "git" | "skills_sh";
 
 export type Skill = {
   id: string;

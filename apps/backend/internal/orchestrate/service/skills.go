@@ -84,7 +84,7 @@ func (s *Service) validateSlugUnique(ctx context.Context, wsID, slug, excludeID 
 
 func (s *Service) validateSourceType(sourceType string) error {
 	switch sourceType {
-	case "inline", "local_path", "git", "":
+	case "inline", "local_path", "git", "skills_sh", "":
 		return nil
 	default:
 		return fmt.Errorf("invalid source type: %q", sourceType)

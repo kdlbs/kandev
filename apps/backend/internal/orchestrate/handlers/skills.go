@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -87,6 +88,41 @@ func (h *Handlers) deleteSkill(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handlers) importSkill(c *gin.Context) {
+	var req dto.ImportSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Source == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source is required"})
+		return
+	}
+	result, err := h.ctrl.Svc.ImportFromSource(c.Request.Context(), c.Param("wsId"), req.Source, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, dto.ImportSkillResponse{
+		Skills:   result.Skills,
+		Warnings: result.Warnings,
+	})
+}
+
+func (h *Handlers) getSkillFile(c *gin.Context) {
+	path := c.DefaultQuery("path", "SKILL.md")
+	content, err := h.ctrl.Svc.GetSkillFile(c.Request.Context(), c.Param("id"), path)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.SkillFileResponse{Path: path, Content: content})
 }
 
 func applySkillUpdates(skill *models.Skill, req *dto.UpdateSkillRequest) {

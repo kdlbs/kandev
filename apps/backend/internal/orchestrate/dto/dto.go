@@ -86,6 +86,23 @@ type SkillListResponse struct {
 	Skills []*models.Skill `json:"skills"`
 }
 
+// ImportSkillRequest is the request body for importing a skill from a URL or path.
+type ImportSkillRequest struct {
+	Source string `json:"source"`
+}
+
+// ImportSkillResponse wraps the result of a skill import.
+type ImportSkillResponse struct {
+	Skills   []*models.Skill `json:"skills"`
+	Warnings []string        `json:"warnings"`
+}
+
+// SkillFileResponse wraps the content of a skill file.
+type SkillFileResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // -- Projects --
 
 // CreateProjectRequest is the request body for creating a project.

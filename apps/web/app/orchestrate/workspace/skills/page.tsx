@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { IconBoxMultiple } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
-import type { Skill, SkillSourceType } from "@/lib/state/slices/orchestrate/types";
+import type { Skill } from "@/lib/state/slices/orchestrate/types";
 import { SkillList } from "./skill-list";
-import { SkillEditor } from "./skill-editor";
+import { SkillDetail } from "./skill-detail";
 import { CreateSkillForm } from "./create-skill-form";
 
 type ViewMode = "view" | "create";
@@ -22,7 +22,7 @@ export default function SkillsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("view");
 
-  useEffect(() => {
+  const fetchSkills = useCallback(() => {
     if (!activeWorkspaceId) return;
     orchestrateApi
       .listSkills(activeWorkspaceId)
@@ -30,24 +30,16 @@ export default function SkillsPage() {
       .catch(() => {});
   }, [activeWorkspaceId, setSkills]);
 
+  useEffect(() => {
+    fetchSkills();
+  }, [fetchSkills]);
+
   const selectedSkill = skills.find((s) => s.id === selectedId) ?? null;
 
   const handleCreate = useCallback(
-    async (data: {
-      name: string;
-      description: string;
-      sourceType: SkillSourceType;
-      sourceLocator: string;
-      content: string;
-    }) => {
+    async (data: Partial<Skill>) => {
       if (!activeWorkspaceId) return;
-      const res = await orchestrateApi.createSkill(activeWorkspaceId, {
-        name: data.name,
-        description: data.description,
-        sourceType: data.sourceType,
-        sourceLocator: data.sourceLocator,
-        content: data.content,
-      });
+      const res = await orchestrateApi.createSkill(activeWorkspaceId, data);
       addSkill(res.skill);
       setSelectedId(res.skill.id);
       setViewMode("view");
@@ -74,6 +66,21 @@ export default function SkillsPage() {
     [removeSkillFromStore, selectedId],
   );
 
+  const handleImport = useCallback(
+    async (source: string) => {
+      if (!activeWorkspaceId) return;
+      const res = await orchestrateApi.importSkill(activeWorkspaceId, source);
+      for (const skill of res.skills) {
+        addSkill(skill);
+      }
+      if (res.skills.length > 0) {
+        setSelectedId(res.skills[0].id);
+        setViewMode("view");
+      }
+    },
+    [activeWorkspaceId, addSkill],
+  );
+
   return (
     <div className="flex h-full">
       <SkillList
@@ -87,21 +94,44 @@ export default function SkillsPage() {
           setSelectedId(null);
           setViewMode("create");
         }}
+        onRefresh={fetchSkills}
+        onImport={handleImport}
       />
       <div className="flex-1 p-6 overflow-y-auto">
-        {viewMode === "create" ? (
-          <CreateSkillForm onCreate={handleCreate} onCancel={() => setViewMode("view")} />
-        ) : selectedSkill ? (
-          <SkillEditor skill={selectedSkill} onSave={handleSave} onDelete={handleDelete} />
-        ) : (
-          <EmptyState />
-        )}
+        <SkillContentPanel
+          viewMode={viewMode}
+          selectedSkill={selectedSkill}
+          onCreate={handleCreate}
+          onSave={handleSave}
+          onDelete={handleDelete}
+          onCancelCreate={() => setViewMode("view")}
+        />
       </div>
     </div>
   );
 }
 
-function EmptyState() {
+function SkillContentPanel({
+  viewMode,
+  selectedSkill,
+  onCreate,
+  onSave,
+  onDelete,
+  onCancelCreate,
+}: {
+  viewMode: ViewMode;
+  selectedSkill: Skill | null;
+  onCreate: (data: Partial<Skill>) => void;
+  onSave: (id: string, patch: Partial<Skill>) => void;
+  onDelete: (id: string) => void;
+  onCancelCreate: () => void;
+}) {
+  if (viewMode === "create") {
+    return <CreateSkillForm onCreate={onCreate} onCancel={onCancelCreate} />;
+  }
+  if (selectedSkill) {
+    return <SkillDetail skill={selectedSkill} onSave={onSave} onDelete={onDelete} />;
+  }
   return (
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
       <IconBoxMultiple className="h-12 w-12 mb-4 opacity-30" />

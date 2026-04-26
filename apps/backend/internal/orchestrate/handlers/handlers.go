@@ -49,7 +49,9 @@ func registerAgentRoutes(api *gin.RouterGroup, h *Handlers) {
 func registerSkillRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/workspaces/:wsId/skills", h.listSkills)
 	api.POST("/workspaces/:wsId/skills", h.createSkill)
+	api.POST("/workspaces/:wsId/skills/import", h.importSkill)
 	api.GET("/skills/:id", h.getSkill)
+	api.GET("/skills/:id/files", h.getSkillFile)
 	api.PATCH("/skills/:id", h.updateSkill)
 	api.DELETE("/skills/:id", h.deleteSkill)
 }
