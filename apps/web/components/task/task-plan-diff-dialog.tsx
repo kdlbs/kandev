@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import {
   Dialog,
@@ -149,7 +149,13 @@ function DiffBody({
         </ToggleGroup>
       </div>
       <div
-        className="flex-1 min-h-0 overflow-auto rounded border border-border bg-muted/20 font-mono text-xs"
+        className={cn(
+          "flex-1 min-h-0 rounded border border-border bg-muted/20 font-mono text-xs",
+          // Unified scrolls in both axes; split mode owns its own panes' scroll
+          // and only needs vertical here so its synced horizontal scrollbars
+          // sit inside the panes (one per side, scroll-linked).
+          mode === "split" ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+        )}
         data-testid="plan-revision-diff-body"
       >
         <DiffBodyInner
@@ -226,11 +232,11 @@ function DiffLineRow({ line }: { line: DiffLine }) {
   );
 }
 
-/** Side-by-side diff: each side has its own column with independent horizontal
- * scroll (via the outer overflow-auto on `plan-revision-diff-body`). Rows align
- * because they share the same `display: grid` layout. Cells use
- * whitespace-pre with min-w-max so the row background extends past the viewport
- * when content overflows horizontally — same fix as unified mode. */
+/** Side-by-side diff with two equal-width panes that scroll horizontally
+ * together. The dialog stays at its fixed width; each pane shows up to half
+ * of it and gets its own horizontal scrollbar for long lines. A scroll
+ * listener keeps both panes' `scrollLeft` in lockstep so corresponding rows
+ * stay aligned visually. */
 function SplitDiff({
   beforeContent,
   afterContent,
@@ -239,27 +245,84 @@ function SplitDiff({
   afterContent: string;
 }) {
   const rows = useMemo(() => alignSplit(beforeContent, afterContent), [beforeContent, afterContent]);
+  const beforeRef = useRef<HTMLDivElement>(null);
+  const afterRef = useRef<HTMLDivElement>(null);
+  // Re-entrancy guard: when we set the partner pane's scrollLeft, that fires
+  // the partner's onScroll, which would bounce back here without this flag.
+  const syncingRef = useRef(false);
+
+  useEffect(() => {
+    const before = beforeRef.current;
+    const after = afterRef.current;
+    if (!before || !after) return;
+    const sync = (source: HTMLDivElement, target: HTMLDivElement) => () => {
+      if (syncingRef.current) return;
+      syncingRef.current = true;
+      target.scrollLeft = source.scrollLeft;
+      // Release on the next frame so the bounced onScroll has fired and
+      // returned early, but we don't permanently disable syncing.
+      requestAnimationFrame(() => {
+        syncingRef.current = false;
+      });
+    };
+    const onBefore = sync(before, after);
+    const onAfter = sync(after, before);
+    before.addEventListener("scroll", onBefore, { passive: true });
+    after.addEventListener("scroll", onAfter, { passive: true });
+    return () => {
+      before.removeEventListener("scroll", onBefore);
+      after.removeEventListener("scroll", onAfter);
+    };
+  }, [rows]);
+
   return (
     <div
-      // grid forces the two columns to stay side-by-side and equally sized
-      // until the natural content width pushes the whole grid wider, at which
-      // point the parent overflow-auto starts scrolling horizontally.
-      className="grid grid-cols-2 min-w-full w-max divide-x divide-border"
+      className="grid grid-cols-2 divide-x divide-border min-w-0"
       data-testid="plan-revision-diff-split"
     >
-      <div className="min-w-0">
-        {rows.map((row, i) => (
-          <SplitCell key={`b-${i}`} side="before" line={row.before} />
-        ))}
-      </div>
-      <div className="min-w-0">
-        {rows.map((row, i) => (
-          <SplitCell key={`a-${i}`} side="after" line={row.after} />
-        ))}
-      </div>
+      <SplitPane
+        ref={beforeRef}
+        rows={rows}
+        side="before"
+        testIdSuffix="before"
+      />
+      <SplitPane
+        ref={afterRef}
+        rows={rows}
+        side="after"
+        testIdSuffix="after"
+      />
     </div>
   );
 }
+
+const SplitPane = ({
+  ref,
+  rows,
+  side,
+  testIdSuffix,
+}: {
+  ref: React.RefObject<HTMLDivElement | null>;
+  rows: SplitRow[];
+  side: "before" | "after";
+  testIdSuffix: string;
+}) => (
+  <div
+    ref={ref}
+    className="min-w-0 overflow-x-auto"
+    data-testid={`plan-revision-diff-split-pane-${testIdSuffix}`}
+  >
+    {/* w-max lets each pane's intrinsic width be the longest line on that
+     * side; combined with the parent grid-cols-2, the visible portion is
+     * still capped at 50% of the dialog while horizontal scroll reveals
+     * the rest. */}
+    <div className="w-max min-w-full">
+      {rows.map((row, i) => (
+        <SplitCell key={i} side={side} line={side === "before" ? row.before : row.after} />
+      ))}
+    </div>
+  </div>
+);
 
 function SplitCell({
   side,
