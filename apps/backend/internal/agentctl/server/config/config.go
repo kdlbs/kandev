@@ -206,7 +206,7 @@ func Load() *Config {
 			AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
 			WorkDir:                getEnv("AGENTCTL_WORKDIR", "/workspace"),
 			AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
-			AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
+			AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", true),
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},

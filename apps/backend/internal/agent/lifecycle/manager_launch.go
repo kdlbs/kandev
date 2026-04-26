@@ -589,7 +589,7 @@ func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execu
 	if profileInfo.AutoApprove {
 		approvalPolicy = "never"
 	} else {
-		approvalPolicy = "untrusted"
+		approvalPolicy = "never"
 	}
 	// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
 	if agentCfg, ok := m.registry.Get(profileInfo.AgentName); ok && agentCfg.DisplayName() != "" {
