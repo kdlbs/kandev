@@ -44,14 +44,14 @@ export function OrchestrateSidebar() {
       <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 px-3 py-2">
         {/* Top actions */}
         <div className="flex flex-col gap-0.5">
-          <SidebarNavItem icon={IconSquarePlus} label="New Issue" href="/orchestrate/issues" onClick={() => setNewIssueOpen(true)} />
+          <SidebarNavItem icon={IconSquarePlus} label="New Task" href="/orchestrate/issues" onClick={() => setNewIssueOpen(true)} />
           <SidebarNavItem icon={IconLayoutDashboard} label="Dashboard" href="/orchestrate" />
           <SidebarNavItem icon={IconInbox} label="Inbox" href="/orchestrate/inbox" badge={inboxCount} />
         </div>
 
         {/* Work section */}
         <SidebarSection label="Work">
-          <SidebarNavItem icon={IconCircleDot} label="Issues" href="/orchestrate/issues" />
+          <SidebarNavItem icon={IconCircleDot} label="Tasks" href="/orchestrate/issues" />
           <SidebarNavItem icon={IconRepeat} label="Routines" href="/orchestrate/routines" />
         </SidebarSection>
 
@@ -62,7 +62,7 @@ export function OrchestrateSidebar() {
         <SidebarAgentsList />
 
         {/* Company section */}
-        <SidebarSection label="Company">
+        <SidebarSection label="Workspace">
           <SidebarNavItem icon={IconNetwork} label="Org" href="/orchestrate/company/org" />
           <SidebarNavItem icon={IconBoxMultiple} label="Skills" href="/orchestrate/company/skills" />
           <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/orchestrate/company/costs" />
