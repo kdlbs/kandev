@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/jira"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	orchestratesqlite "github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+	orchestrateservice "github.com/kandev/kandev/internal/orchestrate/service"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/secrets"
@@ -33,6 +35,7 @@ type Repositories struct {
 	Utility       utilitystore.Repository
 	Workflow      *workflowrepository.Repository
 	Secrets       secrets.SecretStore
+	Orchestrate   *orchestratesqlite.Repository
 }
 
 type Services struct {
@@ -45,4 +48,5 @@ type Services struct {
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
 	Jira         *jira.Service
+	Orchestrate  *orchestrateservice.Service
 }

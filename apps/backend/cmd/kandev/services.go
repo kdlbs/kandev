@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/jira"
+	orchestrateservice "github.com/kandev/kandev/internal/orchestrate/service"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -94,6 +95,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		githubSvc.SetSecretManager(secretsAdapter)
 	}
 
+	// Initialize orchestrate service
+	orchestrateSvc := orchestrateservice.NewService(repos.Orchestrate, log)
+
 	// Initialize JIRA service
 	jiraSecrets := &jiraSecretAdapter{store: repos.Secrets}
 	jiraSvc, _, jiraErr := jira.Provide(dbPool.Writer(), dbPool.Reader(), jiraSecrets, log)
@@ -102,14 +106,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 
 	return &Services{
-		Task:     taskSvc,
-		User:     userSvc,
-		Editor:   editorSvc,
-		Prompts:  promptSvc,
-		Utility:  utilitySvc,
-		Workflow: workflowSvc,
-		GitHub:   githubSvc,
-		Jira:     jiraSvc,
+		Task:        taskSvc,
+		User:        userSvc,
+		Editor:      editorSvc,
+		Prompts:     promptSvc,
+		Utility:     utilitySvc,
+		Workflow:    workflowSvc,
+		GitHub:      githubSvc,
+		Jira:        jiraSvc,
+		Orchestrate: orchestrateSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil

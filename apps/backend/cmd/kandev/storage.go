@@ -16,6 +16,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	"github.com/kandev/kandev/internal/orchestrate"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
@@ -86,6 +87,12 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 	}
 	cleanups = append(cleanups, cleanup)
 
+	orchestrateRepo, _, orchestrateCleanup, err := orchestrate.Provide(writer, reader, log)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("orchestrate repo: %w", err)
+	}
+	cleanups = append(cleanups, orchestrateCleanup)
+
 	// Initialize master key and secrets store
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
@@ -109,6 +116,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 		Utility:       utilityRepo,
 		Workflow:      workflowRepo,
 		Secrets:       secretStore,
+		Orchestrate:   orchestrateRepo,
 	}
 	return pool, repos, cleanups, nil
 }

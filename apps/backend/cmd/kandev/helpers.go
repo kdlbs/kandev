@@ -37,6 +37,8 @@ import (
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	orchestratecontroller "github.com/kandev/kandev/internal/orchestrate/controller"
+	orchestratehandlers "github.com/kandev/kandev/internal/orchestrate/handlers"
 	"github.com/kandev/kandev/internal/orchestrator"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
@@ -483,6 +485,13 @@ func registerSecondaryRoutes(
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 
 	registerE2EResetRoutes(p.router, p.taskRepo, p.log)
+
+	// Register orchestrate routes
+	if p.services.Orchestrate != nil {
+		orchCtrl := orchestratecontroller.NewController(p.services.Orchestrate)
+		orchestratehandlers.RegisterRoutes(p.router, orchCtrl, p.log)
+		p.log.Debug("Registered Orchestrate handlers (HTTP)")
+	}
 }
 
 // registerHealthRoutes sets up the system health endpoint with all health checkers.

@@ -6,6 +6,7 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultOrchestrateState,
 } from "./slices";
 
 export const defaultState = {
@@ -62,6 +63,7 @@ export const defaultState = {
   reviewWatches: defaultGitHubState.reviewWatches,
   issueWatches: defaultGitHubState.issueWatches,
   actionPresets: defaultGitHubState.actionPresets,
+  orchestrate: defaultOrchestrateState.orchestrate,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -144,6 +146,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     issueWatches: { ...defaultState.issueWatches, ...initialState.issueWatches },
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
+    orchestrate: { ...defaultState.orchestrate, ...initialState.orchestrate },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },

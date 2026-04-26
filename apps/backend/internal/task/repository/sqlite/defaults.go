@@ -99,6 +99,72 @@ func (r *Repository) createInitialWorkspace(ctx context.Context) error {
 	return nil
 }
 
+// EnsureOrchestrateWorkflow creates or re-reads the system Orchestrate workflow for a workspace.
+// It is called by the orchestrate provider after all schema migrations have run.
+func (r *Repository) EnsureOrchestrateWorkflow(ctx context.Context, workspaceID string) (string, error) {
+	// Check if workspace already has an orchestrate workflow
+	var existingID string
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT orchestrate_workflow_id FROM workspaces WHERE id = ?`), workspaceID).Scan(&existingID)
+	if err != nil {
+		return "", fmt.Errorf("query workspace orchestrate workflow: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
+	}
+	return r.createOrchestrateWorkflow(ctx, workspaceID)
+}
+
+// createOrchestrateWorkflow inserts the system Orchestrate workflow and its steps.
+func (r *Repository) createOrchestrateWorkflow(ctx context.Context, workspaceID string) (string, error) {
+	now := time.Now().UTC()
+	workflowID := uuid.New().String()
+
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, is_system, sort_order, created_at, updated_at)
+		VALUES (?, ?, 'Orchestrate', 'System workflow for orchestrate tasks', '', 1, 999, ?, ?)
+	`), workflowID, workspaceID, now, now); err != nil {
+		return "", fmt.Errorf("insert orchestrate workflow: %w", err)
+	}
+
+	if err := r.insertOrchestrateSteps(ctx, workflowID, now); err != nil {
+		return "", err
+	}
+
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(
+		`UPDATE workspaces SET orchestrate_workflow_id = ? WHERE id = ?`), workflowID, workspaceID); err != nil {
+		return "", fmt.Errorf("update workspace orchestrate_workflow_id: %w", err)
+	}
+	return workflowID, nil
+}
+
+// insertOrchestrateSteps creates the fixed workflow steps for the Orchestrate workflow.
+func (r *Repository) insertOrchestrateSteps(ctx context.Context, workflowID string, now time.Time) error {
+	steps := []struct {
+		name     string
+		position int
+		isStart  int
+	}{
+		{"Backlog", 0, 0},
+		{"Todo", 1, 1},
+		{"In Progress", 2, 0},
+		{"In Review", 3, 0},
+		{"Blocked", 4, 0},
+		{"Done", 5, 0},
+		{"Cancelled", 6, 0},
+	}
+	for _, step := range steps {
+		stepID := uuid.New().String()
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO workflow_steps (id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, created_at, updated_at)
+			VALUES (?, ?, ?, ?, '', '', '{}', 1, ?, 1, ?, ?)
+		`), stepID, workflowID, step.name, step.position, step.isStart, now, now); err != nil {
+			return fmt.Errorf("insert orchestrate step %s: %w", step.name, err)
+		}
+	}
+	return nil
+}
+
 // ensureDefaultExecutorsAndEnvironments creates default executors and environments if none exist
 func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 	ctx := context.Background()

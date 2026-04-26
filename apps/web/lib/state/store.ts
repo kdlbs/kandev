@@ -28,6 +28,7 @@ import {
   createSessionRuntimeSlice,
   createUISlice,
   createGitHubSlice,
+  createOrchestrateSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -35,6 +36,7 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultOrchestrateState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -134,6 +136,19 @@ export type {
   ReviewWatchesState,
   IssueWatchesState,
 } from "./slices";
+import type {
+  AgentInstance,
+  Skill,
+  Project,
+  Approval,
+  ActivityEntry,
+  CostSummary,
+  BudgetPolicy,
+  Routine,
+  InboxItem,
+  WakeupEntry,
+  DashboardData,
+} from "./slices/orchestrate/types";
 
 // Combined AppState type
 export type AppState = {
@@ -202,6 +217,9 @@ export type AppState = {
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
+
+  // Orchestrate slice
+  orchestrate: (typeof defaultOrchestrateState)["orchestrate"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -454,6 +472,20 @@ export type AppState = {
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
+  // Orchestrate actions
+  setAgentInstances: (agents: AgentInstance[]) => void;
+  setSkills: (skills: Skill[]) => void;
+  setProjects: (projects: Project[]) => void;
+  setApprovals: (approvals: Approval[]) => void;
+  setActivity: (entries: ActivityEntry[]) => void;
+  setCostSummary: (summary: CostSummary | null) => void;
+  setBudgetPolicies: (policies: BudgetPolicy[]) => void;
+  setRoutines: (routines: Routine[]) => void;
+  setInboxItems: (items: InboxItem[]) => void;
+  setInboxCount: (count: number) => void;
+  setWakeups: (wakeups: WakeupEntry[]) => void;
+  setDashboard: (data: DashboardData | null) => void;
+  setOrchestrateLoading: (loading: boolean) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -477,6 +509,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createSessionRuntimeSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitHubSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createOrchestrateSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
@@ -529,6 +563,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
+      orchestrate: merged.orchestrate,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

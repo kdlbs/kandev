@@ -15,6 +15,7 @@ import {
   IconTimeline,
   IconBrandGithub,
   IconTicket,
+  IconNetwork,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { getJiraConfig } from "@/lib/api/domains/jira-api";
@@ -291,6 +292,12 @@ function DesktopHeader({
             <GitHubTopbarButton />
             <JiraTopbarButton workspaceId={workspaceId} />
           </TooltipProvider>
+          <Button variant="outline" asChild className="cursor-pointer gap-2">
+            <Link href="/orchestrate">
+              <IconNetwork className="h-4 w-4" />
+              <span>Orchestrate</span>
+            </Link>
+          </Button>
           <Button variant="outline" asChild className="cursor-pointer gap-2">
             <Link href="/stats">
               <IconChartBar className="h-4 w-4" />

@@ -9,6 +9,10 @@ export {
 } from "./session-runtime/session-runtime-slice";
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
+export {
+  createOrchestrateSlice,
+  defaultOrchestrateState,
+} from "./orchestrate/orchestrate-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -22,6 +26,11 @@ export type {
 } from "./session-runtime/types";
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
 export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
+export type {
+  OrchestrateSlice,
+  OrchestrateSliceState,
+  OrchestrateSliceActions,
+} from "./orchestrate/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -112,4 +121,17 @@ export type {
   ReviewWatchesState,
   IssueWatchesState,
 } from "./github/types";
+export type {
+  AgentInstance,
+  Skill,
+  Project,
+  Approval,
+  ActivityEntry,
+  CostSummary,
+  BudgetPolicy,
+  Routine,
+  InboxItem,
+  WakeupEntry,
+  DashboardData,
+} from "./orchestrate/types";
 export type { Repository, Branch } from "@/lib/types/http";

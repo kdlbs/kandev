@@ -1,0 +1,105 @@
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/orchestrate/dto"
+	"github.com/kandev/kandev/internal/orchestrate/models"
+)
+
+func (h *Handlers) listSkills(c *gin.Context) {
+	skills, err := h.ctrl.Svc.ListSkills(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.SkillListResponse{Skills: skills})
+}
+
+func (h *Handlers) createSkill(c *gin.Context) {
+	var req dto.CreateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	skill := &models.Skill{
+		WorkspaceID:              c.Param("wsId"),
+		Name:                     req.Name,
+		Slug:                     req.Slug,
+		Description:              req.Description,
+		SourceType:               req.SourceType,
+		SourceLocator:            req.SourceLocator,
+		Content:                  req.Content,
+		FileInventory:            req.FileInventory,
+		CreatedByAgentInstanceID: req.CreatedByAgentInstanceID,
+	}
+	if err := h.ctrl.Svc.CreateSkill(c.Request.Context(), skill); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, dto.SkillResponse{Skill: skill})
+}
+
+func (h *Handlers) getSkill(c *gin.Context) {
+	skill, err := h.ctrl.Svc.GetSkill(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.SkillResponse{Skill: skill})
+}
+
+func (h *Handlers) updateSkill(c *gin.Context) {
+	// Bind first to fail fast on malformed input before hitting the database.
+	var req dto.UpdateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	skill, err := h.ctrl.Svc.GetSkill(ctx, c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	applySkillUpdates(skill, &req)
+	if err := h.ctrl.Svc.UpdateSkill(ctx, skill); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.SkillResponse{Skill: skill})
+}
+
+func (h *Handlers) deleteSkill(c *gin.Context) {
+	if err := h.ctrl.Svc.DeleteSkill(c.Request.Context(), c.Param("id")); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func applySkillUpdates(skill *models.Skill, req *dto.UpdateSkillRequest) {
+	if req.Name != nil {
+		skill.Name = *req.Name
+	}
+	if req.Slug != nil {
+		skill.Slug = *req.Slug
+	}
+	if req.Description != nil {
+		skill.Description = *req.Description
+	}
+	if req.SourceType != nil {
+		skill.SourceType = *req.SourceType
+	}
+	if req.SourceLocator != nil {
+		skill.SourceLocator = *req.SourceLocator
+	}
+	if req.Content != nil {
+		skill.Content = *req.Content
+	}
+	if req.FileInventory != nil {
+		skill.FileInventory = *req.FileInventory
+	}
+}

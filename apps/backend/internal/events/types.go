@@ -365,3 +365,21 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
 }
+
+// Event types for orchestrate domain
+const (
+	OrchestrateAgentCreated       = "orchestrate.agent.created"
+	OrchestrateAgentUpdated       = "orchestrate.agent.updated"
+	OrchestrateAgentStatusChanged = "orchestrate.agent.status_changed"
+	OrchestrateSkillCreated       = "orchestrate.skill.created"
+	OrchestrateSkillUpdated       = "orchestrate.skill.updated"
+	OrchestrateProjectCreated     = "orchestrate.project.created"
+	OrchestrateProjectUpdated     = "orchestrate.project.updated"
+	OrchestrateApprovalCreated    = "orchestrate.approval.created"
+	OrchestrateApprovalResolved   = "orchestrate.approval.resolved"
+	OrchestrateCostRecorded       = "orchestrate.cost.recorded"
+	OrchestrateWakeupQueued       = "orchestrate.wakeup.queued"
+	OrchestrateWakeupProcessed    = "orchestrate.wakeup.processed"
+	OrchestrateRoutineTriggered   = "orchestrate.routine.triggered"
+	OrchestrateInboxItem          = "orchestrate.inbox.item"
+)

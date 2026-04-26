@@ -160,6 +160,30 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+
+	// Orchestrate task extensions (ignore errors if columns already exist)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN assignee_agent_instance_id TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN requires_approval INTEGER DEFAULT 0`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN execution_policy TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN execution_state TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
+	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN identifier TEXT`)
+
+	// Orchestrate workspace extensions (ignore errors if columns already exist)
+	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
+	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
+	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN orchestrate_workflow_id TEXT DEFAULT ''`)
+
+	// Orchestrate session cost tracking extensions (ignore errors if columns already exist)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN cost_cents INTEGER DEFAULT 0`)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER DEFAULT 0`)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER DEFAULT 0`)
+
+	// Add is_system column to workflows for system-managed workflows (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
+
 	return nil
 }
 
