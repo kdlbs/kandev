@@ -4,11 +4,15 @@ import { useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Separator } from "@kandev/ui/separator";
+import { useAppStore } from "@/components/state-provider";
 import { ConfigSection } from "./config-section";
 
 export function SettingsContent() {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const workspaces = useAppStore((s) => s.workspaces);
+  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+
+  const [name, setName] = useState(activeWorkspace?.name || "");
+  const [description, setDescription] = useState(activeWorkspace?.description || "");
   const [approvalNewAgents, setApprovalNewAgents] = useState(true);
   const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
   const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
