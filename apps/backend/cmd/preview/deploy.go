@@ -109,20 +109,24 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 		return "", fmt.Errorf("extract bundle: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "deploying kandev service...")
-	if err := deployService(ctx, sprite, port); err != nil {
-		return "", fmt.Errorf("deploy service: %w", err)
-	}
-
-	// Enable the public URL before the health check so that hitting the URL
-	// also triggers any lazy service startup on Sprites' side.
+	// Enable the public URL before deploying the service. This sets the auth
+	// mode on the sprite (not the service), so it is safe to call before the
+	// service exists. Doing it first avoids a service restart mid-health-check.
 	previewURL, err := enablePublicURL(ctx, client, spriteName)
 	if err != nil {
 		return "", fmt.Errorf("enable public URL: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "waiting for kandev to be healthy at %s...\n", previewURL)
-	if err := waitForKandev(ctx, sprite, previewURL); err != nil {
+	fmt.Fprintln(os.Stderr, "deploying kandev service...")
+	if err := deployService(ctx, sprite, port); err != nil {
+		return "", fmt.Errorf("deploy service: %w", err)
+	}
+
+	// Health check via internal localhost to avoid Sprites routing lag during
+	// service transitions (the external URL may return 502 while the new
+	// service process is starting up).
+	fmt.Fprintln(os.Stderr, "waiting for kandev to be healthy...")
+	if err := waitForKandev(ctx, sprite); err != nil {
 		return "", fmt.Errorf("health check: %w", err)
 	}
 

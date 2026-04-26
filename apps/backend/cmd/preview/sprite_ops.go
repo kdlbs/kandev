@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -109,24 +108,22 @@ chmod +x /app/apps/backend/bin/kandev \
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
 mkdir -p /data /var/log
-echo "=== binary check ==="
+echo "=== kandev binary info ==="
 ldd /app/apps/backend/bin/kandev 2>&1 || true
-echo "=== binary test ==="
-(KANDEV_HOME_DIR=/data KANDEV_DOCKER_ENABLED=false timeout 2 /app/apps/backend/bin/kandev || true) 2>&1 | head -20
-echo "=== end binary check ==="
+echo "==========================="
 cat > /app/start-kandev.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
 mkdir -p /data
 
-echo "node: $(node --version 2>&1 || echo NOT FOUND)" >&2
-echo "kandev binary: $(ls -lh /app/apps/backend/bin/kandev 2>&1)" >&2
+# Kill any agentctl orphans from previous runs or extract-time diagnostics.
+pkill -f agentctl || true
+sleep 1
 
 # Start Next.js web server in background.
 PORT=%d HOSTNAME=0.0.0.0 NODE_ENV=production \
   nohup node /app/apps/web/.next/standalone/web/server.js \
   > /var/log/kandev-web.log 2>&1 &
-echo "web server started (pid $!)" >&2
 
 # Start Go backend (main process — Sprites HTTPPort proxies here).
 export KANDEV_HOME_DIR=/data
@@ -134,36 +131,58 @@ export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 export KANDEV_SERVER_PORT=%d
 export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
-echo "ldd: $(ldd /app/apps/backend/bin/kandev 2>&1 | head -5 || echo NOT AVAILABLE)" >&2
-echo "starting kandev on port %d..." >&2
-exec /app/apps/backend/bin/kandev >> /var/log/kandev.log 2>&1
+/app/apps/backend/bin/kandev > /var/log/kandev.log 2>&1
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web, ports.Backend)
+chmod +x /app/start-kandev.sh`, ports.Web, ports.Backend, ports.Web)
 }
 
 // deployService registers (or re-registers) kandev as a Sprites managed service.
-// Uses PUT semantics: safe to call multiple times for re-deploys.
+// deployService registers (or updates) the kandev service and explicitly starts
+// it. The two-step approach (CreateService then StartService) ensures the
+// process runs on both first deploy and re-deploy:
+//   - CreateService is idempotent: creates the service config if absent, or
+//     updates it if it already exists.
+//   - StartService explicitly starts (or restarts) the process regardless of
+//     whether it was previously running or stopped.
 func deployService(ctx context.Context, sprite *sprites.Sprite, port int) error {
-	// Stop the service first if running; ignore errors (may not exist yet).
-	stopCtx, stopCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer stopCancel()
-	if stream, err := sprite.StopService(stopCtx, "kandev"); err == nil {
-		_ = drainStream(stream)
-	}
+	createCtx, createCancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer createCancel()
 
-	svcCtx, svcCancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer svcCancel()
-
-	stream, err := sprite.CreateService(svcCtx, "kandev", &sprites.ServiceRequest{
+	createStream, err := sprite.CreateService(createCtx, "kandev", &sprites.ServiceRequest{
 		Cmd:      "/app/start-kandev.sh",
 		HTTPPort: &port,
 	})
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}
-	defer func() { _ = stream.Close() }()
+	// Drain create stream (informational only).
+	for {
+		ev, err := createStream.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			_ = createStream.Close()
+			return fmt.Errorf("create service stream: %w", err)
+		}
+		if ev.Type == "error" {
+			_ = createStream.Close()
+			return fmt.Errorf("create service error: %s", ev.Data)
+		}
+	}
+	_ = createStream.Close()
 
-	return waitForServiceStarted(stream)
+	// Explicitly start the service so it runs immediately.
+	startCtx, startCancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer startCancel()
+
+	startStream, err := sprite.StartService(startCtx, "kandev")
+	if err != nil {
+		return fmt.Errorf("start service: %w", err)
+	}
+	defer func() { _ = startStream.Close() }()
+
+	return waitForServiceStarted(startStream)
 }
 
 func waitForServiceStarted(stream *sprites.ServiceStream) error {
@@ -195,40 +214,26 @@ func waitForServiceStarted(stream *sprites.ServiceStream) error {
 	}
 }
 
-func drainStream(stream *sprites.ServiceStream) error {
-	for {
-		_, err := stream.Next()
-		if errors.Is(err, io.EOF) || err != nil {
-			return err
-		}
-	}
-}
-
-// waitForKandev polls the kandev /health endpoint via the public URL until it
-// responds with HTTP 200 or the deadline is exceeded. Hitting the public URL
-// also triggers the service to start if Sprites uses lazy-startup semantics.
-// On failure it fetches log output for diagnostics.
-func waitForKandev(ctx context.Context, sprite *sprites.Sprite, publicURL string) error {
+// waitForKandev polls the kandev /health endpoint inside the sprite via
+// CommandContext until kandev responds or the deadline is exceeded.
+// Using the internal address (localhost) avoids Sprites routing state that
+// may lag during a service restart triggered by enablePublicURL.
+func waitForKandev(ctx context.Context, sprite *sprites.Sprite) error {
 	const (
 		timeout   = 90 * time.Second
 		retryWait = 3 * time.Second
 	)
-	healthURL := strings.TrimRight(publicURL, "/") + "/health"
+	healthURL := fmt.Sprintf("http://localhost:%d/health", ports.Backend)
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 5 * time.Second}
 
 	for time.Now().Before(deadline) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
-		if err == nil {
-			resp, err := client.Do(req)
-			if err == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
-					return nil
-				}
-				fmt.Fprintf(os.Stderr, "  health check: HTTP %d\n", resp.StatusCode)
-			}
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		out, err := sprite.CommandContext(checkCtx, "curl", "-sf", healthURL).Output()
+		cancel()
+
+		if err == nil && len(out) > 0 {
+			fmt.Fprintf(os.Stderr, "  kandev is healthy\n")
+			return nil
 		}
 
 		select {
