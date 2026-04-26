@@ -15,7 +15,14 @@ if ! command -v codex &> /dev/null; then
     echo "WARNING: codex CLI not found"
 fi
 
+# Run prepare script if provided (e.g., clone repo, configure git)
+if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
+    echo "Running prepare script..."
+    eval "$KANDEV_PREPARE_SCRIPT"
+    echo "Prepare script completed."
+fi
+
 # Run agentctl HTTP server
-echo "Starting agentctl on port ${AGENTCTL_PORT:-9999}..."
+echo "Starting agentctl on port ${AGENTCTL_PORT:-39429}..."
 exec /usr/local/bin/agentctl
 

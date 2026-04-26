@@ -3,6 +3,11 @@ package github
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +19,159 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 )
+
+func TestParseLinkNext(t *testing.T) {
+	tests := []struct {
+		link string
+		want string
+	}{
+		{
+			link: `<https://api.github.com/repos/o/r/branches?page=2>; rel="next", <https://api.github.com/repos/o/r/branches?page=3>; rel="last"`,
+			want: "https://api.github.com/repos/o/r/branches?page=2",
+		},
+		{
+			link: `<https://api.github.com/repos/o/r/branches?page=3>; rel="last"`,
+			want: "",
+		},
+		{link: "", want: ""},
+	}
+	for _, tc := range tests {
+		got := parseLinkNext(tc.link)
+		if got != tc.want {
+			t.Errorf("parseLinkNext(%q) = %q, want %q", tc.link, got, tc.want)
+		}
+	}
+}
+
+func TestListRepoBranches_Pagination(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page++
+		if page == 1 {
+			w.Header().Set("Link", fmt.Sprintf(`<%s/repos/owner/repo/branches?page=2>; rel="next"`, "http://"+r.Host))
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "feature-a"}})
+		} else {
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "main"}})
+		}
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	branches, err := svc.ListRepoBranches(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches across pages, got %d", len(branches))
+	}
+	// main should appear first regardless of which page it was fetched from.
+	if branches[0].Name != "main" {
+		t.Errorf("expected main first, got %q; branches: %+v", branches[0].Name, branches)
+	}
+	if branches[1].Name != "feature-a" {
+		t.Errorf("expected feature-a second, got %q", branches[1].Name)
+	}
+}
+
+func TestListRepoBranches_NoopClientFallback(t *testing.T) {
+	// A fake GitHub API that returns two branches for a public repo.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/branches" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"name": "main"},
+			{"name": "develop"},
+		})
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	branches, err := svc.ListRepoBranches(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d", len(branches))
+	}
+	if branches[0].Name != "main" || branches[1].Name != "develop" {
+		t.Errorf("unexpected branches: %+v", branches)
+	}
+}
+
+func TestListRepoBranches_NoopClientFallback_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{client: &NoopClient{}}
+	_, err := svc.ListRepoBranches(context.Background(), "owner", "private-repo")
+	if err == nil {
+		t.Fatal("expected error for private/missing repo")
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected GitHubAPIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 status, got %d", apiErr.StatusCode)
+	}
+}
+
+func TestSortBranchesMainFirst(t *testing.T) {
+	tests := []struct {
+		input []string
+		want  []string
+	}{
+		{
+			input: []string{"feature-b", "main", "feature-a", "master"},
+			want:  []string{"main", "master", "feature-a", "feature-b"},
+		},
+		{
+			input: []string{"develop", "master"},
+			want:  []string{"master", "develop"},
+		},
+		{
+			input: []string{"feature-a", "feature-b"},
+			want:  []string{"feature-a", "feature-b"},
+		},
+		{
+			input: []string{"main"},
+			want:  []string{"main"},
+		},
+		{
+			input: []string{},
+			want:  []string{},
+		},
+	}
+	for _, tc := range tests {
+		branches := make([]RepoBranch, len(tc.input))
+		for i, n := range tc.input {
+			branches[i] = RepoBranch{Name: n}
+		}
+		sortBranchesMainFirst(branches)
+		for i, b := range branches {
+			if b.Name != tc.want[i] {
+				t.Errorf("input=%v: got[%d]=%q, want %q", tc.input, i, b.Name, tc.want[i])
+			}
+		}
+	}
+}
 
 func TestGetPR_NilClient(t *testing.T) {
 	svc := &Service{client: nil}
@@ -776,4 +934,3 @@ func TestTimeEqual(t *testing.T) {
 		})
 	}
 }
-

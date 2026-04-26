@@ -270,7 +270,9 @@ func (c *Controller) updateExistingProfiles(ctx context.Context, profiles []*mod
 func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discovery.Availability) error {
 	agentConfig, ok := c.agentRegistry.Get(result.Name)
 	if !ok {
-		return fmt.Errorf("unknown agent: %s", result.Name)
+		// Agent detected on filesystem but not in registry (e.g. KANDEV_MOCK_AGENT=only
+		// suppresses real agents). Skip silently rather than aborting the entire sync.
+		return nil
 	}
 	displayName, err := c.resolveDisplayName(agentConfig, result.Name)
 	if err != nil {

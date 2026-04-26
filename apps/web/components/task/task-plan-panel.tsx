@@ -18,6 +18,8 @@ import type {
 } from "@/components/editors/tiptap/tiptap-plan-editor";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import type { Editor } from "@tiptap/core";
+import { PanelSearchBar } from "@/components/search/panel-search-bar";
+import { usePlanFindShortcut } from "./use-plan-find-shortcut";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -67,6 +69,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const editorInstanceRef = useRef<Editor | null>(null);
+  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
   const {
     draftContent,
     setDraftContent,
@@ -80,6 +83,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 
   const handleEditorReady = useCallback((editor: Editor) => {
     editorInstanceRef.current = editor;
+    setEditorInstance(editor);
   }, []);
 
   const handleCommentDeleted = useCallback(
@@ -125,6 +129,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
+    editorInstance,
     revisions,
     isLoadingRevisions,
     loadRevisions,
@@ -179,8 +184,10 @@ function PlanPanelContent({
   taskId: string;
   state: ReturnType<typeof useTaskPlanPanelState>;
 }) {
-  const { editorWrapperRef, editorInstanceRef, selectionState } = state;
+  const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
   const { textSelection, setTextSelection } = selectionState;
+  // Ctrl+F in-document find (registers a keydown listener on the editor wrapper)
+  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
   return (
     <PanelRoot data-testid="plan-panel">
       <PlanPanelHeader
@@ -206,6 +213,7 @@ function PlanPanelContent({
         )}
         ref={editorWrapperRef}
         onClick={state.handleEmptyStateClick}
+        data-panel-kind="plan"
       >
         <PlanEditor
           key={`${taskId}-${state.editorKey}`}
@@ -225,6 +233,16 @@ function PlanPanelContent({
           isAgentCreatingPlan={state.isAgentCreatingPlan}
           onClick={state.handleEmptyStateClick}
         />
+        {planSearch.isOpen && (
+          <PanelSearchBar
+            value={planSearch.query}
+            onChange={planSearch.setQuery}
+            onNext={planSearch.findNext}
+            onPrev={planSearch.findPrev}
+            onClose={planSearch.close}
+            matchInfo={planSearch.matchInfo}
+          />
+        )}
       </PanelBody>
 
       <PlanSelectionPopoverWrapper

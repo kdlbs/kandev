@@ -277,6 +277,15 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
+	// The per-terminal WS URL only carries terminalId, so fall back to the
+	// command pre-registered by wsUserShellCreate when the URL didn't include
+	// scriptId or label-derived command. Without this, script terminals (custom
+	// scripts and dev_script) would open empty in containerized sessions.
+	if initialCommand == "" {
+		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
+			initialCommand = runner.LookupShellInitialCommand(sessionID, terminalID)
+		}
+	}
 
 	// Create a per-terminal shell on agentctl (idempotent if already exists)
 	if err := client.StartShellTerminal(c.Request.Context(), terminalID, 80, 24); err != nil {

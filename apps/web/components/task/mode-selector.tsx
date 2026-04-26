@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -94,14 +94,17 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
           <DropdownMenuItem
             key={mode.id}
             onClick={() => handleModeChange(mode.id)}
-            className={`cursor-pointer ${mode.id === modeState.currentModeId ? "bg-muted" : ""}`}
+            className={`cursor-pointer relative pr-7 ${mode.id === modeState.currentModeId ? "bg-muted" : ""}`}
           >
-            <div>
+            <div className="min-w-0 flex-1">
               <div>{mode.name}</div>
               {mode.description && (
                 <div className="text-xs text-muted-foreground">{mode.description}</div>
               )}
             </div>
+            {mode.id === modeState.currentModeId && (
+              <IconCheck className="absolute right-2 h-4 w-4" />
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

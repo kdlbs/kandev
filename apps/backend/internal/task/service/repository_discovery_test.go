@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -200,6 +201,91 @@ func TestResolveGitDir(t *testing.T) {
 	expected := filepath.Clean(filepath.Join(altRepo, relPath))
 	if resolved != expected {
 		t.Fatalf("expected git dir %q, got %q", expected, resolved)
+	}
+}
+
+// canonicalTempDir returns a t.TempDir() path with symlinks resolved. macOS
+// returns `/var/folders/...` from t.TempDir() while EvalSymlinks (used inside
+// resolveGitDirWithin) yields `/private/var/folders/...`; without
+// canonicalization the test's expected paths and the function's output live in
+// different namespaces and equality checks fail. On Linux this is a no-op.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval temp dir: %v", err)
+	}
+	return resolved
+}
+
+// TestResolveGitDirWithin_RejectsEscapedGitdir exercises the security-critical
+// branch of resolveGitDirWithin: a repo whose `.git` is a file pointer
+// (worktree style) whose embedded `gitdir:` points outside any allowed root.
+// The function must return ErrPathNotAllowed; if the bounds check is ever
+// removed, callers like readGitCurrentBranch would read arbitrary files on
+// disk.
+func TestResolveGitDirWithin_RejectsEscapedGitdir(t *testing.T) {
+	root := canonicalTempDir(t)
+	outside := canonicalTempDir(t)
+
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	gitFile := filepath.Join(repoPath, ".git")
+	if err := os.WriteFile(gitFile, []byte("gitdir: "+outside+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+
+	if _, err := resolveGitDirWithin(repoPath, []string{root}); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("expected ErrPathNotAllowed for gitdir outside roots, got %v", err)
+	}
+}
+
+// TestResolveGitDirWithin_RejectsSymlinkedGitDir covers the case where
+// `.git` itself is a symlink whose target lives outside the allowed roots.
+// The lexical path looks fine — it's `<allowed>/repo/.git` — but following
+// the symlink would read from elsewhere. EvalSymlinks must catch that.
+func TestResolveGitDirWithin_RejectsSymlinkedGitDir(t *testing.T) {
+	root := canonicalTempDir(t)
+	outside := canonicalTempDir(t)
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	// `.git` symlinks to an out-of-root directory containing a HEAD file.
+	if err := os.Symlink(outside, filepath.Join(repoPath, ".git")); err != nil {
+		t.Skipf("symlink not supported on this platform: %v", err)
+	}
+
+	if _, err := resolveGitDirWithin(repoPath, []string{root}); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("expected ErrPathNotAllowed for symlinked .git escaping roots, got %v", err)
+	}
+}
+
+// TestResolveGitDirWithin_AllowsRepoLocalGitFile covers the legitimate
+// worktree case: `.git` file points to a sibling path that's still inside the
+// repo (e.g. main repo's `.git/worktrees/<name>`).
+func TestResolveGitDirWithin_AllowsRepoLocalGitFile(t *testing.T) {
+	repoPath := canonicalTempDir(t)
+	worktreesDir := filepath.Join(repoPath, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+	gitFile := filepath.Join(repoPath, "wt-clone", ".git")
+	if err := os.MkdirAll(filepath.Dir(gitFile), 0o755); err != nil {
+		t.Fatalf("mkdir wt-clone: %v", err)
+	}
+	if err := os.WriteFile(gitFile, []byte("gitdir: "+worktreesDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+
+	got, err := resolveGitDirWithin(filepath.Dir(gitFile), []string{repoPath})
+	if err != nil {
+		t.Fatalf("expected legitimate worktree to resolve, got %v", err)
+	}
+	if got != worktreesDir {
+		t.Fatalf("expected gitdir %q, got %q", worktreesDir, got)
 	}
 }
 

@@ -29,7 +29,13 @@ export type TaskCreateDialogInitialValues = {
   description?: string;
   repositoryId?: string;
   branch?: string;
+  /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
+   * instead of creating a new branch off `branch`. */
+  checkoutBranch?: string;
   state?: Task["state"];
+  /** When set, opens the dialog in GitHub URL mode pre-filled with this value
+   * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */
+  githubUrl?: string;
 };
 
 export type StoreSelections = {
@@ -160,6 +166,12 @@ export type DialogFormState = {
   setWorkflowAgentProfileId: (v: string) => void;
   /** Clear draft on successful submission (before closing dialog) */
   clearDraft: () => void;
+  /** Local executor only: opt-in to discard local changes and start the task on a new branch */
+  freshBranchEnabled: boolean;
+  setFreshBranchEnabled: (v: boolean) => void;
+  /** Currently checked-out branch in the selected local repo (for the disabled selector placeholder) */
+  currentLocalBranch: string;
+  setCurrentLocalBranch: (v: string) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -210,4 +222,8 @@ export type SubmitHandlersDeps = {
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
   clearDraft: () => void;
+  freshBranchEnabled: boolean;
+  isLocalExecutor: boolean;
+  /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
+  repositoryLocalPath: string;
 };

@@ -113,7 +113,8 @@ export function resolvePRPanelTargetGroup(
   centerGroupId: string,
 ): string {
   const sessionPanel = api.getPanel(`session:${sessionId}`);
-  return sessionPanel?.group?.id ?? centerGroupId;
+  const resolved = sessionPanel?.group?.id ?? centerGroupId;
+  return resolved;
 }
 
 /**
@@ -141,14 +142,14 @@ export function useAutoPRPanel() {
         const api = useDockviewStore.getState().api;
         if (!api) return;
 
-        const decision = shouldAutoAddPRPanel({
+        const decisionParams = {
           hasPR,
           panelExists: !!api.getPanel("pr-detail"),
           isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
           isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
           wasOffered: wasPRPanelOffered(sessionId),
-        });
-
+        };
+        const decision = shouldAutoAddPRPanel(decisionParams);
         if (decision === "remove") {
           api.getPanel("pr-detail")?.api.close();
           return;

@@ -73,13 +73,13 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 	m.tunnels[cacheKey] = nil
 	m.mu.Unlock()
 
-	target, ln, err := m.resolveAndBind(cacheKey, sessionID, tunnelPort)
+	target, authToken, ln, err := m.resolveAndBind(cacheKey, sessionID, tunnelPort)
 	if err != nil {
 		return 0, err
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
-	proxy := m.createTunnelProxy(cacheKey, target, port)
+	proxy := m.createTunnelProxy(cacheKey, target, port, authToken)
 	ctx, cancel := context.WithCancel(context.Background())
 	srv := &http.Server{Handler: proxy}
 
@@ -108,7 +108,7 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 // resolveAndBind resolves the agentctl target URL for the session and binds a
 // local TCP listener for the tunnel. On failure it cleans up the placeholder
 // entry reserved by StartTunnel.
-func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort int) (*url.URL, net.Listener, error) {
+func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort int) (*url.URL, string, net.Listener, error) {
 	cleanup := func() {
 		m.mu.Lock()
 		if m.tunnels[cacheKey] == nil {
@@ -120,31 +120,32 @@ func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort in
 	execution, ok := m.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		cleanup()
-		return nil, nil, fmt.Errorf("session not found or no active execution")
+		return nil, "", nil, fmt.Errorf("session not found or no active execution")
 	}
 
 	agentctlClient := execution.GetAgentCtlClient()
 	if agentctlClient == nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("agentctl client not available")
+		return nil, "", nil, fmt.Errorf("agentctl client not available")
 	}
 
 	target, err := url.Parse(agentctlClient.BaseURL())
 	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("failed to parse agentctl URL: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to parse agentctl URL: %w", err)
 	}
+	authToken := agentctlClient.AuthToken()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", tunnelPort))
 	if err != nil {
 		cleanup()
 		if isAddrInUse(err) {
-			return nil, nil, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
+			return nil, "", nil, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
 		}
-		return nil, nil, fmt.Errorf("failed to bind tunnel port %d: %w", tunnelPort, err)
+		return nil, "", nil, fmt.Errorf("failed to bind tunnel port %d: %w", tunnelPort, err)
 	}
 
-	return target, ln, nil
+	return target, authToken, ln, nil
 }
 
 // serveTunnel starts the tunnel HTTP server and its shutdown goroutine.
@@ -271,7 +272,7 @@ func (m *TunnelManager) removeTunnel(cacheKey string) {
 	delete(m.tunnels, cacheKey)
 }
 
-func (m *TunnelManager) createTunnelProxy(cacheKey string, target *url.URL, port int) *httputil.ReverseProxy {
+func (m *TunnelManager) createTunnelProxy(cacheKey string, target *url.URL, port int, authToken string) *httputil.ReverseProxy {
 	portStr := strconv.Itoa(port)
 
 	proxy := &httputil.ReverseProxy{}
@@ -284,6 +285,10 @@ func (m *TunnelManager) createTunnelProxy(cacheKey string, target *url.URL, port
 		}
 		r.Out.URL.Path = "/api/v1/port-proxy/" + portStr + incoming
 		r.Out.URL.RawPath = ""
+		// Inject agentctl auth token
+		if authToken != "" {
+			r.Out.Header.Set("Authorization", "Bearer "+authToken)
+		}
 		// Preserve original Host header for CORS/Origin validation.
 		r.Out.Host = r.In.Host
 		if r.Out.Header.Get("Upgrade") != "" {

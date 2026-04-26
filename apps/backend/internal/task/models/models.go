@@ -20,6 +20,12 @@ type ListMessagesOptions struct {
 	Sort   string
 }
 
+// SearchMessagesOptions defines options for searching a session's messages.
+type SearchMessagesOptions struct {
+	Query string
+	Limit int
+}
+
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
@@ -387,10 +393,11 @@ const (
 )
 
 // IsRemoteExecutorType reports whether the given executor type represents
-// a remote execution environment.
+// a remote execution environment (including containerized environments like Docker).
+// These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false

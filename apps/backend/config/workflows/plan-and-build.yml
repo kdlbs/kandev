@@ -66,6 +66,11 @@ steps:
 
       {{task_prompt}}
 
+      GIT SAFETY (read before running any git command)
+      - NEVER run `git checkout -- .`, `git checkout .`, `git reset --hard`, `git clean -fd`, or `git stash --include-untracked`. These wipe uncommitted work.
+      - When reverting files touched by formatters/linters, ALWAYS pass explicit paths (e.g. `git checkout -- path/to/file path/to/dir/`). Never use `.` or unscoped globs.
+      - Treat any uncommitted changes you did not make as intentional user work — leave them in place. Do not revert, stash, or overwrite them.
+
       STEP 0: CREATE A TASK LIST
       Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
 
@@ -92,11 +97,11 @@ steps:
       - If a fix requires an architectural change (new DB table, new service layer, switching libraries): stop and ask.
       - After 3 failed fix attempts on the same issue: stop, question the approach, ask the user.
 
-      STEP 4: ENSURE EVERYTHING IS COMMITTED
+      STEP 4: ENSURE YOUR OWN CHANGES ARE COMMITTED
       Before finishing this phase:
-      - Run `git status` to confirm there are no uncommitted or untracked changes that belong to this task.
-      - If anything is left, stage and commit it with a descriptive message.
-      - The phase is only complete when `git status` shows a clean tree on the task branch.
+      - Run `git status` to see what changed.
+      - Stage and commit every file YOU created or modified for this task, using explicit paths (see GIT SAFETY). Use descriptive messages.
+      - Any uncommitted or untracked changes you did not make are intentional user work — leave them as-is. Do not aim for an absolutely clean tree; aim for none of YOUR task-related edits to be uncommitted.
     events:
       on_enter:
         - type: auto_start_agent

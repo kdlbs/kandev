@@ -6,11 +6,42 @@ export type ApiRequestOptions = {
   init?: RequestInit;
 };
 
+/**
+ * Error thrown by fetchJson on non-2xx responses. `body` carries the parsed
+ * JSON response body (if any) so callers can react to structured fields like
+ * the dirty_files list returned with HTTP 409.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 function resolveUrl(pathOrUrl: string, baseUrl: string) {
   if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
     return pathOrUrl;
   }
   return `${baseUrl}${pathOrUrl}`;
+}
+
+async function throwFromResponse(response: Response): Promise<never> {
+  let body: unknown = null;
+  let message = `Request failed: ${response.status} ${response.statusText}`;
+  try {
+    body = await response.json();
+  } catch {
+    // body remains null
+  }
+  if (body && typeof body === "object" && "error" in body) {
+    const errVal = (body as { error?: unknown }).error;
+    if (typeof errVal === "string") message = errVal;
+  }
+  throw new ApiError(message, response.status, body);
 }
 
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
@@ -24,25 +55,9 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
       ...(options?.init?.headers ?? {}),
     },
   });
-  if (!response.ok) {
-    // Try to extract error message from response body
-    let errorMessage = `Request failed: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody = await response.json();
-      if (errorBody?.error) {
-        errorMessage = errorBody.error;
-      }
-    } catch {
-      // Ignore JSON parse errors, use default message
-    }
-    throw new Error(errorMessage);
-  }
-  if (response.status === 204) {
-    return undefined as T;
-  }
+  if (!response.ok) await throwFromResponse(response);
+  if (response.status === 204) return undefined as T;
   const text = await response.text();
-  if (!text) {
-    return undefined as T;
-  }
+  if (!text) return undefined as T;
   return JSON.parse(text) as T;
 }

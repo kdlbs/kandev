@@ -4,8 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// noopPublisher satisfies the taskUpdatedPublisher contract without touching
+// an event bus. Workflow-store unit tests don't exercise the event path.
+func noopPublisher(_ context.Context, _ *models.Task) {}
 
 func TestWorkflowStore_LoadState(t *testing.T) {
 	ctx := context.Background()
@@ -13,7 +18,7 @@ func TestWorkflowStore_LoadState(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 
 	agentMgr := &mockAgentManager{isPassthrough: true}
-	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, nil, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger())
 
 	state, err := store.LoadState(ctx, "t1", "s1")
 	if err != nil {
@@ -51,7 +56,7 @@ func TestWorkflowStore_LoadStep(t *testing.T) {
 		Position:   0,
 	}
 
-	store := newWorkflowStore(nil, stepGetter, nil, nil, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
 
 	spec, err := store.LoadStep(ctx, "wf1", "step1")
 	if err != nil {
@@ -83,7 +88,7 @@ func TestWorkflowStore_LoadNextStep(t *testing.T) {
 		ID: "step3", WorkflowID: "wf1", Name: "Step 3", Position: 2,
 	}
 
-	store := newWorkflowStore(nil, stepGetter, nil, nil, testLogger())
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
 
 	t.Run("returns next step by position", func(t *testing.T) {
 		spec, err := store.LoadNextStep(ctx, "wf1", 0)
@@ -111,7 +116,7 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, nil, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
 
 	err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
 	if err != nil {
@@ -142,7 +147,7 @@ func TestWorkflowStore_PersistData(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, nil, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
 
 	// Persist initial data
 	err := store.PersistData(ctx, "s1", map[string]any{"plan_mode": true})
@@ -187,7 +192,7 @@ func TestWorkflowStore_PersistData(t *testing.T) {
 
 func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 	ctx := context.Background()
-	store := newWorkflowStore(nil, newMockStepGetter(), nil, nil, testLogger())
+	store := newWorkflowStore(nil, newMockStepGetter(), nil, noopPublisher, testLogger())
 
 	t.Run("empty operation ID returns false", func(t *testing.T) {
 		applied, err := store.IsOperationApplied(ctx, "")

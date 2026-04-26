@@ -184,7 +184,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       );
 
       // Give each worker its own agentctl port range, offset from the default
-      // range (10001-10100) to avoid conflicts with a running dev instance.
+      // range (41001-41100) to avoid conflicts with a running dev instance.
       const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 50;
       const agentctlPortMax = agentctlPortBase + 49;
 

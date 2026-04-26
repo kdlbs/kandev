@@ -36,38 +36,31 @@ const defaultWorktreePrepareScript = `#!/bin/bash
 {{repository.setup_script}}
 `
 
-const defaultDockerPrepareScript = `#!/bin/bash
-# Prepare Docker container environment
-# This runs inside the Docker container after it starts
+const defaultDockerPrepareScript = `#!/bin/sh
+# Prepare Docker container environment (kandev/multi-agent image)
+# git, node, and agentctl are already installed in the image
 
-set -euo pipefail
-
-# ---- System dependencies ----
-apt-get update -qq
-apt-get install -y -qq git curl ca-certificates > /dev/null 2>&1
-
-# ---- Node.js (required for agentctl) ----
-if ! command -v node &> /dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
-  apt-get install -y -qq nodejs > /dev/null 2>&1
-fi
+set -eu
 
 # ---- Git identity (optional) ----
 {{git.identity_setup}}
+
+# ---- Configure git/gh for HTTPS auth ----
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+# Configure GitHub token for gh CLI and git operations
+{{github.auth_setup}}
 
 # ---- Clone repository ----
 git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
 
+# Strip embedded token from remote URL to avoid persisting credentials in .git/config
+git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
-
-# ---- Pre-install agent CLI(s) ----
-{{kandev.agents.install}}
-
-# ---- Install and start Kandev agent controller ----
-{{kandev.agentctl.install}}
-{{kandev.agentctl.start}}
 `
 
 const defaultSpritesPrepareScript = `#!/bin/bash
@@ -87,13 +80,14 @@ ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts
 # Rewrite SSH URLs to HTTPS so git clone git@github.com:... works via token auth
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-# Register gh as git credential helper (provides GITHUB_TOKEN to git for HTTPS)
-gh auth setup-git 2>/dev/null || true
-# Ensure gh CLI itself uses HTTPS for gh repo clone
-gh config set git_protocol https --host github.com 2>/dev/null || true
+
+# Configure GitHub token for gh CLI and git operations
+# GH_TOKEN is the primary env var for gh CLI authentication
+{{github.auth_setup}}
 
 # ---- Install pnpm globally ----
-npm install -g pnpm > /dev/null 2>&1
+curl -fsSL https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-linux-x64 -o /usr/local/bin/pnpm
+chmod +x /usr/local/bin/pnpm
 
 # ---- Git identity ----
 {{git.identity_setup}}
@@ -102,6 +96,9 @@ npm install -g pnpm > /dev/null 2>&1
 echo "Cloning {{repository.clone_url}} (branch: {{repository.branch}})..."
 git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
+
+# Strip embedded token from remote URL to avoid persisting credentials in .git/config
+git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
 
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}

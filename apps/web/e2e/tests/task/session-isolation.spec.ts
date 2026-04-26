@@ -74,7 +74,7 @@ test.describe("Session isolation", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     // 1. Create first task with agent session
     const taskA = await apiClient.createTaskWithAgent(
@@ -89,7 +89,19 @@ test.describe("Session isolation", () => {
       },
     );
 
-    // 2. Create second task with a DIFFERENT agent session (different message)
+    // 2. Navigate to first task and wait for agent to complete
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Verify mock response message is visible for first task
+    const chatPanel = testPage.getByTestId("session-chat");
+    await expect(chatPanel.getByText(SIMPLE_MOCK_RESPONSE)).toBeVisible({ timeout: 10_000 });
+
+    // 4. Create second task AFTER first agent completes to avoid concurrent
+    //    git operations on the same repo (both agents do git checkout during
+    //    environment preparation, causing index.lock conflicts).
     const taskB = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Second Task B",
@@ -101,16 +113,6 @@ test.describe("Session isolation", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-
-    // 3. Navigate to first task and wait for agent to complete
-    await testPage.goto(`/t/${taskA.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-
-    // 4. Verify mock response message is visible for first task
-    const chatPanel = testPage.getByTestId("session-chat");
-    await expect(chatPanel.getByText(SIMPLE_MOCK_RESPONSE)).toBeVisible({ timeout: 10_000 });
 
     // 5. Click on second task in the sidebar to switch
     await session.clickTaskInSidebar("Second Task B");

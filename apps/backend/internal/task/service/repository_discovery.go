@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +15,14 @@ import (
 type RepositoryDiscoveryConfig struct {
 	Roots    []string
 	MaxDepth int
+}
+
+// LocalRepoStatus reports the current branch and dirty file paths for a
+// local repository on disk. Used by the task-create dialog to preflight the
+// fresh-branch flow.
+type LocalRepoStatus struct {
+	CurrentBranch string
+	DirtyFiles    []string
 }
 
 type LocalRepository struct {
@@ -153,24 +162,106 @@ func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]
 }
 
 func (s *Service) ListLocalRepositoryBranches(ctx context.Context, path string) ([]Branch, error) {
-	if path == "" {
-		return nil, fmt.Errorf("repository path is required")
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("invalid repository path: %w", err)
-	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return nil, ErrPathNotAllowed
-	}
-	info, err := os.Stat(absPath)
+	absPath, err := s.resolveAllowedLocalPath(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("repository path is not a directory")
-	}
 	return listGitBranches(absPath)
+}
+
+// LocalRepositoryCurrentBranch returns the currently checked-out branch for a
+// local repository on disk. Returns the branch name (e.g. "main") or an empty
+// string if HEAD is detached or unreadable.
+func (s *Service) LocalRepositoryCurrentBranch(ctx context.Context, path string) (string, error) {
+	absPath, err := s.resolveAllowedLocalPath(path)
+	if err != nil {
+		return "", err
+	}
+	return readGitCurrentBranch(absPath, s.discoveryRoots()), nil
+}
+
+// LocalRepositoryStatus returns the current branch and dirty file list for a
+// local repository on disk. Used by the task-create dialog to preflight the
+// fresh-branch flow before committing to a destructive checkout.
+func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (LocalRepoStatus, error) {
+	absPath, err := s.resolveAllowedLocalPath(path)
+	if err != nil {
+		return LocalRepoStatus{}, err
+	}
+	dirty, err := readGitDirtyFiles(ctx, absPath)
+	if err != nil {
+		return LocalRepoStatus{}, err
+	}
+	return LocalRepoStatus{
+		CurrentBranch: readGitCurrentBranch(absPath, s.discoveryRoots()),
+		DirtyFiles:    dirty,
+	}, nil
+}
+
+func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
+	if repoPath == "" {
+		return "", fmt.Errorf("repository path is required")
+	}
+	roots := s.discoveryRoots()
+	abs, err := filepath.Abs(filepath.Clean(repoPath))
+	if err != nil {
+		return "", fmt.Errorf("invalid repository path: %w", err)
+	}
+	// Resolve symlinks before the allowlist check so that OS-level symlinks
+	// (e.g. /var -> /private/var on macOS) don't produce false negatives.
+	// normalizeRoots already resolves symlinks on the roots themselves, so both
+	// sides of the comparison are canonical after this step.
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	safe, err := pathWithinRoots(filepath.Clean(resolved), roots)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(safe)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("repository path is not a directory")
+	}
+	return safe, nil
+}
+
+// pathWithinRoots returns abs only when it sits inside one of the allowed
+// roots after resolving relative segments. The returned string is the
+// trusted, validated path; callers should never use the original input for
+// subsequent file operations.
+//
+// Each root is also passed through filepath.EvalSymlinks before comparison so
+// that OS-level symlinks (e.g. /var -> /private/var on macOS) do not produce
+// false negatives when abs was obtained via EvalSymlinks but the stored root
+// was not.
+func pathWithinRoots(abs string, roots []string) (string, error) {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		// Resolve symlinks on the root so both sides of the comparison are
+		// canonical. Ignore errors — if the root itself doesn't exist we skip it.
+		canonRoot := root
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			canonRoot = r
+		}
+		rel, err := filepath.Rel(canonRoot, abs)
+		if err != nil {
+			continue
+		}
+		if rel == "." {
+			return abs, nil
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		return abs, nil
+	}
+	return "", ErrPathNotAllowed
 }
 
 func (s *Service) discoveryRoots() []string {
@@ -354,6 +445,69 @@ func isWithinRoot(path string, root string) bool {
 	return strings.HasPrefix(absPath, absRoot)
 }
 
+// readGitCurrentBranch returns the currently checked-out branch by reading
+// .git/HEAD directly. Returns an empty string if HEAD is detached, the path
+// is not a clean absolute path, the resolved git dir escapes the allowed
+// roots, or HEAD is unreadable. We avoid `git rev-parse --abbrev-ref HEAD`
+// to skip the subprocess cost on the hot path of branch discovery.
+func readGitCurrentBranch(repoPath string, allowedRoots []string) string {
+	if !filepath.IsAbs(repoPath) {
+		return ""
+	}
+	cleanRepo := filepath.Clean(repoPath)
+	gitDir, err := resolveGitDirWithin(cleanRepo, allowedRoots)
+	if err != nil {
+		return ""
+	}
+	headPath := filepath.Clean(filepath.Join(gitDir, gitHEAD))
+	if !filepath.IsAbs(headPath) {
+		return ""
+	}
+	content, err := os.ReadFile(headPath)
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(content))
+	ref, ok := strings.CutPrefix(trimmed, "ref: ")
+	if !ok {
+		return ""
+	}
+	return strings.TrimPrefix(ref, "refs/heads/")
+}
+
+// readGitDirtyFiles returns the list of dirty file paths in a repository, as
+// reported by `git status --porcelain=v1 -z`. The `-z` form is NUL-terminated
+// and disables path quoting, so paths with spaces, unicode, or control chars
+// round-trip cleanly through the consent flow. Renames (status `R`/`C`)
+// emit two NUL-separated records: the rename target then the original; we
+// keep only the target since that's what's currently in the working tree.
+// Returns an empty slice for a clean working tree.
+func readGitDirtyFiles(ctx context.Context, repoPath string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain=v1", "-z")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	entries := strings.Split(strings.TrimRight(string(out), "\x00"), "\x00")
+	var paths []string
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		status := entry[:2]
+		path := entry[3:]
+		paths = append(paths, path)
+		// Rename / copy entries push an extra "old name" record after the
+		// "new name" record in -z mode; consume and skip it.
+		if status[0] == 'R' || status[0] == 'C' {
+			i++
+		}
+	}
+	return paths, nil
+}
+
 func readGitDefaultBranch(repoPath string) (string, error) {
 	gitDir, err := resolveGitDir(repoPath)
 	if err != nil {
@@ -400,6 +554,43 @@ func resolveGitDir(repoPath string) (string, error) {
 		return gitDir, nil
 	}
 	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
+}
+
+// resolveGitDirWithin is the trust-boundary-aware variant of resolveGitDir:
+// when `.git` is a file pointer (worktree case), the embedded `gitdir:` line
+// can point anywhere on disk. This wrapper rejects any resolved gitdir that
+// is not inside the repo path or one of the allowed discovery roots, so a
+// crafted `.git` file inside an otherwise-allowed directory cannot make the
+// caller read from outside the sandbox.
+func resolveGitDirWithin(repoPath string, allowedRoots []string) (string, error) {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return "", err
+	}
+	// Resolve symlinks before the root check — `repoPath/.git` itself can be
+	// a symlink to a directory outside the sandbox, and a lexical Clean on
+	// the gitdir string would not catch that.
+	resolved, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(resolved)
+	if !filepath.IsAbs(cleaned) {
+		abs, absErr := filepath.Abs(cleaned)
+		if absErr != nil {
+			return "", absErr
+		}
+		cleaned = abs
+	}
+	if isWithinRoot(cleaned, repoPath) {
+		return cleaned, nil
+	}
+	for _, root := range allowedRoots {
+		if root != "" && isWithinRoot(cleaned, root) {
+			return cleaned, nil
+		}
+	}
+	return "", ErrPathNotAllowed
 }
 
 func resolveCommonGitDir(gitDir string) string {

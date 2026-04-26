@@ -55,7 +55,65 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 
 	case strings.HasPrefix(line, "e2e:tool_result("):
 		executeSimulatedToolResult(e, line)
+
+	case strings.HasPrefix(line, "e2e:monitor_start("):
+		executeMonitorStart(e, line)
+
+	case strings.HasPrefix(line, "e2e:monitor_event("):
+		executeMonitorEvent(e, line)
+
+	case strings.HasPrefix(line, "e2e:monitor_end("):
+		executeMonitorEnd(e, line)
 	}
+}
+
+// executeMonitorStart emits a Monitor registration sequence reproducing the
+// claude-agent-acp wire format. Format: e2e:monitor_start("taskId", "command")
+//
+// The taskId is what subsequent monitor_event / monitor_end directives use
+// to look the Monitor back up. Command is recorded in the rawInput so the
+// frontend can label the card (e.g. "gh pr checks --watch").
+func executeMonitorStart(e *emitter, line string) {
+	inner := extractParenContent(line, "e2e:monitor_start(")
+	taskID, rest := extractFirstStringArg(inner)
+	if taskID == "" {
+		e.text("Script error: monitor_start requires taskId")
+		return
+	}
+	rest = strings.TrimSpace(rest)
+	rest = strings.TrimPrefix(rest, ",")
+	command, _ := extractFirstStringArg(rest)
+	toolID := nextToolID()
+	state.monitorTools[taskID] = toolID
+	e.startMonitorTool(toolID, taskID, command)
+}
+
+// executeMonitorEvent emits a `<task-notification>` envelope as if the
+// model echoed an injected user turn. Format: e2e:monitor_event("taskId", "event body")
+func executeMonitorEvent(e *emitter, line string) {
+	inner := extractParenContent(line, "e2e:monitor_event(")
+	taskID, rest := extractFirstStringArg(inner)
+	if taskID == "" {
+		e.text("Script error: monitor_event requires taskId")
+		return
+	}
+	rest = strings.TrimSpace(rest)
+	rest = strings.TrimPrefix(rest, ",")
+	body, _ := extractFirstStringArg(rest)
+	e.emitMonitorEvent(taskID, body)
+}
+
+// executeMonitorEnd emits the terminal tool_call_update for a previously
+// started Monitor. Format: e2e:monitor_end("taskId")
+func executeMonitorEnd(e *emitter, line string) {
+	taskID := extractStringArg(line, "e2e:monitor_end(")
+	tcID, ok := state.monitorTools[taskID]
+	if !ok {
+		e.text("Script error: monitor_end for unknown taskId " + taskID)
+		return
+	}
+	delete(state.monitorTools, taskID)
+	e.endMonitorTool(tcID)
 }
 
 // executeMCPCommand parses and executes: e2e:mcp:<server>:<tool>(<json_args>)

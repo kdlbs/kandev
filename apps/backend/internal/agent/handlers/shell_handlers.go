@@ -224,80 +224,92 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 	})
 }
 
-// UserShellCreateRequest for user_shell.create action
+// UserShellCreateRequest for user_shell.create action.
+// Exactly one of (ScriptID) or (Command) may be set; if both are empty the
+// handler creates a plain shell. When Command is set, Label is used as the
+// terminal label (defaults to "Script" when omitted).
 type UserShellCreateRequest struct {
 	SessionID string `json:"session_id"`
-	ScriptID  string `json:"script_id,omitempty"` // Optional: create a script terminal instead of plain shell
+	ScriptID  string `json:"script_id,omitempty"`
+	Command   string `json:"command,omitempty"`
+	Label     string `json:"label,omitempty"`
 }
 
-// wsUserShellCreate creates a new user shell terminal and returns the assigned ID and label
+// wsUserShellCreate creates a new user shell terminal and returns the assigned ID and label.
 func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req UserShellCreateRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
-
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the interactive runner
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return nil, fmt.Errorf("interactive runner not available")
 	}
 
-	var terminalID, label, initialCommand string
-	var closable bool
+	label, command, err := h.resolveShellScript(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
 
-	if req.ScriptID != "" {
-		// Creating a script terminal - look up the script
-		if h.scriptService == nil {
-			return nil, fmt.Errorf("script service not available")
-		}
-
-		script, err := h.scriptService.GetRepositoryScript(ctx, req.ScriptID)
-		if err != nil {
-			h.logger.Error("failed to get repository script",
-				zap.String("script_id", req.ScriptID),
-				zap.Error(err))
-			return nil, fmt.Errorf("invalid script ID: %w", err)
-		}
-
-		terminalID = "script-" + uuid.New().String()
-		label = script.Name
-		initialCommand = script.Command
-		closable = true // Script terminals are always closable
-
-		// Register the script terminal with the interactive runner
-		interactiveRunner.RegisterScriptShell(req.SessionID, terminalID, label, initialCommand)
-
+	if command != "" {
+		terminalID := "script-" + uuid.New().String()
+		interactiveRunner.RegisterScriptShell(req.SessionID, terminalID, label, command)
 		h.logger.Info("created script terminal",
 			zap.String("session_id", req.SessionID),
 			zap.String("terminal_id", terminalID),
 			zap.String("label", label),
-			zap.String("script_id", req.ScriptID),
-			zap.String("initial_command", initialCommand))
-	} else {
-		// Creating a plain shell terminal
-		result := interactiveRunner.CreateUserShell(req.SessionID)
-		terminalID = result.TerminalID
-		label = result.Label
-		closable = result.Closable
-
-		h.logger.Info("created user shell",
-			zap.String("session_id", req.SessionID),
-			zap.String("terminal_id", terminalID),
-			zap.String("label", label),
-			zap.Bool("closable", closable))
+			zap.String("initial_command", command))
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"terminal_id":     terminalID,
+			"label":           label,
+			"closable":        true,
+			"initial_command": command,
+		})
 	}
 
+	result := interactiveRunner.CreateUserShell(req.SessionID)
+	h.logger.Info("created user shell",
+		zap.String("session_id", req.SessionID),
+		zap.String("terminal_id", result.TerminalID),
+		zap.String("label", result.Label),
+		zap.Bool("closable", result.Closable))
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
-		"terminal_id":     terminalID,
-		"label":           label,
-		"closable":        closable,
-		"initial_command": initialCommand,
+		"terminal_id":     result.TerminalID,
+		"label":           result.Label,
+		"closable":        result.Closable,
+		"initial_command": "",
 	})
+}
+
+// resolveShellScript returns the (label, command) pair for a script terminal,
+// or ("", "") when the request is for a plain shell.
+func (h *ShellHandlers) resolveShellScript(
+	ctx context.Context, req *UserShellCreateRequest,
+) (string, string, error) {
+	if req.ScriptID != "" {
+		if h.scriptService == nil {
+			return "", "", fmt.Errorf("script service not available")
+		}
+		script, err := h.scriptService.GetRepositoryScript(ctx, req.ScriptID)
+		if err != nil {
+			h.logger.Error("failed to get repository script",
+				zap.String("script_id", req.ScriptID), zap.Error(err))
+			return "", "", fmt.Errorf("invalid script ID: %w", err)
+		}
+		return script.Name, script.Command, nil
+	}
+	if req.Command != "" {
+		label := req.Label
+		if label == "" {
+			label = "Script"
+		}
+		return label, req.Command, nil
+	}
+	return "", "", nil
 }
 
 // UserShellStopRequest for user_shell.stop action

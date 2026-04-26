@@ -56,7 +56,7 @@ kubectl logs -l app=kandev -f
 | Resource | File | Purpose |
 |----------|------|---------|
 | Deployment | `deployment.yaml` | Single-replica pod running backend + web |
-| Service | `service.yaml` | ClusterIP exposing port 8080 |
+| Service | `service.yaml` | ClusterIP exposing port 38429 |
 | ConfigMap | `configmap.yaml` | Non-sensitive environment configuration |
 | PVC | `pvc.yaml` | 10Gi persistent volume for SQLite + worktrees |
 | Ingress | `ingress.yaml` | Example ingress with WebSocket support |
@@ -66,11 +66,11 @@ kubectl logs -l app=kandev -f
 **Port-forward** (quickest for testing):
 
 ```bash
-kubectl port-forward svc/kandev 8080:8080
-# Open http://localhost:8080
+kubectl port-forward svc/kandev 38429:38429
+# Open http://localhost:38429
 ```
 
-**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 8080 (the Go backend reverse-proxies the Next.js frontend internally).
+**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 38429 (the Go backend reverse-proxies the Next.js frontend internally).
 
 ### Custom Domain / Reverse Proxy
 
@@ -84,7 +84,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `KANDEV_SERVER_PORT` | `8080` | Server port (API + WebSocket + Web UI) |
+| `KANDEV_SERVER_PORT` | `38429` | Server port (API + WebSocket + Web UI) |
 | `KANDEV_HOME_DIR` | `/data` | Kandev home directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |

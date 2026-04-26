@@ -38,61 +38,97 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		"position":         task.Position,
 		"created_at":       task.CreatedAt.Format(time.RFC3339),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
+		"is_ephemeral":     task.IsEphemeral,
 	}
 
-	// Fetch session count and primary session info for the task
-	sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{task.ID})
-	if err == nil {
-		if count, ok := sessionCountMap[task.ID]; ok {
-			data["session_count"] = count
-		}
-	}
-
-	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{task.ID})
-	if err == nil {
-		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo != nil {
-			data["primary_session_id"] = sessionInfo.ID
-			if sessionInfo.ReviewStatus != nil {
-				data["review_status"] = *sessionInfo.ReviewStatus
-			}
-			if sessionInfo.State != "" {
-				data["primary_session_state"] = string(sessionInfo.State)
-			}
-		}
-	}
+	s.addTaskSessionEventFields(ctx, task.ID, data)
 
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
-
 	if task.ArchivedAt != nil {
 		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}
-
-	// Always include is_ephemeral field so frontend filters work correctly
-	data["is_ephemeral"] = task.IsEphemeral
-
-	if len(task.Repositories) > 0 {
-		data["repository_id"] = task.Repositories[0].RepositoryID
+	// Orchestrator-originated events fetch the task via the raw repo.GetTask,
+	// which does not populate Repositories. Load the primary on demand so the
+	// payload always carries repository_id — matching the HTTP DTO and
+	// preventing the frontend from losing repositoryId on WS updates.
+	if repoID := primaryRepositoryID(ctx, s, task); repoID != "" {
+		data["repository_id"] = repoID
 	}
-
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
 	}
-
 	if oldState != nil {
 		data["old_state"] = string(*oldState)
 		data["new_state"] = string(task.State)
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
-
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish task event",
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}
+}
+
+// addTaskSessionEventFields merges session count, primary session info, and
+// primary executor details into the task event payload. Extracted to keep
+// publishTaskEvent under the project's function-length limit.
+func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, data map[string]interface{}) {
+	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
+		if count, ok := sessionCountMap[taskID]; ok {
+			data["session_count"] = count
+		}
+	}
+
+	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{taskID})
+	if err != nil {
+		return
+	}
+	sessionInfo, ok := primarySessionInfoMap[taskID]
+	if !ok || sessionInfo == nil {
+		return
+	}
+	data["primary_session_id"] = sessionInfo.ID
+	if sessionInfo.ReviewStatus != nil {
+		data["review_status"] = *sessionInfo.ReviewStatus
+	}
+	if sessionInfo.State != "" {
+		data["primary_session_state"] = string(sessionInfo.State)
+	}
+	if sessionInfo.ExecutorID != "" {
+		data["primary_executor_id"] = sessionInfo.ExecutorID
+	}
+	var execType string
+	if sessionInfo.ExecutorSnapshot != nil {
+		if t, ok := sessionInfo.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
+			execType = t
+			data["primary_executor_type"] = t
+		}
+		if n, ok := sessionInfo.ExecutorSnapshot["executor_name"].(string); ok && n != "" {
+			data["primary_executor_name"] = n
+		}
+	}
+	if execType != "" {
+		data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
+	}
+}
+
+// primaryRepositoryID returns the primary repository_id for the task. Prefers
+// the already-loaded Task.Repositories slice; falls back to a lookup so
+// publishers that pass a task without eagerly loaded repositories (e.g. the
+// orchestrator's raw repo.GetTask) still emit repository_id.
+func primaryRepositoryID(ctx context.Context, s *Service, task *models.Task) string {
+	if len(task.Repositories) > 0 {
+		return task.Repositories[0].RepositoryID
+	}
+	repo, err := s.taskRepos.GetPrimaryTaskRepository(ctx, task.ID)
+	if err != nil || repo == nil {
+		return ""
+	}
+	return repo.RepositoryID
 }
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process

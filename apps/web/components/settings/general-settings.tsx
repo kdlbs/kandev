@@ -390,7 +390,7 @@ function BackendConnectionCard() {
             value={displayBackendUrl}
             readOnly
             disabled
-            placeholder="http://localhost:8080"
+            placeholder="http://localhost:38429"
             className="cursor-default"
           />
           <p className="text-xs text-muted-foreground">

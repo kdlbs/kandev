@@ -85,6 +85,7 @@ export const defaultSessionState: SessionSliceState = {
     revisionContentCache: {},
     previewRevisionIdByTaskId: {},
     comparePairByTaskId: {},
+    lastSeenUpdatedAtByTaskId: {},
   },
   queue: { bySessionId: {}, isLoading: {} },
 };
@@ -200,6 +201,12 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
         delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
         delete draft.taskPlans.comparePairByTaskId[taskId];
+        delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
+      }),
+    markTaskPlanSeen: (taskId: string) =>
+      set((draft) => {
+        const plan = draft.taskPlans.byTaskId[taskId];
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
       }),
     setPlanRevisions: (
       taskId: string,

@@ -249,6 +249,14 @@ func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// ReplaceTaskRepositories deletes all existing task-repository associations
+// and recreates them. Exported for callers that mutate repository inputs
+// (e.g. the fresh-branch flow rewriting BaseBranch) after CreateTask has
+// already persisted the original set.
+func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	return s.replaceTaskRepositories(ctx, taskID, workspaceID, repositories)
+}
+
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
 	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {

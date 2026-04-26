@@ -78,6 +78,9 @@ export type TaskPlansState = {
   // Phase 6: preview + compare state
   previewRevisionIdByTaskId: Record<string, string | null>;
   comparePairByTaskId: Record<string, ComparePair>;
+  // From main: tracks the last `updated_at` the user has seen, so the panel
+  // can flag unseen-changes after agent writes between visits.
+  lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
 export type QueuedMessage = {
@@ -152,6 +155,7 @@ export type SessionSliceActions = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  markTaskPlanSeen: (taskId: string) => void;
   // Revision actions
   setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
   upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;

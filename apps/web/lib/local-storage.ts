@@ -633,6 +633,12 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
+  // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
+  const collapsed = getStoredCollapsedSubtaskParents();
+  if (collapsed.includes(taskId)) {
+    setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
+  }
+
   // Session-keyed storage — clean all sessions belonging to the task
   for (const sessionId of sessionIds) {
     removeSessionMaximizeState(sessionId);
@@ -688,6 +694,27 @@ export function setStoredSidebarDraft<T>(draft: T): void {
 
 export function removeStoredSidebarDraft(): void {
   removeLocalStorage(SIDEBAR_DRAFT_KEY);
+}
+
+// --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
+
+const COLLAPSED_SUBTASKS_KEY = "kandev.sidebar.collapsedSubtasks";
+
+/**
+ * Get the list of parent task IDs whose subtasks are collapsed in the sidebar.
+ * Tab-scoped (sessionStorage) so it survives reload/task switches but not tab close.
+ */
+export function getStoredCollapsedSubtaskParents(): string[] {
+  const raw = getSessionStorage<string[]>(COLLAPSED_SUBTASKS_KEY, []) as unknown;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === "string");
+}
+
+/**
+ * Save the list of parent task IDs whose subtasks are collapsed in the sidebar.
+ */
+export function setStoredCollapsedSubtaskParents(ids: string[]): void {
+  setSessionStorage(COLLAPSED_SUBTASKS_KEY, ids);
 }
 
 // --- Task creation draft persistence (sessionStorage, per workspace) ---

@@ -7,15 +7,25 @@ import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 // Requires checks_state === "success" (not just "") so repos with no CI configured
-// won't trigger ready-to-merge on mergeable_state=clean alone. Loosen if we start
-// supporting CI-less repos.
+// won't trigger ready-to-merge on mergeable_state=clean alone.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
-  return (
-    pr.state === "open" &&
-    pr.checks_state === "success" &&
-    pr.review_state === "approved" &&
-    pr.mergeable_state === "clean"
-  );
+  if (pr.state !== "open") return false;
+  if (pr.checks_state !== "success") return false;
+  if (pr.mergeable_state !== "clean") return false;
+  if (pr.review_state === "approved") return true;
+  // No review process: no requested reviewers and no submitted reviews. GitHub
+  // sets mergeable_state=clean when branch protection is satisfied, so this
+  // covers repos without required reviewers.
+  return pr.review_state === "" && pr.pending_review_count === 0;
+}
+
+// CI passed but the PR is still waiting on human review (reviewers requested
+// or pending review state). Distinct from yellow "CI running".
+export function isPRAwaitingReview(pr: TaskPR): boolean {
+  if (pr.state !== "open") return false;
+  if (pr.checks_state !== "success") return false;
+  if (pr.review_state === "approved") return false;
+  return pr.review_state === "pending" || pr.pending_review_count > 0;
 }
 
 export function getPRStatusColor(pr: TaskPR): string {
@@ -29,6 +39,9 @@ export function getPRStatusColor(pr: TaskPR): string {
   }
   if (pr.review_state === "approved" && pr.checks_state === "success") {
     return "text-green-500";
+  }
+  if (isPRAwaitingReview(pr)) {
+    return "text-sky-400";
   }
   if (pr.checks_state === "pending" || pr.review_state === "pending") {
     return "text-yellow-500";

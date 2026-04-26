@@ -143,9 +143,10 @@ const (
 	ActionUserUnsubscribe = "user.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd  = "message.add"
-	ActionMessageGet  = "message.get"
-	ActionMessageList = "message.list"
+	ActionMessageAdd    = "message.add"
+	ActionMessageGet    = "message.get"
+	ActionMessageList   = "message.list"
+	ActionMessageSearch = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress              = "acp.progress"
@@ -382,6 +383,22 @@ const (
 	ActionGitHubIssueTrigger     = "github.issue_watches.trigger"
 	ActionGitHubIssueTriggerAll  = "github.issue_watches.trigger_all"
 	ActionGitHubNewIssueNotify   = "github.new_issue.notify" // Notification
+
+	// Action preset actions for the /github page quick-launch prompts.
+	ActionGitHubActionPresetsList   = "github.action_presets.list"
+	ActionGitHubActionPresetsUpdate = "github.action_presets.update"
+	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
+)
+
+// Jira integration actions
+const (
+	ActionJiraConfigGet        = "jira.config.get"
+	ActionJiraConfigSet        = "jira.config.set"
+	ActionJiraConfigDelete     = "jira.config.delete"
+	ActionJiraConfigTest       = "jira.config.test"
+	ActionJiraTicketGet        = "jira.ticket.get"
+	ActionJiraTicketTransition = "jira.ticket.transition"
+	ActionJiraProjectsList     = "jira.projects.list"
 )
 
 // Error codes

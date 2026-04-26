@@ -160,6 +160,7 @@ export function buildRepositoriesPayload(opts: {
   githubPrHeadBranch: string | null;
   repositoryId: string;
   selectedLocalRepo: LocalRepository | null;
+  freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
   if (opts.useGitHubUrl && opts.githubUrl) {
     return [
@@ -171,8 +172,22 @@ export function buildRepositoriesPayload(opts: {
       },
     ];
   }
+  const fresh = opts.freshBranch
+    ? {
+        fresh_branch: true,
+        confirm_discard: opts.freshBranch.confirmDiscard,
+        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
+      }
+    : {};
   if (opts.repositoryId) {
-    return [{ repository_id: opts.repositoryId, base_branch: opts.branch || undefined }];
+    return [
+      {
+        repository_id: opts.repositoryId,
+        base_branch: opts.branch || undefined,
+        checkout_branch: opts.githubPrHeadBranch || undefined,
+        ...fresh,
+      },
+    ];
   }
   if (opts.selectedLocalRepo) {
     return [
@@ -181,6 +196,7 @@ export function buildRepositoriesPayload(opts: {
         base_branch: opts.branch || undefined,
         local_path: opts.selectedLocalRepo.path,
         default_branch: opts.selectedLocalRepo.default_branch || undefined,
+        ...fresh,
       },
     ];
   }

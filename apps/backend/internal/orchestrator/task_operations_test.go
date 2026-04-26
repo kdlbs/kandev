@@ -1048,11 +1048,20 @@ func TestEnsureSessionRunning_PreparedWorkspace(t *testing.T) {
 	// when StartAgentProcess is called (simulating the agent starting successfully).
 	startAgentProcessCalled := false
 	wrappedMgr := &sessionUpdatingAgentManager{
-		mockAgentManager: &mockAgentManager{isAgentRunning: false},
-		repo:             repo,
-		sessionID:        "session1",
-		taskID:           "task1",
-		onStartCalled:    &startAgentProcessCalled,
+		mockAgentManager: &mockAgentManager{
+			isAgentRunning: false,
+			// Return the execution ID so the existing-workspace path proceeds
+			getExecutionIDForSessionFunc: func(_ context.Context, sid string) (string, error) {
+				if sid == "session1" {
+					return "exec-prepare-1", nil
+				}
+				return "", fmt.Errorf("no execution found")
+			},
+		},
+		repo:          repo,
+		sessionID:     "session1",
+		taskID:        "task1",
+		onStartCalled: &startAgentProcessCalled,
 	}
 
 	taskRepo := newMockTaskRepo()

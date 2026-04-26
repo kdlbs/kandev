@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/spf13/viper"
 )
 
@@ -177,7 +178,7 @@ type AgentConfig struct {
 	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
 	StandaloneHost string `mapstructure:"standaloneHost"`
 
-	// StandalonePort is the control port for standalone agentctl (default: 9999)
+	// StandalonePort is the control port for standalone agentctl (default: 39429)
 	StandalonePort int `mapstructure:"standalonePort"`
 
 	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
@@ -189,7 +190,7 @@ type AgentConfig struct {
 	// This setting is only for running a separate standalone MCP server process.
 	McpServerEnabled bool `mapstructure:"mcpServerEnabled"`
 
-	// McpServerPort is the port for the standalone MCP server (default: 9090)
+	// McpServerPort is the port for the standalone MCP server (default: 40429)
 	McpServerPort int `mapstructure:"mcpServerPort"`
 
 	// McpServerURL is the URL of the Kandev MCP server for task management
@@ -235,7 +236,7 @@ func detectDefaultLogFormat() string {
 func setDefaults(v *viper.Viper) {
 	// Server defaults
 	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.port", ports.Backend)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
@@ -274,9 +275,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
-	v.SetDefault("agent.standalonePort", 9999)
+	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 	v.SetDefault("agent.mcpServerEnabled", false) // MCP is now embedded in agentctl
-	v.SetDefault("agent.mcpServerPort", 9090)
+	v.SetDefault("agent.mcpServerPort", ports.MCP)
 	v.SetDefault("agent.mcpServerUrl", "")
 
 	// Auth defaults

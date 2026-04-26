@@ -21,7 +21,9 @@ async function fetchAndStoreMessages(
   store: ReturnType<typeof useAppStoreApi>,
 ): Promise<Message[]> {
   const client = getWebSocketClient();
-  if (!client) return [];
+  if (!client) {
+    return [];
+  }
 
   const response = await client.request<MessageListResponse>(
     "message.list",
@@ -29,7 +31,6 @@ async function fetchAndStoreMessages(
     10000,
   );
   const fetched = [...(response.messages ?? [])].reverse();
-
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
   // messages that arrived via real-time notifications while the fetch was
@@ -145,6 +146,32 @@ export function useVisibilityBackfill(
   }, [taskSessionId, store]);
 }
 
+function useSessionSubscription(
+  taskSessionId: string | null,
+  connectionStatus: string,
+  isSessionStartingOrUnknown: boolean,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  useEffect(() => {
+    if (!taskSessionId || connectionStatus !== "connected") {
+      return;
+    }
+    const client = getWebSocketClient();
+    if (!client) {
+      return;
+    }
+    const unsubscribe = client.subscribeSession(taskSessionId);
+
+    // Re-fetch messages after subscribing to close the gap between SSR
+    // (which may have run before the agent responded) and this subscription.
+    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+
+    return () => {
+      unsubscribe();
+    };
+  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const messages = useAppStore((state) =>
@@ -232,23 +259,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   // churning on every subsequent RUNNING ↔ WAITING_FOR_INPUT transition.
   const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
 
-  useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected") return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    const unsubscribe = client.subscribeSession(taskSessionId);
-
-    // Re-fetch messages after subscribing to close the gap between SSR
-    // (which may have run before the agent responded) and this subscription.
-    // Without this, fast-responding agents can complete a turn before the
-    // subscription is active, causing the response to never appear.
-    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-
-    return () => {
-      unsubscribe();
-    };
-  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
-
+  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
   useVisibilityBackfill(taskSessionId, store);
 
   const terminalFetchRefs = useMemo(

@@ -237,6 +237,22 @@ type ListMessagesResponse struct {
 	Cursor   string        `json:"cursor"`
 }
 
+// MessageSearchHit is a lightweight match returned by a session message search.
+type MessageSearchHit struct {
+	ID         string    `json:"id"`
+	TurnID     string    `json:"turn_id,omitempty"`
+	AuthorType string    `json:"author_type"`
+	Type       string    `json:"type"`
+	Snippet    string    `json:"snippet"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// SearchMessagesResponse contains hits from a session message search.
+type SearchMessagesResponse struct {
+	Hits  []MessageSearchHit `json:"hits"`
+	Total int                `json:"total"`
+}
+
 type TurnDTO struct {
 	ID          string                 `json:"id"`
 	SessionID   string                 `json:"session_id"`
@@ -290,8 +306,17 @@ type BranchDTO struct {
 }
 
 type RepositoryBranchesResponse struct {
-	Branches []BranchDTO `json:"branches"`
-	Total    int         `json:"total"`
+	Branches      []BranchDTO `json:"branches"`
+	Total         int         `json:"total"`
+	CurrentBranch string      `json:"current_branch,omitempty"`
+}
+
+// LocalRepositoryStatusResponse reports current branch + dirty paths for a
+// local repository on disk (no session required). Used by the task-create
+// dialog to preflight the fresh-branch flow on local executors.
+type LocalRepositoryStatusResponse struct {
+	CurrentBranch string   `json:"current_branch"`
+	DirtyFiles    []string `json:"dirty_files"`
 }
 
 type LocalRepositoryDTO struct {

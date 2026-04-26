@@ -29,6 +29,9 @@ import (
 	// GitHub integration
 	githubpkg "github.com/kandev/kandev/internal/github"
 
+	// JIRA integration
+	jirapkg "github.com/kandev/kandev/internal/jira"
+
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -57,11 +60,13 @@ import (
 
 	// Database
 	"github.com/kandev/kandev/internal/db"
+
+	"github.com/kandev/kandev/internal/common/ports"
 )
 
 // Command-line flags
 var (
-	flagPort     = flag.Int("port", 0, "HTTP server port (default: 8080)")
+	flagPort     = flag.Int("port", 0, fmt.Sprintf("HTTP server port (default: %d)", ports.Backend))
 	flagLogLevel = flag.String("log-level", "", "Log level: debug, info, warn, error")
 	flagHelp     = flag.Bool("help", false, "Show help message")
 	flagVersion  = flag.Bool("version", false, "Show version information")
@@ -74,8 +79,8 @@ func init() {
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  kandev                              # Start with default settings\n")
-		fmt.Fprintf(os.Stderr, "  kandev -port=9000 -log-level=debug  # Custom port and log level\n")
+		fmt.Fprintf(os.Stderr, "  kandev                               # Start with default settings\n")
+		fmt.Fprintf(os.Stderr, "  kandev -port=18080 -log-level=debug  # Custom port and log level\n")
 	}
 }
 
@@ -328,6 +333,15 @@ func startAgentInfrastructure(
 		log.Info("GitHub poller started")
 	}
 
+	// Start JIRA auth-health poller. Probes stored credentials for every
+	// configured workspace on a fixed cadence so the UI can show a real
+	// connected/disconnected status without doing its own polling.
+	if services.Jira != nil {
+		jiraPoller := jirapkg.NewPoller(services.Jira, log)
+		jiraPoller.Start(ctx)
+		addCleanup(func() error { jiraPoller.Stop(); return nil })
+	}
+
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, addCleanup, runCleanups)
 }
@@ -418,7 +432,7 @@ func startGatewayAndServe(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = 8080
+		port = ports.Backend
 	}
 	go func() {
 		log.Info("WebSocket server listening", zap.Int("port", port))
@@ -489,7 +503,7 @@ func buildHTTPServer(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = 8080
+		port = ports.Backend
 	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),

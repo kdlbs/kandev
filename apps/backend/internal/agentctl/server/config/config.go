@@ -196,10 +196,10 @@ type InstanceConfig struct {
 // Load loads the configuration from environment variables.
 func Load() *Config {
 	cfg := &Config{
-		Port: getEnvInt("AGENTCTL_PORT", 9999),
+		Port: getEnvInt("AGENTCTL_PORT", 39429),
 		Ports: PortConfig{
-			Base: getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 10001),
-			Max:  getEnvInt("AGENTCTL_INSTANCE_PORT_MAX", 10100),
+			Base: getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 41001),
+			Max:  getEnvInt("AGENTCTL_INSTANCE_PORT_MAX", 41100),
 		},
 		Defaults: InstanceDefaults{
 			Protocol:               agent.Protocol(getEnv("AGENTCTL_PROTOCOL", string(agent.ProtocolACP))),

@@ -11,6 +11,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Skeleton } from "@kandev/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 
@@ -93,9 +94,13 @@ export function FileBrowserToolbar({
             </TooltipTrigger>
             <TooltipContent>Copy workspace path</TooltipContent>
           </Tooltip>
-          <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-            {displayPath}
-          </span>
+          {displayPath ? (
+            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+              {displayPath}
+            </span>
+          ) : (
+            <Skeleton className="h-3 w-24" />
+          )}
         </>
       }
       right={

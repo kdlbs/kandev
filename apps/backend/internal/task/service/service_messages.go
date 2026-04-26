@@ -234,6 +234,14 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	})
 }
 
+// SearchMessages returns messages whose content matches the query in the given session.
+func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, limit int) ([]*models.Message, error) {
+	return s.messages.SearchMessages(ctx, sessionID, models.SearchMessagesOptions{
+		Query: query,
+		Limit: limit,
+	})
+}
+
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 	if err := s.messages.DeleteMessage(ctx, id); err != nil {

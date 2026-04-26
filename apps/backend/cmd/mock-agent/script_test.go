@@ -561,3 +561,133 @@ func TestExecuteScriptToolUseBadJSON(t *testing.T) {
 		t.Errorf("expected script error message, got %q", text)
 	}
 }
+
+// TestExecuteScriptMonitorStart asserts e2e:monitor_start emits the two-frame
+// claude-acp wire pattern: a pending tool_call followed by a registration
+// tool_call_update whose rawOutput banner carries the taskID and whose Meta
+// is tagged with claudeCode.toolName=Monitor.
+func TestExecuteScriptMonitorStart(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:monitor_start("task-7", "tail -f /var/log/x")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates (start + registration), got %d", len(updates))
+	}
+	if !isToolCallUpdate(updates[0]) {
+		t.Fatal("first update should be tool_call (pending)")
+	}
+	tc := updates[0].notification.Update.ToolCall
+	if tc.Title != "Monitor" {
+		t.Errorf("title = %q, want Monitor", tc.Title)
+	}
+	if !hasMonitorMeta(tc.Meta) {
+		t.Errorf("first update missing claudeCode.toolName=Monitor meta: %+v", tc.Meta)
+	}
+
+	if !isToolCallCompleteUpdate(updates[1]) {
+		t.Fatal("second update should be tool_call_update (registration)")
+	}
+	tcu := updates[1].notification.Update.ToolCallUpdate
+	if tcu.Status == nil || string(*tcu.Status) != "completed" {
+		t.Errorf("registration status = %v, want completed", tcu.Status)
+	}
+	out, _ := tcu.RawOutput.(string)
+	if !strings.HasPrefix(out, "Monitor started (task task-7,") {
+		t.Errorf("rawOutput = %q, want banner starting with 'Monitor started (task task-7,'", out)
+	}
+
+	// taskID must be remembered for subsequent monitor_event / monitor_end.
+	if _, ok := state.monitorTools["task-7"]; !ok {
+		t.Error("monitorTools missing entry for task-7")
+	}
+}
+
+// TestExecuteScriptMonitorEvent asserts e2e:monitor_event emits an
+// agent_message_chunk whose text matches the `<task-notification>` envelope
+// pattern the kandev adapter parses.
+func TestExecuteScriptMonitorEvent(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:monitor_event("task-7", "first event line")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if !isTextUpdate(updates[0]) {
+		t.Fatal("expected text update for monitor event envelope")
+	}
+	text := getTextContent(updates[0])
+	if !strings.Contains(text, "<task-id>task-7</task-id>") ||
+		!strings.Contains(text, "<event>first event line</event>") {
+		t.Errorf("envelope text = %q, want it to contain task-id and event tags", text)
+	}
+}
+
+// TestExecuteScriptMonitorEndUsesStoredToolCallID asserts e2e:monitor_end
+// resolves the taskID via state.monitorTools and emits a terminal
+// tool_call_update against the same toolCallID the start created.
+func TestExecuteScriptMonitorEndUsesStoredToolCallID(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "",
+		"e2e:monitor_start(\"task-7\", \"x\")\n"+
+			"e2e:monitor_end(\"task-7\")")
+
+	updates := mock.getUpdates()
+	if len(updates) != 3 {
+		t.Fatalf("expected 3 updates (start, registration, end), got %d", len(updates))
+	}
+	startTCID := updates[0].notification.Update.ToolCall.ToolCallId
+	endUpd := updates[2].notification.Update.ToolCallUpdate
+	if endUpd == nil {
+		t.Fatal("third update should be tool_call_update (terminal)")
+	}
+	if endUpd.ToolCallId != startTCID {
+		t.Errorf("end ToolCallId = %q, want %q (same as start)", endUpd.ToolCallId, startTCID)
+	}
+	if endUpd.Status == nil || string(*endUpd.Status) != "completed" {
+		t.Errorf("end status = %v, want completed", endUpd.Status)
+	}
+	if _, ok := state.monitorTools["task-7"]; ok {
+		t.Error("monitorTools should drop entry after monitor_end")
+	}
+}
+
+// TestExecuteScriptMonitorEndUnknownTaskIDReportsError asserts e2e:monitor_end
+// for a taskID that was never started emits a "Script error" text update
+// (matches the existing handling for malformed directives).
+func TestExecuteScriptMonitorEndUnknownTaskIDReportsError(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:monitor_end("does-not-exist")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	text := getTextContent(updates[0])
+	if !strings.Contains(text, "Script error") || !strings.Contains(text, "does-not-exist") {
+		t.Errorf("expected script error referencing unknown taskId, got %q", text)
+	}
+}
+
+// hasMonitorMeta returns true if the SDK Meta map carries the
+// claudeCode.toolName=Monitor marker.
+func hasMonitorMeta(meta map[string]any) bool {
+	if meta == nil {
+		return false
+	}
+	cc, ok := meta["claudeCode"].(map[string]any)
+	if !ok {
+		return false
+	}
+	name, _ := cc["toolName"].(string)
+	return name == "Monitor"
+}

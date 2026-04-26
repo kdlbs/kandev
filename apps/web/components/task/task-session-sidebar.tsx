@@ -27,6 +27,26 @@ import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 
+/**
+ * Stabilize a derived array of primary session IDs so the reference only
+ * changes when the actual contents change. This prevents the bulk-subscribe
+ * effect from tearing down and recreating all subscriptions on every kanban
+ * snapshot update.
+ */
+function useStablePrimarySessionIds(
+  allTasks: Array<{ primarySessionId?: string | null }>,
+): string[] {
+  const key = useMemo(
+    () =>
+      allTasks
+        .map((t) => t.primarySessionId)
+        .filter((id): id is string => id != null)
+        .join("\0"),
+    [allTasks],
+  );
+  return useMemo(() => (key ? key.split("\0") : []), [key]);
+}
+
 /** Find a task across all workflow snapshots */
 function findTaskInSnapshots(
   snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
@@ -264,10 +284,7 @@ function useSidebarData(workspaceId: string | null) {
 
   // Stable list of primary session IDs for the bulk-subscribe effect.
   // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
-  const primarySessionIds = useMemo(
-    () => allTasks.map((t) => t.primarySessionId).filter((id): id is string => id != null),
-    [allTasks],
-  );
+  const primarySessionIds = useStablePrimarySessionIds(allTasks);
 
   return {
     activeTaskId,
@@ -512,13 +529,18 @@ function useSidebarActions(store: StoreApi) {
 
 function useBulkGitStatusSubscription(primarySessionIds: string[]) {
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   useEffect(() => {
     if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
     const client = getWebSocketClient();
     if (!client) return;
-    const unsubscribes = primarySessionIds.map((id) => client.subscribeSession(id));
+    // Skip active session — it's already subscribed + focused by the task page hooks
+    const backgroundIds = activeSessionId
+      ? primarySessionIds.filter((id) => id !== activeSessionId)
+      : primarySessionIds;
+    const unsubscribes = backgroundIds.map((id) => client.subscribeSession(id));
     return () => unsubscribes.forEach((u) => u());
-  }, [primarySessionIds, connectionStatus]);
+  }, [primarySessionIds, connectionStatus, activeSessionId]);
 }
 
 function useEffectiveSidebarView() {
@@ -578,6 +600,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   }, [tasksWithRepositories, preparingTaskId]);
 
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
+  const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
+  const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
   const effectiveView = useEffectiveSidebarView();
   const grouped = useMemo(
     () => applyView(displayTasks, effectiveView),
@@ -595,6 +619,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           selectedTaskId={selectedTaskId}
           collapsedGroupKeys={effectiveView.collapsedGroups}
           onToggleGroup={(groupKey) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey)}
+          collapsedSubtaskParentIds={collapsedSubtaskParents}
+          onToggleSubtasks={toggleSubtaskCollapsed}
           onSelectTask={handleSelectTask}
           onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}

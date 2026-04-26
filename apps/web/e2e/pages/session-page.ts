@@ -827,4 +827,21 @@ export class SessionPage {
     await this.revisionRowBody(this.revisionRow(n)).click();
     await expect(this.previewDialog()).toBeVisible({ timeout: 5_000 });
   }
+
+  // --- Panel search helpers (Ctrl+F feature) ---
+
+  /** Any currently-mounted panel search bar. */
+  panelSearchBar(): Locator {
+    return this.page.locator("[data-panel-search-bar]");
+  }
+
+  /** Search input inside the currently-mounted bar. */
+  panelSearchInput(): Locator {
+    return this.panelSearchBar().locator('input[type="text"]');
+  }
+
+  /** "N / M" match counter. */
+  panelSearchCounter(): Locator {
+    return this.panelSearchBar().locator('[aria-live="polite"]');
+  }
 }

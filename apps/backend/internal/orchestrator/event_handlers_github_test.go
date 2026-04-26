@@ -674,4 +674,3 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		}
 	})
 }
-

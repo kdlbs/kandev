@@ -28,12 +28,16 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github")
 	api.GET("/status", c.httpGetStatus)
+	api.POST("/token", c.httpConfigureToken)
+	api.DELETE("/token", c.httpClearToken)
 
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
 	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
+	api.GET("/prs/:owner/:repo/:number/status", c.httpGetPRStatus)
+	api.POST("/prs/statuses", c.httpGetPRStatusesBatch)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
@@ -57,6 +61,13 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 
+	api.GET("/user/prs", c.httpSearchUserPRs)
+	api.GET("/user/issues", c.httpSearchUserIssues)
+
+	api.GET("/action-presets", c.httpGetActionPresets)
+	api.PUT("/action-presets", c.httpUpdateActionPresets)
+	api.POST("/action-presets/reset", c.httpResetActionPresets)
+
 	api.GET("/stats", c.httpGetStats)
 }
 
@@ -67,6 +78,34 @@ func (c *Controller) httpGetStatus(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, status)
+}
+
+func (c *Controller) httpConfigureToken(ctx *gin.Context) {
+	var req ConfigureTokenRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: token is required"})
+		return
+	}
+
+	if err := c.service.ConfigureToken(ctx.Request.Context(), req.Token); err != nil {
+		// Check if it's a validation error (invalid token)
+		if strings.Contains(err.Error(), "invalid token") {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"configured": true})
+}
+
+func (c *Controller) httpClearToken(ctx *gin.Context) {
+	if err := c.service.ClearToken(ctx.Request.Context()); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"cleared": true})
 }
 
 func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
@@ -126,6 +165,52 @@ func (c *Controller) httpGetPRFeedback(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, feedback)
+}
+
+func (c *Controller) httpGetPRStatus(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	numberStr := ctx.Param("number")
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	status, err := c.service.GetPRStatus(ctx.Request.Context(), owner, repo, number)
+	if err != nil {
+		c.handleSearchError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, status)
+}
+
+// prStatusesBatchMaxRefs caps how many PRs a single batch request can ask for.
+// The list page defaults to 25 per page and can go up to 100; double that
+// gives slack without letting a rogue client ask for thousands.
+const prStatusesBatchMaxRefs = 200
+
+// httpGetPRStatusesBatch fetches statuses for multiple PRs in one request.
+// Body: {"refs": [{"owner","repo","number"}, ...]}.
+// Response: {"statuses": {"<owner>/<repo>#<number>": <PRStatus>}}. PRs that
+// fail upstream are omitted rather than failing the whole batch.
+func (c *Controller) httpGetPRStatusesBatch(ctx *gin.Context) {
+	var body struct {
+		Refs []PRRef `json:"refs"`
+	}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if len(body.Refs) > prStatusesBatchMaxRefs {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "too many refs"})
+		return
+	}
+	statuses, err := c.service.GetPRStatusesBatch(ctx.Request.Context(), body.Refs)
+	if err != nil {
+		c.handleSearchError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"statuses": statuses})
 }
 
 func (c *Controller) httpGetPRInfo(ctx *gin.Context) {
@@ -344,6 +429,84 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
 }
 
+// httpSearchUserPRs searches for pull requests. Accepts:
+//   - query: the complete GitHub search query (e.g. "is:pr author:@me state:open")
+//   - filter: additional qualifiers appended to the default `type:pr`
+//   - page: 1-indexed page (default 1)
+//   - per_page: items per page, clamped to 1..100 (default 50)
+//
+// When query is non-empty it is used verbatim; otherwise filter is used.
+func (c *Controller) httpSearchUserPRs(ctx *gin.Context) {
+	query := ctx.Query("query")
+	filter := ctx.Query("filter")
+	page, perPage := parsePaginationQuery(ctx)
+	result, err := c.service.SearchUserPRsPaged(ctx.Request.Context(), filter, query, page, perPage)
+	if err != nil {
+		c.handleSearchError(ctx, err)
+		return
+	}
+	if result.PRs == nil {
+		result.PRs = []*PR{}
+	}
+	ctx.JSON(http.StatusOK, result)
+}
+
+// httpSearchUserIssues mirrors httpSearchUserPRs for issues.
+func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
+	query := ctx.Query("query")
+	filter := ctx.Query("filter")
+	page, perPage := parsePaginationQuery(ctx)
+	result, err := c.service.SearchUserIssuesPaged(ctx.Request.Context(), filter, query, page, perPage)
+	if err != nil {
+		c.handleSearchError(ctx, err)
+		return
+	}
+	if result.Issues == nil {
+		result.Issues = []*Issue{}
+	}
+	ctx.JSON(http.StatusOK, result)
+}
+
+// parsePaginationQuery reads `page` and `per_page` query params. Missing or
+// non-positive values fall back to defaults (page=1, perPage=50). The upper
+// bound for perPage (100) is applied later by clampSearchPage in the client
+// layer, where it also gates the cache key.
+func parsePaginationQuery(ctx *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(ctx.Query("page"))
+	perPage, _ := strconv.Atoi(ctx.Query("per_page"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 50
+	}
+	return page, perPage
+}
+
+// handleSearchError maps client errors to proper HTTP responses.
+func (c *Controller) handleSearchError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrNoClient) {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+			"code":  "github_not_configured",
+		})
+		return
+	}
+	status := http.StatusInternalServerError
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusNotFound:
+			status = http.StatusNotFound
+		case http.StatusUnauthorized:
+			status = http.StatusUnauthorized
+		case http.StatusForbidden:
+			status = http.StatusForbidden
+		}
+	}
+	ctx.JSON(status, gin.H{"error": err.Error()})
+}
+
 func (c *Controller) httpGetStats(ctx *gin.Context) {
 	req := &PRStatsRequest{
 		WorkspaceID: ctx.Query("workspace_id"),
@@ -470,4 +633,52 @@ func (c *Controller) httpTriggerAllIssueChecks(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"new_issues_found": count})
+}
+
+// --- Action preset HTTP handlers ---
+
+func (c *Controller) httpGetActionPresets(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	presets, err := c.service.GetActionPresets(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
+}
+
+func (c *Controller) httpUpdateActionPresets(ctx *gin.Context) {
+	var req UpdateActionPresetsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.WorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		return
+	}
+	presets, err := c.service.UpdateActionPresets(ctx.Request.Context(), &req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
+}
+
+func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	presets, err := c.service.ResetActionPresets(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, presets)
 }

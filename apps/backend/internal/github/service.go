@@ -2,7 +2,13 @@ package github
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +28,13 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+// defaultBranchMain and defaultBranchMaster are the conventional default branch
+// names sorted to the top of branch pickers.
+const (
+	defaultBranchMain   = "main"
+	defaultBranchMaster = "master"
+)
+
 // TaskDeleter deletes tasks by ID. Used for cleaning up merged PR tasks.
 type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
@@ -30,6 +43,13 @@ type TaskDeleter interface {
 // TaskSessionChecker checks if a task has any sessions (user interacted with it).
 type TaskSessionChecker interface {
 	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
+}
+
+// SecretManager handles secret creation, update, and deletion.
+type SecretManager interface {
+	Create(ctx context.Context, name, value string) (id string, err error)
+	Update(ctx context.Context, id, value string) error
+	Delete(ctx context.Context, id string) error
 }
 
 // prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
@@ -41,6 +61,7 @@ type Service struct {
 	client             Client
 	authMethod         string
 	secrets            SecretProvider
+	secretManager      SecretManager
 	store              *Store
 	eventBus           bus.EventBus
 	logger             *logger.Logger
@@ -48,17 +69,21 @@ type Service struct {
 	taskSessionChecker TaskSessionChecker
 	syncGroup          singleflight.Group
 	taskEventSubs      []bus.Subscription
+	searchCache        *ttlCache
+	prStatusCache      *ttlCache
 }
 
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		client:     client,
-		authMethod: authMethod,
-		secrets:    secrets,
-		store:      store,
-		eventBus:   eventBus,
-		logger:     log,
+		client:        client,
+		authMethod:    authMethod,
+		secrets:       secrets,
+		store:         store,
+		eventBus:      eventBus,
+		logger:        log,
+		searchCache:   newTTLCache(),
+		prStatusCache: newTTLCache(),
 	}
 }
 
@@ -67,6 +92,9 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
+
+// SetSecretManager sets the secret manager for token configuration operations.
+func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {
@@ -96,6 +124,9 @@ func (s *Service) AuthMethod() string {
 	return s.authMethod
 }
 
+// RequiredGitHubScopes lists the GitHub token scopes needed for full functionality.
+var RequiredGitHubScopes = []string{"repo", "read:org"}
+
 // GetStatus returns the current GitHub connection status.
 // If not authenticated, it retries client creation to pick up auth changes
 // (e.g. GITHUB_TOKEN secret added after startup).
@@ -110,8 +141,15 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	s.mu.Unlock()
 
 	status := &GitHubStatus{
-		AuthMethod: authMethod,
+		AuthMethod:     authMethod,
+		RequiredScopes: RequiredGitHubScopes,
 	}
+
+	// Check if a GITHUB_TOKEN secret is configured
+	tokenSecretID, hasToken := s.findGitHubTokenSecret(ctx)
+	status.TokenConfigured = hasToken
+	status.TokenSecretID = tokenSecretID
+
 	if client == nil {
 		status.Diagnostics = runGHDiagnostics(ctx)
 		return status, nil
@@ -130,6 +168,27 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 		status.Diagnostics = runGHDiagnostics(ctx)
 	}
 	return status, nil
+}
+
+// findGitHubTokenSecret checks if a GITHUB_TOKEN secret exists in the secrets store.
+// Returns the secret ID and whether a token is configured.
+func (s *Service) findGitHubTokenSecret(ctx context.Context) (string, bool) {
+	if s.secrets == nil {
+		return "", false
+	}
+	items, err := s.secrets.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, item := range items {
+		if !item.HasValue {
+			continue
+		}
+		if item.Name == "GITHUB_TOKEN" || item.Name == "github_token" {
+			return item.ID, true
+		}
+	}
+	return "", false
 }
 
 // retryClientCreation attempts to create a GitHub client when not authenticated.
@@ -161,6 +220,75 @@ func runGHDiagnostics(ctx context.Context) *AuthDiagnostics {
 		}
 	}
 	return NewGHClient().RunAuthDiagnostics(ctx)
+}
+
+// ConfigureToken saves or updates a GitHub Personal Access Token in the secrets store.
+// It validates the token by making a test API call before saving.
+func (s *Service) ConfigureToken(ctx context.Context, token string) error {
+	if s.secretManager == nil {
+		return fmt.Errorf("secret manager not configured")
+	}
+
+	// Validate the token by testing authentication
+	testClient := NewPATClient(token)
+	user, err := testClient.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+	s.logger.Info("validated GitHub token", zap.String("user", user))
+
+	// Check if a GITHUB_TOKEN secret already exists
+	existingID, exists := s.findGitHubTokenSecret(ctx)
+	if exists {
+		// Update existing secret
+		if err := s.secretManager.Update(ctx, existingID, token); err != nil {
+			return fmt.Errorf("update token: %w", err)
+		}
+		s.logger.Info("updated GitHub token secret", zap.String("id", existingID))
+	} else {
+		// Create new secret
+		newID, err := s.secretManager.Create(ctx, "GITHUB_TOKEN", token)
+		if err != nil {
+			return fmt.Errorf("create token: %w", err)
+		}
+		s.logger.Info("created GitHub token secret", zap.String("id", newID))
+	}
+
+	// Refresh the client to use the new token
+	s.mu.Lock()
+	s.client = testClient
+	s.authMethod = AuthMethodPAT
+	s.mu.Unlock()
+
+	return nil
+}
+
+// ClearToken removes the configured GitHub token from the secrets store.
+func (s *Service) ClearToken(ctx context.Context) error {
+	if s.secretManager == nil {
+		return fmt.Errorf("secret manager not configured")
+	}
+
+	existingID, exists := s.findGitHubTokenSecret(ctx)
+	if !exists {
+		return nil // No token to clear
+	}
+
+	if err := s.secretManager.Delete(ctx, existingID); err != nil {
+		return fmt.Errorf("delete token: %w", err)
+	}
+	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
+
+	// Reset to try gh CLI or other methods
+	s.mu.Lock()
+	s.client = nil
+	s.authMethod = AuthMethodNone
+	s.mu.Unlock()
+
+	// Try to re-establish connection via other methods
+	s.retryClientCreation(ctx)
+
+	return nil
 }
 
 // SubmitReview submits a review on a pull request.
@@ -542,6 +670,83 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 		return nil, fmt.Errorf("github client not available")
 	}
 	return s.client.GetPRFeedback(ctx, owner, repo, number)
+}
+
+// GetPRStatus fetches lightweight PR status (review + checks + mergeable).
+// Cached briefly so repeat loads of the same list (pagination, re-render,
+// back-navigation) don't refetch. The returned pointer is shared — callers
+// must not mutate it.
+func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number int) (*PRStatus, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	key := prStatusCacheKey(owner, repo, number)
+	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
+		return s.client.GetPRStatus(ctx, owner, repo, number)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*PRStatus), nil
+}
+
+// PRRef identifies a pull request by owner/repo/number.
+type PRRef struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+}
+
+// prStatusBatchConcurrency bounds how many upstream GetPRStatus calls run in
+// parallel. GitHub has per-hour quotas and per-endpoint concurrency limits;
+// this is well under both while still collapsing a 25-PR page into a single
+// short wait on the client.
+const prStatusBatchConcurrency = 8
+
+// GetPRStatusesBatch fetches statuses for multiple PRs concurrently, honoring
+// the per-PR cache. The returned map is keyed by prStatusCacheKey; PRs that
+// fail to fetch are logged and omitted from the result so one bad repo
+// doesn't poison the page.
+func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[string]*PRStatus, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	result := make(map[string]*PRStatus, len(refs))
+	var mu sync.Mutex
+	sem := make(chan struct{}, prStatusBatchConcurrency)
+	var wg sync.WaitGroup
+	for _, ref := range refs {
+		if ref.Owner == "" || ref.Repo == "" || ref.Number <= 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(r PRRef) {
+			defer wg.Done()
+			// Release queued goroutines early when the caller disconnects —
+			// otherwise up to 200 refs queue up serially behind the semaphore
+			// and each still runs its full upstream fetch.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			status, err := s.GetPRStatus(ctx, r.Owner, r.Repo, r.Number)
+			if err != nil {
+				s.logger.Debug("batch PR status fetch failed",
+					zap.String("owner", r.Owner),
+					zap.String("repo", r.Repo),
+					zap.Int("number", r.Number),
+					zap.Error(err))
+				return
+			}
+			mu.Lock()
+			result[prStatusCacheKey(r.Owner, r.Repo, r.Number)] = status
+			mu.Unlock()
+		}(ref)
+	}
+	wg.Wait()
+	return result, nil
 }
 
 // TriggerPRSync performs an immediate PR status sync for a task.
@@ -961,11 +1166,198 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 }
 
 // ListRepoBranches lists branches for a repository.
+// When no authenticated client is configured, it falls back to the unauthenticated
+// GitHub API so that public repositories remain accessible without a token.
+// The result is sorted so that "main" appears first, "master" second, then all
+// remaining branches alphabetically — matching the default branch convention and
+// making the most common choices immediately visible in pickers.
 func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	var (
+		branches []RepoBranch
+		err      error
+	)
+	if s.client != nil {
+		branches, err = s.client.ListRepoBranches(ctx, owner, repo)
+		if err != nil && !errors.Is(err, ErrNoClient) {
+			return nil, err
+		}
+	}
+	if branches == nil {
+		branches, err = listRepoBranchesAnonymous(ctx, owner, repo)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sortBranchesMainFirst(branches)
+	return branches, nil
+}
+
+// sortBranchesMainFirst sorts branches in-place: "main" first, "master" second,
+// then all remaining branches alphabetically.
+func sortBranchesMainFirst(branches []RepoBranch) {
+	priority := func(name string) int {
+		switch name {
+		case defaultBranchMain:
+			return 0
+		case defaultBranchMaster:
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(branches, func(i, j int) bool {
+		pi, pj := priority(branches[i].Name), priority(branches[j].Name)
+		if pi != pj {
+			return pi < pj
+		}
+		return branches[i].Name < branches[j].Name
+	})
+}
+
+// anonymousAPIBase is the GitHub API base URL used by listRepoBranchesAnonymous.
+// Overridden in tests to point at a local httptest server.
+var anonymousAPIBase = githubAPIBase
+
+// anonymousHTTPClient is used by listRepoBranchesAnonymous. The 30 s timeout
+// prevents a slow or unresponsive GitHub API from tying up server goroutines
+// indefinitely across multi-page pagination.
+var anonymousHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+// listRepoBranchesAnonymous calls the GitHub REST API without authentication to
+// list branches for public repositories, following pagination via Link headers.
+// Returns ErrNoClient on network errors and a GitHubAPIError for non-2xx
+// responses (404, 403, etc.) so the controller maps them to correct HTTP codes.
+func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	next := fmt.Sprintf("%s/repos/%s/%s/branches?per_page=100",
+		anonymousAPIBase, url.PathEscape(owner), url.PathEscape(repo))
+	var branches []RepoBranch
+	for next != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
+		if err != nil {
+			return nil, ErrNoClient
+		}
+		req.Header.Set("Accept", githubAccept)
+		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+
+		resp, err := anonymousHTTPClient.Do(req)
+		if err != nil {
+			return nil, ErrNoClient
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return nil, &GitHubAPIError{
+				StatusCode: resp.StatusCode,
+				Endpoint:   next,
+				Body:       string(body),
+			}
+		}
+
+		var page []struct {
+			Name string `json:"name"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&page)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decode branches response: %w", err)
+		}
+		for _, b := range page {
+			branches = append(branches, RepoBranch{Name: b.Name})
+		}
+		next = parseLinkNext(resp.Header.Get("Link"))
+	}
+	return branches, nil
+}
+
+// parseLinkNext extracts the URL for rel="next" from a GitHub Link header.
+// Returns "" if no next page is present.
+func parseLinkNext(link string) string {
+	// Format: <url>; rel="next", <url>; rel="last"
+	for part := range strings.SplitSeq(link, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		if start := strings.Index(part, "<"); start != -1 {
+			if end := strings.Index(part, ">"); end != -1 && end > start {
+				return part[start+1 : end]
+			}
+		}
+	}
+	return ""
+}
+
+// SearchUserPRs searches for PRs using a filter or custom query. Unless the
+// caller already pins a type qualifier, `type:pr` is injected into the
+// composed query.
+func (s *Service) SearchUserPRs(ctx context.Context, filter, customQuery string) ([]*PR, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	return s.client.ListRepoBranches(ctx, owner, repo)
+	return s.client.SearchPRs(ctx, filter, customQuery)
+}
+
+// SearchUserIssues searches for issues using a filter or custom query. Unless
+// the caller already pins a type qualifier, `type:issue` is injected into the
+// composed query.
+func (s *Service) SearchUserIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.ListIssues(ctx, filter, customQuery)
+}
+
+// SearchUserPRsPaged is the paginated variant of SearchUserPRs. Results are
+// cached for a short window (see searchCacheTTL) — callers must not mutate
+// the returned page, since it is shared across concurrent requests.
+func (s *Service) SearchUserPRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*PRSearchPage, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	// Clamp before composing the cache key so perPage=150 and perPage=100
+	// share the same cached page instead of creating two entries for
+	// identical results.
+	page, perPage = clampSearchPage(page, perPage)
+	key := searchCacheKey("pr", filter, customQuery, page, perPage)
+	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
+		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && result.PRs == nil {
+			result.PRs = []*PR{}
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*PRSearchPage), nil
+}
+
+// SearchUserIssuesPaged is the paginated variant of SearchUserIssues. See
+// SearchUserPRsPaged for caching semantics.
+func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	page, perPage = clampSearchPage(page, perPage)
+	key := searchCacheKey("issue", filter, customQuery, page, perPage)
+	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
+		result, err := s.client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && result.Issues == nil {
+			result.Issues = []*Issue{}
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*IssueSearchPage), nil
 }
 
 // ReserveReviewPRTask atomically claims the dedup slot for a (watch, repo, PR)
@@ -1319,9 +1711,12 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 	return s.fetchIssuesWithRepoFilter(ctx, watch), nil
 }
 
-// buildIssueFilter builds the filter qualifier from watch labels.
+// buildIssueFilter builds the filter qualifier from watch labels. `state:open`
+// is included because the watcher is only interested in active issues —
+// buildIssueSearchQuery no longer injects it (the /github page presets
+// supply their own state qualifiers), so we add it here instead.
 func (s *Service) buildIssueFilter(watch *IssueWatch) string {
-	var parts []string
+	parts := []string{"state:open"}
 	for _, label := range watch.Labels {
 		if strings.ContainsRune(label, ' ') {
 			parts = append(parts, `label:"`+label+`"`)

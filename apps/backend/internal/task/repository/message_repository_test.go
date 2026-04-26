@@ -235,3 +235,113 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 		t.Error("expected RequestsInput to be true")
 	}
 }
+
+func TestSQLiteRepository_SearchMessages(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-s", Name: "W"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-s", WorkflowID: "wf-s", WorkflowStepID: "step-s", Title: "T"}
+	_ = repo.CreateTask(ctx, task)
+	sid := setupSQLiteTestSession(ctx, repo, task.ID, "sess-s")
+	otherSid := setupSQLiteTestSession(ctx, repo, task.ID, "sess-other")
+	turnID := setupSQLiteTestTurn(ctx, repo, sid, task.ID, "turn-s")
+	otherTurnID := setupSQLiteTestTurn(ctx, repo, otherSid, task.ID, "turn-other")
+
+	base := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m1", TaskSessionID: sid, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorUser,
+		Content:    "hello world from the agent",
+		CreatedAt:  base.Add(-2 * time.Minute),
+	})
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m2", TaskSessionID: sid, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent,
+		Content:    "no match here",
+		CreatedAt:  base.Add(-1 * time.Minute),
+	})
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m3", TaskSessionID: sid, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent,
+		Content:    "another HELLO from the agent again",
+		CreatedAt:  base,
+	})
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m-other", TaskSessionID: otherSid, TaskID: task.ID, TurnID: otherTurnID,
+		AuthorType: models.MessageAuthorUser,
+		Content:    "hello from other session",
+		CreatedAt:  base,
+	})
+
+	hits, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "hello"})
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 hits in session, got %d", len(hits))
+	}
+	// Newest-first: m3 before m1
+	if hits[0].ID != "m3" || hits[1].ID != "m1" {
+		t.Errorf("expected hits [m3, m1], got [%s, %s]", hits[0].ID, hits[1].ID)
+	}
+
+	// Respect session boundary — no m-other
+	for _, h := range hits {
+		if h.TaskSessionID == otherSid {
+			t.Errorf("search leaked into other session: %s", h.ID)
+		}
+	}
+
+	// Empty query returns nothing
+	empty, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "  "})
+	if err != nil {
+		t.Fatalf("empty search failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected 0 hits for empty query, got %d", len(empty))
+	}
+
+	// Limit honored
+	limited, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "hello", Limit: 1})
+	if err != nil {
+		t.Fatalf("limited search failed: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Errorf("expected 1 hit with limit=1, got %d", len(limited))
+	}
+
+	// LIKE metacharacters in the query must match literally — "%" should not
+	// be treated as "any sequence" and "_" should not match any single char.
+	pct, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "%"})
+	if err != nil {
+		t.Fatalf("percent search failed: %v", err)
+	}
+	if len(pct) != 0 {
+		t.Errorf("percent query must not match as wildcard, got %d hits", len(pct))
+	}
+	underscore, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "h_llo"})
+	if err != nil {
+		t.Fatalf("underscore search failed: %v", err)
+	}
+	if len(underscore) != 0 {
+		t.Errorf("underscore query must not match as wildcard, got %d hits", len(underscore))
+	}
+
+	// Literal percent in content must be findable via a query containing "%".
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "m-pct", TaskSessionID: sid, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent,
+		Content:    "progress: 95% complete",
+		CreatedAt:  base.Add(1 * time.Minute),
+	})
+	litPct, err := repo.SearchMessages(ctx, sid, models.SearchMessagesOptions{Query: "95%"})
+	if err != nil {
+		t.Fatalf("literal percent search failed: %v", err)
+	}
+	if len(litPct) != 1 || litPct[0].ID != "m-pct" {
+		t.Errorf("expected literal 95%% match, got %d hits", len(litPct))
+	}
+}

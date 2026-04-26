@@ -293,8 +293,9 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
 
 ### Knowledge
+- **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the "what & why" of a feature, written before coding. Optional siblings: `plan.md` (how), `notes.md` (post-ship). Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Implementation plans are stored in `docs/plans/`. Save completed feature designs via `/record plan`.
+- **Plans:** Retrospective implementation plans live in `docs/plans/` (created via `/record plan`). A forward-looking plan tied to a spec goes at `docs/specs/<slug>/plan.md`.
 
 ### Backend
 - Provider pattern for DI; stderr for logs, stdout for ACP only

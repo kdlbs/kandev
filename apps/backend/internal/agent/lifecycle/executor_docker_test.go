@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -341,5 +342,143 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 
 		// Should not panic
 		registry.CloseAll()
+	})
+}
+
+func TestInjectTokenIntoURL(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, log)
+
+	tests := []struct {
+		name     string
+		url      string
+		env      map[string]string
+		expected string
+	}{
+		{
+			name:     "HTTPS URL with GITHUB_TOKEN",
+			url:      "https://github.com/org/repo.git",
+			env:      map[string]string{"GITHUB_TOKEN": "ghp_test123"},
+			expected: "https://x-access-token:ghp_test123@github.com/org/repo.git",
+		},
+		{
+			name:     "HTTPS URL with GH_TOKEN fallback",
+			url:      "https://github.com/org/repo.git",
+			env:      map[string]string{"GH_TOKEN": "ghp_ghtoken"},
+			expected: "https://x-access-token:ghp_ghtoken@github.com/org/repo.git",
+		},
+		{
+			name:     "GITHUB_TOKEN takes priority over GH_TOKEN",
+			url:      "https://github.com/org/repo.git",
+			env:      map[string]string{"GITHUB_TOKEN": "ghp_primary", "GH_TOKEN": "ghp_secondary"},
+			expected: "https://x-access-token:ghp_primary@github.com/org/repo.git",
+		},
+		{
+			name:     "SSH URL converted to authenticated HTTPS",
+			url:      "git@github.com:org/repo.git",
+			env:      map[string]string{"GITHUB_TOKEN": "ghp_test123"},
+			expected: "https://x-access-token:ghp_test123@github.com/org/repo.git",
+		},
+		{
+			name:     "no token returns URL unchanged",
+			url:      "https://github.com/org/repo.git",
+			env:      map[string]string{},
+			expected: "https://github.com/org/repo.git",
+		},
+		{
+			name:     "nil env returns URL unchanged",
+			url:      "https://github.com/org/repo.git",
+			env:      nil,
+			expected: "https://github.com/org/repo.git",
+		},
+		{
+			name:     "non-GitHub URL unchanged",
+			url:      "https://gitlab.com/org/repo.git",
+			env:      map[string]string{"GITHUB_TOKEN": "ghp_test123"},
+			expected: "https://gitlab.com/org/repo.git",
+		},
+		{
+			name:     "SSH URL without token unchanged",
+			url:      "git@github.com:org/repo.git",
+			env:      map[string]string{},
+			expected: "git@github.com:org/repo.git",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := exec.injectTokenIntoURL(tt.url, tt.env)
+			if got != tt.expected {
+				t.Errorf("injectTokenIntoURL(%q) = %q, want %q", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestReconnectToContainer_ValidationErrors(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, log)
+
+	t.Run("short execution ID rejected", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			PreviousExecutionID: "short",
+		}
+		_, err := exec.reconnectToContainer(context.Background(), nil, req)
+		if err == nil {
+			t.Fatal("expected error for short execution ID")
+		}
+		if !strings.Contains(err.Error(), "too short") {
+			t.Errorf("expected 'too short' error, got: %v", err)
+		}
+	})
+
+	t.Run("empty execution ID rejected", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			PreviousExecutionID: "",
+		}
+		_, err := exec.reconnectToContainer(context.Background(), nil, req)
+		if err == nil {
+			t.Fatal("expected error for empty execution ID")
+		}
+	})
+}
+
+func TestResolvePrepareScript(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, log)
+
+	t.Run("uses default docker script when no metadata", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			Metadata: map[string]interface{}{
+				"repository_path":      "/tmp/repo",
+				"base_branch":          "main",
+				"repository_clone_url": "https://github.com/org/repo.git",
+			},
+			Env: map[string]string{"GH_TOKEN": "ghp_test"},
+		}
+		script := exec.resolvePrepareScript(req)
+		if script == "" {
+			t.Fatal("expected non-empty script")
+		}
+		// Should contain clone command
+		if !strings.Contains(script, "git clone") {
+			t.Error("expected git clone in script")
+		}
+		// Should contain token stripping
+		if !strings.Contains(script, "git remote set-url") {
+			t.Error("expected token stripping after clone")
+		}
+	})
+
+	t.Run("empty metadata uses defaults", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			Metadata: map[string]interface{}{},
+			Env:      map[string]string{},
+		}
+		script := exec.resolvePrepareScript(req)
+		// Should still produce a script (default docker script)
+		if script == "" {
+			t.Fatal("expected non-empty default script")
+		}
 	})
 }

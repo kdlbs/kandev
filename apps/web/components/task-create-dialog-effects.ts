@@ -7,6 +7,7 @@ import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
   discoverRepositoriesAction,
+  getLocalRepositoryStatusAction,
   listLocalRepositoryBranchesAction,
 } from "@/app/actions/workspaces";
 import { getLocalStorage } from "@/lib/local-storage";
@@ -153,7 +154,8 @@ export function useLocalBranchesEffect(
   workspaceId: string | null,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
-  const { selectedLocalRepo, setLocalBranches, setLocalBranchesLoading } = fs;
+  const { selectedLocalRepo, setLocalBranches, setLocalBranchesLoading, setCurrentLocalBranch } =
+    fs;
   useEffect(() => {
     if (!open || !workspaceId || !selectedLocalRepo) return;
     const repoPath = selectedLocalRepo.path;
@@ -162,6 +164,7 @@ export function useLocalBranchesEffect(
       .then(() => listLocalRepositoryBranchesAction(workspaceId, repoPath))
       .then((r) => {
         setLocalBranches(r.branches);
+        setCurrentLocalBranch(r.current_branch ?? "");
       })
       .catch((e) => {
         toast({
@@ -170,11 +173,71 @@ export function useLocalBranchesEffect(
           variant: "error",
         });
         setLocalBranches([]);
+        setCurrentLocalBranch("");
       })
       .finally(() => {
         setLocalBranchesLoading(false);
       });
-  }, [open, selectedLocalRepo, toast, workspaceId, setLocalBranches, setLocalBranchesLoading]);
+  }, [
+    open,
+    selectedLocalRepo,
+    toast,
+    workspaceId,
+    setLocalBranches,
+    setLocalBranchesLoading,
+    setCurrentLocalBranch,
+  ]);
+}
+
+/**
+ * Resolves the absolute repo path for whichever repository the user has selected
+ * (workspace-attached or discovered) and fetches its currently-checked-out branch.
+ * Used by the disabled branch-selector placeholder so users see exactly which
+ * branch their local clone is on.
+ */
+export function useCurrentLocalBranchEffect(
+  fs: DialogFormState,
+  open: boolean,
+  workspaceId: string | null,
+  repositories: Repository[],
+) {
+  const { repositoryId, selectedLocalRepo, useGitHubUrl, setCurrentLocalBranch } = fs;
+  useEffect(() => {
+    if (!open || !workspaceId || useGitHubUrl) {
+      setCurrentLocalBranch("");
+      return;
+    }
+    let path = "";
+    if (selectedLocalRepo) {
+      path = selectedLocalRepo.path;
+    } else if (repositoryId) {
+      const repo = repositories.find((r: Repository) => r.id === repositoryId);
+      if (repo?.local_path) path = repo.local_path;
+    }
+    if (!path) {
+      setCurrentLocalBranch("");
+      return;
+    }
+    let cancelled = false;
+    getLocalRepositoryStatusAction(workspaceId, path)
+      .then((r) => {
+        if (!cancelled) setCurrentLocalBranch(r.current_branch ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentLocalBranch("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    open,
+    workspaceId,
+    useGitHubUrl,
+    repositoryId,
+    selectedLocalRepo,
+    repositories,
+    setCurrentLocalBranch,
+  ]);
 }
 
 export function useDefaultSelectionsEffect(
@@ -413,6 +476,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs, branches);
   useLocalBranchesEffect(fs, open, workspaceId, toast);
+  useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
 }

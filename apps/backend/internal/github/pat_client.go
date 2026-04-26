@@ -133,16 +133,59 @@ func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, c
 	return prs, nil
 }
 
+func (c *PATClient) SearchPRs(ctx context.Context, filter, customQuery string) ([]*PR, error) {
+	page, err := c.SearchPRsPaged(ctx, filter, customQuery, 1, 50)
+	if err != nil {
+		return nil, err
+	}
+	return page.PRs, nil
+}
+
+func (c *PATClient) SearchPRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*PRSearchPage, error) {
+	page, perPage = clampSearchPage(page, perPage)
+	query := buildPRSearchQuery(filter, customQuery)
+	var result struct {
+		TotalCount int             `json:"total_count"`
+		Items      []patSearchItem `json:"items"`
+	}
+	endpoint := fmt.Sprintf("/search/issues?q=%s&per_page=%d&page=%d",
+		url.QueryEscape(query), perPage, page)
+	if err := c.get(ctx, endpoint, &result); err != nil {
+		return nil, fmt.Errorf("search PRs: %w", err)
+	}
+	prs := make([]*PR, len(result.Items))
+	for i, item := range result.Items {
+		prs[i] = convertSearchItemToPR(
+			item.Number, item.Title, item.HTMLURL, item.State,
+			item.User.Login, item.RepositoryURL, item.Draft,
+			item.CreatedAt, item.UpdatedAt,
+		)
+	}
+	return &PRSearchPage{PRs: prs, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
+}
+
 func (c *PATClient) ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+	page, err := c.ListIssuesPaged(ctx, filter, customQuery, 1, 50)
+	if err != nil {
+		return nil, err
+	}
+	return page.Issues, nil
+}
+
+func (c *PATClient) ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+	page, perPage = clampSearchPage(page, perPage)
 	query := buildIssueSearchQuery(filter, customQuery)
 	var result struct {
-		Items []issueSearchItem `json:"items"`
+		TotalCount int               `json:"total_count"`
+		Items      []issueSearchItem `json:"items"`
 	}
-	endpoint := "/search/issues?q=" + url.QueryEscape(query) + "&per_page=50"
+	endpoint := fmt.Sprintf("/search/issues?q=%s&per_page=%d&page=%d",
+		url.QueryEscape(query), perPage, page)
 	if err := c.get(ctx, endpoint, &result); err != nil {
 		return nil, fmt.Errorf("search issues: %w", err)
 	}
-	return parseIssueSearchResults(result.Items), nil
+	issues := parseIssueSearchResults(result.Items)
+	return &IssueSearchPage{Issues: issues, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
 }
 
 func (c *PATClient) GetIssueState(ctx context.Context, owner, repo string, number int) (string, error) {

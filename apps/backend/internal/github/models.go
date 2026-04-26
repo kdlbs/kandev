@@ -92,6 +92,25 @@ type PRStatus struct {
 	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
 	ReviewCount        int    `json:"review_count"`
 	PendingReviewCount int    `json:"pending_review_count"`
+	ChecksTotal        int    `json:"checks_total"`
+	ChecksPassing      int    `json:"checks_passing"`
+}
+
+// PRSearchPage is a paginated slice of PR search results, with the total
+// count reported by the GitHub Search API (capped at 1000).
+type PRSearchPage struct {
+	PRs        []*PR `json:"prs"`
+	TotalCount int   `json:"total_count"`
+	Page       int   `json:"page"`
+	PerPage    int   `json:"per_page"`
+}
+
+// IssueSearchPage is a paginated slice of Issue search results.
+type IssueSearchPage struct {
+	Issues     []*Issue `json:"issues"`
+	TotalCount int      `json:"total_count"`
+	Page       int      `json:"page"`
+	PerPage    int      `json:"per_page"`
 }
 
 // PRWatch tracks active PR monitoring (session → PR).
@@ -209,10 +228,18 @@ type RepoBranch struct {
 
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
-	Authenticated bool             `json:"authenticated"`
-	Username      string           `json:"username"`
-	AuthMethod    string           `json:"auth_method"` // "gh_cli", "pat", "none"
-	Diagnostics   *AuthDiagnostics `json:"diagnostics,omitempty"`
+	Authenticated   bool             `json:"authenticated"`
+	Username        string           `json:"username"`
+	AuthMethod      string           `json:"auth_method"` // "gh_cli", "pat", "none"
+	TokenConfigured bool             `json:"token_configured"`
+	TokenSecretID   string           `json:"token_secret_id,omitempty"`
+	RequiredScopes  []string         `json:"required_scopes"`
+	Diagnostics     *AuthDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// ConfigureTokenRequest is the request body for configuring a GitHub token.
+type ConfigureTokenRequest struct {
+	Token string `json:"token" binding:"required"`
 }
 
 // AuthDiagnostics captures the output of gh auth status for troubleshooting.
@@ -410,4 +437,94 @@ type UpdateIssueWatchRequest struct {
 	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+}
+
+// --- Action presets (quick-launch prompts on the /github page) ---
+
+// ActionPresetKind enumerates the two lists of quick-launch presets.
+const (
+	ActionPresetKindPR    = "pr"
+	ActionPresetKindIssue = "issue"
+)
+
+// ActionPreset is a single configurable quick-task launcher entry.
+// PromptTemplate supports `{{url}}` and `{{title}}` placeholders which are
+// substituted client-side when the dialog is opened.
+type ActionPreset struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	Hint           string `json:"hint"`
+	Icon           string `json:"icon"`
+	PromptTemplate string `json:"prompt_template"`
+}
+
+// ActionPresets groups the PR and Issue preset lists for a workspace.
+type ActionPresets struct {
+	WorkspaceID string         `json:"workspace_id"`
+	PR          []ActionPreset `json:"pr"`
+	Issue       []ActionPreset `json:"issue"`
+}
+
+// UpdateActionPresetsRequest replaces one or both preset lists for a workspace.
+// Nil fields are left unchanged.
+type UpdateActionPresetsRequest struct {
+	WorkspaceID string          `json:"workspace_id"`
+	PR          *[]ActionPreset `json:"pr,omitempty"`
+	Issue       *[]ActionPreset `json:"issue,omitempty"`
+}
+
+// DefaultPRActionPresets returns the built-in PR presets used when a workspace
+// has no stored overrides.
+func DefaultPRActionPresets() []ActionPreset {
+	return []ActionPreset{
+		{
+			ID:             "review",
+			Label:          "Review",
+			Hint:           "Read the diff, flag issues",
+			Icon:           "eye",
+			PromptTemplate: "Review the pull request at {{url}}. Provide feedback on code quality, correctness, and suggest improvements.",
+		},
+		{
+			ID:             "address_feedback",
+			Label:          "Address feedback",
+			Hint:           "Apply review comments",
+			Icon:           "message",
+			PromptTemplate: "Review the feedback on the pull request at {{url}}. Evaluate each comment critically — apply changes that improve the code, push back on suggestions that are unnecessary or harmful, and explain your reasoning. Push the changes when done.",
+		},
+		{
+			ID:             "fix_ci",
+			Label:          "Fix CI",
+			Hint:           "Diagnose failing checks",
+			Icon:           "tool",
+			PromptTemplate: "Investigate and fix the CI failures and merge conflicts on the pull request at {{url}}. Run the failing checks locally, resolve any conflicts, diagnose issues, and push fixes.",
+		},
+	}
+}
+
+// DefaultIssueActionPresets returns the built-in Issue presets used when a
+// workspace has no stored overrides.
+func DefaultIssueActionPresets() []ActionPreset {
+	return []ActionPreset{
+		{
+			ID:             "implement",
+			Label:          "Implement",
+			Hint:           "Build and open a PR",
+			Icon:           "code",
+			PromptTemplate: `Implement the changes described in the GitHub issue at {{url}} (title: "{{title}}"). Open a pull request when complete.`,
+		},
+		{
+			ID:             "investigate",
+			Label:          "Investigate",
+			Hint:           "Find the root cause",
+			Icon:           "search",
+			PromptTemplate: `Investigate the GitHub issue at {{url}} (title: "{{title}}"). Identify root cause and summarize findings.`,
+		},
+		{
+			ID:             "reproduce",
+			Label:          "Reproduce",
+			Hint:           "Document repro steps",
+			Icon:           "bug",
+			PromptTemplate: `Reproduce the bug described in the GitHub issue at {{url}} (title: "{{title}}"). Document the reproduction steps.`,
+		},
+	}
 }

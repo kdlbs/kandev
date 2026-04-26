@@ -4,68 +4,9 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cleanupTaskStorage } from "@/lib/local-storage";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
+import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 
 type KanbanTask = KanbanState["tasks"][number];
-
-/** Falls back to existing value when incoming is null, undefined, or empty string. */
-function withFallback<T>(value: T | null | undefined, fallback: T | undefined): T | undefined {
-  return value || fallback;
-}
-
-/** Falls back only on null/undefined -- preserves 0 and other falsy non-string values. */
-function withNullishFallback<T>(
-  value: T | null | undefined,
-  fallback: T | undefined,
-): T | undefined {
-  return value ?? fallback;
-}
-
-function buildNullableFields(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-  existing?: KanbanTask,
-): Pick<
-  KanbanTask,
-  | "repositoryId"
-  | "primarySessionId"
-  | "primarySessionState"
-  | "sessionCount"
-  | "reviewStatus"
-  | "primaryExecutorId"
-  | "primaryExecutorType"
-  | "primaryExecutorName"
-  | "parentTaskId"
-  | "updatedAt"
-  | "createdAt"
-> {
-  return {
-    repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
-    primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
-    primarySessionState: withFallback(payload.primary_session_state, existing?.primarySessionState),
-    sessionCount: withNullishFallback(payload.session_count, existing?.sessionCount),
-    reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
-    primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
-    primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),
-    primaryExecutorName: withFallback(payload.primary_executor_name, existing?.primaryExecutorName),
-    parentTaskId: withFallback(payload.parent_id, existing?.parentTaskId),
-    updatedAt: withFallback(payload.updated_at, existing?.updatedAt),
-    createdAt: withFallback(payload.created_at, existing?.createdAt),
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
-  return {
-    id: payload.task_id,
-    workflowStepId: payload.workflow_step_id,
-    title: payload.title,
-    description: payload.description,
-    position: payload.position ?? 0,
-    state: payload.state,
-    isRemoteExecutor: payload.is_remote_executor ?? existing?.isRemoteExecutor ?? false,
-    ...buildNullableFields(payload, existing),
-  };
-}
 
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
   const exists = tasks.some((task) => task.id === nextTask.id);
@@ -92,26 +33,31 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
   };
 }
 
+type TaskEventPayload = TaskLike & {
+  workflow_id: string;
+  is_ephemeral?: boolean;
+  archived_at?: string | null;
+};
+
 /** Upsert a task in both single-kanban and multi-kanban snapshots. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function upsertTaskInBothKanbans(state: AppState, wfId: string, payload: any): AppState {
+function upsertTaskInBothKanbans(
+  state: AppState,
+  wfId: string,
+  payload: TaskEventPayload,
+): AppState {
   // Skip ephemeral tasks - they should never be added to kanban
   if (payload.is_ephemeral) {
     return state;
   }
 
+  const nextTask = toKanbanTask(payload);
   let next = state;
 
   if (state.kanban.workflowId === wfId) {
-    const existing = state.kanban.tasks.find((t) => t.id === payload.task_id);
-    const nextTask = buildTaskFromPayload(payload, existing);
     next = { ...next, kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) } };
   }
 
-  const snapshot = state.kanbanMulti.snapshots[wfId];
-  if (snapshot) {
-    const existing = snapshot.tasks.find((t) => t.id === payload.task_id);
-    const nextTask = buildTaskFromPayload(payload, existing);
+  if (state.kanbanMulti.snapshots[wfId]) {
     next = upsertMultiTask(next, wfId, nextTask);
   }
 
