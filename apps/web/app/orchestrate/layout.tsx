@@ -5,6 +5,7 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { WorkspaceRail } from "./components/workspace-rail";
 import { OrchestrateSidebar } from "./components/orchestrate-sidebar";
+import { OrchestrateTopbar } from "./components/orchestrate-topbar";
 
 function mapWorkspaceItem(ws: { id: string; name: string; description?: string | null; owner_id: string; default_executor_id?: string | null; default_environment_id?: string | null; default_agent_profile_id?: string | null; default_config_agent_profile_id?: string | null; created_at: string; updated_at: string }) {
   return {
@@ -51,7 +52,10 @@ export default async function OrchestrateLayout({ children }: { children: React.
       <div className="flex h-screen">
         <WorkspaceRail />
         <OrchestrateSidebar />
-        <main className="flex-1 min-w-0 overflow-y-auto">{children}</main>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <OrchestrateTopbar />
+          <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
+        </div>
       </div>
     </TooltipProvider>
   );

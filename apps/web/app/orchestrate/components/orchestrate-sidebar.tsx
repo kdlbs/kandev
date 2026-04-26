@@ -14,7 +14,9 @@ import {
   IconSettings,
   IconSearch,
 } from "@tabler/icons-react";
+import Link from "next/link";
 import { Button } from "@kandev/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { useAppStore } from "@/components/state-provider";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarSection } from "./sidebar-section";
@@ -70,6 +72,17 @@ export function OrchestrateSidebar() {
           <SidebarNavItem icon={IconSettings} label="Settings" href="/orchestrate/company/settings" />
         </SidebarSection>
       </nav>
+
+      {/* Bottom bar */}
+      <div className="flex items-center gap-1 px-3 h-10 border-t border-border shrink-0">
+        <span className="text-xs text-muted-foreground truncate flex-1">v{process.env.NEXT_PUBLIC_APP_VERSION || "0.1"}</span>
+        <Link href="/settings/general" className="cursor-pointer">
+          <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+            <IconSettings className="h-3.5 w-3.5" />
+          </Button>
+        </Link>
+        <ThemeToggle />
+      </div>
 
       <NewIssueDialog open={newIssueOpen} onOpenChange={setNewIssueOpen} />
     </aside>
