@@ -1,10 +1,53 @@
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateHydrator } from "@/components/state-hydrator";
+import { listWorkspaces, fetchUserSettings } from "@/lib/api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import type { AppState } from "@/lib/state/store";
 import { WorkspaceRail } from "./components/workspace-rail";
 import { OrchestrateSidebar } from "./components/orchestrate-sidebar";
 
-export default function OrchestrateLayout({ children }: { children: React.ReactNode }) {
+function mapWorkspaceItem(ws: { id: string; name: string; description?: string | null; owner_id: string; default_executor_id?: string | null; default_environment_id?: string | null; default_agent_profile_id?: string | null; default_config_agent_profile_id?: string | null; created_at: string; updated_at: string }) {
+  return {
+    id: ws.id,
+    name: ws.name,
+    description: ws.description ?? null,
+    owner_id: ws.owner_id,
+    default_executor_id: ws.default_executor_id ?? null,
+    default_environment_id: ws.default_environment_id ?? null,
+    default_agent_profile_id: ws.default_agent_profile_id ?? null,
+    default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    created_at: ws.created_at,
+    updated_at: ws.updated_at,
+  };
+}
+
+export default async function OrchestrateLayout({ children }: { children: React.ReactNode }) {
+  const [workspacesResponse, userSettingsResponse] = await Promise.all([
+    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+    fetchUserSettings({ cache: "no-store" }).catch(() => null),
+  ]);
+
+  const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+  const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
+  const activeWorkspaceId =
+    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null;
+
+  const initialState: Partial<AppState> = {
+    workspaces: {
+      items: workspaceItems,
+      activeId: activeWorkspaceId,
+    },
+    userSettings: {
+      ...mapUserSettingsResponse(userSettingsResponse),
+      workspaceId: activeWorkspaceId,
+    },
+  };
+
   return (
     <TooltipProvider>
+      <StateHydrator initialState={initialState} />
       <div className="flex h-screen">
         <WorkspaceRail />
         <OrchestrateSidebar />
