@@ -7,7 +7,7 @@ import {
   IconInbox,
   IconCircleDot,
   IconRepeat,
-  IconNetwork,
+  IconSitemap,
   IconBoxMultiple,
   IconCurrencyDollar,
   IconHistory,
@@ -65,7 +65,7 @@ export function OrchestrateSidebar() {
 
         {/* Company section */}
         <SidebarSection label="Workspace">
-          <SidebarNavItem icon={IconNetwork} label="Org" href="/orchestrate/company/org" />
+          <SidebarNavItem icon={IconSitemap} label="Org" href="/orchestrate/company/org" />
           <SidebarNavItem icon={IconBoxMultiple} label="Skills" href="/orchestrate/company/skills" />
           <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/orchestrate/company/costs" />
           <SidebarNavItem icon={IconHistory} label="Activity" href="/orchestrate/company/activity" />
