@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
 
@@ -16,17 +18,44 @@ import (
 
 // Service provides orchestrate business logic.
 type Service struct {
-	repo   *sqlite.Repository
-	logger *logger.Logger
+	repo      *sqlite.Repository
+	cfgLoader *configloader.ConfigLoader
+	cfgWriter *configloader.FileWriter
+	logger    *logger.Logger
+	eb        bus.EventBus
+	relay     *ChannelRelay
 }
 
 // NewService creates a new orchestrate service.
 func NewService(repo *sqlite.Repository, log *logger.Logger) *Service {
-	return &Service{
+	svc := &Service{
 		repo:   repo,
 		logger: log.WithFields(zap.String("component", "orchestrate-service")),
 	}
+	svc.relay = NewChannelRelay(svc)
+	return svc
 }
+
+// SetConfigLoader sets the filesystem-based config loader and writer.
+// Called after construction because the config loader is created later in startup.
+func (s *Service) SetConfigLoader(loader *configloader.ConfigLoader, writer *configloader.FileWriter) {
+	s.cfgLoader = loader
+	s.cfgWriter = writer
+}
+
+// ConfigLoader returns the filesystem config loader (may be nil).
+func (s *Service) ConfigLoader() *configloader.ConfigLoader {
+	return s.cfgLoader
+}
+
+// ConfigWriter returns the filesystem config writer (may be nil).
+func (s *Service) ConfigWriter() *configloader.FileWriter {
+	return s.cfgWriter
+}
+
+// defaultWorkspaceName is used for ConfigLoader lookups when we only have a
+// DB workspace ID. Most single-user installs have one workspace named "default".
+const defaultWorkspaceName = "default"
 
 // Agent instance methods (CRUD + validation + status transitions) are in agents.go.
 

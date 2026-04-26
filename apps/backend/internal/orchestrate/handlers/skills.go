@@ -11,7 +11,7 @@ import (
 )
 
 func (h *Handlers) listSkills(c *gin.Context) {
-	skills, err := h.ctrl.Svc.ListSkills(c.Request.Context(), c.Param("wsId"))
+	skills, err := h.ctrl.Svc.ListSkillsFromConfig(c.Request.Context(), c.Param("wsId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -49,7 +49,7 @@ func (h *Handlers) createSkill(c *gin.Context) {
 }
 
 func (h *Handlers) getSkill(c *gin.Context) {
-	skill, err := h.ctrl.Svc.GetSkill(c.Request.Context(), c.Param("id"))
+	skill, err := h.ctrl.Svc.GetSkillFromConfig(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

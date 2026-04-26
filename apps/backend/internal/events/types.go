@@ -377,6 +377,7 @@ const (
 	OrchestrateProjectUpdated     = "orchestrate.project.updated"
 	OrchestrateApprovalCreated    = "orchestrate.approval.created"
 	OrchestrateApprovalResolved   = "orchestrate.approval.resolved"
+	OrchestrateCommentCreated     = "orchestrate.comment.created"
 	OrchestrateCostRecorded       = "orchestrate.cost.recorded"
 	OrchestrateWakeupQueued       = "orchestrate.wakeup.queued"
 	OrchestrateWakeupProcessed    = "orchestrate.wakeup.processed"

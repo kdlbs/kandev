@@ -52,6 +52,7 @@ type ApprovalResolvedData struct {
 
 // RegisterEventSubscribers subscribes to system events and queues wakeups.
 func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
+	s.eb = eb
 	subs := []struct {
 		subject string
 		handler bus.EventHandler
@@ -59,6 +60,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
 		{events.OrchestrateApprovalResolved, s.handleApprovalResolved},
+		{events.OrchestrateCommentCreated, s.handleCommentCreated},
 	}
 	for _, sub := range subs {
 		if _, err := eb.Subscribe(sub.subject, sub.handler); err != nil {
@@ -104,6 +106,26 @@ func (s *Service) onMovedToInProgress(ctx context.Context, data *TaskMovedData) 
 }
 
 func (s *Service) onMovedToDone(ctx context.Context, data *TaskMovedData) error {
+	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Error("get task execution fields failed", zap.Error(err))
+		return s.finalizeDone(ctx, data)
+	}
+
+	if fields.ExecutionPolicy != "" && fields.ExecutionPolicy != "{}" {
+		policy, pErr := ParseExecutionPolicy(fields.ExecutionPolicy)
+		if pErr != nil || policy == nil || len(policy.Stages) == 0 {
+			s.logger.Error("parse execution policy failed", zap.Error(pErr))
+			return s.finalizeDone(ctx, data)
+		}
+		return s.EnterReviewStage(ctx, data.TaskID, *policy)
+	}
+
+	return s.finalizeDone(ctx, data)
+}
+
+// finalizeDone resolves blockers and notifies parents -- the original done path.
+func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	if err := s.queueBlockersResolvedWakeups(ctx, data.TaskID); err != nil {
 		s.logger.Error("blocker resolution wakeups failed", zap.Error(err))
 	}
@@ -183,6 +205,25 @@ func (s *Service) queueChildrenCompletedWakeup(ctx context.Context, parentID str
 	payload := mustJSON(map[string]string{"task_id": parentID})
 	key := fmt.Sprintf("children_completed:%s", parentID)
 	return s.QueueWakeup(ctx, assignee, WakeupReasonTaskChildrenCompleted, payload, key)
+}
+
+// handleCommentCreated loads the comment and relays it to external channels.
+func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[CommentPostedData](event)
+	if err != nil {
+		return nil
+	}
+	comment, err := s.repo.GetTaskComment(ctx, data.CommentID)
+	if err != nil {
+		s.logger.Error("load comment for relay failed",
+			zap.String("comment_id", data.CommentID), zap.Error(err))
+		return nil
+	}
+	if err := s.relay.RelayComment(ctx, comment); err != nil {
+		s.logger.Error("relay comment failed",
+			zap.String("comment_id", data.CommentID), zap.Error(err))
+	}
+	return nil
 }
 
 // handleApprovalResolved fires a wakeup for the requesting agent.

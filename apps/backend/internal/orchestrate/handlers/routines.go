@@ -11,7 +11,7 @@ import (
 )
 
 func (h *Handlers) listRoutines(c *gin.Context) {
-	routines, err := h.ctrl.Svc.ListRoutines(c.Request.Context(), c.Param("wsId"))
+	routines, err := h.ctrl.Svc.ListRoutinesFromConfig(c.Request.Context(), c.Param("wsId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -43,7 +43,7 @@ func (h *Handlers) createRoutine(c *gin.Context) {
 }
 
 func (h *Handlers) getRoutine(c *gin.Context) {
-	routine, err := h.ctrl.Svc.GetRoutine(c.Request.Context(), c.Param("id"))
+	routine, err := h.ctrl.Svc.GetRoutineFromConfig(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

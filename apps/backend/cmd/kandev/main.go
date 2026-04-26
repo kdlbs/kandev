@@ -450,6 +450,12 @@ func startGatewayAndServe(
 			log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
 		}
 
+		// Wire ConfigLoader + FileWriter into the orchestrate service so
+		// list/get handlers read from the filesystem-backed config.
+		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
+		services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
+		log.Info("Orchestrate service wired to ConfigLoader")
+
 		// Start fsnotify watcher
 		cfgWatcher, err := configloader.NewWatcher(cfgLoader)
 		if err != nil {

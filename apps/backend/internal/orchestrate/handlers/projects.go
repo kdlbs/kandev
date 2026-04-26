@@ -10,7 +10,7 @@ import (
 )
 
 func (h *Handlers) listProjects(c *gin.Context) {
-	projects, err := h.ctrl.Svc.ListProjectsWithCounts(c.Request.Context(), c.Param("wsId"))
+	projects, err := h.ctrl.Svc.ListProjectsWithCountsFromConfig(c.Request.Context(), c.Param("wsId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -44,7 +44,7 @@ func (h *Handlers) createProject(c *gin.Context) {
 }
 
 func (h *Handlers) getProject(c *gin.Context) {
-	project, err := h.ctrl.Svc.GetProject(c.Request.Context(), c.Param("id"))
+	project, err := h.ctrl.Svc.GetProjectFromConfig(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

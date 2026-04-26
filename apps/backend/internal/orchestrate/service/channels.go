@@ -118,5 +118,5 @@ func (s *Service) HandleChannelInbound(
 		Source:         channel.Platform,
 		ReplyChannelID: channel.ID,
 	}
-	return s.repo.CreateTaskComment(ctx, comment)
+	return s.CreateComment(ctx, comment)
 }

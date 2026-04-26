@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,17 @@ func (r *Repository) CreateTaskComment(ctx context.Context, comment *models.Task
 	`), comment.ID, comment.TaskID, comment.AuthorType, comment.AuthorID,
 		comment.Body, comment.Source, comment.ReplyChannelID, comment.CreatedAt)
 	return err
+}
+
+// GetTaskComment returns a single comment by ID.
+func (r *Repository) GetTaskComment(ctx context.Context, id string) (*models.TaskComment, error) {
+	var comment models.TaskComment
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT * FROM task_comments WHERE id = ?`), id).StructScan(&comment)
+	if err != nil {
+		return nil, fmt.Errorf("get comment %s: %w", id, err)
+	}
+	return &comment, nil
 }
 
 // ListTaskComments returns all comments for a task, ordered by creation time.

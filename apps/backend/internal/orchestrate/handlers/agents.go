@@ -24,7 +24,7 @@ func (h *Handlers) listAgents(c *gin.Context) {
 		agents, err = h.ctrl.Svc.ListAgentInstancesFiltered(
 			c.Request.Context(), c.Param("wsId"), filter)
 	} else {
-		agents, err = h.ctrl.Svc.ListAgentInstances(
+		agents, err = h.ctrl.Svc.ListAgentsFromConfig(
 			c.Request.Context(), c.Param("wsId"))
 	}
 	if err != nil {
@@ -62,7 +62,7 @@ func (h *Handlers) createAgent(c *gin.Context) {
 }
 
 func (h *Handlers) getAgent(c *gin.Context) {
-	agent, err := h.ctrl.Svc.GetAgentInstance(c.Request.Context(), c.Param("id"))
+	agent, err := h.ctrl.Svc.GetAgentFromConfig(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
