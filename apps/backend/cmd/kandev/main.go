@@ -479,6 +479,17 @@ func startGatewayAndServe(
 		)
 		go orchScheduler.Start(ctx)
 		log.Info("Orchestrate wakeup scheduler started")
+
+		// Start GC sweep for orphaned worktrees and containers
+		worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
+		gc := orchestrateservice.NewGarbageCollector(
+			services.Orchestrate,
+			worktreeBase,
+			nil, // dockerClient - pass if Docker available
+			3*time.Hour,
+		)
+		go gc.Start(ctx)
+		log.Info("Orchestrate GC sweep started")
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)

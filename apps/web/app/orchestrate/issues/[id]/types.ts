@@ -42,6 +42,20 @@ export type IssueActivityEntry = {
   createdAt: string;
 };
 
+export type TaskSessionState =
+  | "RUNNING"
+  | "WAITING_FOR_INPUT"
+  | "COMPLETED"
+  | "FAILED";
+
+export type TaskSession = {
+  id: string;
+  agentName: string;
+  agentRole: string;
+  state: TaskSessionState;
+  isPrimary: boolean;
+};
+
 export type Issue = {
   id: string;
   workspaceId: string;

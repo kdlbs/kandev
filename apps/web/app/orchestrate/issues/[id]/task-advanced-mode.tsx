@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   IconArrowLeft,
   IconLayoutList,
@@ -9,6 +9,7 @@ import {
   IconListDetails,
   IconFiles,
   IconGitBranch,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -21,16 +22,26 @@ import { AdvancedTerminalPanel } from "./advanced-panels/terminal-panel";
 import { AdvancedPlanPanel } from "./advanced-panels/plan-panel";
 import { AdvancedFilesPanel } from "./advanced-panels/files-panel";
 import { AdvancedChangesPanel } from "./advanced-panels/changes-panel";
-import type { Issue } from "./types";
+import type { Issue, TaskSession } from "./types";
 
 type TaskAdvancedModeProps = {
   task: Issue;
+  sessions: TaskSession[];
   onToggleSimple: () => void;
 };
 
-export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps) {
+export function TaskAdvancedMode({ task, sessions, onToggleSimple }: TaskAdvancedModeProps) {
   const [rightTab, setRightTab] = useState<"files" | "changes">("files");
   const [rightCollapsed, setRightCollapsed] = useState(false);
+
+  const primarySession = useMemo(
+    () => sessions.find((s) => s.isPrimary) ?? sessions[0],
+    [sessions],
+  );
+  const sessionEnded =
+    primarySession?.state === "COMPLETED" || primarySession?.state === "FAILED";
+  const hasActiveSession =
+    Boolean(primarySession) && !sessionEnded;
 
   return (
     <div className="flex flex-col h-full">
@@ -93,6 +104,20 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
         </div>
       </div>
 
+      {/* Session ended banner */}
+      {sessionEnded && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
+          <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">
+            Agent session ended
+            {primarySession?.agentName ? ` (${primarySession.agentName})` : ""}
+          </span>
+          <Button variant="outline" size="sm" className="ml-auto cursor-pointer">
+            Start new session
+          </Button>
+        </div>
+      )}
+
       {/* Main content area */}
       <div className="flex-1 min-h-0 flex">
         {/* Left: Tabbed panels */}
@@ -127,7 +152,7 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
               <AdvancedChatPanel taskId={task.id} />
             </TabsContent>
             <TabsContent value="terminal" className="flex-1 min-h-0 mt-0">
-              <AdvancedTerminalPanel taskId={task.id} />
+              <AdvancedTerminalPanel taskId={task.id} hasActiveSession={hasActiveSession} />
             </TabsContent>
             <TabsContent value="plan" className="flex-1 min-h-0 mt-0">
               <AdvancedPlanPanel taskId={task.id} />
@@ -166,9 +191,9 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
             </div>
             <ScrollArea className="flex-1">
               {rightTab === "files" ? (
-                <AdvancedFilesPanel taskId={task.id} />
+                <AdvancedFilesPanel taskId={task.id} hasActiveSession={hasActiveSession} />
               ) : (
-                <AdvancedChangesPanel taskId={task.id} />
+                <AdvancedChangesPanel taskId={task.id} hasActiveSession={hasActiveSession} />
               )}
             </ScrollArea>
           </div>

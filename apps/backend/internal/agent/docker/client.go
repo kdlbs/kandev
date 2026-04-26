@@ -55,6 +55,7 @@ type ContainerInfo struct {
 	FinishedAt time.Time
 	ExitCode   int
 	Health     string
+	Labels     map[string]string
 }
 
 // Client wraps the Docker client.
@@ -478,6 +479,7 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 			Image:  ctr.Image,
 			State:  ctr.State,
 			Status: ctr.Status,
+			Labels: ctr.Labels,
 		}
 		infos = append(infos, info)
 	}

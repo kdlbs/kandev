@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { IconCode, IconCopy, IconPlus, IconUpload } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -18,24 +18,35 @@ import {
 import { TaskProperties } from "./task-properties";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
+import { SessionTabs } from "./session-tabs";
 import { StatusIcon } from "./status-icon";
 import { NewIssueDialog } from "../../components/new-issue-dialog";
-import type { Issue, IssueComment, IssueActivityEntry } from "./types";
+import type { Issue, IssueComment, IssueActivityEntry, TaskSession } from "./types";
 
 type TaskSimpleModeProps = {
   task: Issue;
   comments: IssueComment[];
   activity: IssueActivityEntry[];
-  onToggleAdvanced: () => void;
+  sessions: TaskSession[];
+  onToggleAdvanced?: () => void;
 };
 
 export function TaskSimpleMode({
   task,
   comments,
   activity,
+  sessions,
   onToggleAdvanced,
 }: TaskSimpleModeProps) {
   const [subIssueOpen, setSubIssueOpen] = useState(false);
+  const hasMultipleSessions = sessions.length >= 2;
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    sessions[0]?.id ?? "",
+  );
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId),
+    [sessions, activeSessionId],
+  );
 
   return (
     <div className="flex h-full">
@@ -80,12 +91,17 @@ export function TaskSimpleMode({
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 cursor-pointer"
+                  disabled={!onToggleAdvanced}
                   onClick={onToggleAdvanced}
                 >
                   <IconCode className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Advanced mode (terminal, files, plan)</TooltipContent>
+              <TooltipContent>
+                {onToggleAdvanced
+                  ? "Advanced mode (terminal, files, plan)"
+                  : "No agent session available"}
+              </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -140,7 +156,18 @@ export function TaskSimpleMode({
             </TabsTrigger>
           </TabsList>
           <TabsContent value="chat">
-            <TaskChat taskId={task.id} comments={comments} />
+            {hasMultipleSessions ? (
+              <SessionTabs
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelect={setActiveSessionId}
+              />
+            ) : null}
+            <TaskChat
+              taskId={task.id}
+              comments={comments}
+              readOnly={activeSession?.state === "COMPLETED" || activeSession?.state === "FAILED"}
+            />
           </TabsContent>
           <TabsContent value="activity">
             <TaskActivity taskId={task.id} entries={activity} />

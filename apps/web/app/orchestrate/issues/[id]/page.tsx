@@ -4,7 +4,7 @@ import { use, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TaskSimpleMode } from "./task-simple-mode";
 import { TaskAdvancedMode } from "./task-advanced-mode";
-import type { Issue, IssueComment, IssueActivityEntry } from "./types";
+import type { Issue, IssueComment, IssueActivityEntry, TaskSession } from "./types";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -18,6 +18,7 @@ function useMockIssue(id: string): {
   task: Issue;
   comments: IssueComment[];
   activity: IssueActivityEntry[];
+  sessions: TaskSession[];
 } {
   return useMemo(
     () => ({
@@ -41,6 +42,7 @@ function useMockIssue(id: string): {
       },
       comments: [],
       activity: [],
+      sessions: [],
     }),
     [id],
   );
@@ -53,7 +55,9 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
   const mode = searchParams.get("mode") || "simple";
 
   // TODO: Replace with real data fetch once Wave 3A backend is ready
-  const { task, comments, activity } = useMockIssue(id);
+  const { task, comments, activity, sessions } = useMockIssue(id);
+
+  const hasSession = Boolean(task.assigneeAgentInstanceId) || sessions.length > 0;
 
   const setMode = (newMode: string) => {
     const url = newMode === "advanced"
@@ -62,10 +66,11 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
     router.push(url);
   };
 
-  if (mode === "advanced") {
+  if (mode === "advanced" && hasSession) {
     return (
       <TaskAdvancedMode
         task={task}
+        sessions={sessions}
         onToggleSimple={() => setMode("simple")}
       />
     );
@@ -76,7 +81,8 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
       task={task}
       comments={comments}
       activity={activity}
-      onToggleAdvanced={() => setMode("advanced")}
+      sessions={sessions}
+      onToggleAdvanced={hasSession ? () => setMode("advanced") : undefined}
     />
   );
 }

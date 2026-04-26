@@ -55,6 +55,18 @@ func NewContainerManager(dockerClient *docker.Client, networkName string, log *l
 	}
 }
 
+// fallbackHomeDir is the directory used when os.UserHomeDir() fails.
+const fallbackHomeDir = "/tmp"
+
+// homeDir returns the current user's home directory, falling back to /tmp.
+func homeDir() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return fallbackHomeDir
+	}
+	return h
+}
+
 // LaunchResult holds the result of a successful container launch.
 type LaunchResult struct {
 	ContainerID string
@@ -300,6 +312,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			"kandev.instance_id": config.InstanceID,
 			"kandev.task_id":     config.TaskID,
 			"kandev.session_id":  config.SessionID,
+			"kandev.home_dir":    homeDir(),
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
@@ -357,7 +370,7 @@ func (cm *ContainerManager) expandMountSource(source, workspacePath string) stri
 	if strings.Contains(result, "{home}") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			homeDir = "/tmp"
+			homeDir = fallbackHomeDir
 		}
 		result = strings.ReplaceAll(result, "{home}", homeDir)
 	}

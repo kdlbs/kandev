@@ -67,7 +67,7 @@ func (cb *CommandBuilder) ExpandSessionDir(ag agents.Agent) string {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		homeDir = "/tmp"
+		homeDir = fallbackHomeDir
 	}
 
 	result := strings.ReplaceAll(template, "{home}", homeDir)

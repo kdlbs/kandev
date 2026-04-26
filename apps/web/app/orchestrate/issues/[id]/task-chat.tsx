@@ -15,6 +15,7 @@ import type { IssueComment } from "./types";
 type TaskChatProps = {
   taskId: string;
   comments: IssueComment[];
+  readOnly?: boolean;
 };
 
 function formatDuration(ms: number): string {
@@ -79,7 +80,7 @@ function CommentEntry({ comment }: { comment: IssueComment }) {
   );
 }
 
-export function TaskChat({ taskId, comments }: TaskChatProps) {
+export function TaskChat({ taskId, comments, readOnly = false }: TaskChatProps) {
   const [input, setInput] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -102,23 +103,25 @@ export function TaskChat({ taskId, comments }: TaskChatProps) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex gap-2 mt-4 pt-4 border-t border-border">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Add a comment..."
-          className="flex-1 bg-muted rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-        />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button type="submit" size="sm" variant="ghost" className="cursor-pointer shrink-0">
-              <IconSend className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Send</TooltipContent>
-        </Tooltip>
-      </form>
+      {!readOnly && (
+        <form onSubmit={handleSubmit} className="flex gap-2 mt-4 pt-4 border-t border-border">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Add a comment..."
+            className="flex-1 bg-muted rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="submit" size="sm" variant="ghost" className="cursor-pointer shrink-0">
+                <IconSend className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Send</TooltipContent>
+          </Tooltip>
+        </form>
+      )}
     </div>
   );
 }
