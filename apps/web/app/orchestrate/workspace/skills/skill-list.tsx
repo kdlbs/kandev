@@ -81,7 +81,7 @@ export function SkillList(props: SkillListProps) {
         />
       </div>
       <SkillItems items={filtered} selectedId={selectedId} onSelect={onSelect} search={search} />
-      <div className="px-4 py-3 border-t border-border">
+      <div className="flex items-center px-4 h-10 border-t border-border shrink-0">
         <a
           href="https://skills.sh"
           target="_blank"
