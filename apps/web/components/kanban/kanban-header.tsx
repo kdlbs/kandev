@@ -15,7 +15,7 @@ import {
   IconTimeline,
   IconBrandGithub,
   IconTicket,
-  IconNetwork,
+  IconRobot,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { getJiraConfig } from "@/lib/api/domains/jira-api";
@@ -294,7 +294,7 @@ function DesktopHeader({
           </TooltipProvider>
           <Button variant="outline" asChild className="cursor-pointer gap-2">
             <Link href="/orchestrate">
-              <IconNetwork className="h-4 w-4" />
+              <IconRobot className="h-4 w-4" />
               <span>Orchestrate</span>
             </Link>
           </Button>
