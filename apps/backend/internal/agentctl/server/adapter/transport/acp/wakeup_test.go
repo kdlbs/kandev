@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -122,11 +123,10 @@ type wakeupCapture struct {
 	calls     int32
 	lastSess  string
 	lastPrmpt string
-	fired     chan struct{}
 }
 
 func newWakeupCapture() *wakeupCapture {
-	return &wakeupCapture{fired: make(chan struct{}, 4)}
+	return &wakeupCapture{}
 }
 
 func (c *wakeupCapture) fire(sessionID, prompt string) {
@@ -135,100 +135,99 @@ func (c *wakeupCapture) fire(sessionID, prompt string) {
 	c.lastPrmpt = prompt
 	c.mu.Unlock()
 	atomic.AddInt32(&c.calls, 1)
-	select {
-	case c.fired <- struct{}{}:
-	default:
-	}
 }
 
+// Timer-driven tests use testing/synctest so time.AfterFunc is intercepted by
+// synctest's fake clock. To advance fake time past a scheduled timer we
+// time.Sleep in the test goroutine — under synctest, all bubble goroutines
+// are then blocked and the runtime jumps fake time to the next pending event.
+// synctest.Wait() afterwards ensures any goroutine the timer spawned has
+// finished its work before the assertion.
+
 func TestWakeupScheduler_FiresAfterDelay(t *testing.T) {
-	log := newTestWakeupLogger(t)
-	cap := newWakeupCapture()
-	sched := newWakeupScheduler(log, cap.fire)
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
-	at := time.Now().Add(40 * time.Millisecond).UnixMilli()
-	sched.schedule("sess-1", "wake-prompt", at)
+		at := time.Now().Add(40 * time.Millisecond).UnixMilli()
+		sched.schedule("sess-1", "wake-prompt", at)
 
-	select {
-	case <-cap.fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("wakeup did not fire within timeout")
-	}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	cap.mu.Lock()
-	defer cap.mu.Unlock()
-	if cap.lastSess != "sess-1" || cap.lastPrmpt != "wake-prompt" {
-		t.Errorf("unexpected fire args: sess=%q prompt=%q", cap.lastSess, cap.lastPrmpt)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 1 {
+			t.Fatalf("expected 1 fire, got %d", got)
+		}
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		if cap.lastSess != "sess-1" || cap.lastPrmpt != "wake-prompt" {
+			t.Errorf("unexpected fire args: sess=%q prompt=%q", cap.lastSess, cap.lastPrmpt)
+		}
+	})
 }
 
 func TestWakeupScheduler_CancelPreventsFire(t *testing.T) {
-	log := newTestWakeupLogger(t)
-	cap := newWakeupCapture()
-	sched := newWakeupScheduler(log, cap.fire)
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
-	at := time.Now().Add(50 * time.Millisecond).UnixMilli()
-	sched.schedule("sess-1", "p", at)
-	sched.cancel()
+		at := time.Now().Add(50 * time.Millisecond).UnixMilli()
+		sched.schedule("sess-1", "p", at)
+		sched.cancel()
 
-	select {
-	case <-cap.fired:
-		t.Fatal("wakeup fired despite cancel")
-	case <-time.After(150 * time.Millisecond):
-	}
+		// Advance fake time past the would-be fire instant; nothing should run.
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
 
-	if got := atomic.LoadInt32(&cap.calls); got != 0 {
-		t.Errorf("expected 0 fires, got %d", got)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 0 {
+			t.Errorf("expected 0 fires, got %d", got)
+		}
+	})
 }
 
 func TestWakeupScheduler_StaleTimestampDropped(t *testing.T) {
-	log := newTestWakeupLogger(t)
-	cap := newWakeupCapture()
-	sched := newWakeupScheduler(log, cap.fire)
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
-	// Past timestamp: should not arm a timer.
-	sched.schedule("sess-1", "p", time.Now().Add(-time.Hour).UnixMilli())
+		// Past timestamp: should not arm a timer at all.
+		sched.schedule("sess-1", "p", time.Now().Add(-time.Hour).UnixMilli())
 
-	select {
-	case <-cap.fired:
-		t.Fatal("stale wakeup fired")
-	case <-time.After(80 * time.Millisecond):
-	}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	if got := atomic.LoadInt32(&cap.calls); got != 0 {
-		t.Errorf("expected 0 fires, got %d", got)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 0 {
+			t.Errorf("expected 0 fires, got %d", got)
+		}
+	})
 }
 
 func TestWakeupScheduler_RescheduleReplacesPrior(t *testing.T) {
-	log := newTestWakeupLogger(t)
-	cap := newWakeupCapture()
-	sched := newWakeupScheduler(log, cap.fire)
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
-	// First schedule far in the future, then reschedule soon — only the
-	// second should fire, and only once.
-	sched.schedule("sess-1", "first", time.Now().Add(time.Hour).UnixMilli())
-	sched.schedule("sess-1", "second", time.Now().Add(40*time.Millisecond).UnixMilli())
+		// First schedule far in the future, then reschedule soon — only the
+		// second should fire, and only once.
+		sched.schedule("sess-1", "first", time.Now().Add(time.Hour).UnixMilli())
+		sched.schedule("sess-1", "second", time.Now().Add(40*time.Millisecond).UnixMilli())
 
-	select {
-	case <-cap.fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("rescheduled wakeup did not fire")
-	}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	// Make sure no extra fires arrive shortly after.
-	select {
-	case <-cap.fired:
-		t.Fatal("unexpected second fire")
-	case <-time.After(80 * time.Millisecond):
-	}
-
-	cap.mu.Lock()
-	defer cap.mu.Unlock()
-	if cap.lastPrmpt != "second" {
-		t.Errorf("expected last prompt %q, got %q", "second", cap.lastPrmpt)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 1 {
+			t.Fatalf("expected 1 fire, got %d", got)
+		}
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		if cap.lastPrmpt != "second" {
+			t.Errorf("expected last prompt %q, got %q", "second", cap.lastPrmpt)
+		}
+	})
 }
 
 // TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState reproduces the race
@@ -236,45 +235,47 @@ func TestWakeupScheduler_RescheduleReplacesPrior(t *testing.T) {
 // timer before schedule() runs. The stale fireOnce must observe the gen
 // mismatch and bail out, not consume the newly scheduled wakeup.
 func TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState(t *testing.T) {
-	log := newTestWakeupLogger(t)
-	cap := newWakeupCapture()
-	sched := newWakeupScheduler(log, cap.fire)
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
-	// Manually drive the race: arm a timer, capture its gen, then simulate
-	// a stale fire by calling fireOnce with the captured gen *after* a
-	// rescheduling has bumped gen.
-	sched.mu.Lock()
-	sched.gen++
-	staleGen := sched.gen
-	sched.sessionID = "old-sess"
-	sched.prompt = "old-prompt"
-	sched.mu.Unlock()
+		// Manually drive the race: arm a timer, capture its gen, then simulate
+		// a stale fire by calling fireOnce with the captured gen *after* a
+		// rescheduling has bumped gen.
+		sched.mu.Lock()
+		sched.gen++
+		staleGen := sched.gen
+		sched.sessionID = "old-sess"
+		sched.prompt = "old-prompt"
+		sched.mu.Unlock()
 
-	// Reschedule before stale fire executes.
-	sched.schedule("new-sess", "new-prompt", time.Now().Add(time.Hour).UnixMilli())
+		// Reschedule before stale fire executes.
+		sched.schedule("new-sess", "new-prompt", time.Now().Add(time.Hour).UnixMilli())
 
-	// Stale fire arrives now — should be a no-op.
-	sched.fireOnce(staleGen)
+		// Stale fire arrives now — should be a no-op.
+		sched.fireOnce(staleGen)
 
-	if got := atomic.LoadInt32(&cap.calls); got != 0 {
-		t.Errorf("stale fireOnce fired anyway: calls=%d", got)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 0 {
+			t.Errorf("stale fireOnce fired anyway: calls=%d", got)
+		}
 
-	// New schedule should still fire normally when its timer elapses.
-	sched.cancel()
-	sched.schedule("new-sess", "new-prompt", time.Now().Add(40*time.Millisecond).UnixMilli())
+		// New schedule should still fire normally when its timer elapses.
+		sched.cancel()
+		sched.schedule("new-sess", "new-prompt", time.Now().Add(40*time.Millisecond).UnixMilli())
 
-	select {
-	case <-cap.fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("post-race wakeup did not fire")
-	}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	cap.mu.Lock()
-	defer cap.mu.Unlock()
-	if cap.lastSess != "new-sess" || cap.lastPrmpt != "new-prompt" {
-		t.Errorf("fired with wrong args: sess=%q prompt=%q", cap.lastSess, cap.lastPrmpt)
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 1 {
+			t.Fatalf("expected 1 fire after reschedule, got %d", got)
+		}
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		if cap.lastSess != "new-sess" || cap.lastPrmpt != "new-prompt" {
+			t.Errorf("fired with wrong args: sess=%q prompt=%q", cap.lastSess, cap.lastPrmpt)
+		}
+	})
 }
 
 func TestWakeupScheduler_IgnoresMissingFields(t *testing.T) {
@@ -293,51 +294,53 @@ func TestWakeupScheduler_IgnoresMissingFields(t *testing.T) {
 }
 
 func TestHandleWakeupEvent_SchedulesOnceBothFieldsArrive(t *testing.T) {
-	a := newTestAdapter()
-	t.Cleanup(func() { _ = a.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		a := newTestAdapter()
+		t.Cleanup(func() { _ = a.Close() })
 
-	cap := newWakeupCapture()
-	a.wakeup = newWakeupScheduler(a.logger, cap.fire)
+		cap := newWakeupCapture()
+		a.wakeup = newWakeupScheduler(a.logger, cap.fire)
 
-	at := time.Now().Add(40 * time.Millisecond).UnixMilli()
+		at := time.Now().Add(40 * time.Millisecond).UnixMilli()
 
-	// Initial tool_call: only the toolName is known.
-	metaInitial := map[string]any{
-		"claudeCode": map[string]any{"toolName": "ScheduleWakeup"},
-	}
-	a.handleWakeupEvent("sess-1", "tc-1", metaInitial, nil, false)
+		// Initial tool_call: only the toolName is known.
+		metaInitial := map[string]any{
+			"claudeCode": map[string]any{"toolName": "ScheduleWakeup"},
+		}
+		a.handleWakeupEvent("sess-1", "tc-1", metaInitial, nil, false)
 
-	// Mid-update: rawInput arrives with the prompt.
-	a.handleWakeupEvent("sess-1", "tc-1", metaInitial, map[string]any{
-		"prompt":       "wake-now",
-		"delaySeconds": 60,
-	}, false)
+		// Mid-update: rawInput arrives with the prompt.
+		a.handleWakeupEvent("sess-1", "tc-1", metaInitial, map[string]any{
+			"prompt":       "wake-now",
+			"delaySeconds": 60,
+		}, false)
 
-	// Verify nothing fired yet — scheduledFor still missing.
-	if got := atomic.LoadInt32(&cap.calls); got != 0 {
-		t.Fatalf("fired before scheduledFor known: calls=%d", got)
-	}
+		// Verify nothing fired yet — scheduledFor still missing.
+		if got := atomic.LoadInt32(&cap.calls); got != 0 {
+			t.Fatalf("fired before scheduledFor known: calls=%d", got)
+		}
 
-	// Final update: scheduledFor arrives in meta.
-	metaWithResp := map[string]any{
-		"claudeCode": map[string]any{
-			"toolName":     "ScheduleWakeup",
-			"toolResponse": map[string]any{"scheduledFor": float64(at)},
-		},
-	}
-	a.handleWakeupEvent("sess-1", "tc-1", metaWithResp, nil, false)
+		// Final update: scheduledFor arrives in meta.
+		metaWithResp := map[string]any{
+			"claudeCode": map[string]any{
+				"toolName":     "ScheduleWakeup",
+				"toolResponse": map[string]any{"scheduledFor": float64(at)},
+			},
+		}
+		a.handleWakeupEvent("sess-1", "tc-1", metaWithResp, nil, false)
 
-	select {
-	case <-cap.fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("wakeup did not fire after both fields known")
-	}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
 
-	cap.mu.Lock()
-	defer cap.mu.Unlock()
-	if cap.lastPrmpt != "wake-now" {
-		t.Errorf("prompt=%q, want %q", cap.lastPrmpt, "wake-now")
-	}
+		if got := atomic.LoadInt32(&cap.calls); got != 1 {
+			t.Fatalf("expected 1 fire, got %d", got)
+		}
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		if cap.lastPrmpt != "wake-now" {
+			t.Errorf("prompt=%q, want %q", cap.lastPrmpt, "wake-now")
+		}
+	})
 }
 
 func TestHandleWakeupEvent_NonWakeupIgnored(t *testing.T) {
@@ -397,5 +400,29 @@ func TestHandleWakeupEvent_TerminalCleansUpPending(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&cap.calls); got != 0 {
 		t.Errorf("terminal-without-data should not fire, got %d calls", got)
+	}
+}
+
+// TestFireWakeup_SkipsOnSessionChange exercises fireWakeup's session-guard
+// branch — when the adapter's current session has rotated away from the one
+// the wakeup was scheduled for, the wakeup must drop instead of trying to
+// drive an unrelated session.
+func TestFireWakeup_SkipsOnSessionChange(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	cap := newWakeupCapture()
+	a.wakeup = newWakeupScheduler(a.logger, cap.fire)
+
+	// Adapter currently tracks a different session than the one the wakeup
+	// was scheduled against.
+	a.mu.Lock()
+	a.sessionID = "new-sess"
+	a.mu.Unlock()
+
+	a.fireWakeup("old-sess", "should-not-fire")
+
+	if got := atomic.LoadInt32(&cap.calls); got != 0 {
+		t.Errorf("expected 0 fires after session change, got %d", got)
 	}
 }

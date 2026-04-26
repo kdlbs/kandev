@@ -462,6 +462,15 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
+	// Loading a different session invalidates any pending wakeup keyed to the
+	// prior session — same reset block as NewSession to avoid leaving an armed
+	// timer for a session id that's about to change and accumulating stale
+	// pendingWakeups entries across reloads.
+	a.mu.Lock()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
+	a.mu.Unlock()
+
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
 	defer span.End()
 
