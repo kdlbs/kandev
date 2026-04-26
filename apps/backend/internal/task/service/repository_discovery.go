@@ -207,40 +207,49 @@ func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid repository path: %w", err)
 	}
-	safe, err := pathWithinRoots(abs, roots)
+	// Resolve symlinks before the allowlist check so that OS-level symlinks
+	// (e.g. /var -> /private/var on macOS) don't produce false negatives.
+	// normalizeRoots already resolves symlinks on the roots themselves, so both
+	// sides of the comparison are canonical after this step.
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", err
 	}
-	// Resolve symlinks then re-validate so a symlink within a root cannot
-	// escape outside the allowed roots.
-	resolved, err := filepath.EvalSymlinks(safe)
+	safe, err := pathWithinRoots(filepath.Clean(resolved), roots)
 	if err != nil {
 		return "", err
 	}
-	resolvedSafe, err := pathWithinRoots(filepath.Clean(resolved), roots)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(resolvedSafe)
+	info, err := os.Stat(safe)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("repository path is not a directory")
 	}
-	return resolvedSafe, nil
+	return safe, nil
 }
 
 // pathWithinRoots returns abs only when it sits inside one of the allowed
 // roots after resolving relative segments. The returned string is the
 // trusted, validated path; callers should never use the original input for
 // subsequent file operations.
+//
+// Each root is also passed through filepath.EvalSymlinks before comparison so
+// that OS-level symlinks (e.g. /var -> /private/var on macOS) do not produce
+// false negatives when abs was obtained via EvalSymlinks but the stored root
+// was not.
 func pathWithinRoots(abs string, roots []string) (string, error) {
 	for _, root := range roots {
 		if root == "" {
 			continue
 		}
-		rel, err := filepath.Rel(root, abs)
+		// Resolve symlinks on the root so both sides of the comparison are
+		// canonical. Ignore errors — if the root itself doesn't exist we skip it.
+		canonRoot := root
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			canonRoot = r
+		}
+		rel, err := filepath.Rel(canonRoot, abs)
 		if err != nil {
 			continue
 		}

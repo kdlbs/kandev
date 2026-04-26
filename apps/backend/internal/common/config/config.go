@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/spf13/viper"
 )
 
@@ -235,7 +236,7 @@ func detectDefaultLogFormat() string {
 func setDefaults(v *viper.Viper) {
 	// Server defaults
 	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.port", 38429)
+	v.SetDefault("server.port", ports.Backend)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
@@ -274,9 +275,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
-	v.SetDefault("agent.standalonePort", 39429)
+	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 	v.SetDefault("agent.mcpServerEnabled", false) // MCP is now embedded in agentctl
-	v.SetDefault("agent.mcpServerPort", 40429)
+	v.SetDefault("agent.mcpServerPort", ports.MCP)
 	v.SetDefault("agent.mcpServerUrl", "")
 
 	// Auth defaults

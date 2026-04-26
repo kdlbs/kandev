@@ -25,10 +25,16 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-preview clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
+
+## Build the preview CLI for deploying PR preview environments to Sprites
+build-preview:
+	@echo "Building preview..."
+	@$(MKDIR) $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
@@ -162,6 +168,7 @@ help:
 	@echo "  build-all       Build all binaries (unified + individual services + agentctl)"
 	@echo "  build-agentctl  Build the agentctl sidecar binary (includes embedded MCP server)"
 	@echo "  build-mock-agent Build the mock-agent binary for testing"
+	@echo "  build-preview   Build the preview CLI for PR preview environments"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode (pprof enabled)"
