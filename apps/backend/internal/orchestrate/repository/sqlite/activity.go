@@ -44,6 +44,26 @@ func (r *Repository) ListActivityEntries(ctx context.Context, workspaceID string
 	return entries, nil
 }
 
+// ListActivityEntriesByAction returns activity entries matching a specific action prefix.
+func (r *Repository) ListActivityEntriesByAction(ctx context.Context, workspaceID, action string, limit int) ([]*models.ActivityEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var entries []*models.ActivityEntry
+	err := r.ro.SelectContext(ctx, &entries, r.ro.Rebind(
+		`SELECT * FROM orchestrate_activity_log
+		 WHERE workspace_id = ? AND action = ?
+		 ORDER BY created_at DESC LIMIT ?`),
+		workspaceID, action, limit)
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []*models.ActivityEntry{}
+	}
+	return entries, nil
+}
+
 // ListActivityEntriesByType returns activity entries filtered by target_type or actor_type.
 func (r *Repository) ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error) {
 	if limit <= 0 {

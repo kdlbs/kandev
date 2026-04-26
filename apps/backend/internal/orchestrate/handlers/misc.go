@@ -154,15 +154,11 @@ func (h *Handlers) decideApproval(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	approval, err := h.ctrl.Svc.GetApproval(c.Request.Context(), c.Param("id"))
+	approval, err := h.ctrl.Svc.DecideApproval(
+		c.Request.Context(), c.Param("id"),
+		req.Status, req.DecidedBy, req.DecisionNote,
+	)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-	approval.Status = req.Status
-	approval.DecisionNote = req.DecisionNote
-	approval.DecidedBy = req.DecidedBy
-	if err := h.ctrl.Svc.UpdateApproval(c.Request.Context(), approval); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -184,8 +180,25 @@ func (h *Handlers) listActivity(c *gin.Context) {
 // -- Inbox handler --
 
 func (h *Handlers) getInbox(c *gin.Context) {
-	// Stub: computed view, real implementation in later wave
-	c.JSON(http.StatusOK, dto.InboxResponse{Items: []interface{}{}})
+	wsID := c.Param("wsId")
+
+	// If ?count=true, return just the count for badge display.
+	if c.Query("count") == "true" {
+		count, err := h.ctrl.Svc.GetInboxCount(c.Request.Context(), wsID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, dto.InboxCountResponse{Count: count})
+		return
+	}
+
+	items, err := h.ctrl.Svc.GetInboxItems(c.Request.Context(), wsID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.InboxResponse{Items: items})
 }
 
 // -- Memory handlers --
@@ -242,16 +255,19 @@ func (h *Handlers) memorySummary(c *gin.Context) {
 // -- Dashboard handler --
 
 func (h *Handlers) getDashboard(c *gin.Context) {
-	total, active, pending, activity, err := h.ctrl.Svc.GetDashboard(c.Request.Context(), c.Param("wsId"))
+	data, err := h.ctrl.Svc.GetDashboardData(c.Request.Context(), c.Param("wsId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, dto.DashboardResponse{
-		AgentCount:     total,
-		ActiveAgents:   active,
-		PendingItems:   pending,
-		RecentActivity: activity,
+		AgentCount:       data.AgentCount,
+		RunningCount:     data.RunningCount,
+		PausedCount:      data.PausedCount,
+		ErrorCount:       data.ErrorCount,
+		MonthSpendCents:  data.MonthSpendCents,
+		PendingApprovals: data.PendingApprovals,
+		RecentActivity:   data.RecentActivity,
 	})
 }
 

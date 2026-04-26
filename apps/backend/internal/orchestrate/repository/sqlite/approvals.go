@@ -57,6 +57,28 @@ func (r *Repository) ListApprovals(ctx context.Context, workspaceID string) ([]*
 	return approvals, nil
 }
 
+// ListPendingApprovals returns all pending approvals for a workspace.
+func (r *Repository) ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error) {
+	var approvals []*models.Approval
+	err := r.ro.SelectContext(ctx, &approvals, r.ro.Rebind(
+		`SELECT * FROM orchestrate_approvals WHERE workspace_id = ? AND status = 'pending' ORDER BY created_at DESC`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if approvals == nil {
+		approvals = []*models.Approval{}
+	}
+	return approvals, nil
+}
+
+// CountPendingApprovals returns the number of pending approvals for a workspace.
+func (r *Repository) CountPendingApprovals(ctx context.Context, workspaceID string) (int, error) {
+	var count int
+	err := r.ro.GetContext(ctx, &count, r.ro.Rebind(
+		`SELECT COUNT(*) FROM orchestrate_approvals WHERE workspace_id = ? AND status = 'pending'`), workspaceID)
+	return count, err
+}
+
 // UpdateApproval updates an existing approval (used for deciding).
 func (r *Repository) UpdateApproval(ctx context.Context, approval *models.Approval) error {
 	approval.UpdatedAt = time.Now().UTC()

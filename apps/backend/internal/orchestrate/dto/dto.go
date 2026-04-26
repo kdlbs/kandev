@@ -243,17 +243,28 @@ type MemorySummaryResponse struct {
 
 // InboxResponse wraps inbox items.
 type InboxResponse struct {
-	Items []interface{} `json:"items"`
+	Items []*models.InboxItem `json:"items"`
+}
+
+// InboxCountResponse wraps the inbox item count.
+type InboxCountResponse struct {
+	Count int `json:"count"`
 }
 
 // -- Dashboard --
 
-// DashboardResponse wraps dashboard data.
+// DashboardResponse wraps the full dashboard data.
 type DashboardResponse struct {
-	AgentCount     int                     `json:"agent_count"`
-	ActiveAgents   int                     `json:"active_agents"`
-	PendingItems   int                     `json:"pending_items"`
-	RecentActivity []*models.ActivityEntry `json:"recent_activity"`
+	AgentCount       int                     `json:"agent_count"`
+	RunningCount     int                     `json:"running_count"`
+	PausedCount      int                     `json:"paused_count"`
+	ErrorCount       int                     `json:"error_count"`
+	TasksInProgress  int                     `json:"tasks_in_progress"`
+	OpenTasks        int                     `json:"open_tasks"`
+	BlockedTasks     int                     `json:"blocked_tasks"`
+	MonthSpendCents  int                     `json:"month_spend_cents"`
+	PendingApprovals int                     `json:"pending_approvals"`
+	RecentActivity   []*models.ActivityEntry `json:"recent_activity"`
 }
 
 // -- Wakeups --

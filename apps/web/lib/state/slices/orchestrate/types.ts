@@ -146,12 +146,16 @@ export type Routine = {
   updatedAt: string;
 };
 
+export type InboxItemType = "approval" | "budget_alert" | "agent_error" | "task_review";
+
 export type InboxItem = {
   id: string;
-  type: "approval" | "budget_alert" | "agent_error" | "task_review";
+  type: InboxItemType;
   title: string;
   description?: string;
   status: string;
+  entity_id?: string;
+  entity_type?: string;
   createdAt: string;
   payload?: Record<string, unknown>;
 };
@@ -216,16 +220,16 @@ export type IssuesState = {
 };
 
 export type DashboardData = {
-  agentCount: number;
-  runningCount: number;
-  pausedCount: number;
-  errorCount: number;
-  tasksInProgress: number;
-  openTasks: number;
-  blockedTasks: number;
-  monthSpendCents: number;
-  budgetCents: number;
-  pendingApprovals: number;
+  agent_count: number;
+  running_count: number;
+  paused_count: number;
+  error_count: number;
+  tasks_in_progress: number;
+  open_tasks: number;
+  blocked_tasks: number;
+  month_spend_cents: number;
+  pending_approvals: number;
+  recent_activity: ActivityEntry[];
 };
 
 // --- Slice state & actions ---

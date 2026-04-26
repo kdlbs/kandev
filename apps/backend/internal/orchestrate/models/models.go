@@ -203,6 +203,15 @@ type RoutineRun struct {
 	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
 }
 
+// ApprovalType constants for approval request types.
+const (
+	ApprovalTypeHireAgent      = "hire_agent"
+	ApprovalTypeBudgetIncrease = "budget_increase"
+	ApprovalTypeBoardApproval  = "board_approval"
+	ApprovalTypeTaskReview     = "task_review"
+	ApprovalTypeSkillCreation  = "skill_creation"
+)
+
 // Approval represents a pending or resolved approval request.
 type Approval struct {
 	ID                         string     `json:"id" db:"id"`
@@ -273,6 +282,34 @@ type TaskComment struct {
 	Source         string    `json:"source" db:"source"`
 	ReplyChannelID string    `json:"reply_channel_id" db:"reply_channel_id"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+}
+
+// InboxItem represents a computed inbox entry for the user.
+type InboxItem struct {
+	ID          string                 `json:"id"`
+	Type        string                 `json:"type"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description,omitempty"`
+	Status      string                 `json:"status"`
+	EntityID    string                 `json:"entity_id,omitempty"`
+	EntityType  string                 `json:"entity_type,omitempty"`
+	Payload     map[string]interface{} `json:"payload,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+}
+
+// DashboardData represents aggregated dashboard information.
+type DashboardData struct {
+	AgentCount       int              `json:"agent_count"`
+	RunningCount     int              `json:"running_count"`
+	PausedCount      int              `json:"paused_count"`
+	ErrorCount       int              `json:"error_count"`
+	TasksInProgress  int              `json:"tasks_in_progress"`
+	OpenTasks        int              `json:"open_tasks"`
+	BlockedTasks     int              `json:"blocked_tasks"`
+	MonthSpendCents  int              `json:"month_spend_cents"`
+	PendingApprovals int              `json:"pending_approvals"`
+	RecentActivity   []*ActivityEntry `json:"recent_activity"`
+	RecentIssues     []interface{}    `json:"recent_issues,omitempty"`
 }
 
 // CostBreakdown represents an aggregated cost entry.

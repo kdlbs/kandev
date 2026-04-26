@@ -285,7 +285,10 @@ export function getInbox(workspaceId: string, options?: ApiRequestOptions) {
 }
 
 export function getInboxCount(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ count: number }>(`${BASE}/workspaces/${workspaceId}/inbox?count=true`, options);
+  return fetchJson<{ count: number }>(
+    `${BASE}/workspaces/${workspaceId}/inbox?count=true`,
+    options,
+  );
 }
 
 // --- Agent Memory ---
