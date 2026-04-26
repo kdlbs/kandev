@@ -407,22 +407,40 @@ func TestHandleWakeupEvent_TerminalCleansUpPending(t *testing.T) {
 // branch — when the adapter's current session has rotated away from the one
 // the wakeup was scheduled for, the wakeup must drop instead of trying to
 // drive an unrelated session.
+// TestFireWakeup_SkipsOnSessionChange exercises fireWakeup's session-guard
+// branch — when the adapter's current session has rotated away from the one
+// the wakeup was scheduled for, the wakeup must drop instead of trying to
+// drive an unrelated session.
+//
+// We can't observe Prompt directly (it returns early on nil acpConn without
+// any side effect on the updates channel) so we use a.pendingContext as a
+// canary: Prompt's first action under a.mu is to read-and-clear it. If the
+// guard works, fireWakeup never spawns the goroutine that calls Prompt and
+// the canary survives. If the guard regresses, Prompt runs and clears it.
 func TestFireWakeup_SkipsOnSessionChange(t *testing.T) {
-	a := newTestAdapter()
-	t.Cleanup(func() { _ = a.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		a := newTestAdapter()
+		t.Cleanup(func() { _ = a.Close() })
 
-	cap := newWakeupCapture()
-	a.wakeup = newWakeupScheduler(a.logger, cap.fire)
+		// Adapter currently tracks a different session than the one the wakeup
+		// was scheduled against, and pendingContext holds a canary string.
+		const canary = "guard-canary"
+		a.mu.Lock()
+		a.sessionID = "new-sess"
+		a.pendingContext = canary
+		a.mu.Unlock()
 
-	// Adapter currently tracks a different session than the one the wakeup
-	// was scheduled against.
-	a.mu.Lock()
-	a.sessionID = "new-sess"
-	a.mu.Unlock()
+		a.fireWakeup("old-sess", "should-not-fire")
 
-	a.fireWakeup("old-sess", "should-not-fire")
+		// Let any spawned goroutine run to completion. Inside synctest, after
+		// Wait() returns the bubble has settled and we can inspect state.
+		synctest.Wait()
 
-	if got := atomic.LoadInt32(&cap.calls); got != 0 {
-		t.Errorf("expected 0 fires after session change, got %d", got)
-	}
+		a.mu.Lock()
+		got := a.pendingContext
+		a.mu.Unlock()
+		if got != canary {
+			t.Errorf("pendingContext=%q, want %q — Prompt was reached, guard regressed", got, canary)
+		}
+	})
 }
