@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
@@ -17,7 +18,8 @@ import { createCodeBlockWithMermaid } from "./tiptap-mermaid-extension";
 import { cn } from "@/lib/utils";
 
 type Props = {
-  /** Markdown source. The editor parses it once on mount via tiptap-markdown. */
+  /** Markdown source. The editor's tiptap-markdown extension parses it via
+   * `setContent`, so headings, lists, tables, and code blocks render properly. */
   content: string;
   className?: string;
   testId?: string;
@@ -30,6 +32,10 @@ const lowlight = createLowlight(common);
  * Reuses the same StarterKit + Markdown + tables/tasks/code-block extensions as
  * the live plan editor so previewed markdown matches what the user sees while
  * editing — minus interactive bits (slash menu, drag handles, comment marks).
+ *
+ * Initial markdown content is set via `editor.commands.setContent(content, ...)`
+ * after creation rather than the `content` option, because tiptap-markdown's
+ * setContent override is what triggers the markdown -> doc parse.
  */
 export function PlanReadOnlyMarkdown({ content, className, testId }: Props) {
   const editor = useEditor({
@@ -49,8 +55,15 @@ export function PlanReadOnlyMarkdown({ content, className, testId }: Props) {
       TableCell,
       TableHeader,
     ],
-    content,
   });
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    // Tiptap-markdown intercepts setContent for markdown strings; setting
+    // content this way (instead of via the `content` option) ensures the
+    // input gets parsed as markdown rather than treated as raw text/HTML.
+    editor.commands.setContent(content, { emitUpdate: false });
+  }, [editor, content]);
 
   return (
     <EditorContent
