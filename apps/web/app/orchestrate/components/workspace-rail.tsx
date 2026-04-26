@@ -56,11 +56,9 @@ export function WorkspaceRail({ workspaces: ssrWorkspaces, activeWorkspaceId: ss
               <TooltipTrigger asChild>
                 <div className="group relative flex items-center justify-center w-full">
                   {/* Left edge indicator pill */}
-                  <div
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r transition-all duration-200 bg-foreground ${
-                      isActive ? "h-9" : "h-0 group-hover:h-5"
-                    }`}
-                  />
+                  {isActive && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] rounded-r-full bg-foreground transition-all h-4" />
+                  )}
                   <button
                     onClick={() => handleSelect(ws.id)}
                     className={`h-12 w-12 rounded-2xl flex items-center justify-center text-sm font-semibold cursor-pointer transition-all duration-200 ${
