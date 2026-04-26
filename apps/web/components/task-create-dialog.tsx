@@ -3,7 +3,7 @@
 import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
-import type { Task } from "@/lib/types/http";
+import type { Task, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
@@ -11,7 +11,6 @@ import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
 import {
-  CreateEditSelectors,
   SessionSelectors,
   WorkflowSection,
   DialogPromptSection,
@@ -23,12 +22,12 @@ import {
 } from "@/components/task-create-dialog-options";
 import {
   RepositorySelector,
-  BranchSelector,
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
+import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import { useToast } from "@/components/toast-provider";
 import {
   useDialogFormState,
@@ -267,6 +266,8 @@ type DialogFormBodyProps = {
   isLocalExecutor: boolean;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
+  /** Workspace repositories — used by the multi-repo extra rows. */
+  repositories: Repository[];
 };
 
 function DialogFormBody({
@@ -299,6 +300,7 @@ function DialogFormBody({
   isLocalExecutor,
   enhance,
   workflowAgentLocked,
+  repositories,
 }: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
@@ -315,30 +317,24 @@ function DialogFormBody({
         onJiraImport={onJiraImport}
       />
       {!isSessionMode && (
-        <CreateEditSelectors
+        <CreateModeSelectors
           isTaskStarted={isTaskStarted}
           hasRepositorySelection={hasRepositorySelection}
           branchOptions={branchOptions}
-          branch={fs.branch}
-          onBranchChange={onBranchChange}
           branchesLoading={branchesLoading}
-          localBranchesLoading={fs.localBranchesLoading}
+          agentProfileOptions={agentProfileOptions}
+          executorProfileOptions={executorProfileOptions}
           agentProfiles={agentProfiles}
           agentProfilesLoading={agentProfilesLoading}
-          agentProfileOptions={agentProfileOptions}
-          agentProfileId={fs.agentProfileId}
-          onAgentProfileChange={onAgentProfileChange}
-          isCreatingSession={isCreatingSession}
-          executorProfileOptions={executorProfileOptions}
-          executorProfileId={fs.executorProfileId}
-          onExecutorProfileChange={onExecutorProfileChange}
           executorsLoading={executorsLoading}
+          isCreatingSession={isCreatingSession}
+          fs={fs}
+          onBranchChange={onBranchChange}
+          onAgentProfileChange={onAgentProfileChange}
+          onExecutorProfileChange={onExecutorProfileChange}
           isLocalExecutor={isLocalExecutor}
-          useGitHubUrl={fs.useGitHubUrl}
           workflowAgentLocked={workflowAgentLocked}
-          BranchSelectorComponent={BranchSelector}
-          AgentSelectorComponent={AgentSelector}
-          ExecutorProfileSelectorComponent={ExecutorProfileSelector}
+          repositories={repositories}
         />
       )}
       <WorkflowSection
@@ -453,6 +449,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
     branch: fs.branch,
+    extraRepositories: fs.extraRepositories,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -489,6 +486,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflows,
     agentProfiles,
     snapshots,
+    repositories,
     repositoriesLoading,
     branchesLoading,
     computed,
@@ -504,7 +502,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
   const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
-  const { sessionRepoName, workflows, agentProfiles, snapshots } = setup;
+  const { sessionRepoName, workflows, agentProfiles, snapshots, repositories } = setup;
   const { repositoriesLoading, branchesLoading, computed, handlers, handleKeyDown } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
@@ -569,6 +567,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             isLocalExecutor={computed.isLocalExecutor}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
+            repositories={repositories}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

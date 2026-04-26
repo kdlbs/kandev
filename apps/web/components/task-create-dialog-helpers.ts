@@ -152,8 +152,44 @@ export function validateCreateInputs(inputs: {
   );
 }
 
+/**
+ * One additional repository row from the multi-repo task create form.
+ * The primary repo is built from useGitHubUrl/repositoryId/selectedLocalRepo
+ * fields (see buildRepositoriesPayload below); these extras are appended.
+ */
+export type ExtraRepoInput = {
+  repositoryId: string;
+  branch: string;
+};
+
 /** Builds the repositories payload for task creation from the current form state. */
 export function buildRepositoriesPayload(opts: {
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  branch: string;
+  githubPrHeadBranch: string | null;
+  repositoryId: string;
+  selectedLocalRepo: LocalRepository | null;
+  /**
+   * Additional repository rows entered via the "+ Add repository" button.
+   * Empty rows (no repository_id) are dropped silently so a user can leave
+   * an unfinished row without blocking submit; duplicate detection happens
+   * at the backend (see Phase 8).
+   */
+  extraRepositories?: ExtraRepoInput[];
+}): NonNullable<CreateTaskParams["repositories"]> {
+  const primary = buildPrimaryRepoPayload(opts);
+  const extras = (opts.extraRepositories ?? [])
+    .filter((row) => row.repositoryId.trim() !== "")
+    .map((row) => ({
+      repository_id: row.repositoryId,
+      base_branch: row.branch || undefined,
+    }));
+  if (primary.length === 0) return extras;
+  return [...primary, ...extras];
+}
+
+function buildPrimaryRepoPayload(opts: {
   useGitHubUrl: boolean;
   githubUrl: string;
   branch: string;

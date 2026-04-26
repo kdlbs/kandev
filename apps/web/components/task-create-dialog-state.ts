@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type {
   LocalRepository,
   Workspace,
-  Repository,
   ExecutorProfile,
   Branch,
 } from "@/lib/types/http";
@@ -21,13 +20,7 @@ import {
   useExecutorProfileOptions,
   useIsLocalExecutor,
 } from "@/components/task-create-dialog-options";
-import {
-  setLocalStorage,
-  getTaskCreateDraft,
-  setTaskCreateDraft,
-  removeTaskCreateDraft,
-} from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
   TaskCreateDialogInitialValues,
@@ -35,6 +28,7 @@ import type {
   DialogComputedValues,
   DialogComputedArgs,
 } from "@/components/task-create-dialog-types";
+import { useExtraRepositoriesState } from "@/components/task-create-dialog-extra-repos-state";
 import {
   computePassthroughProfile,
   computeEffectiveStepId,
@@ -354,6 +348,7 @@ export function useDialogFormState(
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
+  const extraRepos = useExtraRepositoriesState();
 
   useFormResetEffects({
     open,
@@ -396,7 +391,13 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  return { ...form, ...discovery, ...ghUrl, ...wfAgent, clearDraft };
+  // Reset extra repositories whenever the dialog re-opens with a fresh form.
+  useEffect(() => {
+    if (!open) extraRepos.resetExtraRepositories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...extraRepos, clearDraft };
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";
@@ -407,111 +408,8 @@ export {
 } from "@/components/task-create-dialog-helpers";
 export { useTaskCreateDialogEffects } from "@/components/task-create-dialog-effects";
 
-export function useDialogHandlers(fs: DialogFormState, repositories: Repository[]) {
-  const handleSelectLocalRepository = useCallback(
-    (path: string) => {
-      fs.setDiscoveredRepoPath(path);
-      fs.setSelectedLocalRepo(fs.discoveredRepositories.find((r) => r.path === path) ?? null);
-      fs.setRepositoryId("");
-      fs.setBranch("");
-      fs.setLocalBranches([]);
-    },
-    [fs],
-  );
-
-  const handleRepositoryChange = useCallback(
-    (value: string) => {
-      if (repositories.find((r: Repository) => r.id === value)) {
-        fs.setRepositoryId(value);
-        setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
-        fs.setDiscoveredRepoPath("");
-        fs.setSelectedLocalRepo(null);
-        fs.setLocalBranches([]);
-        fs.setBranch("");
-        fs.setUseGitHubUrl(false);
-        fs.setGitHubUrl("");
-        fs.setGitHubBranches([]);
-        return;
-      }
-      handleSelectLocalRepository(value);
-    },
-    [repositories, fs, handleSelectLocalRepository],
-  );
-
-  const handleAgentProfileChange = useCallback(
-    (value: string) => {
-      fs.setAgentProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
-    },
-    [fs],
-  );
-  const handleExecutorProfileChange = useCallback(
-    (value: string) => {
-      fs.setExecutorProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, value);
-    },
-    [fs],
-  );
-  const handleTaskNameChange = useCallback(
-    (value: string) => {
-      fs.setTaskName(value);
-      fs.setHasTitle(value.trim().length > 0);
-    },
-    [fs],
-  );
-  const handleBranchChange = useCallback(
-    (value: string) => {
-      fs.setBranch(value);
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
-    },
-    [fs],
-  );
-  const handleWorkflowChange = useCallback(
-    (value: string) => {
-      fs.setSelectedWorkflowId(value);
-    },
-    [fs],
-  );
-
-  const handleToggleGitHubUrl = useCallback(() => {
-    const next = !fs.useGitHubUrl;
-    fs.setUseGitHubUrl(next);
-    if (next) {
-      fs.setRepositoryId("");
-      fs.setDiscoveredRepoPath("");
-      fs.setSelectedLocalRepo(null);
-      fs.setLocalBranches([]);
-    } else {
-      fs.setGitHubUrl("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    }
-    fs.setBranch("");
-  }, [fs]);
-
-  const handleGitHubUrlChange = useCallback(
-    (value: string) => {
-      fs.setGitHubUrl(value);
-      fs.setBranch("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    },
-    [fs],
-  );
-
-  return {
-    handleRepositoryChange,
-    handleAgentProfileChange,
-    handleExecutorProfileChange,
-    handleTaskNameChange,
-    handleBranchChange,
-    handleWorkflowChange,
-    handleToggleGitHubUrl,
-    handleGitHubUrlChange,
-  };
-}
+// useDialogHandlers lives in ./task-create-dialog-handlers.ts
+export { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 
 export function useDialogComputed({
   fs,

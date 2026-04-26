@@ -2,13 +2,17 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useCommentsStore } from "./comments-store";
 import type { DiffComment } from "./types";
 
+const SESSION_ID = "sess";
+const FILE_PATH = "src/app.tsx";
+const REPO_FRONT = "repo-front";
+
 function diffComment(overrides: Partial<DiffComment>): DiffComment {
   return {
     id: "c-" + Math.random().toString(36).slice(2),
-    sessionId: "sess",
+    sessionId: SESSION_ID,
     source: "diff",
     text: "looks off",
-    filePath: "src/app.tsx",
+    filePath: FILE_PATH,
     startLine: 1,
     endLine: 1,
     side: "additions",
@@ -31,26 +35,26 @@ describe("getCommentsForFile (multi-repo)", () => {
 
   it("filters by repositoryId when provided", () => {
     const store = useCommentsStore.getState();
-    store.addComment(diffComment({ id: "front", repositoryId: "repo-front" }));
+    store.addComment(diffComment({ id: "front", repositoryId: REPO_FRONT }));
     store.addComment(diffComment({ id: "back", repositoryId: "repo-back" }));
 
     const front = useCommentsStore
       .getState()
-      .getCommentsForFile("sess", "src/app.tsx", "repo-front");
+      .getCommentsForFile(SESSION_ID, FILE_PATH, REPO_FRONT);
     expect(front.map((c) => c.id)).toEqual(["front"]);
 
     const back = useCommentsStore
       .getState()
-      .getCommentsForFile("sess", "src/app.tsx", "repo-back");
+      .getCommentsForFile(SESSION_ID, FILE_PATH, "repo-back");
     expect(back.map((c) => c.id)).toEqual(["back"]);
   });
 
   it("returns all matching when repositoryId is omitted", () => {
     const store = useCommentsStore.getState();
-    store.addComment(diffComment({ id: "front", repositoryId: "repo-front" }));
+    store.addComment(diffComment({ id: "front", repositoryId: REPO_FRONT }));
     store.addComment(diffComment({ id: "back", repositoryId: "repo-back" }));
 
-    const all = useCommentsStore.getState().getCommentsForFile("sess", "src/app.tsx");
+    const all = useCommentsStore.getState().getCommentsForFile(SESSION_ID, FILE_PATH);
     expect(all.map((c) => c.id).sort()).toEqual(["back", "front"]);
   });
 
@@ -60,7 +64,7 @@ describe("getCommentsForFile (multi-repo)", () => {
 
     const result = useCommentsStore
       .getState()
-      .getCommentsForFile("sess", "src/app.tsx", "repo-front");
+      .getCommentsForFile(SESSION_ID, FILE_PATH, REPO_FRONT);
     expect(result.map((c) => c.id)).toEqual(["legacy"]);
   });
 });

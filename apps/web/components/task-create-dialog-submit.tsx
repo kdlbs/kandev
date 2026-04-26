@@ -37,6 +37,7 @@ export function useTaskSubmitHandlers({
   githubUrl,
   githubPrHeadBranch,
   branch,
+  extraRepositories,
   agentProfileId,
   executorId,
   executorProfileId,
@@ -98,8 +99,20 @@ export function useTaskSubmitHandlers({
         githubPrHeadBranch,
         repositoryId,
         selectedLocalRepo,
+        extraRepositories: extraRepositories.map((row) => ({
+          repositoryId: row.repositoryId,
+          branch: row.branch,
+        })),
       }),
-    [useGitHubUrl, repositoryId, branch, githubUrl, githubPrHeadBranch, selectedLocalRepo],
+    [
+      useGitHubUrl,
+      repositoryId,
+      branch,
+      githubUrl,
+      githubPrHeadBranch,
+      selectedLocalRepo,
+      extraRepositories,
+    ],
   );
 
   const handleSessionSubmit = useCallback(async () => {

@@ -15,6 +15,20 @@ import type {
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 
+/**
+ * One extra repository row in the multi-repo task create form. The form
+ * tracks these in addition to the primary (repositoryId/branch) so the
+ * existing single-repo controls keep working for the common case.
+ *
+ * `key` is a stable client-side id used as React key and for
+ * add/update/remove ops; it's not sent to the backend.
+ */
+export type ExtraRepositoryRow = {
+  key: string;
+  repositoryId: string;
+  branch: string;
+};
+
 export type StepType = {
   id: string;
   title: string;
@@ -121,6 +135,15 @@ export type DialogFormState = {
   setRepositoryId: (v: string) => void;
   branch: string;
   setBranch: (v: string) => void;
+  /**
+   * Extra repository rows beyond the primary, for multi-repo tasks.
+   * The primary repo (repositoryId/branch above) is always position 0;
+   * each extra row gets the next position. Empty array = single-repo task.
+   */
+  extraRepositories: ExtraRepositoryRow[];
+  addExtraRepository: () => void;
+  removeExtraRepository: (key: string) => void;
+  updateExtraRepository: (key: string, patch: Partial<ExtraRepositoryRow>) => void;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
   executorId: string;
@@ -183,6 +206,11 @@ export type SubmitHandlersDeps = {
   githubUrl: string;
   githubPrHeadBranch: string | null;
   branch: string;
+  /**
+   * Extra repository rows from the multi-repo form. Submit handlers append
+   * these to the primary in the same payload position order.
+   */
+  extraRepositories: ExtraRepositoryRow[];
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
