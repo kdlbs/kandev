@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconPlus } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { listBudgets, deleteBudget } from "@/lib/api/domains/orchestrate-api";
 import type { BudgetPolicy } from "@/lib/state/slices/orchestrate/types";
 import { BudgetPolicyCard } from "./budget-policy-card";
@@ -16,12 +17,19 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     listBudgets(workspaceId)
       .then((res) => setPolicies(res.budgets ?? []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load budgets");
+      });
   }, [workspaceId, reloadKey]);
 
   const handleDelete = async (id: string) => {
-    await deleteBudget(id);
-    setPolicies((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await deleteBudget(id);
+      setPolicies((prev) => prev.filter((p) => p.id !== id));
+      toast.success("Budget policy deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete budget policy");
+    }
   };
 
   const handleCreated = () => {

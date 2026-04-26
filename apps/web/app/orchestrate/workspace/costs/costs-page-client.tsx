@@ -35,8 +35,8 @@ export function CostsPageClient({ initialCostSummary }: CostsPageClientProps) {
       <PageHeader title="Costs" />
       <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="budgets">Budgets</TabsTrigger>
+          <TabsTrigger value="overview" className="cursor-pointer">Overview</TabsTrigger>
+          <TabsTrigger value="budgets" className="cursor-pointer">Budgets</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <CostOverview workspaceId={activeWorkspaceId} />

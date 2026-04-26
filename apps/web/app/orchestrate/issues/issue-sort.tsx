@@ -3,6 +3,7 @@
 import { IconArrowsSort, IconSortAscending, IconSortDescending } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { IssueSortField, IssueSortDir } from "@/lib/state/slices/orchestrate/types";
 
@@ -24,11 +25,16 @@ type IssueSortProps = {
 export function IssueSort({ field, dir, onFieldChange, onDirChange }: IssueSortProps) {
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="cursor-pointer">
-          <IconArrowsSort className="h-4 w-4" />
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon-sm" className="cursor-pointer">
+              <IconArrowsSort className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Sort</TooltipContent>
+      </Tooltip>
       <PopoverContent className="w-48 p-2" align="end">
         <p className="text-xs font-medium px-2 mb-1">Sort by</p>
         <div className="flex flex-col gap-0.5">

@@ -16,6 +16,12 @@ interface SkillContentProps {
   onCancel?: () => void;
 }
 
+/** Strip YAML frontmatter (---\n...\n---) from the start of content. */
+function stripFrontmatter(content: string): string {
+  const match = content.match(/^---\n[\s\S]*?\n---\n?/);
+  return match ? content.slice(match[0].length) : content;
+}
+
 export function SkillContent({
   content,
   mode,
@@ -70,7 +76,7 @@ export function SkillContent({
   return (
     <div className="markdown-body max-w-3xl">
       <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-        {content || "*No content*"}
+        {content ? stripFrontmatter(content) : "*No content*"}
       </ReactMarkdown>
     </div>
   );

@@ -36,14 +36,19 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
     <div className="flex flex-col h-full">
       {/* Topbar */}
       <div className="flex items-center gap-2 px-4 h-10 border-b border-border bg-background shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 cursor-pointer"
-          onClick={onToggleSimple}
-        >
-          <IconArrowLeft className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 cursor-pointer"
+              onClick={onToggleSimple}
+            >
+              <IconArrowLeft className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Back</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -62,14 +67,19 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
         <span className="text-xs font-mono text-muted-foreground">{task.identifier}</span>
         <span className="text-sm font-medium truncate">{task.title}</span>
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer"
-            onClick={() => setRightCollapsed(!rightCollapsed)}
-          >
-            <IconFiles className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 cursor-pointer"
+                onClick={() => setRightCollapsed(!rightCollapsed)}
+              >
+                <IconFiles className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{rightCollapsed ? "Show files panel" : "Hide files panel"}</TooltipContent>
+          </Tooltip>
           {task.assigneeName && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center">

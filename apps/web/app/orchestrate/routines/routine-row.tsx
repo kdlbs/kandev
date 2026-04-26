@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { IconDots, IconPlayerPlay, IconTrash, IconPencil } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentInstance } from "@/lib/state/slices/orchestrate/types";
 import { timeAgo } from "../components/shared/time-ago";
 
@@ -56,16 +57,21 @@ export function RoutineRow({
         className="cursor-pointer"
       />
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <IconDots className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <IconDots className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Actions</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             className="cursor-pointer"

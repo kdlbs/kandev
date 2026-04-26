@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { IconArrowLeft, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import { getProject, deleteProject } from "@/lib/api/domains/orchestrate-api";
@@ -33,14 +35,21 @@ export default function ProjectDetailPage({ params }: PageProps) {
     }
     getProject(id).then((res) => {
       if (res) setProject(res as unknown as Project);
-    }).catch(() => {});
+    }).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to load project");
+    });
   }, [id, storeProject]);
 
   const handleDelete = async () => {
     if (!project) return;
-    await deleteProject(project.id);
-    removeProject(project.id);
-    router.push("/orchestrate/projects");
+    try {
+      await deleteProject(project.id);
+      removeProject(project.id);
+      toast.success("Project deleted");
+      router.push("/orchestrate/projects");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete project");
+    }
   };
 
   if (!project) {
@@ -54,14 +63,19 @@ export default function ProjectDetailPage({ params }: PageProps) {
   return (
     <div className="p-6 max-w-3xl space-y-6">
       <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => router.push("/orchestrate/projects")}
-          className="cursor-pointer"
-        >
-          <IconArrowLeft className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => router.push("/orchestrate/projects")}
+              className="cursor-pointer"
+            >
+              <IconArrowLeft className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Back to projects</TooltipContent>
+        </Tooltip>
         <span className="text-sm text-muted-foreground">Projects</span>
       </div>
 

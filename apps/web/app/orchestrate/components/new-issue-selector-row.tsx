@@ -13,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { AgentInstance, Project } from "@/lib/state/slices/orchestrate/types";
 import type { IssueDraft } from "./new-issue-draft";
@@ -129,11 +130,16 @@ export function NewIssueSelectorRow({ draft, onUpdate }: Props) {
           onSelect={(id) => onUpdate({ projectId: id })}
         />
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
-              <IconDotsVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+                  <IconDotsVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>More options</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start">
             <DropdownMenuItem
               className="cursor-pointer"

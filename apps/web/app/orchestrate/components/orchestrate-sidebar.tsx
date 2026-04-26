@@ -16,6 +16,7 @@ import {
 } from "@tabler/icons-react";
 import Link from "next/link";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAppStore } from "@/components/state-provider";
 import { SidebarNavItem } from "./sidebar-nav-item";
@@ -42,9 +43,14 @@ export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSideba
       {/* Top: workspace name + search */}
       <div className="flex items-center gap-1 px-3 h-12 border-b border-border">
         <span className="flex-1 min-w-0 text-sm font-bold truncate">{workspaceName}</span>
-        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 cursor-pointer">
-          <IconSearch className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 cursor-pointer">
+              <IconSearch className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Search</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Nav: scrollable */}
@@ -80,11 +86,16 @@ export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSideba
 
       {/* Bottom bar */}
       <div className="flex items-center justify-end gap-1 px-3 h-10 border-t border-border shrink-0">
-        <Link href="/settings/general" className="cursor-pointer">
-          <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
-            <IconSettings className="h-3.5 w-3.5" />
-          </Button>
-        </Link>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link href="/settings/general" className="cursor-pointer">
+              <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+                <IconSettings className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent>Settings</TooltipContent>
+        </Tooltip>
         <ThemeToggle />
       </div>
 

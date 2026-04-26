@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { IconTrash } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { BudgetPolicy } from "@/lib/state/slices/orchestrate/types";
 import { cn } from "@/lib/utils";
 
@@ -56,14 +57,19 @@ export function BudgetPolicyCard({ policy, spentCents = 0, onDelete }: Props) {
           <Badge className={status.className}>{status.label}</Badge>
         </div>
         {onDelete && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="cursor-pointer"
-            onClick={() => onDelete(policy.id)}
-          >
-            <IconTrash className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="cursor-pointer"
+                onClick={() => onDelete(policy.id)}
+              >
+                <IconTrash className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete policy</TooltipContent>
+          </Tooltip>
         )}
       </CardHeader>
       <CardContent>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { IconCode, IconChevronDown, IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   Collapsible,
   CollapsibleContent,
@@ -109,9 +110,14 @@ export function TaskChat({ taskId, comments }: TaskChatProps) {
           placeholder="Add a comment..."
           className="flex-1 bg-muted rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
         />
-        <Button type="submit" size="sm" variant="ghost" className="cursor-pointer shrink-0">
-          <IconSend className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="submit" size="sm" variant="ghost" className="cursor-pointer shrink-0">
+              <IconSend className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Send</TooltipContent>
+        </Tooltip>
       </form>
     </div>
   );

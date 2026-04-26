@@ -18,6 +18,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@kandev/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { toast } from "sonner";
 import type { AgentInstance } from "@/lib/state/slices/orchestrate/types";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 
@@ -47,7 +49,9 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
       if (!cancelled) {
         setEntries((res as { memory?: MemoryEntry[] }).memory ?? []);
       }
-    }).catch(() => { /* ignore */ });
+    }).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to load memory");
+    });
     return () => { cancelled = true; };
   }, [agent.id]);
 
@@ -70,16 +74,26 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
 
   const handleDelete = useCallback(
     async (entryId: string) => {
-      await orchestrateApi.deleteMemory(agent.id, entryId);
-      setEntries((prev) => prev.filter((e) => e.id !== entryId));
+      try {
+        await orchestrateApi.deleteMemory(agent.id, entryId);
+        setEntries((prev) => prev.filter((e) => e.id !== entryId));
+        toast.success("Memory entry deleted");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to delete memory entry");
+      }
     },
     [agent.id],
   );
 
   const handleClearAll = useCallback(async () => {
-    await orchestrateApi.deleteAllMemory(agent.id);
-    setEntries([]);
-    setClearDialogOpen(false);
+    try {
+      await orchestrateApi.deleteAllMemory(agent.id);
+      setEntries([]);
+      setClearDialogOpen(false);
+      toast.success("All memory cleared");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to clear memory");
+    }
   }, [agent.id]);
 
   const handleExport = useCallback(async () => {
@@ -266,17 +280,22 @@ function MemoryEntryRow({
         <span className="text-xs text-muted-foreground shrink-0">
           {entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : ""}
         </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0 cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <IconTrash className="h-3.5 w-3.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+            >
+              <IconTrash className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Delete entry</TooltipContent>
+        </Tooltip>
       </div>
       {expanded && (
         <pre className="mt-2 text-xs whitespace-pre-wrap bg-muted/50 rounded p-3">

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type SidebarCollapsibleSectionProps = {
@@ -33,14 +34,19 @@ export function SidebarCollapsibleSection({
           </span>
         </CollapsibleTrigger>
         {onAdd && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 cursor-pointer"
-            onClick={onAdd}
-          >
-            <IconPlus className="h-3 w-3 text-muted-foreground/60" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 cursor-pointer"
+                onClick={onAdd}
+              >
+                <IconPlus className="h-3 w-3 text-muted-foreground/60" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Add {label.toLowerCase()}</TooltipContent>
+          </Tooltip>
         )}
       </div>
       <CollapsibleContent>

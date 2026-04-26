@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Card, CardContent } from "@kandev/ui/card";
+import { toast } from "sonner";
 import { createBudget } from "@/lib/api/domains/orchestrate-api";
 
 type Props = {
@@ -43,6 +44,9 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         actionOnExceed: action as "notify_only" | "pause_agent" | "block_new_tasks",
       });
       onCreated();
+      toast.success("Budget policy created");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create budget policy");
     } finally {
       setSaving(false);
     }
@@ -54,11 +58,11 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Scope Type">
             <Select value={scopeType} onValueChange={setScopeType}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="workspace">Workspace</SelectItem>
-                <SelectItem value="agent">Agent</SelectItem>
-                <SelectItem value="project">Project</SelectItem>
+                <SelectItem value="workspace" className="cursor-pointer">Workspace</SelectItem>
+                <SelectItem value="agent" className="cursor-pointer">Agent</SelectItem>
+                <SelectItem value="project" className="cursor-pointer">Project</SelectItem>
               </SelectContent>
             </Select>
           </FormField>
@@ -70,10 +74,10 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
           </FormField>
           <FormField label="Period">
             <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="monthly">Monthly</SelectItem>
-                <SelectItem value="total">Total</SelectItem>
+                <SelectItem value="monthly" className="cursor-pointer">Monthly</SelectItem>
+                <SelectItem value="total" className="cursor-pointer">Total</SelectItem>
               </SelectContent>
             </Select>
           </FormField>
@@ -82,11 +86,11 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
           </FormField>
           <FormField label="Action on Exceed">
             <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="notify_only">Notify Only</SelectItem>
-                <SelectItem value="pause_agent">Pause Agent</SelectItem>
-                <SelectItem value="block_new_tasks">Block New Tasks</SelectItem>
+                <SelectItem value="notify_only" className="cursor-pointer">Notify Only</SelectItem>
+                <SelectItem value="pause_agent" className="cursor-pointer">Pause Agent</SelectItem>
+                <SelectItem value="block_new_tasks" className="cursor-pointer">Block New Tasks</SelectItem>
               </SelectContent>
             </Select>
           </FormField>

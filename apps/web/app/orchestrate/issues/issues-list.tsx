@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { listIssues } from "@/lib/api/domains/orchestrate-api";
 import { NewIssueDialog } from "../components/new-issue-dialog";
@@ -68,7 +69,9 @@ export function IssuesList() {
     setIssuesLoading(true);
     listIssues(workspaceId)
       .then((res) => { if (!cancelled) setIssues(res.issues ?? []); })
-      .catch(() => {})
+      .catch((err) => {
+        if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load issues");
+      })
       .finally(() => { if (!cancelled) setIssuesLoading(false); });
     return () => { cancelled = true; };
   }, [workspaceId, setIssues, setIssuesLoading]);

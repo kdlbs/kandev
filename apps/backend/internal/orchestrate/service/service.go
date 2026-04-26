@@ -61,9 +61,19 @@ const defaultWorkspaceName = "default"
 
 // -- Skills --
 
-// CreateSkill creates a new skill.
+// CreateSkill creates a new skill and writes it to the filesystem.
 func (s *Service) CreateSkill(ctx context.Context, skill *models.Skill) error {
-	return s.repo.CreateSkill(ctx, skill)
+	if err := s.repo.CreateSkill(ctx, skill); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && skill.Content != "" {
+		if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, skill.Content); err != nil {
+			s.logger.Warn("failed to write skill to filesystem",
+				zap.String("slug", skill.Slug),
+				zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // GetSkill returns a skill by ID.

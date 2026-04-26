@@ -2,7 +2,9 @@
 
 import { useState, useCallback } from "react";
 import { IconPlus, IconX } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -82,6 +84,9 @@ export function CreateProjectDialog({
       setLeadAgentId("");
       setExecutorType("");
       setDockerImage("");
+      toast.success("Project created");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create project");
     } finally {
       setSubmitting(false);
     }
@@ -147,15 +152,20 @@ export function CreateProjectDialog({
                 onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddRepo())}
                 className="flex-1"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={handleAddRepo}
-                className="cursor-pointer shrink-0"
-              >
-                <IconPlus className="h-4 w-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleAddRepo}
+                    className="cursor-pointer shrink-0"
+                  >
+                    <IconPlus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add repository</TooltipContent>
+              </Tooltip>
             </div>
             {repos.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1">
@@ -185,9 +195,9 @@ export function CreateProjectDialog({
                 <SelectValue placeholder="Select agent (optional)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="none" className="cursor-pointer">None</SelectItem>
                 {agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
+                  <SelectItem key={a.id} value={a.id} className="cursor-pointer">
                     {a.name}
                   </SelectItem>
                 ))}
@@ -202,11 +212,11 @@ export function CreateProjectDialog({
                 <SelectValue placeholder="Inherit from workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">Inherit from workspace</SelectItem>
-                <SelectItem value="local_pc">Local (standalone)</SelectItem>
-                <SelectItem value="local_docker">Local Docker</SelectItem>
-                <SelectItem value="sprites">Sprites (remote sandbox)</SelectItem>
-                <SelectItem value="remote_docker">Remote Docker</SelectItem>
+                <SelectItem value="inherit" className="cursor-pointer">Inherit from workspace</SelectItem>
+                <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
+                <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
+                <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
+                <SelectItem value="remote_docker" className="cursor-pointer">Remote Docker</SelectItem>
               </SelectContent>
             </Select>
             {(executorType === "local_docker" || executorType === "remote_docker") && (

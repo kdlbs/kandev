@@ -8,10 +8,15 @@ import {
   IconEye,
   IconTrash,
   IconBoxMultiple,
+  IconCopy,
+  IconCheck,
+  IconExternalLink,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/orchestrate/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { SkillContent } from "./skill-content";
@@ -124,6 +129,12 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   );
 }
 
+const READ_ONLY_REASONS: Partial<Record<SkillSourceType, string>> = {
+  git: "GitHub-managed skills are read-only",
+  skills_sh: "skills.sh-managed skills are read-only",
+  local_path: "Local path skills are read-only",
+};
+
 function SkillDetailHeader({
   skill,
   readOnly,
@@ -135,6 +146,8 @@ function SkillDetailHeader({
   onEdit?: () => void;
   onDelete: () => void;
 }) {
+  const { copied, copy } = useCopyToClipboard();
+
   return (
     <div className="flex items-start justify-between">
       <div className="flex items-center gap-3">
@@ -149,21 +162,74 @@ function SkillDetailHeader({
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {readOnly && <Badge variant="outline">Read only</Badge>}
+        {readOnly && (
+          <>
+            <Badge variant="outline">Read only</Badge>
+            {READ_ONLY_REASONS[skill.sourceType] && (
+              <span className="text-xs text-muted-foreground">
+                {READ_ONLY_REASONS[skill.sourceType]}
+              </span>
+            )}
+          </>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => copy(skill.slug)}
+              className="h-7 w-7 p-0 cursor-pointer"
+            >
+              {copied ? (
+                <IconCheck className="h-4 w-4 text-green-500" />
+              ) : (
+                <IconCopy className="h-4 w-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? "Copied!" : "Copy slug"}</TooltipContent>
+        </Tooltip>
         {onEdit && (
           <Button variant="ghost" size="sm" onClick={onEdit} className="cursor-pointer">
             Edit
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="text-destructive cursor-pointer"
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              className="h-7 w-7 p-0 text-destructive cursor-pointer"
+            >
+              <IconTrash className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Remove skill</TooltipContent>
+        </Tooltip>
       </div>
+    </div>
+  );
+}
+
+function SourceValue({ skill }: { skill: Skill }) {
+  const isLink = skill.sourceLocator?.startsWith("http");
+  return (
+    <div className="flex items-center gap-1.5">
+      <SourceIcon sourceType={skill.sourceType} />
+      {isLink ? (
+        <a
+          href={skill.sourceLocator}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline cursor-pointer"
+        >
+          {SOURCE_LABELS[skill.sourceType]}
+          <IconExternalLink className="h-3 w-3 inline ml-1" />
+        </a>
+      ) : (
+        <span>{SOURCE_LABELS[skill.sourceType]}</span>
+      )}
     </div>
   );
 }
@@ -172,10 +238,7 @@ function SkillMetadataRow({ skill, readOnly }: { skill: Skill; readOnly: boolean
   return (
     <div className="grid grid-cols-4 gap-4 text-sm">
       <MetadataItem label="SOURCE">
-        <div className="flex items-center gap-1.5">
-          <SourceIcon sourceType={skill.sourceType} />
-          <span>{SOURCE_LABELS[skill.sourceType]}</span>
-        </div>
+        <SourceValue skill={skill} />
       </MetadataItem>
       <MetadataItem label="KEY">
         <span className="font-mono">{skill.slug}</span>

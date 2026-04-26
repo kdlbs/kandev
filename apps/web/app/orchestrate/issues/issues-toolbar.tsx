@@ -11,6 +11,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
   IssueFilterState,
   IssueViewMode,
@@ -90,32 +91,47 @@ export function IssuesToolbar({
         />
       </div>
       <div className="ml-auto flex items-center gap-1">
-        <Button
-          variant={viewMode === "list" ? "secondary" : "ghost"}
-          size="icon-sm"
-          className="cursor-pointer"
-          onClick={() => onViewModeChange("list")}
-        >
-          <IconList className="h-4 w-4" />
-        </Button>
-        <Button
-          variant={viewMode === "board" ? "secondary" : "ghost"}
-          size="icon-sm"
-          className="cursor-pointer"
-          onClick={() => onViewModeChange("board")}
-        >
-          <IconColumns3 className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={viewMode === "list" ? "secondary" : "ghost"}
+              size="icon-sm"
+              className="cursor-pointer"
+              onClick={() => onViewModeChange("list")}
+            >
+              <IconList className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>List view</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={viewMode === "board" ? "secondary" : "ghost"}
+              size="icon-sm"
+              className="cursor-pointer"
+              onClick={() => onViewModeChange("board")}
+            >
+              <IconColumns3 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Board view</TooltipContent>
+        </Tooltip>
         <Separator orientation="vertical" className="h-6 mx-1" />
         {viewMode === "list" && (
-          <Button
-            variant={nestingEnabled ? "secondary" : "ghost"}
-            size="icon-sm"
-            className="cursor-pointer"
-            onClick={onToggleNesting}
-          >
-            <IconListTree className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={nestingEnabled ? "secondary" : "ghost"}
+                size="icon-sm"
+                className="cursor-pointer"
+                onClick={onToggleNesting}
+              >
+                <IconListTree className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Toggle nesting</TooltipContent>
+          </Tooltip>
         )}
         <IssueFilters filters={filters} onFilterChange={onFilterChange} />
         <IssueSort

@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogFooter,
 } from "@kandev/ui/dialog";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
 import { useIssueDraft } from "./new-issue-draft";
@@ -54,6 +55,9 @@ export function NewIssueDialog({
       });
       clearDraft();
       onOpenChange(false);
+      toast.success("Issue created");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create issue");
     } finally {
       setSubmitting(false);
     }

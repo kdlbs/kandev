@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { toast } from "sonner";
 import { listActivity } from "@/lib/api/domains/orchestrate-api";
 import type { ActivityEntry } from "@/lib/state/slices/orchestrate/types";
 import { ActivityRow } from "./activity-row";
@@ -25,7 +26,9 @@ export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     listActivity(workspaceId, filterType)
       .then((res) => setEntries(res.activity ?? []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load activity");
+      });
   }, [workspaceId, filterType]);
 
   return (
@@ -34,12 +37,12 @@ export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
         title="Activity"
         action={
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-[140px] h-8 text-xs">
+            <SelectTrigger className="w-[140px] h-8 text-xs cursor-pointer">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {FILTER_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
+                <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
                   {opt.label}
                 </SelectItem>
               ))}

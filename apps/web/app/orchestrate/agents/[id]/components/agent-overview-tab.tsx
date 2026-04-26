@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentInstance } from "@/lib/api/domains/orchestrate-api";
 import type { AgentInstance, AgentRole } from "@/lib/state/slices/orchestrate/types";
@@ -52,6 +53,9 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         executorPreference: executorType ? { type: executorType } : undefined,
       });
       setDirty(false);
+      toast.success("Agent updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update agent");
     } finally {
       setSaving(false);
     }

@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@kandev/ui/dialog";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 
@@ -47,8 +48,8 @@ export function ConfigSection() {
         const res = await orchestrateApi.previewImport(activeWorkspaceId, parsed);
         setPreview(res.preview);
         setImportDialogOpen(true);
-      } catch {
-        /* ignore parse errors */
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to parse import file");
       }
     },
     [activeWorkspaceId],
@@ -62,8 +63,9 @@ export function ConfigSection() {
       setImportDialogOpen(false);
       setPreview(null);
       setBundle(null);
-    } catch {
-      /* ignore */
+      toast.success("Configuration imported");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to apply import");
     } finally {
       setApplying(false);
     }

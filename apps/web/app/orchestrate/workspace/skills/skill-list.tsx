@@ -11,9 +11,11 @@ import {
   IconCode,
   IconLoader2,
 } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/orchestrate/types";
 
@@ -58,6 +60,9 @@ export function SkillList(props: SkillListProps) {
     try {
       await onImport(importSource.trim());
       setImportSource("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to import skill: ${msg}`);
     } finally {
       setImporting(false);
     }
@@ -114,12 +119,22 @@ function SkillListHeader({
         </Badge>
       </div>
       <div className="flex items-center gap-1">
-        <Button variant="ghost" size="sm" onClick={onRefresh} className="h-7 w-7 p-0 cursor-pointer">
-          <IconRefresh className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onAdd} className="h-7 w-7 p-0 cursor-pointer">
-          <IconPlus className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" onClick={onRefresh} className="h-7 w-7 p-0 cursor-pointer">
+              <IconRefresh className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Refresh skills</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" onClick={onAdd} className="h-7 w-7 p-0 cursor-pointer">
+              <IconPlus className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Create new skill</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

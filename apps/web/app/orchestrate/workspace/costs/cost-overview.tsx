@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconCurrencyDollar, IconRobot, IconFolder, IconCpu } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { getCostSummary, getCostsByAgent, getCostsByProject, getCostsByModel } from "@/lib/api/domains/orchestrate-api";
 import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/orchestrate/types";
@@ -40,7 +41,9 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
         setByProject(projects.breakdown ?? []);
         setByModel(models.breakdown ?? []);
       })
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load cost data");
+      });
   }, [workspaceId, range]);
 
   return (

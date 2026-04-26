@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { IssueDraft } from "./new-issue-draft";
 
 const STATUS_OPTIONS = [
@@ -98,9 +99,14 @@ export function NewIssueBottomBar({ draft, onUpdate }: Props) {
         <IconPaperclip className="h-3.5 w-3.5 mr-1" />
         Upload
       </Button>
-      <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
-        <IconDotsVertical className="h-4 w-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+            <IconDotsVertical className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>More options</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

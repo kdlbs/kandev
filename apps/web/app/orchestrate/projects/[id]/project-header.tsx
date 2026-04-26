@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
+import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/orchestrate-api";
 import { useAppStore } from "@/components/state-provider";
 import type { Project, ProjectStatus } from "@/lib/state/slices/orchestrate/types";
@@ -50,6 +51,9 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
         updateProjectStore(project.id, patch);
       }
       setDirty(false);
+      toast.success("Project saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save project");
     } finally {
       setSaving(false);
     }
@@ -76,7 +80,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           </SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
+              <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
                 {opt.label}
               </SelectItem>
             ))}

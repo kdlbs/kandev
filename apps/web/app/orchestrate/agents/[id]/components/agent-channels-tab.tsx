@@ -26,6 +26,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@kandev/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { toast } from "sonner";
 import type { AgentInstance } from "@/lib/state/slices/orchestrate/types";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 
@@ -59,14 +61,21 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
       if (!cancelled) {
         setChannels((res as { channels?: Channel[] }).channels ?? []);
       }
-    }).catch(() => { /* ignore */ });
+    }).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to load channels");
+    });
     return () => { cancelled = true; };
   }, [agent.id]);
 
   const handleDelete = useCallback(
     async (channelId: string) => {
-      await orchestrateApi.deleteChannel(agent.id, channelId);
-      setChannels((prev) => prev.filter((c) => c.id !== channelId));
+      try {
+        await orchestrateApi.deleteChannel(agent.id, channelId);
+        setChannels((prev) => prev.filter((c) => c.id !== channelId));
+        toast.success("Channel deleted");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to delete channel");
+      }
     },
     [agent.id],
   );
@@ -144,14 +153,19 @@ function ChannelRow({
         </p>
       </div>
       <Badge className={statusColor}>{channel.status}</Badge>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 cursor-pointer"
-        onClick={onDelete}
-      >
-        <IconTrash className="h-4 w-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 cursor-pointer"
+            onClick={onDelete}
+          >
+            <IconTrash className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Delete channel</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -181,8 +195,9 @@ function AddChannelDialog({
         status: "active",
       });
       onCreated((res as { channel: Channel }).channel);
-    } catch {
-      /* ignore */
+      toast.success("Channel added");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add channel");
     } finally {
       setSubmitting(false);
     }
@@ -198,14 +213,14 @@ function AddChannelDialog({
           <div>
             <label className="text-sm font-medium">Platform</label>
             <Select value={platform} onValueChange={setPlatform}>
-              <SelectTrigger className="mt-1">
+              <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="telegram">Telegram</SelectItem>
-                <SelectItem value="slack">Slack</SelectItem>
-                <SelectItem value="discord">Discord</SelectItem>
-                <SelectItem value="webhook">Webhook</SelectItem>
+                <SelectItem value="telegram" className="cursor-pointer">Telegram</SelectItem>
+                <SelectItem value="slack" className="cursor-pointer">Slack</SelectItem>
+                <SelectItem value="discord" className="cursor-pointer">Discord</SelectItem>
+                <SelectItem value="webhook" className="cursor-pointer">Webhook</SelectItem>
               </SelectContent>
             </Select>
           </div>

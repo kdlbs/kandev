@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createAgentInstance } from "@/lib/api/domains/orchestrate-api";
 import type { AgentRole, AgentInstance } from "@/lib/state/slices/orchestrate/types";
@@ -66,6 +67,9 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
       }
       resetForm();
       onOpenChange(false);
+      toast.success("Agent created");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create agent");
     } finally {
       setSubmitting(false);
     }

@@ -3,6 +3,7 @@
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { AgentInstance } from "@/lib/state/slices/orchestrate/types";
 
 type ParticipantRowProps = {
@@ -55,14 +56,19 @@ export function ParticipantRow({
           ))}
         </PopoverContent>
       </Popover>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6 cursor-pointer"
-        onClick={onHide}
-      >
-        <IconX className="h-3 w-3" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 cursor-pointer"
+            onClick={onHide}
+          >
+            <IconX className="h-3 w-3" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Remove {label.toLowerCase()}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

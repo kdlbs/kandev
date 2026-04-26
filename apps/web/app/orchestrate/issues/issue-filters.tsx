@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
   IssueFilterState,
   OrchestrateIssueStatus,
@@ -46,16 +47,21 @@ export function IssueFilters({ filters, onFilterChange }: IssueFiltersProps) {
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={activeCount > 0 ? "secondary" : "ghost"} size="icon-sm" className="cursor-pointer">
-          <IconFilter className="h-4 w-4" />
-          {activeCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">
-              {activeCount}
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant={activeCount > 0 ? "secondary" : "ghost"} size="icon-sm" className="cursor-pointer">
+              <IconFilter className="h-4 w-4" />
+              {activeCount > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">
+                  {activeCount}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Filter</TooltipContent>
+      </Tooltip>
       <PopoverContent className="w-56 p-3" align="end">
         <p className="text-xs font-medium mb-2">Status</p>
         <div className="flex flex-col gap-1.5">

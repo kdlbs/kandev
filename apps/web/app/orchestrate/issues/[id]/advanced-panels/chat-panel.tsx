@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 
 type AdvancedChatPanelProps = {
@@ -40,17 +41,22 @@ export function AdvancedChatPanel({ taskId }: AdvancedChatPanelProps) {
               }
             }}
           />
-          <Button
-            size="icon"
-            className="h-9 w-9 cursor-pointer shrink-0"
-            disabled={!message.trim()}
-            onClick={() => {
-              // TODO: send message via orchestrate API
-              setMessage("");
-            }}
-          >
-            <IconSend className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                className="h-9 w-9 cursor-pointer shrink-0"
+                disabled={!message.trim()}
+                onClick={() => {
+                  // TODO: send message via orchestrate API
+                  setMessage("");
+                }}
+              >
+                <IconSend className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Send message</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

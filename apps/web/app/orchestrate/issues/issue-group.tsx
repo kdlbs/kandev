@@ -3,6 +3,7 @@
 import { IconLayoutRows } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { IssueGroupBy } from "@/lib/state/slices/orchestrate/types";
 
@@ -23,15 +24,20 @@ type IssueGroupProps = {
 export function IssueGroup({ groupBy, onGroupByChange }: IssueGroupProps) {
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant={groupBy !== "none" ? "secondary" : "ghost"}
-          size="icon-sm"
-          className="cursor-pointer"
-        >
-          <IconLayoutRows className="h-4 w-4" />
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant={groupBy !== "none" ? "secondary" : "ghost"}
+              size="icon-sm"
+              className="cursor-pointer"
+            >
+              <IconLayoutRows className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Group by</TooltipContent>
+      </Tooltip>
       <PopoverContent className="w-44 p-2" align="end">
         <p className="text-xs font-medium px-2 mb-1">Group by</p>
         <div className="flex flex-col gap-0.5">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconSearch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Input } from "@kandev/ui/input";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 import type { InboxItem } from "@/lib/state/slices/orchestrate/types";
@@ -69,16 +70,26 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
 
   const handleApprove = useCallback(
     async (id: string) => {
-      await orchestrateApi.decideApproval(id, { status: "approved" });
-      void fetchInbox();
+      try {
+        await orchestrateApi.decideApproval(id, { status: "approved" });
+        void fetchInbox();
+        toast.success("Approved");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to approve");
+      }
     },
     [fetchInbox],
   );
 
   const handleReject = useCallback(
     async (id: string) => {
-      await orchestrateApi.decideApproval(id, { status: "rejected" });
-      void fetchInbox();
+      try {
+        await orchestrateApi.decideApproval(id, { status: "rejected" });
+        void fetchInbox();
+        toast.success("Rejected");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to reject");
+      }
     },
     [fetchInbox],
   );

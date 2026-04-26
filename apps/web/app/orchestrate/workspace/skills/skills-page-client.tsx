@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { IconBoxMultiple } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 import type { Skill } from "@/lib/state/slices/orchestrate/types";
@@ -36,7 +37,11 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
     if (!activeWorkspaceId) return;
     orchestrateApi
       .listSkills(activeWorkspaceId)
-      .then((res) => setSkills(res.skills))
+      .then((res) => {
+        if (res.skills && res.skills.length > 0) {
+          setSkills(res.skills);
+        }
+      })
       .catch(() => {});
   }, [activeWorkspaceId, setSkills]);
 
@@ -45,10 +50,19 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
   const handleCreate = useCallback(
     async (data: Partial<Skill>) => {
       if (!activeWorkspaceId) return;
-      const res = await orchestrateApi.createSkill(activeWorkspaceId, data);
-      addSkill(res.skill);
-      setSelectedId(res.skill.id);
-      setViewMode("view");
+      try {
+        const res = await orchestrateApi.createSkill(activeWorkspaceId, data);
+        addSkill(res.skill);
+        setSelectedId(res.skill.id);
+        setViewMode("view");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("already exists") || msg.includes("duplicate") || msg.includes("unique")) {
+          toast.error("A skill with this name already exists");
+        } else {
+          toast.error("Failed to create skill");
+        }
+      }
     },
     [activeWorkspaceId, addSkill],
   );
@@ -66,10 +80,11 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
       await orchestrateApi.deleteSkill(id);
       removeSkillFromStore(id);
       if (selectedId === id) {
-        setSelectedId(null);
+        const remaining = skills.filter((s) => s.id !== id);
+        setSelectedId(remaining[0]?.id ?? null);
       }
     },
-    [removeSkillFromStore, selectedId],
+    [removeSkillFromStore, selectedId, skills],
   );
 
   const handleImport = useCallback(

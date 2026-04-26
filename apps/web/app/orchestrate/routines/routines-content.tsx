@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import {
   listRoutines,
@@ -49,24 +50,39 @@ export function RoutinesContent() {
 
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
-      await updateRoutine(id, { status: active ? "active" : "paused" } as Record<string, unknown>);
-      await fetchRoutines();
+      try {
+        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<string, unknown>);
+        await fetchRoutines();
+        toast.success(active ? "Routine activated" : "Routine paused");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to update routine");
+      }
     },
     [fetchRoutines],
   );
 
   const handleRunNow = useCallback(
     async (id: string) => {
-      await runRoutine(id);
-      await fetchRuns();
+      try {
+        await runRoutine(id);
+        await fetchRuns();
+        toast.success("Routine started");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to run routine");
+      }
     },
     [fetchRuns],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
-      await deleteRoutine(id);
-      await fetchRoutines();
+      try {
+        await deleteRoutine(id);
+        await fetchRoutines();
+        toast.success("Routine deleted");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to delete routine");
+      }
     },
     [fetchRoutines],
   );
@@ -84,27 +100,32 @@ export function RoutinesContent() {
       timezone: string;
     }) => {
       if (!workspaceId) return;
-      const template = JSON.stringify({ title: data.taskTitle, description: data.taskDescription });
-      const res = await createRoutine(workspaceId, {
-        name: data.name,
-        description: data.description,
-        taskTemplate: JSON.parse(template),
-        assigneeAgentInstanceId: data.assigneeAgentInstanceId,
-        concurrencyPolicy: data.concurrencyPolicy,
-      } as Record<string, unknown>);
-      if (data.triggerKind === "cron" && data.cronExpression && res) {
-        const routineObj = res as unknown as { routine?: { id: string } };
-        const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
-        if (routineId) {
-          await createRoutineTrigger(routineId, {
-            kind: data.triggerKind as "cron",
-            cronExpression: data.cronExpression,
-            timezone: data.timezone,
-          });
+      try {
+        const template = JSON.stringify({ title: data.taskTitle, description: data.taskDescription });
+        const res = await createRoutine(workspaceId, {
+          name: data.name,
+          description: data.description,
+          taskTemplate: JSON.parse(template),
+          assigneeAgentInstanceId: data.assigneeAgentInstanceId,
+          concurrencyPolicy: data.concurrencyPolicy,
+        } as Record<string, unknown>);
+        if (data.triggerKind === "cron" && data.cronExpression && res) {
+          const routineObj = res as unknown as { routine?: { id: string } };
+          const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
+          if (routineId) {
+            await createRoutineTrigger(routineId, {
+              kind: data.triggerKind as "cron",
+              cronExpression: data.cronExpression,
+              timezone: data.timezone,
+            });
+          }
         }
+        setShowCreate(false);
+        await fetchRoutines();
+        toast.success("Routine created");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to create routine");
       }
-      setShowCreate(false);
-      await fetchRoutines();
     },
     [workspaceId, fetchRoutines],
   );

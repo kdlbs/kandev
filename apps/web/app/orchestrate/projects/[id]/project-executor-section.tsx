@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@kandev/ui/select";
 import { IconDeviceFloppy } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/orchestrate-api";
 import { useAppStore } from "@/components/state-provider";
 import type { Project } from "@/lib/state/slices/orchestrate/types";
@@ -52,6 +53,9 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
       await updateProject(project.id, { executorConfig: newConfig });
       updateProjectStore(project.id, { executorConfig: newConfig });
       setDirty(false);
+      toast.success("Executor configuration saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save executor configuration");
     } finally {
       setSaving(false);
     }
@@ -89,11 +93,11 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
               <SelectValue placeholder="Inherit from workspace" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="inherit">Inherit from workspace</SelectItem>
-              <SelectItem value="local_pc">Local (standalone)</SelectItem>
-              <SelectItem value="local_docker">Local Docker</SelectItem>
-              <SelectItem value="sprites">Sprites (remote sandbox)</SelectItem>
-              <SelectItem value="remote_docker">Remote Docker</SelectItem>
+              <SelectItem value="inherit" className="cursor-pointer">Inherit from workspace</SelectItem>
+              <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
+              <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
+              <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
+              <SelectItem value="remote_docker" className="cursor-pointer">Remote Docker</SelectItem>
             </SelectContent>
           </Select>
         </div>
