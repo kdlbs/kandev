@@ -51,8 +51,7 @@ async function seedTaskAndWaitForIdle(
   // signal that the agent has produced output.
   await expect
     .poll(
-      async () =>
-        (await session.idleInput().isVisible()) || (await session.planPanel.isVisible()),
+      async () => (await session.idleInput().isVisible()) || (await session.planPanel.isVisible()),
       { timeout: 30_000, message: "agent output not visible" },
     )
     .toBe(true);
@@ -61,10 +60,23 @@ async function seedTaskAndWaitForIdle(
 }
 
 /** Ensure the plan panel is visible. When an agent write auto-opens it,
- * the toggle is unnecessary (and would close it). */
+ * the toggle is unnecessary (and would close it). After a page reload the
+ * panel may not auto-open, in which case togglePlanMode adds it; we poll
+ * a few times because hydration can race the click. */
 async function openPlanPanel(session: SessionPage) {
-  if (!(await session.planPanel.isVisible())) {
-    await session.togglePlanMode();
+  if (await session.planPanel.isVisible()) return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await session.togglePlanMode();
+    } catch {
+      // toggle button not yet ready — retry after a short wait
+    }
+    try {
+      await session.planPanel.waitFor({ state: "visible", timeout: 5_000 });
+      return;
+    } catch {
+      // Not visible yet; loop and try toggling again.
+    }
   }
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
 }
@@ -135,9 +147,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
       script,
     );
     await openPlanPanel(session);
-    await expect(
-      session.planPanel.getByText("Initial plan", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Initial plan", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await session.openRewind();
     await expectRevisionCount(session, 1);
@@ -163,9 +175,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
       script,
     );
     await openPlanPanel(session);
-    await expect(
-      session.planPanel.getByText("Draft v2", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Draft v2", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await session.openRewind();
     await expectRevisionCount(session, 1);
@@ -190,17 +202,15 @@ test.describe("Plan checkpointing — rewind UI", () => {
       script,
     );
     await openPlanPanel(session);
-    await expect(
-      session.planPanel.getByText("Second pass", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Second pass", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await session.openRewind();
     await expectRevisionCount(session, 2);
     // Newest first: v2 has current badge; v1 has revert button instead.
     await expect(session.revisionRow(2).getByTestId("plan-revision-current-badge")).toBeVisible();
-    await expect(
-      session.revisionRow(1).getByTestId("plan-revision-current-badge"),
-    ).toHaveCount(0);
+    await expect(session.revisionRow(1).getByTestId("plan-revision-current-badge")).toHaveCount(0);
     await expect(session.revisionRow(1).getByTestId("plan-revision-revert-button")).toBeVisible();
   });
 
@@ -223,9 +233,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
       script,
     );
     await openPlanPanel(session);
-    await expect(
-      session.planPanel.getByText("Agent draft B", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Agent draft B", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await session.openRewind();
     await expectRevisionCount(session, 2);
@@ -234,9 +244,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.revertToRevision(1);
 
     // HEAD content must now be the old v1 content.
-    await expect(
-      session.planPanel.getByText("Agent draft A", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Agent draft A", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Reopen popover; expect 3 revisions with restore marker on v3.
     await session.openRewind();
@@ -296,9 +306,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
       script,
     );
     await openPlanPanel(session);
-    await expect(
-      session.planPanel.getByText("Agent wrote this", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Agent wrote this", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // User types into the editor; autosave fires after 1500ms.
     const editor = session.planEditor();
@@ -312,10 +322,14 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.openRewind();
     await expectRevisionCount(session, 2);
     // v2 (newest) is the user write — UI displays "You" for any user-authored
-    // revision regardless of stored author_name. v1 stays as the agent label.
+    // revision regardless of stored author_name. v1 stays as the agent label,
+    // resolved from the active session's profile snapshot — exact value varies
+    // per E2E setup ("Claude", "mock-default", …) so we just ensure it's a
+    // non-empty agent name (i.e., not the user sentinel).
     const v2Author = session.revisionRow(2).getByTestId("plan-revision-author");
     const v1Author = session.revisionRow(1).getByTestId("plan-revision-author");
-    await expect(v1Author).toHaveText("Agent");
+    await expect(v1Author).not.toHaveText("You");
+    await expect(v1Author).not.toBeEmpty();
     await expect(v2Author).toHaveText("You");
   });
 
@@ -352,9 +366,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.revertConfirmOk().click();
     await expect(session.revertConfirmDialog()).toBeHidden({ timeout: 5_000 });
     // HEAD is now the older content again.
-    await expect(
-      session.planPanel.getByText("Older draft", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel.getByText("Older draft", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await session.openRewind();
     await expectRevisionCount(session, 3);
@@ -418,10 +432,7 @@ test.describe("Plan checkpointing — rewind UI", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const script = planWriteScript([
-      { content: "One", delayMsAfter: 2500 },
-      { content: "Two" },
-    ]);
+    const script = planWriteScript([{ content: "One", delayMsAfter: 2500 }, { content: "Two" }]);
     const { session, taskId } = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,

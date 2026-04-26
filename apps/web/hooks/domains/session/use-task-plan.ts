@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   getTaskPlan,
   createTaskPlan,
@@ -138,10 +138,10 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
   };
 }
 
-const EMPTY_PAIR: readonly [string | null, string | null] = Object.freeze([null, null]) as readonly [
-  string | null,
-  string | null,
-];
+const EMPTY_PAIR: readonly [string | null, string | null] = Object.freeze([
+  null,
+  null,
+]) as readonly [string | null, string | null];
 
 function useTaskPlanRevisions(
   taskId: string | null,
@@ -158,7 +158,7 @@ function useTaskPlanRevisions(
     taskId ? (state.taskPlans.revisionsLoadedByTaskId[taskId] ?? false) : false,
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const revisionContentCache = useAppStore((state) => state.taskPlans.revisionContentCache);
+  const storeApi = useAppStoreApi();
   const setPlanRevisions = useAppStore((state) => state.setPlanRevisions);
   const setPlanRevisionsLoading = useAppStore((state) => state.setPlanRevisionsLoading);
   const cachePlanRevisionContent = useAppStore((state) => state.cachePlanRevisionContent);
@@ -186,14 +186,19 @@ function useTaskPlanRevisions(
 
   const loadRevisionContent = useCallback(
     async (revisionId: string): Promise<string> => {
-      const cached = revisionContentCache[revisionId];
+      // Read the cache lazily via the store API inside the callback so this
+      // function's identity stays stable across cache updates. Selecting the
+      // cache object as a hook input would re-create the callback whenever
+      // any task's content was cached, which retriggers the dialogs'
+      // content-fetch effects (cache short-circuits, but the work is wasted).
+      const cached = storeApi.getState().taskPlans.revisionContentCache[revisionId];
       if (cached !== undefined) return cached;
       const rev = await getPlanRevision(revisionId);
       const content = rev.content ?? "";
       cachePlanRevisionContent(revisionId, content);
       return content;
     },
-    [revisionContentCache, cachePlanRevisionContent],
+    [storeApi, cachePlanRevisionContent],
   );
 
   const revertTo = useCallback(

@@ -62,6 +62,12 @@ export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers
       store.getState().markTaskPlanSeen(task_id);
     },
     "task.plan.revision.created": (message) => handleRevisionPush(store, message),
-    "task.plan.reverted": (message) => handleRevisionPush(store, message),
+    // `task.plan.reverted` is published alongside `task.plan.revision.created`
+    // for the same row by the backend RevertPlan path. Re-running the upsert
+    // on this event would be a no-op against the list (same id, same data)
+    // but would needlessly evict the revisionContentCache entry and trigger
+    // an extra Zustand update. Treat this event as a notification-only signal
+    // — register no-op so the dispatcher doesn't warn about an unhandled type.
+    "task.plan.reverted": () => {},
   };
 }

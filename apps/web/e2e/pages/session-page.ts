@@ -804,9 +804,7 @@ export class SessionPage {
   diffSplitCells(kind?: "add" | "remove" | "context" | "empty"): Locator {
     const root = this.diffDialog();
     if (!kind) return root.getByTestId("plan-revision-diff-split-cell");
-    return root.locator(
-      `[data-testid="plan-revision-diff-split-cell"][data-line-kind="${kind}"]`,
-    );
+    return root.locator(`[data-testid="plan-revision-diff-split-cell"][data-line-kind="${kind}"]`);
   }
 
   diffModeToggle(mode: "unified" | "split"): Locator {

@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
-import {
-  IconHistory,
-  IconUser,
-  IconRestore,
-  IconLoader2,
-} from "@tabler/icons-react";
+import { IconHistory, IconUser, IconRestore, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -216,9 +211,7 @@ function RevisionsDialogStack({
     if (!previewRevision) return null;
     // revisions are sorted newest-first by revision_number; previous = the
     // first entry whose revision_number is strictly less than the previewed one.
-    return (
-      revisions.find((r) => r.revision_number < previewRevision.revision_number) ?? null
-    );
+    return revisions.find((r) => r.revision_number < previewRevision.revision_number) ?? null;
   }, [revisions, previewRevision]);
 
   const handleRevert = useCallback(
@@ -371,13 +364,8 @@ function RevisionAuthor({
   if (revision.author_kind === "agent") {
     return (
       <>
-        {agentName ? (
-          <AgentLogo agentName={agentName} size={14} className="shrink-0" />
-        ) : null}
-        <span
-          className="text-xs text-foreground truncate"
-          data-testid="plan-revision-author"
-        >
+        {agentName ? <AgentLogo agentName={agentName} size={14} className="shrink-0" /> : null}
+        <span className="text-xs text-foreground truncate" data-testid="plan-revision-author">
           {revision.author_name}
         </span>
       </>
@@ -386,10 +374,7 @@ function RevisionAuthor({
   return (
     <>
       <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      <span
-        className="text-xs text-foreground truncate"
-        data-testid="plan-revision-author"
-      >
+      <span className="text-xs text-foreground truncate" data-testid="plan-revision-author">
         {USER_DISPLAY_NAME}
       </span>
     </>
@@ -448,10 +433,7 @@ function RevisionRow({
             </Badge>
           )}
         </div>
-        <div
-          className="text-[11px] text-muted-foreground mt-1"
-          data-testid="plan-revision-time"
-        >
+        <div className="text-[11px] text-muted-foreground mt-1" data-testid="plan-revision-time">
           {timestamp}
         </div>
         {revision.revert_of_revision_id && (
@@ -506,8 +488,8 @@ function RevertConfirmDialog({
         <DialogHeader>
           <DialogTitle>Restore to version {target?.revision_number}?</DialogTitle>
           <DialogDescription>
-            This creates a new version with v{target?.revision_number}&#39;s content.
-            Nothing is lost; the current version stays in history.
+            This creates a new version with v{target?.revision_number}&#39;s content. Nothing is
+            lost; the current version stays in history.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

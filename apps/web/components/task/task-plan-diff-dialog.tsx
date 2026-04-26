@@ -14,12 +14,7 @@ import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import type { TaskPlanRevision } from "@/lib/types/http";
-import {
-  lineDiff,
-  diffSummary,
-  type DiffLine,
-  type DiffLineKind,
-} from "./task-plan-diff";
+import { lineDiff, diffSummary, type DiffLine, type DiffLineKind } from "./task-plan-diff";
 
 type Props = {
   /** Revision pair in arbitrary user-pick order; the dialog re-orders them by
@@ -76,7 +71,13 @@ export function PlanRevisionDiffDialog({
             Line-level diff between the two selected versions.
           </DialogDescription>
         </DialogHeader>
-        <DiffBody before={before} after={after} loadContent={loadContent} mode={mode} setMode={setMode} />
+        <DiffBody
+          before={before}
+          after={after}
+          loadContent={loadContent}
+          mode={mode}
+          setMode={setMode}
+        />
         <DialogFooter>
           <Button
             variant="outline"
@@ -191,7 +192,8 @@ function DiffBodyInner({
 }) {
   if (error) return <div className="p-3 text-destructive">{error}</div>;
   if (lines === null) return <DiffLoading />;
-  if (sameRevision) return <DiffMessage>These are the same version; nothing to compare.</DiffMessage>;
+  if (sameRevision)
+    return <DiffMessage>These are the same version; nothing to compare.</DiffMessage>;
   if (lines.length === 0) return <DiffMessage>(both versions are empty)</DiffMessage>;
   if (summary && summary.added === 0 && summary.removed === 0) {
     return <DiffMessage>No textual changes between these versions.</DiffMessage>;
@@ -244,7 +246,10 @@ function SplitDiff({
   beforeContent: string;
   afterContent: string;
 }) {
-  const rows = useMemo(() => alignSplit(beforeContent, afterContent), [beforeContent, afterContent]);
+  const rows = useMemo(
+    () => alignSplit(beforeContent, afterContent),
+    [beforeContent, afterContent],
+  );
   const beforeRef = useRef<HTMLDivElement>(null);
   const afterRef = useRef<HTMLDivElement>(null);
   // Re-entrancy guard: when we set the partner pane's scrollLeft, that fires
@@ -280,18 +285,8 @@ function SplitDiff({
       className="grid grid-cols-2 divide-x divide-border min-w-0"
       data-testid="plan-revision-diff-split"
     >
-      <SplitPane
-        ref={beforeRef}
-        rows={rows}
-        side="before"
-        testIdSuffix="before"
-      />
-      <SplitPane
-        ref={afterRef}
-        rows={rows}
-        side="after"
-        testIdSuffix="after"
-      />
+      <SplitPane ref={beforeRef} rows={rows} side="before" testIdSuffix="before" />
+      <SplitPane ref={afterRef} rows={rows} side="after" testIdSuffix="after" />
     </div>
   );
 }
@@ -324,13 +319,7 @@ const SplitPane = ({
   </div>
 );
 
-function SplitCell({
-  side,
-  line,
-}: {
-  side: "before" | "after";
-  line: DiffLine | null;
-}) {
+function SplitCell({ side, line }: { side: "before" | "after"; line: DiffLine | null }) {
   // Empty cells (a removal on the after side, or an addition on the before
   // side) get a subtle striped background so the row alignment is visible.
   if (!line) {
@@ -345,10 +334,7 @@ function SplitCell({
   }
   return (
     <div
-      className={cn(
-        "flex gap-2 px-3 py-0.5 leading-relaxed whitespace-pre",
-        KIND_CLASS[line.kind],
-      )}
+      className={cn("flex gap-2 px-3 py-0.5 leading-relaxed whitespace-pre", KIND_CLASS[line.kind])}
       data-testid="plan-revision-diff-split-cell"
       data-line-kind={line.kind}
       data-side={side}
