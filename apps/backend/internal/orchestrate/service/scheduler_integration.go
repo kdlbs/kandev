@@ -105,6 +105,12 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
+	// Inject desired skills into the agent's config directory (best-effort).
+	if err := si.svc.InjectSkillsForAgent(ctx, agentInstanceID, defaultWorkspaceName); err != nil {
+		si.logger.Warn("failed to inject skills",
+			zap.String("wakeup_id", wakeupID), zap.Error(err))
+	}
+
 	// Resolve executor config.
 	execCfg, err := si.resolveExecutorForWakeup(ctx, agent, wakeup.Payload)
 	if err != nil {

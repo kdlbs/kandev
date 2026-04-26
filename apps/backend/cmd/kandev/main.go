@@ -450,6 +450,15 @@ func startGatewayAndServe(
 			log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
 		}
 
+		// Clean dangling skill symlinks on startup + register shutdown cleanup
+		orchestrateservice.CleanDanglingSymlinks(configBasePath)
+		log.Info("Cleaned dangling skill symlinks")
+		addCleanup(func() error {
+			orchestrateservice.CleanupOwnedSymlinks(configBasePath)
+			log.Info("Cleaned owned skill symlinks on shutdown")
+			return nil
+		})
+
 		// Wire ConfigLoader + FileWriter into the orchestrate service so
 		// list/get handlers read from the filesystem-backed config.
 		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)

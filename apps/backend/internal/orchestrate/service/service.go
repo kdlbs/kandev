@@ -18,12 +18,13 @@ import (
 
 // Service provides orchestrate business logic.
 type Service struct {
-	repo      *sqlite.Repository
-	cfgLoader *configloader.ConfigLoader
-	cfgWriter *configloader.FileWriter
-	logger    *logger.Logger
-	eb        bus.EventBus
-	relay     *ChannelRelay
+	repo              *sqlite.Repository
+	cfgLoader         *configloader.ConfigLoader
+	cfgWriter         *configloader.FileWriter
+	logger            *logger.Logger
+	eb                bus.EventBus
+	relay             *ChannelRelay
+	agentTypeResolver AgentTypeResolver
 }
 
 // NewService creates a new orchestrate service.
