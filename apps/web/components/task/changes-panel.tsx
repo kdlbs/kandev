@@ -43,6 +43,8 @@ type ChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
+  repositoryName?: string;
 };
 
 function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
@@ -53,6 +55,7 @@ function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     plus: file.additions,
     minus: file.deletions,
     oldPath: file.old_path,
+    repositoryName: file.repository_name,
   }));
 }
 

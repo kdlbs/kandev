@@ -34,7 +34,31 @@ type ChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
+  repositoryName?: string;
 };
+
+/**
+ * Groups changed files by repository name, preserving original order within
+ * each group. Returns an empty-name leading group when files lack a
+ * repository name (single-repo workspaces) so the renderer can skip the
+ * per-repo header in that case.
+ */
+function groupChangedFilesByRepository(
+  files: ChangedFile[],
+): Array<{ repositoryName: string; files: ChangedFile[] }> {
+  const order: string[] = [];
+  const buckets = new Map<string, ChangedFile[]>();
+  for (const file of files) {
+    const name = file.repositoryName ?? "";
+    if (!buckets.has(name)) {
+      buckets.set(name, []);
+      order.push(name);
+    }
+    buckets.get(name)!.push(file);
+  }
+  return order.map((name) => ({ repositoryName: name, files: buckets.get(name)! }));
+}
 
 // --- Timeline section dot colors ---
 const DOT_COLORS = {
@@ -297,6 +321,80 @@ type FileListSectionProps = {
   onBulkDiscard?: (paths: string[]) => void;
 };
 
+/**
+ * Renders the body of a file-list section. For multi-repo workspaces it
+ * groups files by repository under per-repo subheaders; single-repo
+ * workspaces fall back to a flat list (no header) so the existing UI is
+ * unchanged.
+ */
+function FileListBody(props: {
+  variant: "unstaged" | "staged";
+  files: ChangedFile[];
+  pendingStageFiles: Set<string>;
+  multiSelect: ReturnType<typeof useMultiSelect>;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onOpenDiff: (path: string) => void;
+  onEditFile: (path: string) => void;
+  onStage: (path: string) => void;
+  onUnstage: (path: string) => void;
+  onDiscard: (path: string) => void;
+}) {
+  const { variant, files, pendingStageFiles, multiSelect } = props;
+  const groups = useMemo(() => groupChangedFilesByRepository(files), [files]);
+  const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
+
+  const renderRow = (file: ChangedFile) => (
+    <FileRow
+      key={`${file.repositoryName ?? ""}:${file.path}`}
+      file={file}
+      isPending={pendingStageFiles.has(file.path)}
+      isSelected={multiSelect.isSelected(file.path)}
+      onSelect={multiSelect.handleClick}
+      onOpenDiff={props.onOpenDiff}
+      onStage={props.onStage}
+      onUnstage={props.onUnstage}
+      onDiscard={props.onDiscard}
+      onEditFile={props.onEditFile}
+    />
+  );
+
+  return (
+    <div>
+      <ul
+        data-testid={`${variant}-file-list`}
+        className="space-y-0.5"
+        tabIndex={-1}
+        onKeyDown={props.onKeyDown}
+      >
+        {groups.map((group) =>
+          showRepoHeaders ? (
+            <li
+              key={group.repositoryName || "__no_repo__"}
+              data-testid="changes-repo-group"
+              data-repository-name={group.repositoryName || ""}
+            >
+              <div
+                className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide"
+                data-testid="changes-repo-header"
+              >
+                <span className="truncate">{group.repositoryName || "Other"}</span>
+                <span className="text-muted-foreground/50 normal-case tracking-normal">
+                  {group.files.length}
+                </span>
+              </div>
+              <ul className="space-y-0.5">{group.files.map(renderRow)}</ul>
+            </li>
+          ) : (
+            // Single-repo flat list: render rows inline so the DOM shape stays
+            // identical to the pre-multi-repo behavior.
+            group.files.map(renderRow)
+          ),
+        )}
+      </ul>
+    </div>
+  );
+}
+
 export function FileListSection(props: FileListSectionProps) {
   const {
     variant,
@@ -332,29 +430,18 @@ export function FileListSection(props: FileListSectionProps) {
       data-testid={`${variant}-files-section`}
     >
       {files.length > 0 && (
-        <div>
-          <ul
-            data-testid={`${variant}-file-list`}
-            className="space-y-0.5"
-            tabIndex={-1}
-            onKeyDown={handleKeyDown}
-          >
-            {files.map((file) => (
-              <FileRow
-                key={file.path}
-                file={file}
-                isPending={pendingStageFiles.has(file.path)}
-                isSelected={multiSelect.isSelected(file.path)}
-                onSelect={multiSelect.handleClick}
-                onOpenDiff={onOpenDiff}
-                onStage={onStage}
-                onUnstage={onUnstage}
-                onDiscard={onDiscard}
-                onEditFile={onEditFile}
-              />
-            ))}
-          </ul>
-        </div>
+        <FileListBody
+          variant={variant}
+          files={files}
+          pendingStageFiles={pendingStageFiles}
+          multiSelect={multiSelect}
+          onKeyDown={handleKeyDown}
+          onOpenDiff={onOpenDiff}
+          onStage={onStage}
+          onUnstage={onUnstage}
+          onDiscard={onDiscard}
+          onEditFile={onEditFile}
+        />
       )}
       {files.length > 0 && (
         <div className="mt-1.5 flex items-center gap-1.5">

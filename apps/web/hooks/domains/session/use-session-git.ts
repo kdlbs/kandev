@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useSessionGitStatus } from "./use-session-git-status";
+import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
@@ -72,18 +72,44 @@ export type SessionGit = {
   ) => Promise<PRCreateResult>;
 };
 
+/**
+ * Builds the SessionGit's flat file list. For multi-repo workspaces it
+ * stamps each FileInfo with its repository_name so consumers can group;
+ * for single-repo it returns the legacy single-status files unchanged.
+ */
+function aggregateFilesAcrossRepos(
+  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
+  gitStatus: ReturnType<typeof useSessionGitStatus>,
+): FileInfo[] {
+  if (statusByRepo.length > 0) {
+    const out: FileInfo[] = [];
+    for (const { repository_name, status } of statusByRepo) {
+      if (!status?.files) continue;
+      for (const f of Object.values(status.files)) {
+        out.push(repository_name ? { ...f, repository_name } : f);
+      }
+    }
+    return out;
+  }
+  return gitStatus?.files ? Object.values(gitStatus.files) : [];
+}
+
 export function useSessionGit(sessionId: string | null | undefined): SessionGit {
   const sid = sessionId ?? null;
   const gitStatus = useSessionGitStatus(sid);
+  const statusByRepo = useSessionGitStatusByRepo(sid);
   const { commits, loading: commitsLoading } = useSessionCommits(sid);
   const { diff: cumulativeDiff } = useCumulativeDiff(sid);
   const gitOps = useGitOperations(sid);
 
   const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
 
+  // Multi-repo: aggregate files from every repo's per-repo status, stamping
+  // each FileInfo with its repository_name so downstream UI can group them.
+  // Single-repo (or repo-less) sessions fall back to the legacy single status.
   const allFiles = useMemo<FileInfo[]>(
-    () => (gitStatus?.files ? Object.values(gitStatus.files) : []),
-    [gitStatus],
+    () => aggregateFilesAcrossRepos(statusByRepo, gitStatus),
+    [statusByRepo, gitStatus],
   );
   const unstagedFiles = useMemo(() => allFiles.filter((f) => !f.staged), [allFiles]);
   const stagedFiles = useMemo(() => allFiles.filter((f) => f.staged), [allFiles]);
