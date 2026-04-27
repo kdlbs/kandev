@@ -272,6 +272,78 @@ export type DashboardData = {
   recent_activity: ActivityEntry[];
 };
 
+// --- Meta types (from backend /api/v1/orchestrate/meta) ---
+
+export type StatusMeta = {
+  id: string;
+  label: string;
+  order: number;
+  color: string;
+};
+
+export type PriorityMeta = {
+  id: string;
+  label: string;
+  order: number;
+  color: string;
+  value: number;
+};
+
+export type RoleMeta = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type ExecutorTypeMeta = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type SkillSourceTypeMeta = {
+  id: string;
+  label: string;
+  readOnly: boolean;
+  readOnlyReason?: string;
+};
+
+export type ProjectStatusMeta = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type AgentStatusMeta = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type RoutineRunStatusMeta = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type InboxItemTypeMeta = {
+  id: string;
+  label: string;
+  icon: string;
+};
+
+export type OrchestrateMeta = {
+  statuses: StatusMeta[];
+  priorities: PriorityMeta[];
+  roles: RoleMeta[];
+  executorTypes: ExecutorTypeMeta[];
+  skillSourceTypes: SkillSourceTypeMeta[];
+  projectStatuses: ProjectStatusMeta[];
+  agentStatuses: AgentStatusMeta[];
+  routineRunStatuses: RoutineRunStatusMeta[];
+  inboxItemTypes: InboxItemTypeMeta[];
+};
+
 // --- Slice state & actions ---
 
 export type OrchestrateSliceState = {
@@ -289,6 +361,7 @@ export type OrchestrateSliceState = {
     wakeups: WakeupEntry[];
     dashboard: DashboardData | null;
     issues: IssuesState;
+    meta: OrchestrateMeta | null;
     isLoading: boolean;
   };
 };
@@ -323,6 +396,7 @@ export type OrchestrateSliceActions = {
   setIssueGroupBy: (groupBy: IssueGroupBy) => void;
   toggleNesting: () => void;
   setIssuesLoading: (loading: boolean) => void;
+  setMeta: (meta: OrchestrateMeta | null) => void;
   setOrchestrateLoading: (loading: boolean) => void;
 };
 

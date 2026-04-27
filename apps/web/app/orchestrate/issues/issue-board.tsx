@@ -2,13 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "@kandev/ui/scroll-area";
+import { useAppStore } from "@/components/state-provider";
 import type {
   OrchestrateIssue,
   OrchestrateIssueStatus,
 } from "@/lib/state/slices/orchestrate/types";
 import { StatusIcon } from "./status-icon";
 
-const BOARD_COLUMNS: { status: OrchestrateIssueStatus; label: string }[] = [
+const FALLBACK_COLUMNS: { status: OrchestrateIssueStatus; label: string }[] = [
   { status: "backlog", label: "Backlog" },
   { status: "todo", label: "Todo" },
   { status: "in_progress", label: "In Progress" },
@@ -70,8 +71,13 @@ function BoardColumn({
 }
 
 export function IssueBoard({ issues }: IssueBoardProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const columns = meta
+    ? meta.statuses.map((s) => ({ status: s.id as OrchestrateIssueStatus, label: s.label }))
+    : FALLBACK_COLUMNS;
+
   const grouped = new Map<OrchestrateIssueStatus, OrchestrateIssue[]>();
-  for (const col of BOARD_COLUMNS) {
+  for (const col of columns) {
     grouped.set(col.status, []);
   }
   for (const issue of issues) {
@@ -81,7 +87,7 @@ export function IssueBoard({ issues }: IssueBoardProps) {
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-4">
-      {BOARD_COLUMNS.map((col) => (
+      {columns.map((col) => (
         <BoardColumn
           key={col.status}
           label={col.label}

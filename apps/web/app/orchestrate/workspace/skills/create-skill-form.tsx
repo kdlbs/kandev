@@ -5,7 +5,14 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { useAppStore } from "@/components/state-provider";
 import type { SkillSourceType } from "@/lib/state/slices/orchestrate/types";
+
+const FALLBACK_SOURCE_TYPES = [
+  { id: "inline", label: "Inline (edit in browser)" },
+  { id: "local_path", label: "Local Path" },
+  { id: "git", label: "Git Repository" },
+];
 
 type CreateSkillFormProps = {
   onCreate: (data: {
@@ -19,6 +26,14 @@ type CreateSkillFormProps = {
 };
 
 export function CreateSkillForm({ onCreate, onCancel }: CreateSkillFormProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  // Only show creatable (non-read-only) source types, plus exclude skills_sh from creation
+  const sourceTypes = meta
+    ? meta.skillSourceTypes
+        .filter((s) => !s.readOnly)
+        .map((s) => ({ id: s.id, label: s.label }))
+    : FALLBACK_SOURCE_TYPES;
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [sourceType, setSourceType] = useState<SkillSourceType>("inline");
@@ -61,9 +76,11 @@ export function CreateSkillForm({ onCreate, onCancel }: CreateSkillFormProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="inline">Inline (edit in browser)</SelectItem>
-            <SelectItem value="local_path">Local Path</SelectItem>
-            <SelectItem value="git">Git Repository</SelectItem>
+            {sourceTypes.map((st) => (
+              <SelectItem key={st.id} value={st.id}>
+                {st.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>

@@ -56,11 +56,13 @@ function RoleAndReports({
   role,
   reportsTo,
   agents,
+  roles,
   onChange,
 }: {
   role: AgentRole;
   reportsTo: string;
   agents: AgentInstance[];
+  roles: Array<{ id: string; label: string }>;
   onChange: (patch: Partial<FormState>) => void;
 }) {
   return (
@@ -72,18 +74,11 @@ function RoleAndReports({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ceo" className="cursor-pointer">
-              CEO
-            </SelectItem>
-            <SelectItem value="worker" className="cursor-pointer">
-              Worker
-            </SelectItem>
-            <SelectItem value="specialist" className="cursor-pointer">
-              Specialist
-            </SelectItem>
-            <SelectItem value="assistant" className="cursor-pointer">
-              Assistant
-            </SelectItem>
+            {roles.map((r) => (
+              <SelectItem key={r.id} value={r.id} className="cursor-pointer">
+                {r.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground mt-1">
@@ -160,9 +155,11 @@ function BudgetAndConcurrency({
 
 function ExecutorPreferenceField({
   value,
+  executorTypes,
   onChange,
 }: {
   value: string;
+  executorTypes: Array<{ id: string; label: string }>;
   onChange: (v: string) => void;
 }) {
   return (
@@ -179,15 +176,11 @@ function ExecutorPreferenceField({
           <SelectItem value="__inherit__" className="cursor-pointer">
             Inherit
           </SelectItem>
-          <SelectItem value="local_pc" className="cursor-pointer">
-            Local (standalone)
-          </SelectItem>
-          <SelectItem value="local_docker" className="cursor-pointer">
-            Local Docker
-          </SelectItem>
-          <SelectItem value="sprites" className="cursor-pointer">
-            Sprites (remote sandbox)
-          </SelectItem>
+          {executorTypes.map((et) => (
+            <SelectItem key={et.id} value={et.id} className="cursor-pointer">
+              {et.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground mt-1">
@@ -197,10 +190,28 @@ function ExecutorPreferenceField({
   );
 }
 
+const FALLBACK_ROLES = [
+  { id: "ceo", label: "CEO" },
+  { id: "worker", label: "Worker" },
+  { id: "specialist", label: "Specialist" },
+  { id: "assistant", label: "Assistant" },
+];
+
+const FALLBACK_EXECUTOR_TYPES = [
+  { id: "local_pc", label: "Local (standalone)" },
+  { id: "local_docker", label: "Local Docker" },
+  { id: "sprites", label: "Sprites (remote sandbox)" },
+];
+
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
+  const meta = useAppStore((s) => s.orchestrate.meta);
   const addAgentInstance = useAppStore((s) => s.addAgentInstance);
+
+  const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
+  const executorTypes =
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
 
   const [state, setState] = useState<FormState>(INITIAL_STATE);
   const [submitting, setSubmitting] = useState(false);
@@ -247,6 +258,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
             role={state.role}
             reportsTo={state.reportsTo}
             agents={agents}
+            roles={roles}
             onChange={handleChange}
           />
           <BudgetAndConcurrency
@@ -256,6 +268,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
           />
           <ExecutorPreferenceField
             value={state.executorPref}
+            executorTypes={executorTypes}
             onChange={(v) => handleChange({ executorPref: v })}
           />
         </div>

@@ -51,6 +51,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 		"orchestrate_channels",
 		"task_blockers",
 		"task_comments",
+		"orchestrate_onboarding",
 	}
 
 	for _, table := range expectedTables {

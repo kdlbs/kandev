@@ -365,6 +365,34 @@ type WakeupListResponse struct {
 	Wakeups []*models.WakeupRequest `json:"wakeups"`
 }
 
+// -- Onboarding --
+
+// OnboardingStateResponse is the response for GET /onboarding-state.
+type OnboardingStateResponse struct {
+	Completed   bool   `json:"completed"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	CEOAgentID  string `json:"ceoAgentId,omitempty"`
+}
+
+// OnboardingCompleteRequest is the request body for POST /onboarding/complete.
+type OnboardingCompleteRequest struct {
+	WorkspaceName      string `json:"workspaceName"`
+	TaskPrefix         string `json:"taskPrefix"`
+	AgentName          string `json:"agentName"`
+	AgentProfileID     string `json:"agentProfileId"`
+	ExecutorPreference string `json:"executorPreference"`
+	TaskTitle          string `json:"taskTitle,omitempty"`
+	TaskDescription    string `json:"taskDescription,omitempty"`
+}
+
+// OnboardingCompleteResponse is the response for POST /onboarding/complete.
+type OnboardingCompleteResponse struct {
+	WorkspaceID string `json:"workspaceId"`
+	AgentID     string `json:"agentId"`
+	ProjectID   string `json:"projectId,omitempty"`
+	TaskID      string `json:"taskId,omitempty"`
+}
+
 // -- Git --
 
 // GitCloneRequest is the request body for cloning a workspace from a git repo.

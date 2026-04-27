@@ -5,16 +5,17 @@ import { IconGitBranch } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import { Progress } from "@kandev/ui/progress";
+import { useAppStore } from "@/components/state-provider";
 import type { Project } from "@/lib/state/slices/orchestrate/types";
 
-const statusBadgeClasses: Record<string, string> = {
+const FALLBACK_BADGE_CLASSES: Record<string, string> = {
   active: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
   completed: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
   on_hold: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300",
   archived: "bg-neutral-100 text-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-300",
 };
 
-const statusLabels: Record<string, string> = {
+const FALLBACK_LABELS: Record<string, string> = {
   active: "Active",
   completed: "Completed",
   on_hold: "On Hold",
@@ -27,6 +28,11 @@ type ProjectCardProps = {
 };
 
 export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaStatus = meta?.projectStatuses.find((s) => s.id === project.status);
+  const badgeClass = metaStatus?.color ?? FALLBACK_BADGE_CLASSES[project.status] ?? "";
+  const statusLabel = metaStatus?.label ?? FALLBACK_LABELS[project.status] ?? project.status;
+
   const counts = project.taskCounts ?? { total: 0, in_progress: 0, done: 0, blocked: 0 };
   const repoCount = project.repositories?.length ?? 0;
   const progressPct = counts.total > 0 ? Math.round((counts.done / counts.total) * 100) : 0;
@@ -41,8 +47,8 @@ export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
               style={{ backgroundColor: project.color || "#6b7280" }}
             />
             <CardTitle className="text-sm font-medium truncate flex-1">{project.name}</CardTitle>
-            <Badge className={statusBadgeClasses[project.status] ?? ""}>
-              {statusLabels[project.status] ?? project.status}
+            <Badge className={badgeClass}>
+              {statusLabel}
             </Badge>
           </div>
         </CardHeader>

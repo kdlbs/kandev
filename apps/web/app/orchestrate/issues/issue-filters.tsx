@@ -6,6 +6,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useAppStore } from "@/components/state-provider";
 import type {
   IssueFilterState,
   OrchestrateIssueStatus,
@@ -13,7 +14,7 @@ import type {
 } from "@/lib/state/slices/orchestrate/types";
 import { StatusIcon } from "./status-icon";
 
-const STATUSES: { value: OrchestrateIssueStatus; label: string }[] = [
+const FALLBACK_STATUSES: { value: OrchestrateIssueStatus; label: string }[] = [
   { value: "backlog", label: "Backlog" },
   { value: "todo", label: "Todo" },
   { value: "in_progress", label: "In Progress" },
@@ -23,7 +24,7 @@ const STATUSES: { value: OrchestrateIssueStatus; label: string }[] = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-const PRIORITIES: { value: OrchestrateIssuePriority; label: string }[] = [
+const FALLBACK_PRIORITIES: { value: OrchestrateIssuePriority; label: string }[] = [
   { value: "critical", label: "Critical" },
   { value: "high", label: "High" },
   { value: "medium", label: "Medium" },
@@ -41,6 +42,14 @@ function toggleInArray<T>(arr: T[], value: T): T[] {
 }
 
 export function IssueFilters({ filters, onFilterChange }: IssueFiltersProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const STATUSES = meta
+    ? meta.statuses.map((s) => ({ value: s.id as OrchestrateIssueStatus, label: s.label }))
+    : FALLBACK_STATUSES;
+  const PRIORITIES = meta
+    ? meta.priorities.map((p) => ({ value: p.id as OrchestrateIssuePriority, label: p.label }))
+    : FALLBACK_PRIORITIES;
+
   const activeCount =
     filters.statuses.length +
     filters.priorities.length +

@@ -1,6 +1,7 @@
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";
 import { listWorkspaces, fetchUserSettings } from "@/lib/api";
+import { getMeta } from "@/lib/api/domains/orchestrate-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { WorkspaceRail } from "./components/workspace-rail";
@@ -34,9 +35,10 @@ function mapWorkspaceItem(ws: {
 }
 
 export default async function OrchestrateLayout({ children }: { children: React.ReactNode }) {
-  const [workspacesResponse, userSettingsResponse] = await Promise.all([
+  const [workspacesResponse, userSettingsResponse, metaResponse] = await Promise.all([
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    getMeta({ cache: "no-store" }).catch(() => null),
   ]);
 
   const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
@@ -52,6 +54,32 @@ export default async function OrchestrateLayout({ children }: { children: React.
     userSettings: {
       ...mapUserSettingsResponse(userSettingsResponse),
       workspaceId: activeWorkspaceId,
+    },
+    orchestrate: {
+      agentInstances: [],
+      skills: [],
+      projects: [],
+      approvals: [],
+      activity: [],
+      costSummary: null,
+      budgetPolicies: [],
+      routines: [],
+      inboxItems: [],
+      inboxCount: 0,
+      wakeups: [],
+      dashboard: null,
+      issues: {
+        items: [],
+        filters: { statuses: [], priorities: [], assigneeIds: [], projectIds: [], search: "" },
+        viewMode: "list",
+        sortField: "updated",
+        sortDir: "desc",
+        groupBy: "none",
+        nestingEnabled: true,
+        isLoading: false,
+      },
+      meta: metaResponse,
+      isLoading: false,
     },
   };
 

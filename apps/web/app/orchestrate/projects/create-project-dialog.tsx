@@ -117,14 +117,23 @@ function ReposField({
   );
 }
 
+const FALLBACK_EXECUTOR_TYPES = [
+  { id: "local_pc", label: "Local (standalone)" },
+  { id: "local_docker", label: "Local Docker" },
+  { id: "sprites", label: "Sprites (remote sandbox)" },
+  { id: "remote_docker", label: "Remote Docker" },
+];
+
 function ExecutorField({
   executorType,
   dockerImage,
+  executorTypes,
   onExecutorTypeChange,
   onDockerImageChange,
 }: {
   executorType: string;
   dockerImage: string;
+  executorTypes: Array<{ id: string; label: string }>;
   onExecutorTypeChange: (v: string) => void;
   onDockerImageChange: (v: string) => void;
 }) {
@@ -142,18 +151,11 @@ function ExecutorField({
           <SelectItem value="inherit" className="cursor-pointer">
             Inherit from workspace
           </SelectItem>
-          <SelectItem value="local_pc" className="cursor-pointer">
-            Local (standalone)
-          </SelectItem>
-          <SelectItem value="local_docker" className="cursor-pointer">
-            Local Docker
-          </SelectItem>
-          <SelectItem value="sprites" className="cursor-pointer">
-            Sprites (remote sandbox)
-          </SelectItem>
-          <SelectItem value="remote_docker" className="cursor-pointer">
-            Remote Docker
-          </SelectItem>
+          {executorTypes.map((et) => (
+            <SelectItem key={et.id} value={et.id} className="cursor-pointer">
+              {et.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       {(executorType === "local_docker" || executorType === "remote_docker") && (
@@ -243,12 +245,14 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
 function ProjectFormBody({
   form,
   agents,
+  executorTypes,
   onUpdate,
   onAddRepo,
   onRemoveRepo,
 }: {
   form: ProjectFormState;
   agents: AgentInstance[];
+  executorTypes: Array<{ id: string; label: string }>;
   onUpdate: (patch: Partial<ProjectFormState>) => void;
   onAddRepo: () => void;
   onRemoveRepo: (r: string) => void;
@@ -307,6 +311,7 @@ function ProjectFormBody({
       <ExecutorField
         executorType={form.executorType}
         dockerImage={form.dockerImage}
+        executorTypes={executorTypes}
         onExecutorTypeChange={(v) => onUpdate({ executorType: v })}
         onDockerImageChange={(v) => onUpdate({ dockerImage: v })}
       />
@@ -316,6 +321,9 @@ function ProjectFormBody({
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const executorTypes =
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =
     useProjectForm(workspaceId, () => onOpenChange(false));
 
@@ -329,6 +337,7 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
         <ProjectFormBody
           form={form}
           agents={agents}
+          executorTypes={executorTypes}
           onUpdate={update}
           onAddRepo={handleAddRepo}
           onRemoveRepo={handleRemoveRepo}

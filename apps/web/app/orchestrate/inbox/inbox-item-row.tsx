@@ -3,10 +3,18 @@
 import { IconShieldCheck, IconAlertTriangle, IconBug, IconEye } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
+import { useAppStore } from "@/components/state-provider";
 import type { InboxItem } from "@/lib/state/slices/orchestrate/types";
 import { timeAgo } from "../components/shared/time-ago";
 
-const typeConfig: Record<string, { icon: typeof IconShieldCheck; label: string }> = {
+const ICON_MAP: Record<string, typeof IconShieldCheck> = {
+  "shield-check": IconShieldCheck,
+  "alert-triangle": IconAlertTriangle,
+  bug: IconBug,
+  eye: IconEye,
+};
+
+const FALLBACK_TYPE_CONFIG: Record<string, { icon: typeof IconShieldCheck; label: string }> = {
   approval: { icon: IconShieldCheck, label: "Approval" },
   budget_alert: { icon: IconAlertTriangle, label: "Budget Alert" },
   agent_error: { icon: IconBug, label: "Agent Error" },
@@ -25,8 +33,20 @@ type Props = {
   onReject?: (id: string) => void;
 };
 
+function useInboxTypeConfig(type: string) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaType = meta?.inboxItemTypes.find((t) => t.id === type);
+  if (metaType) {
+    return {
+      icon: ICON_MAP[metaType.icon] ?? IconShieldCheck,
+      label: metaType.label,
+    };
+  }
+  return FALLBACK_TYPE_CONFIG[type] ?? FALLBACK_TYPE_CONFIG.approval;
+}
+
 export function InboxItemRow({ item, onApprove, onReject }: Props) {
-  const config = typeConfig[item.type] ?? typeConfig.approval;
+  const config = useInboxTypeConfig(item.type);
   const Icon = config.icon;
 
   return (

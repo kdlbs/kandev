@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
 import type {
   OrchestrateIssue,
   OrchestrateIssueStatus,
@@ -7,7 +8,7 @@ import type {
   IssueFilterState,
 } from "@/lib/state/slices/orchestrate/types";
 
-const STATUS_ORDER: Record<OrchestrateIssueStatus, number> = {
+const FALLBACK_STATUS_ORDER: Record<OrchestrateIssueStatus, number> = {
   backlog: 0,
   todo: 1,
   in_progress: 2,
@@ -17,7 +18,7 @@ const STATUS_ORDER: Record<OrchestrateIssueStatus, number> = {
   cancelled: 6,
 };
 
-const PRIORITY_ORDER: Record<string, number> = {
+const FALLBACK_PRIORITY_ORDER: Record<string, number> = {
   critical: 0,
   high: 1,
   medium: 2,
@@ -51,14 +52,16 @@ function compareIssues(
   b: OrchestrateIssue,
   field: IssueSortField,
   dir: IssueSortDir,
+  statusOrder: Record<string, number>,
+  priorityOrder: Record<string, number>,
 ): number {
   let cmp = 0;
   switch (field) {
     case "status":
-      cmp = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+      cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
       break;
     case "priority":
-      cmp = (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4);
+      cmp = (priorityOrder[a.priority] ?? 4) - (priorityOrder[b.priority] ?? 4);
       break;
     case "title":
       cmp = a.title.localeCompare(b.title);
@@ -91,9 +94,27 @@ export type UseIssuesTreeOptions = {
 
 export function useIssuesTree(opts: UseIssuesTreeOptions): FlatIssueNode[] {
   const { issues, filters, sortField, sortDir, nestingEnabled, expandedIds } = opts;
+  const meta = useAppStore((s) => s.orchestrate.meta);
+
+  const STATUS_ORDER = useMemo(() => {
+    if (!meta) return FALLBACK_STATUS_ORDER;
+    const map: Record<string, number> = {};
+    for (const s of meta.statuses) map[s.id] = s.order;
+    return map;
+  }, [meta]);
+
+  const PRIORITY_ORDER = useMemo(() => {
+    if (!meta) return FALLBACK_PRIORITY_ORDER;
+    const map: Record<string, number> = {};
+    for (const p of meta.priorities) map[p.id] = p.order;
+    return map;
+  }, [meta]);
+
   return useMemo(() => {
     const filtered = issues.filter((i) => matchesFilters(i, filters));
-    const sorted = [...filtered].sort((a, b) => compareIssues(a, b, sortField, sortDir));
+    const sorted = [...filtered].sort((a, b) =>
+      compareIssues(a, b, sortField, sortDir, STATUS_ORDER, PRIORITY_ORDER),
+    );
 
     if (!nestingEnabled) {
       return sorted.map((issue) => ({ issue, level: 0, hasChildren: false }));
@@ -134,5 +155,5 @@ export function useIssuesTree(opts: UseIssuesTreeOptions): FlatIssueNode[] {
     }
 
     return result;
-  }, [issues, filters, sortField, sortDir, nestingEnabled, expandedIds]);
+  }, [issues, filters, sortField, sortDir, nestingEnabled, expandedIds, STATUS_ORDER, PRIORITY_ORDER]);
 }

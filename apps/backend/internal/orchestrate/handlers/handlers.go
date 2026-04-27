@@ -21,6 +21,9 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	h := &Handlers{ctrl: ctrl, logger: log.WithFields(zap.String("component", "orchestrate-handlers"))}
 	api := router.Group("/api/v1/orchestrate")
 
+	api.GET("/meta", h.getMeta)
+
+	registerOnboardingRoutes(api, h)
 	registerAgentRoutes(api, h)
 	registerSkillRoutes(api, h)
 	registerProjectRoutes(api, h)

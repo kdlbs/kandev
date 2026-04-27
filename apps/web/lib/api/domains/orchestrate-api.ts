@@ -14,9 +14,16 @@ import type {
   WakeupEntry,
   DashboardData,
   OrchestrateIssue,
+  OrchestrateMeta,
 } from "@/lib/state/slices/orchestrate/types";
 
 const BASE = "/api/v1/orchestrate";
+
+// --- Meta ---
+
+export function getMeta(options?: ApiRequestOptions) {
+  return fetchJson<OrchestrateMeta>(`${BASE}/meta`, options);
+}
 
 // --- Agent Instances ---
 

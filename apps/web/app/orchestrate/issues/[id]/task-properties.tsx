@@ -2,6 +2,7 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { Separator } from "@kandev/ui/separator";
+import { useAppStore } from "@/components/state-provider";
 import { formatRelativeTime } from "@/lib/utils";
 import type { Issue } from "./types";
 import { StatusIcon } from "./status-icon";

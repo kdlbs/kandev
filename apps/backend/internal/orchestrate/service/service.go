@@ -47,6 +47,9 @@ func (f TaskStarterFunc) StartTask(ctx context.Context, taskID, agentProfileID, 
 // Implemented by the task service or its repository.
 type WorkspaceCreator interface {
 	CreateWorkspace(ctx context.Context, name, description string) error
+	// FindWorkspaceIDByName returns the kanban workspace UUID for a given name.
+	// Returns empty string if not found.
+	FindWorkspaceIDByName(ctx context.Context, name string) (string, error)
 }
 
 // Service provides orchestrate business logic.

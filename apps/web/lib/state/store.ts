@@ -508,6 +508,7 @@ export type AppState = {
   setIssueGroupBy: (groupBy: IssueGroupBy) => void;
   toggleNesting: () => void;
   setIssuesLoading: (loading: boolean) => void;
+  setMeta: (meta: import("./slices/orchestrate/types").OrchestrateMeta | null) => void;
   setOrchestrateLoading: (loading: boolean) => void;
 };
 

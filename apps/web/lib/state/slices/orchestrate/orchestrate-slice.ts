@@ -39,6 +39,7 @@ export const defaultOrchestrateState: OrchestrateSliceState = {
       nestingEnabled: true,
       isLoading: false,
     },
+    meta: null,
     isLoading: false,
   },
 };
@@ -194,6 +195,10 @@ function createMiscActions(set: SetFn) {
     setDashboard: (data: OrchestrateSlice["orchestrate"]["dashboard"]) =>
       set((draft) => {
         draft.orchestrate.dashboard = data;
+      }),
+    setMeta: (meta: OrchestrateSlice["orchestrate"]["meta"]) =>
+      set((draft) => {
+        draft.orchestrate.meta = meta;
       }),
     setOrchestrateLoading: (loading: boolean) =>
       set((draft) => {

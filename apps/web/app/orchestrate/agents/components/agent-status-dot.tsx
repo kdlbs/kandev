@@ -1,7 +1,10 @@
+"use client";
+
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
 import type { AgentStatus } from "@/lib/state/slices/orchestrate/types";
 
-const statusStyles: Record<AgentStatus, string> = {
+const FALLBACK_STYLES: Record<AgentStatus, string> = {
   idle: "bg-neutral-400",
   working: "bg-cyan-400 animate-pulse",
   paused: "bg-yellow-400",
@@ -15,10 +18,14 @@ type AgentStatusDotProps = {
 };
 
 export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaStatus = meta?.agentStatuses.find((s) => s.id === status);
+  const colorClass = metaStatus?.color ?? FALLBACK_STYLES[status] ?? "";
+  const label = metaStatus?.label ?? status;
   return (
     <span
-      className={cn("inline-block h-2 w-2 rounded-full shrink-0", statusStyles[status], className)}
-      title={status}
+      className={cn("inline-block h-2 w-2 rounded-full shrink-0", colorClass, className)}
+      title={label}
     />
   );
 }

@@ -65,6 +65,9 @@ func (r *Repository) initSchema() error {
 	if err := r.createTaskExtensionTables(); err != nil {
 		return err
 	}
+	if err := r.createOnboardingTable(); err != nil {
+		return err
+	}
 	r.migrateSchedulerColumns()
 	r.migrateTaskFTS()
 	return nil
@@ -389,6 +392,20 @@ func (r *Repository) createChannelTables() error {
 		task_id TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
+	);
+	`)
+	return err
+}
+
+func (r *Repository) createOnboardingTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS orchestrate_onboarding (
+		workspace_id TEXT PRIMARY KEY,
+		completed INTEGER NOT NULL DEFAULT 0,
+		ceo_agent_id TEXT DEFAULT '',
+		first_task_id TEXT DEFAULT '',
+		completed_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`)
 	return err

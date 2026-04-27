@@ -30,7 +30,7 @@ interface SkillDetailProps {
   onDelete: (id: string) => void;
 }
 
-const SOURCE_LABELS: Record<SkillSourceType, string> = {
+const FALLBACK_SOURCE_LABELS: Record<SkillSourceType, string> = {
   inline: "Inline",
   local_path: "Local",
   git: "GitHub",
@@ -49,14 +49,21 @@ function SourceIcon({ sourceType }: { sourceType: SkillSourceType }) {
   }
 }
 
-function isReadOnly(sourceType: SkillSourceType): boolean {
-  return sourceType !== "inline";
+function useSkillSourceMeta(sourceType: SkillSourceType) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaSource = meta?.skillSourceTypes.find((s) => s.id === sourceType);
+  return {
+    label: metaSource?.label ?? FALLBACK_SOURCE_LABELS[sourceType] ?? sourceType,
+    readOnly: metaSource?.readOnly ?? sourceType !== "inline",
+    readOnlyReason: metaSource?.readOnlyReason,
+  };
 }
 
 export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   const [contentMode, setContentMode] = useState<ContentMode>("view");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const readOnly = isReadOnly(skill.sourceType);
+  const sourceMeta = useSkillSourceMeta(skill.sourceType);
+  const readOnly = sourceMeta.readOnly;
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
   const usedByCount = useMemo(
     () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
@@ -81,6 +88,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
       <SkillDetailHeader
         skill={skill}
         readOnly={readOnly}
+        readOnlyReason={sourceMeta.readOnlyReason}
         onEdit={!readOnly ? handleEdit : undefined}
         onDelete={() => onDelete(skill.id)}
       />
@@ -135,7 +143,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   );
 }
 
-const READ_ONLY_REASONS: Partial<Record<SkillSourceType, string>> = {
+const FALLBACK_READ_ONLY_REASONS: Partial<Record<SkillSourceType, string>> = {
   git: "GitHub-managed skills are read-only",
   skills_sh: "skills.sh-managed skills are read-only",
   local_path: "Local path skills are read-only",
@@ -144,11 +152,13 @@ const READ_ONLY_REASONS: Partial<Record<SkillSourceType, string>> = {
 function SkillDetailHeader({
   skill,
   readOnly,
+  readOnlyReason,
   onEdit,
   onDelete,
 }: {
   skill: Skill;
   readOnly: boolean;
+  readOnlyReason?: string;
   onEdit?: () => void;
   onDelete: () => void;
 }) {
@@ -171,9 +181,9 @@ function SkillDetailHeader({
         {readOnly && (
           <>
             <Badge variant="outline">Read only</Badge>
-            {READ_ONLY_REASONS[skill.sourceType] && (
+            {(readOnlyReason ?? FALLBACK_READ_ONLY_REASONS[skill.sourceType]) && (
               <span className="text-xs text-muted-foreground">
-                {READ_ONLY_REASONS[skill.sourceType]}
+                {readOnlyReason ?? FALLBACK_READ_ONLY_REASONS[skill.sourceType]}
               </span>
             )}
           </>
@@ -219,6 +229,7 @@ function SkillDetailHeader({
 }
 
 function SourceValue({ skill }: { skill: Skill }) {
+  const sourceMeta = useSkillSourceMeta(skill.sourceType);
   const isLink = skill.sourceLocator?.startsWith("http");
   return (
     <div className="flex items-center gap-1.5">
@@ -230,11 +241,11 @@ function SourceValue({ skill }: { skill: Skill }) {
           rel="noopener noreferrer"
           className="hover:underline cursor-pointer"
         >
-          {SOURCE_LABELS[skill.sourceType]}
+          {sourceMeta.label}
           <IconExternalLink className="h-3 w-3 inline ml-1" />
         </a>
       ) : (
-        <span>{SOURCE_LABELS[skill.sourceType]}</span>
+        <span>{sourceMeta.label}</span>
       )}
     </div>
   );

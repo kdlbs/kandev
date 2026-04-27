@@ -723,3 +723,16 @@ func (a *taskWorkspaceCreatorAdapter) CreateWorkspace(ctx context.Context, name,
 	})
 	return err
 }
+
+func (a *taskWorkspaceCreatorAdapter) FindWorkspaceIDByName(ctx context.Context, name string) (string, error) {
+	workspaces, err := a.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, ws := range workspaces {
+		if ws.Name == name {
+			return ws.ID, nil
+		}
+	}
+	return "", nil
+}

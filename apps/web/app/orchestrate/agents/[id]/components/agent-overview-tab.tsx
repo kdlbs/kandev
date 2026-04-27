@@ -19,12 +19,14 @@ function IdentityCard({
   name,
   role,
   reportsToName,
+  roles,
   onNameChange,
   onRoleChange,
 }: {
   name: string;
   role: AgentRole;
   reportsToName: string;
+  roles: Array<{ id: string; label: string }>;
   onNameChange: (v: string) => void;
   onRoleChange: (v: AgentRole) => void;
 }) {
@@ -49,18 +51,11 @@ function IdentityCard({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ceo" className="cursor-pointer">
-                  CEO
-                </SelectItem>
-                <SelectItem value="worker" className="cursor-pointer">
-                  Worker
-                </SelectItem>
-                <SelectItem value="specialist" className="cursor-pointer">
-                  Specialist
-                </SelectItem>
-                <SelectItem value="assistant" className="cursor-pointer">
-                  Assistant
-                </SelectItem>
+                {roles.map((r) => (
+                  <SelectItem key={r.id} value={r.id} className="cursor-pointer">
+                    {r.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -78,6 +73,7 @@ function ConfigurationCard({
   budget,
   maxConcurrent,
   executorType,
+  executorTypes,
   onBudgetChange,
   onMaxConcurrentChange,
   onExecutorTypeChange,
@@ -85,6 +81,7 @@ function ConfigurationCard({
   budget: number;
   maxConcurrent: number;
   executorType: string;
+  executorTypes: Array<{ id: string; label: string }>;
   onBudgetChange: (v: number) => void;
   onMaxConcurrentChange: (v: number) => void;
   onExecutorTypeChange: (v: string) => void;
@@ -134,15 +131,11 @@ function ConfigurationCard({
               <SelectItem value="__inherit__" className="cursor-pointer">
                 Inherit
               </SelectItem>
-              <SelectItem value="local_pc" className="cursor-pointer">
-                Local (standalone)
-              </SelectItem>
-              <SelectItem value="local_docker" className="cursor-pointer">
-                Local Docker
-              </SelectItem>
-              <SelectItem value="sprites" className="cursor-pointer">
-                Sprites (remote sandbox)
-              </SelectItem>
+              {executorTypes.map((et) => (
+                <SelectItem key={et.id} value={et.id} className="cursor-pointer">
+                  {et.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -151,9 +144,27 @@ function ConfigurationCard({
   );
 }
 
+const FALLBACK_ROLES = [
+  { id: "ceo", label: "CEO" },
+  { id: "worker", label: "Worker" },
+  { id: "specialist", label: "Specialist" },
+  { id: "assistant", label: "Assistant" },
+];
+
+const FALLBACK_EXECUTOR_TYPES = [
+  { id: "local_pc", label: "Local (standalone)" },
+  { id: "local_docker", label: "Local Docker" },
+  { id: "sprites", label: "Sprites (remote sandbox)" },
+];
+
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
+  const meta = useAppStore((s) => s.orchestrate.meta);
   const updateStore = useAppStore((s) => s.updateAgentInstance);
+
+  const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
+  const executorTypes =
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
 
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState<AgentRole>(agent.role);
@@ -199,6 +210,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         name={name}
         role={role}
         reportsToName={reportsToAgent?.name ?? "None"}
+        roles={roles}
         onNameChange={(v) => {
           setName(v);
           markDirty();
@@ -212,6 +224,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         budget={budget}
         maxConcurrent={maxConcurrent}
         executorType={executorType}
+        executorTypes={executorTypes}
         onBudgetChange={(v) => {
           setBudget(v);
           markDirty();

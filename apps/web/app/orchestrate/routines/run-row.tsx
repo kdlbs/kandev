@@ -1,9 +1,10 @@
 "use client";
 
 import { Badge } from "@kandev/ui/badge";
+import { useAppStore } from "@/components/state-provider";
 import type { RoutineRun } from "@/lib/state/slices/orchestrate/types";
 
-const statusColors: Record<string, string> = {
+const FALLBACK_COLORS: Record<string, string> = {
   received: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
   task_created: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
   skipped: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400",
@@ -27,9 +28,14 @@ type RunRowProps = {
 };
 
 export function RunRow({ run }: RunRowProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaStatus = meta?.routineRunStatuses.find((s) => s.id === run.status);
+  const colorClass = metaStatus?.color ?? FALLBACK_COLORS[run.status] ?? "";
+  const label = metaStatus?.label ?? formatLabel(run.status);
+
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/50 transition-colors">
-      <Badge className={statusColors[run.status] ?? ""}>{formatLabel(run.status)}</Badge>
+      <Badge className={colorClass}>{label}</Badge>
       <span className="text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 text-xs text-muted-foreground font-mono truncate">
         {run.dispatchFingerprint ? run.dispatchFingerprint.slice(0, 12) : "--"}
