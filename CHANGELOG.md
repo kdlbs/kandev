@@ -100,7 +100,7 @@ All notable changes to Kandev.
 
 ### Bug Fixes
 
-- release script tags fetching
+- release script tags fetching ([986410ab](https://github.com/kdlbs/kandev/commit/986410ab2ebb1cc25e1ad046c9daae18a58cc150))
 - show repo name instead of full path in task sidebar ([#652](https://github.com/kdlbs/kandev/pull/652))
 - unstick agent session when cancel times out ([#651](https://github.com/kdlbs/kandev/pull/651))
 - anchor PR detail panel to session group on auto-open ([#646](https://github.com/kdlbs/kandev/pull/646))
@@ -1155,5 +1155,4 @@ All notable changes to Kandev.
 ### Merge
 
 - resolve conflicts with main
-
 

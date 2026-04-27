@@ -47,6 +47,7 @@ CURRENT_CLI_MAJOR=0
 CURRENT_CLI_MINOR=0
 CURRENT_CLI_PATCH=0
 CURRENT_APP_TAG=""
+CURRENT_APP_TAG_FOUND=0
 CURRENT_APP_MAJOR=0
 CURRENT_APP_MINOR=0
 
@@ -232,6 +233,7 @@ detect_current_app_version() {
   local tags
   tags="$(git -C "$ROOT_DIR" tag --list 'v*')"
 
+  CURRENT_APP_TAG_FOUND=0
   local found=0
   local best_major=0
   local best_minor=0
@@ -254,6 +256,7 @@ detect_current_app_version() {
   CURRENT_APP_MAJOR="$best_major"
   CURRENT_APP_MINOR="$best_minor"
   CURRENT_APP_TAG="v${CURRENT_APP_MAJOR}.${CURRENT_APP_MINOR}"
+  CURRENT_APP_TAG_FOUND="$found"
 
   if [[ "$found" -eq 1 ]]; then
     log "Current app tag:     $(bold "$CURRENT_APP_TAG") $(dim "(latest git tag matching vM.m)")"
@@ -456,6 +459,14 @@ ensure_latest_app_tag_present() {
   [[ "$DRY_RUN" -eq 1 ]] && return 0
 
   log "Verifying latest app tag $(bold "$CURRENT_APP_TAG") is present locally..."
+  if [[ "$CURRENT_APP_TAG_FOUND" -eq 0 ]]; then
+    if latest_origin_app_tag >/dev/null 2>&1; then
+      die "No local app tag found, but origin has app tags. Fetch origin tags and retry."
+    fi
+    log_ok "No prior app tags on origin or locally"
+    return 0
+  fi
+
   local origin_app_tag
   if ! origin_app_tag="$(latest_origin_app_tag)"; then
     die "Could not determine latest app tag from origin. Refusing to generate CHANGELOG.md."
