@@ -276,7 +276,7 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 		status := &agentctltypes.ProcessStatusUpdate{SessionID: "sess-1"}
 
 		start := time.Now()
-		mgr.handlePassthroughExit(execution, status)
+		mgr.handlePassthroughExit(execution, status, start)
 		if elapsed := time.Since(start); elapsed != 0 {
 			t.Errorf("handlePassthroughExit advanced fake time by %v — did not short-circuit during shutdown", elapsed)
 		}
@@ -292,31 +292,31 @@ func TestIsFastFailExit(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		execution *AgentExecution
+		startedAt time.Time
 		exitCode  int
 		want      bool
 	}{
 		{
 			name:      "fast exit with non-zero code → fast-fail",
-			execution: &AgentExecution{PassthroughStartedAt: now.Add(-100 * time.Millisecond)},
+			startedAt: now.Add(-100 * time.Millisecond),
 			exitCode:  1,
 			want:      true,
 		},
 		{
 			name:      "slow exit with non-zero code → restart",
-			execution: &AgentExecution{PassthroughStartedAt: now.Add(-5 * time.Second)},
+			startedAt: now.Add(-5 * time.Second),
 			exitCode:  1,
 			want:      false,
 		},
 		{
 			name:      "fast exit with zero code → not fast-fail (clean exit)",
-			execution: &AgentExecution{PassthroughStartedAt: now.Add(-100 * time.Millisecond)},
+			startedAt: now.Add(-100 * time.Millisecond),
 			exitCode:  0,
 			want:      false,
 		},
 		{
 			name:      "zero start time → check disabled (recovered execution)",
-			execution: &AgentExecution{PassthroughStartedAt: time.Time{}},
+			startedAt: time.Time{},
 			exitCode:  1,
 			want:      false,
 		},
@@ -324,7 +324,7 @@ func TestIsFastFailExit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isFastFailExit(tt.execution, tt.exitCode, window); got != tt.want {
+			if got := isFastFailExit(tt.startedAt, tt.exitCode, window); got != tt.want {
 				t.Errorf("isFastFailExit() = %v, want %v", got, tt.want)
 			}
 		})

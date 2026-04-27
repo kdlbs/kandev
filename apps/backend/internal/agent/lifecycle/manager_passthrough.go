@@ -594,7 +594,10 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
 		// Only trigger auto-restart for the passthrough process, not for user shell terminals
 		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
-			go m.handlePassthroughExit(execution, status)
+			// Snapshot the start time synchronously so the goroutine doesn't
+			// race the next launch's write to execution.PassthroughStartedAt.
+			startedAt := execution.PassthroughStartedAt
+			go m.handlePassthroughExit(execution, status, startedAt)
 		} else {
 			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
 				zap.String("session_id", status.SessionID),
@@ -606,7 +609,10 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 
 // handlePassthroughExit handles auto-restart logic when a passthrough process exits.
 // This function is called asynchronously to allow the old process to be cleaned up first.
-func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate) {
+// startedAt is the snapshot of execution.PassthroughStartedAt taken synchronously
+// at the call site — passed in rather than re-read here to avoid racing with
+// the next launch's write to that field.
+func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate, startedAt time.Time) {
 	const restartDelay = 500 * time.Millisecond
 	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
 	// fastFailWindow is short enough to catch launch-time failures (bad CLI
@@ -657,34 +663,29 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	// always means the launch itself was wrong (bad CLI flag, missing binary,
 	// auth failure). Restarting just thrashes — the next run hits the same
 	// failure at the same speed. Surface the failure to the user instead.
-	if isFastFailExit(execution, exitCode, fastFailWindow) {
-		m.logger.Warn("passthrough process exited fast with non-zero code, skipping auto-restart",
-			zap.String("session_id", sessionID),
-			zap.Int("exit_code", exitCode),
-			zap.Duration("uptime", time.Since(execution.PassthroughStartedAt)))
-		failMsg := fmt.Sprintf("\r\n\x1b[31m[Agent exited (code %d) within %s. Likely cause: bad CLI flag, missing binary, or auth failure. Edit your profile and reconnect to retry.]\x1b[0m\r\n",
-			exitCode, fastFailWindow)
-		if err := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); err != nil {
-			m.logger.Debug("failed to write fast-fail message to terminal",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+	if isFastFailExit(startedAt, exitCode, fastFailWindow) {
+		m.notifyFastFailExit(interactiveRunner, sessionID, startedAt, exitCode, fastFailWindow)
 		return
 	}
 
+	m.attemptPassthroughRestart(execution, interactiveRunner, sessionID, exitCode, restartDelay)
+}
+
+// attemptPassthroughRestart announces the restart on the terminal, waits the
+// restart delay, re-checks shutdown/WebSocket, and resumes the session.
+// Reconnects the existing WebSocket to the new process on success.
+func (m *Manager) attemptPassthroughRestart(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, restartDelay time.Duration) {
 	m.logger.Info("passthrough process exited with active WebSocket, attempting auto-restart",
 		zap.String("session_id", sessionID),
 		zap.Int("exit_code", exitCode))
 
-	// Send restart notification to terminal (use session-level to survive process deletion)
 	restartMsg := "\r\n\x1b[33m[Agent exited. Restarting...]\x1b[0m\r\n"
-	if err := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(restartMsg)); err != nil {
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(restartMsg)); err != nil {
 		m.logger.Debug("failed to write restart message to terminal",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
 
-	// Delay before restart
 	time.Sleep(restartDelay)
 
 	// Shutdown may have started during the sleep; re-check before touching
@@ -695,23 +696,19 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		return
 	}
 
-	// Check WebSocket is still connected after delay (use session-level tracking)
-	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+	if !runner.HasActiveWebSocketBySession(sessionID) {
 		m.logger.Debug("WebSocket disconnected during restart delay, aborting",
 			zap.String("session_id", sessionID))
 		return
 	}
 
-	// Attempt restart
-	ctx := context.Background()
-	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+	if err := m.ResumePassthroughSession(context.Background(), sessionID); err != nil {
 		m.logger.Error("failed to auto-restart passthrough session",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 
-		// Send error message to terminal
 		errorMsg := fmt.Sprintf("\r\n\x1b[31m[Restart failed: %s]\x1b[0m\r\n", err.Error())
-		if writeErr := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(errorMsg)); writeErr != nil {
+		if writeErr := runner.WriteToDirectOutputBySession(sessionID, []byte(errorMsg)); writeErr != nil {
 			m.logger.Debug("failed to write restart error message to terminal",
 				zap.String("session_id", sessionID),
 				zap.Error(writeErr))
@@ -719,8 +716,7 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		return
 	}
 
-	// Connect the session's existing WebSocket to the new process
-	if interactiveRunner.ConnectSessionWebSocket(execution.PassthroughProcessID) {
+	if runner.ConnectSessionWebSocket(execution.PassthroughProcessID) {
 		m.logger.Info("passthrough session auto-restarted and reconnected WebSocket",
 			zap.String("session_id", sessionID),
 			zap.String("new_process_id", execution.PassthroughProcessID))
@@ -731,15 +727,31 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	}
 }
 
+// notifyFastFailExit logs the fast-fail decision and writes a one-shot
+// banner to the terminal explaining why the auto-restart was skipped.
+func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionID string, startedAt time.Time, exitCode int, window time.Duration) {
+	m.logger.Warn("passthrough process exited fast with non-zero code, skipping auto-restart",
+		zap.String("session_id", sessionID),
+		zap.Int("exit_code", exitCode),
+		zap.Duration("uptime", time.Since(startedAt)))
+	failMsg := fmt.Sprintf("\r\n\x1b[31m[Agent exited (code %d) within %s. Likely cause: bad CLI flag, missing binary, or auth failure. Edit your profile and reconnect to retry.]\x1b[0m\r\n",
+		exitCode, window)
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); err != nil {
+		m.logger.Debug("failed to write fast-fail message to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
 // isFastFailExit reports whether a passthrough process exit looks like a
 // launch failure rather than a runtime exit worth restarting. A zero start
 // time disables the check (e.g. recovered executions where the start time
 // is unknown), so the legacy restart path remains the default.
-func isFastFailExit(execution *AgentExecution, exitCode int, window time.Duration) bool {
-	if exitCode == 0 || execution.PassthroughStartedAt.IsZero() {
+func isFastFailExit(startedAt time.Time, exitCode int, window time.Duration) bool {
+	if exitCode == 0 || startedAt.IsZero() {
 		return false
 	}
-	return time.Since(execution.PassthroughStartedAt) < window
+	return time.Since(startedAt) < window
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.
