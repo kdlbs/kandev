@@ -43,6 +43,9 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	// yet imported. Both paths bottom out in `listGitBranches`; the only
 	// difference is how the absolute path is resolved.
 	api.GET("/workspaces/:id/branches", h.httpListBranches)
+	// Local-status (branch + dirty files) backs the fresh-branch consent
+	// flow on the local executor. Path-only — fresh-branch is local-only.
+	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
@@ -172,7 +175,7 @@ func (h *RepositoryHandlers) httpListBranches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "specify only one of repository_id or path"})
 		return
 	}
-	branches, err := h.service.ListBranches(c.Request.Context(), repoID, path)
+	result, err := h.service.ListBranchesWithCurrent(c.Request.Context(), repoID, path)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
@@ -182,13 +185,40 @@ func (h *RepositoryHandlers) httpListBranches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list branches"})
 		return
 	}
-	dtoBranches := make([]dto.BranchDTO, len(branches))
-	for i, branch := range branches {
+	dtoBranches := make([]dto.BranchDTO, len(result.Branches))
+	for i, branch := range result.Branches {
 		dtoBranches[i] = dto.FromBranch(branch)
 	}
 	c.JSON(http.StatusOK, dto.RepositoryBranchesResponse{
-		Branches: dtoBranches,
-		Total:    len(dtoBranches),
+		Branches:      dtoBranches,
+		Total:         len(dtoBranches),
+		CurrentBranch: result.CurrentBranch,
+	})
+}
+
+func (h *RepositoryHandlers) httpLocalRepositoryStatus(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+	status, err := h.service.LocalRepositoryStatus(c.Request.Context(), path)
+	if err != nil {
+		if errors.Is(err, service.ErrPathNotAllowed) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
+			return
+		}
+		h.logger.Error("failed to read local repository status", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read local repository status"})
+		return
+	}
+	dirty := status.DirtyFiles
+	if dirty == nil {
+		dirty = []string{}
+	}
+	c.JSON(http.StatusOK, dto.LocalRepositoryStatusResponse{
+		CurrentBranch: status.CurrentBranch,
+		DirtyFiles:    dirty,
 	})
 }
 
@@ -254,7 +284,6 @@ func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, dto.FromRepository(repository))
 }
-
 
 type httpUpdateRepositoryRequest struct {
 	Name                 *string `json:"name"`

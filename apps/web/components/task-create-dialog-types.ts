@@ -185,6 +185,12 @@ export type DialogFormState = {
   setWorkflowAgentProfileId: (v: string) => void;
   /** Clear draft on successful submission (before closing dialog) */
   clearDraft: () => void;
+  /** Local executor only: opt-in to discard local changes and start the task on a new branch */
+  freshBranchEnabled: boolean;
+  setFreshBranchEnabled: (v: boolean) => void;
+  /** Currently checked-out branch in the selected local repo (for the disabled selector placeholder) */
+  currentLocalBranch: string;
+  setCurrentLocalBranch: (v: string) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -238,4 +244,8 @@ export type SubmitHandlersDeps = {
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
   clearDraft: () => void;
+  freshBranchEnabled: boolean;
+  isLocalExecutor: boolean;
+  /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
+  repositoryLocalPath: string;
 };

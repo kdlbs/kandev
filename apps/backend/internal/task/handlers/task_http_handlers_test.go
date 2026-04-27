@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -22,6 +23,63 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	return log
+}
+
+func TestResolveFreshBranchName(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		taskTitle string
+		assert    func(t *testing.T, got string)
+	}{
+		{
+			name:      "uses raw name when provided",
+			raw:       "feature/x",
+			taskTitle: "ignored",
+			assert: func(t *testing.T, got string) {
+				if got != "feature/x" {
+					t.Fatalf("expected feature/x, got %q", got)
+				}
+			},
+		},
+		{
+			name:      "trims whitespace from raw name",
+			raw:       "  feature/y  ",
+			taskTitle: "ignored",
+			assert: func(t *testing.T, got string) {
+				if got != "feature/y" {
+					t.Fatalf("expected feature/y, got %q", got)
+				}
+			},
+		},
+		{
+			name:      "derives from title when raw is empty",
+			raw:       "",
+			taskTitle: "Fix login bug",
+			assert: func(t *testing.T, got string) {
+				if !strings.HasPrefix(got, "fix-login-bug_") {
+					t.Fatalf("expected fix-login-bug_ prefix, got %q", got)
+				}
+			},
+		},
+		{
+			name:      "title with only special chars falls back to suffix only",
+			raw:       "",
+			taskTitle: "!!!",
+			assert: func(t *testing.T, got string) {
+				// SemanticWorktreeName returns just the suffix (3 chars from
+				// the alphabet) when the sanitized title is empty.
+				if len(got) != 3 {
+					t.Fatalf("expected 3-char suffix, got %q (len %d)", got, len(got))
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.assert(t, resolveFreshBranchName(tc.raw, tc.taskTitle))
+		})
+	}
 }
 
 func TestAssociatePRFromRepoInputs(t *testing.T) {

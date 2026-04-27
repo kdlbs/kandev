@@ -389,6 +389,49 @@ func TestLocalPreparer_BaseBranchCheckout(t *testing.T) {
 	}
 }
 
+// TestLocalPreparer_FreshBranchInputs covers the post-fresh-branch state: the
+// HTTP layer now persists the new branch name as the task's BaseBranch, so the
+// preparer must successfully checkout that branch even when it was just
+// created moments earlier. This is essentially the existing BaseBranch path —
+// the test exists to catch any regression that breaks resume after a fresh
+// checkout.
+func TestLocalPreparer_FreshBranchPersistedAsBaseBranch(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+	// Simulate fresh-branch having just created "feature/new" from main.
+	for _, args := range [][]string{
+		{"checkout", "-b", "feature/new"},
+		{"commit", "--allow-empty", "-m", "fresh"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		BaseBranch:     "feature/new",
+	}
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
+	}
+	if branch := currentBranch(t, repoDir); branch != "feature/new" {
+		t.Fatalf("expected branch 'feature/new', got %q", branch)
+	}
+}
+
 func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 	isolateGitEnv(t)
 	log := newTestLocalLogger()

@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type {
-  LocalRepository,
-  Workspace,
-  ExecutorProfile,
-  Branch,
-} from "@/lib/types/http";
+import type { LocalRepository, Workspace, ExecutorProfile, Branch } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -58,6 +53,8 @@ type FormResetters = {
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  setFreshBranchEnabled: (v: boolean) => void;
+  setCurrentLocalBranch: (v: string) => void;
 };
 
 type FormResetEffectsArgs = {
@@ -174,6 +171,8 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubBranches([]);
   resetters.setGitHubUrlError(null);
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
+  resetters.setFreshBranchEnabled(false);
+  resetters.setCurrentLocalBranch("");
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -222,6 +221,17 @@ function useDraftPersistence(
 function useWorkflowAgentProfileState() {
   const [workflowAgentProfileId, setWorkflowAgentProfileId] = useState("");
   return { workflowAgentProfileId, setWorkflowAgentProfileId };
+}
+
+function useFreshBranchState() {
+  const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
+  const [currentLocalBranch, setCurrentLocalBranch] = useState("");
+  return {
+    freshBranchEnabled,
+    setFreshBranchEnabled,
+    currentLocalBranch,
+    setCurrentLocalBranch,
+  };
 }
 
 function useGitHubUrlState() {
@@ -346,6 +356,7 @@ export function useDialogFormState(
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
   const repos = useRepositoriesState();
+  const freshBranch = useFreshBranchState();
 
   useFormResetEffects({
     open,
@@ -374,6 +385,8 @@ export function useDialogFormState(
       setGitHubBranches: ghUrl.setGitHubBranches,
       setGitHubUrlError: ghUrl.setGitHubUrlError,
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
+      setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
+      setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
     },
   });
 
@@ -385,7 +398,7 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
-  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...repos, clearDraft };
+  return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...repos, ...freshBranch, clearDraft };
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";

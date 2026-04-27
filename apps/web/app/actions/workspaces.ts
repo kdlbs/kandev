@@ -9,7 +9,7 @@ import type {
   ListWorkflowStepsResponse,
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
-  RepositoryBranchesResponse,
+  LocalRepositoryStatusResponse,
   ListRepositoryScriptsResponse,
   ListWorkspacesResponse,
   RepositoryPathValidationResponse,
@@ -162,6 +162,19 @@ export async function listRepositoriesAction(
   const queryString = searchParams.toString();
   const url = `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ""}`;
   return fetchJson<ListRepositoriesResponse>(url);
+}
+
+// Path-based branch listing moved to lib/api/domains/workspace-api.ts as a
+// unified `listBranches({ repositoryId | path })` after the endpoint unification.
+// Local repo status (branch + dirty files) backs the fresh-branch consent flow.
+export async function getLocalRepositoryStatusAction(
+  workspaceId: string,
+  path: string,
+): Promise<LocalRepositoryStatusResponse> {
+  const params = `?path=${encodeURIComponent(path)}`;
+  return fetchJson<LocalRepositoryStatusResponse>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/local-status${params}`,
+  );
 }
 
 export async function discoverRepositoriesAction(

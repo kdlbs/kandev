@@ -9,6 +9,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import { FreshBranchToggle } from "@/components/task-create-dialog-fresh-branch";
 import type { JiraTicket } from "@/lib/types/jira";
 
 type SelectorOption = {
@@ -50,70 +51,110 @@ type CreateEditSelectorsProps = {
     triggerClassName?: string;
   }>;
   workflowAgentLocked: boolean;
+  /** When true, render the FreshBranchToggle row beneath the selectors. */
+  freshBranchAvailable: boolean;
+  freshBranchEnabled: boolean;
+  onToggleFreshBranch: (enabled: boolean) => void;
+  currentLocalBranch: string;
 };
 
-export const CreateEditSelectors = memo(function CreateEditSelectors({
-  isTaskStarted,
+type AgentColumnProps = Pick<
+  CreateEditSelectorsProps,
+  | "agentProfiles"
+  | "agentProfilesLoading"
+  | "agentProfileOptions"
+  | "agentProfileId"
+  | "onAgentProfileChange"
+  | "isCreatingSession"
+  | "AgentSelectorComponent"
+  | "workflowAgentLocked"
+>;
+
+function AgentColumn({
   agentProfiles,
   agentProfilesLoading,
   agentProfileOptions,
   agentProfileId,
   onAgentProfileChange,
   isCreatingSession,
-  executorProfileOptions,
-  executorProfileId,
-  onExecutorProfileChange,
-  executorsLoading,
-  workflowAgentLocked,
   AgentSelectorComponent,
-  ExecutorProfileSelectorComponent,
-}: CreateEditSelectorsProps) {
-  if (isTaskStarted) return null;
+  workflowAgentLocked,
+}: AgentColumnProps) {
+  if (agentProfiles.length === 0 && !agentProfilesLoading) {
+    return (
+      <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
+        <span>No agents found.</span>
+        <Link href="/settings/agents" className="cursor-pointer text-primary hover:underline">
+          Add agent
+        </Link>
+      </div>
+    );
+  }
+  const placeholder = agentProfilesLoading ? "Loading agents..." : "Select agent";
+  return (
+    <>
+      <AgentSelectorComponent
+        options={agentProfileOptions}
+        value={agentProfileId}
+        onValueChange={onAgentProfileChange}
+        placeholder={placeholder}
+        disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
+      />
+      {workflowAgentLocked && (
+        <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
+      )}
+    </>
+  );
+}
 
-  const agentLockedByWorkflow = workflowAgentLocked;
+function freshBranchHint(enabled: boolean, currentBranch: string): string {
+  if (enabled) return "Will fork a new branch from the selected base";
+  return currentBranch ? `Uses current branch: ${currentBranch}` : "Uses current branch";
+}
 
-  const agentPlaceholder = (() => {
-    if (agentProfilesLoading) return "Loading agents...";
-    if (agentProfiles.length === 0) return "No agents available";
-    return "Select agent";
-  })();
+export const CreateEditSelectors = memo(function CreateEditSelectors(
+  props: CreateEditSelectorsProps,
+) {
+  if (props.isTaskStarted) return null;
+  const {
+    executorProfileOptions,
+    executorProfileId,
+    onExecutorProfileChange,
+    executorsLoading,
+    ExecutorProfileSelectorComponent,
+    freshBranchAvailable,
+    freshBranchEnabled,
+    onToggleFreshBranch,
+    currentLocalBranch,
+  } = props;
 
   // Branch + repo selection moved into the chip row above the description;
-  // this row carries only agent and executor profile selectors now.
+  // this row carries only agent and executor profile selectors. The
+  // fresh-branch opt-in lives below as a small row, gated by the parent.
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-      <div>
-        {agentProfiles.length === 0 && !agentProfilesLoading ? (
-          <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
-            <span>No agents found.</span>
-            <Link href="/settings/agents" className="text-primary hover:underline">
-              Add agent
-            </Link>
-          </div>
-        ) : (
-          <>
-            <AgentSelectorComponent
-              options={agentProfileOptions}
-              value={agentProfileId}
-              onValueChange={onAgentProfileChange}
-              placeholder={agentPlaceholder}
-              disabled={agentProfilesLoading || isCreatingSession || agentLockedByWorkflow}
-            />
-            {agentLockedByWorkflow && (
-              <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
-            )}
-          </>
-        )}
+    <div className="space-y-2">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+        <div>
+          <AgentColumn {...props} />
+        </div>
+        <div>
+          <ExecutorProfileSelectorComponent
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+            disabled={executorsLoading}
+          />
+        </div>
       </div>
-      <div>
-        <ExecutorProfileSelectorComponent
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
-          disabled={executorsLoading}
-        />
-      </div>
+      {freshBranchAvailable && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
+          <span className="truncate">
+            {freshBranchHint(freshBranchEnabled, currentLocalBranch)}
+          </span>
+        </div>
+      )}
     </div>
   );
 });

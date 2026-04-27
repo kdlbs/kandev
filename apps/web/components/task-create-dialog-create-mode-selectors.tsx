@@ -24,13 +24,16 @@ type CreateModeSelectorsProps = {
   fs: DialogFormState;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
+  onToggleFreshBranch: (enabled: boolean) => void;
   workflowAgentLocked: boolean;
+  /** Computed by parent: single-row + local executor + not URL mode. */
+  freshBranchAvailable: boolean;
 };
 
 /**
- * Create/edit-mode form body section: agent + executor profile selectors.
- * Repo and branch selection moved into the chip row above the description
- * (see RepoChipsRow), so this row no longer carries those controls.
+ * Create/edit-mode form body section: agent + executor profile selectors,
+ * with the FreshBranchToggle row beneath when applicable. Repo and branch
+ * selection moved into the chip row above the description (RepoChipsRow).
  */
 export function CreateModeSelectors(props: CreateModeSelectorsProps) {
   return (
@@ -47,6 +50,10 @@ export function CreateModeSelectors(props: CreateModeSelectorsProps) {
       onExecutorProfileChange={props.onExecutorProfileChange}
       executorsLoading={props.executorsLoading}
       workflowAgentLocked={props.workflowAgentLocked}
+      freshBranchAvailable={props.freshBranchAvailable}
+      freshBranchEnabled={props.fs.freshBranchEnabled}
+      onToggleFreshBranch={props.onToggleFreshBranch}
+      currentLocalBranch={props.fs.currentLocalBranch}
       AgentSelectorComponent={AgentSelector}
       ExecutorProfileSelectorComponent={ExecutorProfileSelector}
     />

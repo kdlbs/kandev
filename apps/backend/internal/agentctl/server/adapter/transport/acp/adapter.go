@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
@@ -39,6 +40,12 @@ const (
 	contentTypeAudio    = "audio"
 	contentTypeResource = "resource"
 )
+
+// wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
+// Wakeup turns can perform real work (the model often runs a few tool calls
+// before stopping) so we mirror what a normal user-initiated prompt would
+// allow rather than a tight RPC deadline.
+const wakeupPromptTimeout = 30 * time.Minute
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -104,6 +111,16 @@ type Adapter struct {
 	// and rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
 
+	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool fires
+	// its timer inside the SDK's async-iterator, but the upstream
+	// @agentclientprotocol/claude-agent-acp bridge only drains that iterator
+	// inside its prompt() handler — so a wakeup that fires while no prompt is
+	// in flight produces no output. wakeup re-injects the wakeup as a synthetic
+	// session/prompt at fire time. pendingWakeups tracks per-tool-call info
+	// (prompt + scheduledFor) since these arrive in separate notifications.
+	wakeup         *wakeupScheduler
+	pendingWakeups map[string]*pendingWakeup
+
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
 	promptTraceCtx context.Context
@@ -124,6 +141,13 @@ type Adapter struct {
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
+
+	// lifetimeCtx is cancelled by Close. Background work that may outlive
+	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
+	// context from this one so it aborts when the adapter shuts down rather
+	// than continuing to drive a dead subprocess.
+	lifetimeCtx    context.Context
+	lifetimeCancel context.CancelFunc
 }
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -131,7 +155,8 @@ type Adapter struct {
 // cfg.AgentID is required for debug file naming.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
-	return &Adapter{
+	ctx, cancel := context.WithCancel(context.Background())
+	a := &Adapter{
 		cfg:             cfg,
 		logger:          l,
 		agentID:         cfg.AgentID,
@@ -139,8 +164,13 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),
+		pendingWakeups:  make(map[string]*pendingWakeup),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		lifetimeCtx:     ctx,
+		lifetimeCancel:  cancel,
 	}
+	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
+	return a
 }
 
 // PrepareEnvironment is a no-op for ACP.
@@ -251,6 +281,15 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
+
+	// A fresh session invalidates any pending wakeup keyed to the prior
+	// session. Reset pendingWakeups and cancel the scheduler under one
+	// a.mu critical section so a concurrent handleWakeupEvent can't slip
+	// a stale entry between the two operations.
+	a.mu.Lock()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
+	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
@@ -422,6 +461,15 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
+
+	// Loading a different session invalidates any pending wakeup keyed to the
+	// prior session — same reset block as NewSession to avoid leaving an armed
+	// timer for a session id that's about to change and accumulating stale
+	// pendingWakeups entries across reloads.
+	a.mu.Lock()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
+	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
 	defer span.End()
@@ -653,6 +701,96 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	return nil
 }
 
+// fireWakeup is invoked by wakeupScheduler when a ScheduleWakeup timer
+// elapses. It issues a synthetic session/prompt so the upstream
+// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued wakeup
+// turn and emits visible ACP frames. The session must still match (the user
+// hasn't started a fresh session) and the adapter must not be closed.
+//
+// Concurrent-prompt safety: if a user prompt is already in flight when this
+// runs, both end up calling conn.Prompt() on the same ClientSideConnection.
+// That's safe at the wire level — the ACP SDK's Connection.sendMessage
+// holds a write mutex, so request frames never interleave on stdin, and
+// JSON-RPC pairs each response back to its originating request via id —
+// but it does mean two prompts can be in flight against the bridge at
+// once. The bridge serialises them in the order it receives them, which
+// is exactly what we want for a wakeup that races a user message.
+func (a *Adapter) fireWakeup(sessionID, prompt string) {
+	a.mu.RLock()
+	closed := a.closed
+	currentSession := a.sessionID
+	a.mu.RUnlock()
+
+	if closed {
+		a.logger.Debug("skipping wakeup fire: adapter closed",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if currentSession != sessionID {
+		a.logger.Info("skipping wakeup fire: session changed",
+			zap.String("scheduled_for", sessionID),
+			zap.String("current", currentSession))
+		return
+	}
+
+	a.logger.Info("injecting synthetic wakeup prompt",
+		zap.String("session_id", sessionID),
+		zap.Int("prompt_len", len(prompt)))
+
+	go func() {
+		// Derive from lifetimeCtx so a concurrent Close aborts the in-flight
+		// prompt instead of letting it run against a dead subprocess.
+		ctx, cancel := context.WithTimeout(a.lifetimeCtx, wakeupPromptTimeout)
+		defer cancel()
+		if err := a.Prompt(ctx, prompt, nil); err != nil {
+			a.logger.Error("synthetic wakeup prompt failed",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}()
+}
+
+// handleWakeupEvent inspects a tool-call meta + rawInput pair, accumulates
+// pending state per toolCallID, and schedules a wakeup once both the prompt
+// and scheduledFor timestamp are known. terminal=true means the tool call has
+// reached a terminal state, so any pending entry should be cleaned up.
+func (a *Adapter) handleWakeupEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
+	if toolCallID == "" {
+		return
+	}
+
+	scheduledForMs, isWakeup := extractScheduleWakeup(meta)
+
+	a.mu.Lock()
+	pw, tracked := a.pendingWakeups[toolCallID]
+	if !tracked {
+		if !isWakeup {
+			a.mu.Unlock()
+			return
+		}
+		pw = &pendingWakeup{}
+		a.pendingWakeups[toolCallID] = pw
+	}
+
+	if scheduledForMs > 0 {
+		pw.scheduledForMs = scheduledForMs
+	}
+	if prompt, ok := extractWakeupPrompt(rawInput); ok {
+		pw.prompt = prompt
+	}
+
+	prompt := pw.prompt
+	stamp := pw.scheduledForMs
+	if (prompt != "" && stamp > 0) || terminal {
+		delete(a.pendingWakeups, toolCallID)
+	}
+	a.mu.Unlock()
+
+	if prompt != "" && stamp > 0 {
+		a.wakeup.schedule(sessionID, prompt, stamp)
+	}
+}
+
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
@@ -784,6 +922,15 @@ func (a *Adapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing ACP adapter")
+
+	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
+	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
+	if a.wakeup != nil {
+		a.wakeup.cancel()
+	}
+	if a.lifetimeCancel != nil {
+		a.lifetimeCancel()
+	}
 
 	// Clean up any saved attachments
 	a.attachMgr.Cleanup()
@@ -1432,6 +1579,11 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	a.activeToolCalls[toolCallID] = normalizedPayload
 	a.mu.Unlock()
 
+	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
+	// on the initial tool_call; rawInput is usually empty here but record
+	// the prompt eagerly when it does arrive in the same notification.
+	a.handleWakeupEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
+
 	// Detect tool type for logging
 	toolType := DetectToolOperationType(toolKind, args)
 	_ = toolType // Used for normalization
@@ -1556,6 +1708,11 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		}
 	}
 	a.mu.Unlock()
+
+	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
+	// `_meta.claudeCode.toolResponse.scheduledFor` typically arrive. Once both
+	// are known, schedule the synthetic prompt; on terminal status, clean up.
+	a.handleWakeupEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
 
 	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
 	// as an agent_plan event so the orchestrator creates a visible plan message.

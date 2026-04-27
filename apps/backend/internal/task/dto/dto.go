@@ -306,8 +306,17 @@ type BranchDTO struct {
 }
 
 type RepositoryBranchesResponse struct {
-	Branches []BranchDTO `json:"branches"`
-	Total    int         `json:"total"`
+	Branches      []BranchDTO `json:"branches"`
+	Total         int         `json:"total"`
+	CurrentBranch string      `json:"current_branch,omitempty"`
+}
+
+// LocalRepositoryStatusResponse reports current branch + dirty paths for a
+// local repository on disk (no session required). Used by the task-create
+// dialog to preflight the fresh-branch flow on local executors.
+type LocalRepositoryStatusResponse struct {
+	CurrentBranch string   `json:"current_branch"`
+	DirtyFiles    []string `json:"dirty_files"`
 }
 
 type LocalRepositoryDTO struct {

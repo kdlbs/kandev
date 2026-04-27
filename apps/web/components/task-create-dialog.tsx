@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -10,16 +10,14 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
+import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
+import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
   SessionSelectors,
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
-import {
-  useRepositoryOptions,
-  useBranchOptions,
-  useAgentProfileOptions,
-} from "@/components/task-create-dialog-options";
+import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import {
   AgentSelector,
   ExecutorProfileSelector,
@@ -74,41 +72,6 @@ interface TaskCreateDialogProps {
   parentTaskId?: string;
 }
 
-type DialogHeaderContentProps = {
-  isCreateMode: boolean;
-  isEditMode: boolean;
-  sessionRepoName?: string;
-  initialTitle?: string;
-};
-
-function DialogHeaderContent(props: DialogHeaderContentProps) {
-  const { isCreateMode, isEditMode, sessionRepoName, initialTitle } = props;
-
-  if (isCreateMode || isEditMode) {
-    // Header is intentionally minimal — the dialog itself signals "create"
-    // and the task name input lives in the body below the repo chips. The
-    // GitHub URL input + toggle moved into the chip row as well.
-    return (
-      <DialogTitle className="sr-only">{isEditMode ? "Edit task" : "New task"}</DialogTitle>
-    );
-  }
-  return (
-    <DialogTitle asChild>
-      <div className="flex items-center gap-1 min-w-0 text-sm font-medium">
-        {sessionRepoName && (
-          <>
-            <span className="truncate text-muted-foreground">{sessionRepoName}</span>
-            <span className="text-muted-foreground mx-0.5">/</span>
-          </>
-        )}
-        <span className="truncate">{initialTitle || "Task"}</span>
-        <span className="text-muted-foreground mx-0.5">/</span>
-        <span className="text-muted-foreground whitespace-nowrap">new session</span>
-      </div>
-    </DialogTitle>
-  );
-}
-
 type DialogFormBodyProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
@@ -142,62 +105,54 @@ type DialogFormBodyProps = {
   onWorkflowChange: (v: string) => void;
   onToggleGitHubUrl: () => void;
   onGitHubUrlChange: (v: string) => void;
+  onToggleFreshBranch: (enabled: boolean) => void;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];
+  /** Computed in the parent: single-row + local executor + not URL mode. */
+  freshBranchAvailable: boolean;
 };
 
-function DialogFormBody({
-  isSessionMode,
-  isCreateMode,
-  isEditMode,
-  isTaskStarted,
-  isPassthroughProfile,
-  initialDescription,
-  hasDescription,
-  workspaceId,
-  onJiraImport,
-  agentProfileOptions,
-  executorProfileOptions,
-  agentProfiles,
-  agentProfilesLoading,
-  executorsLoading,
-  isCreatingSession,
-  workflows,
-  snapshots,
-  effectiveWorkflowId,
-  fs,
-  handleKeyDown,
-  onTaskNameChange,
-  onRowRepositoryChange,
-  onRowBranchChange,
-  onAgentProfileChange,
-  onExecutorProfileChange,
-  onWorkflowChange,
-  onToggleGitHubUrl,
-  onGitHubUrlChange,
-  enhance,
-  workflowAgentLocked,
-  repositories,
-}: DialogFormBodyProps) {
-  // Task name renders below the chip row in create/edit mode (per UX request);
-  // session mode and started tasks keep the header-only label and skip this.
-  const showTaskName = !isSessionMode && (isCreateMode || isEditMode) && !isTaskStarted;
+function CreateModeBody(props: DialogFormBodyProps) {
+  const {
+    isCreateMode,
+    isEditMode,
+    isTaskStarted,
+    workspaceId,
+    onJiraImport,
+    agentProfileOptions,
+    executorProfileOptions,
+    agentProfiles,
+    agentProfilesLoading,
+    executorsLoading,
+    isCreatingSession,
+    fs,
+    onTaskNameChange,
+    onRowRepositoryChange,
+    onRowBranchChange,
+    onAgentProfileChange,
+    onExecutorProfileChange,
+    onToggleGitHubUrl,
+    onGitHubUrlChange,
+    onToggleFreshBranch,
+    workflowAgentLocked,
+    repositories,
+    freshBranchAvailable,
+  } = props;
+  const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-      {!isSessionMode && (
-        <RepoChipsRow
-          fs={fs}
-          repositories={repositories}
-          isTaskStarted={isTaskStarted}
-          workspaceId={workspaceId}
-          onRowRepositoryChange={onRowRepositoryChange}
-          onRowBranchChange={onRowBranchChange}
-          onToggleGitHubUrl={onToggleGitHubUrl}
-          onGitHubUrlChange={onGitHubUrlChange}
-        />
-      )}
+    <>
+      <RepoChipsRow
+        fs={fs}
+        repositories={repositories}
+        isTaskStarted={isTaskStarted}
+        workspaceId={workspaceId}
+        onRowRepositoryChange={onRowRepositoryChange}
+        onRowBranchChange={onRowBranchChange}
+        onToggleGitHubUrl={onToggleGitHubUrl}
+        onGitHubUrlChange={onGitHubUrlChange}
+      />
       {showTaskName && (
         <InlineTaskName
           value={fs.taskName}
@@ -206,56 +161,82 @@ function DialogFormBody({
         />
       )}
       <DialogPromptSection
-        isSessionMode={isSessionMode}
+        isSessionMode={false}
         isTaskStarted={isTaskStarted}
-        isPassthroughProfile={isPassthroughProfile}
-        initialDescription={initialDescription}
-        hasDescription={hasDescription}
+        isPassthroughProfile={props.isPassthroughProfile}
+        initialDescription={props.initialDescription}
+        hasDescription={props.hasDescription}
         fs={fs}
-        handleKeyDown={handleKeyDown}
-        enhance={enhance}
+        handleKeyDown={props.handleKeyDown}
+        enhance={props.enhance}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
       />
-      {!isSessionMode && (
-        <CreateModeSelectors
-          isTaskStarted={isTaskStarted}
-          agentProfileOptions={agentProfileOptions}
-          executorProfileOptions={executorProfileOptions}
-          agentProfiles={agentProfiles}
-          agentProfilesLoading={agentProfilesLoading}
-          executorsLoading={executorsLoading}
-          isCreatingSession={isCreatingSession}
-          fs={fs}
-          onAgentProfileChange={onAgentProfileChange}
-          onExecutorProfileChange={onExecutorProfileChange}
-          workflowAgentLocked={workflowAgentLocked}
-        />
-      )}
+      <CreateModeSelectors
+        isTaskStarted={isTaskStarted}
+        agentProfileOptions={agentProfileOptions}
+        executorProfileOptions={executorProfileOptions}
+        agentProfiles={agentProfiles}
+        agentProfilesLoading={agentProfilesLoading}
+        executorsLoading={executorsLoading}
+        isCreatingSession={isCreatingSession}
+        fs={fs}
+        onAgentProfileChange={onAgentProfileChange}
+        onExecutorProfileChange={onExecutorProfileChange}
+        onToggleFreshBranch={onToggleFreshBranch}
+        workflowAgentLocked={workflowAgentLocked}
+        freshBranchAvailable={freshBranchAvailable}
+      />
+    </>
+  );
+}
+
+function SessionModeBody(props: DialogFormBodyProps) {
+  return (
+    <>
+      <DialogPromptSection
+        isSessionMode
+        isTaskStarted={props.isTaskStarted}
+        isPassthroughProfile={props.isPassthroughProfile}
+        initialDescription={props.initialDescription}
+        hasDescription={props.hasDescription}
+        fs={props.fs}
+        handleKeyDown={props.handleKeyDown}
+        enhance={props.enhance}
+        workspaceId={props.workspaceId}
+        onJiraImport={props.onJiraImport}
+      />
+      <SessionSelectors
+        agentProfileOptions={props.agentProfileOptions}
+        agentProfileId={props.fs.agentProfileId}
+        onAgentProfileChange={props.onAgentProfileChange}
+        agentProfilesLoading={props.agentProfilesLoading}
+        isCreatingSession={props.isCreatingSession}
+        executorProfileOptions={props.executorProfileOptions}
+        executorProfileId={props.fs.executorProfileId}
+        onExecutorProfileChange={props.onExecutorProfileChange}
+        executorsLoading={props.executorsLoading}
+        AgentSelectorComponent={AgentSelector}
+        ExecutorProfileSelectorComponent={ExecutorProfileSelector}
+      />
+    </>
+  );
+}
+
+function DialogFormBody(props: DialogFormBodyProps) {
+  const { isSessionMode, isCreateMode, isTaskStarted, workflows, snapshots } = props;
+  return (
+    <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+      {isSessionMode ? <SessionModeBody {...props} /> : <CreateModeBody {...props} />}
       <WorkflowSection
         isCreateMode={isCreateMode}
         isTaskStarted={isTaskStarted}
         workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
         snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
-        effectiveWorkflowId={effectiveWorkflowId}
-        onWorkflowChange={onWorkflowChange}
-        agentProfiles={agentProfiles}
+        effectiveWorkflowId={props.effectiveWorkflowId}
+        onWorkflowChange={props.onWorkflowChange}
+        agentProfiles={props.agentProfiles}
       />
-      {isSessionMode && (
-        <SessionSelectors
-          agentProfileOptions={agentProfileOptions}
-          agentProfileId={fs.agentProfileId}
-          onAgentProfileChange={onAgentProfileChange}
-          agentProfilesLoading={agentProfilesLoading}
-          isCreatingSession={isCreatingSession}
-          executorProfileOptions={executorProfileOptions}
-          executorProfileId={fs.executorProfileId}
-          onExecutorProfileChange={onExecutorProfileChange}
-          executorsLoading={executorsLoading}
-          AgentSelectorComponent={AgentSelector}
-          ExecutorProfileSelectorComponent={ExecutorProfileSelector}
-        />
-      )}
     </div>
   );
 }
@@ -293,40 +274,27 @@ function useJiraImportHandler(fs: DialogFormState) {
   );
 }
 
-function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
-  const { open, onOpenChange, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const { editingTask, onSuccess, onCreateSession, initialValues, parentTaskId } = props;
+type SubmitWiringArgs = {
+  props: TaskCreateDialogProps;
+  fs: ReturnType<typeof useDialogFormState>;
+  computed: ReturnType<typeof useTaskCreateDialogData>["computed"];
+  repositoryLocalPath: string;
+  isSessionMode: boolean;
+  isEditMode: boolean;
+};
+
+function useSubmitHandlersWiring({
+  props,
+  fs,
+  computed,
+  repositoryLocalPath,
+  isSessionMode,
+  isEditMode,
+}: SubmitWiringArgs) {
+  const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
+  const { parentTaskId } = props;
   const taskId = props.taskId ?? null;
-  const isSessionMode = mode === "session";
-  const isEditMode = mode === "edit";
-  const isCreateMode = mode === "create";
-  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
-  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
-  const { toast } = useToast();
-  const sessionRepoName = useSessionRepoName(isSessionMode);
-  const {
-    workflows,
-    agentProfiles,
-    executors,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    computed,
-  } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
-  useTaskCreateDialogEffects(fs, {
-    open,
-    workspaceId,
-    workflowId,
-    repositories,
-    repositoriesLoading,
-    agentProfiles,
-    executors,
-    workspaceDefaults: computed.workspaceDefaults,
-    toast,
-    workflows,
-  });
-  const handlers = useDialogHandlers(fs, repositories);
-  const submitHandlers = useTaskSubmitHandlers({
+  return useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
     isPassthroughProfile: computed.isPassthroughProfile,
@@ -363,10 +331,79 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
     clearDraft: fs.clearDraft,
+    freshBranchEnabled: fs.freshBranchEnabled,
+    isLocalExecutor: computed.isLocalExecutor,
+    repositoryLocalPath,
+  });
+}
+
+/**
+ * Resolves the on-disk path for the (single) selected row, used by the
+ * fresh-branch consent flow. Multi-row tasks hide fresh-branch in the UI,
+ * so we only need to resolve a path when there is exactly one row.
+ */
+function resolveSingleRowLocalPath(
+  fs: DialogFormState,
+  repositories: Repository[],
+): string {
+  if (fs.repositories.length !== 1) return "";
+  const row = fs.repositories[0];
+  if (row.localPath) return row.localPath;
+  if (row.repositoryId) {
+    return repositories.find((r) => r.id === row.repositoryId)?.local_path ?? "";
+  }
+  return "";
+}
+
+function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
+  const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
+  const { editingTask, initialValues } = props;
+  const isSessionMode = mode === "session";
+  const isEditMode = mode === "edit";
+  const isCreateMode = mode === "create";
+  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
+  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
+  const { toast } = useToast();
+  const sessionRepoName = useSessionRepoName(isSessionMode);
+  const {
+    workflows,
+    agentProfiles,
+    executors,
+    snapshots,
+    repositories,
+    repositoriesLoading,
+    computed,
+  } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
+  const repositoryLocalPath = resolveSingleRowLocalPath(fs, repositories);
+  useTaskCreateDialogEffects(fs, {
+    open,
+    workspaceId,
+    workflowId,
+    repositories,
+    repositoriesLoading,
+    agentProfiles,
+    executors,
+    workspaceDefaults: computed.workspaceDefaults,
+    toast,
+    workflows,
+  });
+  const handlers = useDialogHandlers(fs, repositories);
+  const submitHandlers = useSubmitHandlersWiring({
+    props,
+    fs,
+    computed,
+    repositoryLocalPath,
+    isSessionMode,
+    isEditMode,
   });
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
   });
+  // Fresh-branch is single-row + local executor + not URL mode. The chip row
+  // can hold any number of repos; we hide the toggle whenever the question
+  // ("which repo do we discard local changes in?") becomes ambiguous.
+  const freshBranchAvailable =
+    !fs.useGitHubUrl && computed.isLocalExecutor && fs.repositories.length === 1;
   return {
     fs,
     isSessionMode,
@@ -383,6 +420,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     handlers,
     submitHandlers,
     handleKeyDown,
+    freshBranchAvailable,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),
   };
@@ -393,7 +431,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
   const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
   const { sessionRepoName, workflows, agentProfiles, snapshots, repositories } = setup;
-  const { computed, handlers, handleKeyDown } = setup;
+  const { computed, handlers, handleKeyDown, freshBranchAvailable } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   const { handleJiraImport } = setup;
@@ -441,9 +479,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onWorkflowChange={handlers.handleWorkflowChange}
             onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
+            onToggleFreshBranch={handlers.handleToggleFreshBranch}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
             repositories={repositories}
+            freshBranchAvailable={freshBranchAvailable}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter
@@ -473,7 +513,28 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             />
           </DialogFooter>
         </form>
+        <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PendingDiscardModal({
+  pending,
+}: {
+  pending: ReturnType<typeof useTaskSubmitHandlers>["pendingDiscard"];
+}) {
+  if (!pending) return null;
+  return (
+    <DiscardLocalChangesDialog
+      open
+      onOpenChange={(next) => {
+        if (!next) pending.resolve(false);
+      }}
+      dirtyFiles={pending.dirtyFiles}
+      repoPath={pending.repoPath}
+      onConfirm={() => pending.resolve(true)}
+      onCancel={() => pending.resolve(false)}
+    />
   );
 }

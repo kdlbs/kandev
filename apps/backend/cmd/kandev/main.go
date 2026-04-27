@@ -60,16 +60,13 @@ import (
 
 	// Database
 	"github.com/kandev/kandev/internal/db"
-)
 
-// defaultServerPort is the fallback HTTP port when neither the CLI flag nor
-// the config file / env var sets one. Kept in sync with the viper default in
-// internal/common/config.setDefaults.
-const defaultServerPort = 38429
+	"github.com/kandev/kandev/internal/common/ports"
+)
 
 // Command-line flags
 var (
-	flagPort     = flag.Int("port", 0, fmt.Sprintf("HTTP server port (default: %d)", defaultServerPort))
+	flagPort     = flag.Int("port", 0, fmt.Sprintf("HTTP server port (default: %d)", ports.Backend))
 	flagLogLevel = flag.String("log-level", "", "Log level: debug, info, warn, error")
 	flagHelp     = flag.Bool("help", false, "Show help message")
 	flagVersion  = flag.Bool("version", false, "Show version information")
@@ -435,7 +432,7 @@ func startGatewayAndServe(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = defaultServerPort
+		port = ports.Backend
 	}
 	go func() {
 		log.Info("WebSocket server listening", zap.Int("port", port))
@@ -506,7 +503,7 @@ func buildHTTPServer(
 
 	port := cfg.Server.Port
 	if port == 0 {
-		port = defaultServerPort
+		port = ports.Backend
 	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),

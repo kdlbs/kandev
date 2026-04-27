@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -317,6 +319,20 @@ type httpTaskRepositoryInput struct {
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
 	GitHubURL      string `json:"github_url"`
+
+	// Fresh-branch flow (local executor only): when FreshBranch is true the
+	// handler discards uncommitted changes in the local clone and creates
+	// NewBranchName from BaseBranch before the task is persisted.
+	// ConfirmDiscard must be true if the working tree is dirty; otherwise
+	// the request is rejected with 409 + the dirty file list.
+	// ConsentedDirtyFiles is the dirty-file list the UI showed the user;
+	// the backend rejects with 409 if the live dirty set has any path
+	// that wasn't on this list, protecting against silent loss of files
+	// that became dirty between preflight and execution.
+	FreshBranch         bool     `json:"fresh_branch,omitempty"`
+	NewBranchName       string   `json:"new_branch_name,omitempty"`
+	ConfirmDiscard      bool     `json:"confirm_discard,omitempty"`
+	ConsentedDirtyFiles []string `json:"consented_dirty_files,omitempty"`
 }
 
 type httpCreateTaskRequest struct {
@@ -444,6 +460,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
+	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
+		return
+	}
+
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
@@ -454,6 +474,158 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// commitFreshBranch wraps the post-CreateTask fresh-branch sequence: run the
+// destructive checkout, compensate by deleting the task if it fails, then
+// persist the rewritten BaseBranch onto the now-existing task. Returns false
+// when an HTTP error response was already written.
+func (h *TaskHandlers) commitFreshBranch(
+	c *gin.Context,
+	taskID, title, workspaceID string,
+	inputs []httpTaskRepositoryInput,
+	repos []dto.TaskRepositoryInput,
+) bool {
+	hasFresh := false
+	for _, raw := range inputs {
+		if raw.FreshBranch {
+			hasFresh = true
+			break
+		}
+	}
+	if !hasFresh {
+		// No fresh-branch opt-in — repos were already persisted by CreateTask,
+		// so skip the destructive checkout and the DELETE+INSERT rewrite.
+		return true
+	}
+	if !h.applyFreshBranch(c, title, inputs, repos) {
+		if delErr := h.service.DeleteTask(c.Request.Context(), taskID); delErr != nil {
+			h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
+				zap.String("task_id", taskID), zap.Error(delErr))
+		}
+		return false
+	}
+	// Persist the rewritten BaseBranch (set by applyFreshBranch) onto the task.
+	// applyFreshBranch already mutated the git repo, so we can't roll back —
+	// but we must surface a 5xx so the caller knows the DB still references
+	// the user's original fork point. Otherwise every subsequent session
+	// resume would silently check out the old branch and abandon the new one.
+	if err := h.service.ReplaceTaskRepositories(c.Request.Context(), taskID, workspaceID, convertToServiceRepos(repos)); err != nil {
+		h.logger.Error("failed to persist fresh-branch base branch onto task",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "fresh branch was created but the task record could not be updated; please check the repository",
+		})
+		return false
+	}
+	return true
+}
+
+// applyFreshBranch executes the fresh-branch flow for any local-executor
+// repository inputs that opted in. Mutates `repos[i].BaseBranch` to the
+// newly-created branch on success so the persisted task uses it as the
+// effective base branch on every session resume. Writes the appropriate
+// HTTP error response and returns false on failure.
+//
+// When the caller doesn't supply NewBranchName, the backend generates a
+// semantic name from the task title (matching the worktree executor's
+// branch-naming) so the user only has to flip a switch.
+func (h *TaskHandlers) applyFreshBranch(c *gin.Context, taskTitle string, inputs []httpTaskRepositoryInput, repos []dto.TaskRepositoryInput) bool {
+	ctx := c.Request.Context()
+	for i, raw := range inputs {
+		if !raw.FreshBranch {
+			continue
+		}
+		repoPath, ok := h.resolveLocalRepoPath(c, raw)
+		if !ok {
+			return false
+		}
+		baseBranch := raw.BaseBranch
+		if baseBranch == "" {
+			// User didn't pick one — fall back to the repo's checked-out branch.
+			baseBranch, _ = h.service.LocalRepositoryCurrentBranch(ctx, repoPath)
+		}
+		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
+		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
+			RepoPath:            repoPath,
+			BaseBranch:          baseBranch,
+			NewBranch:           newBranch,
+			ConfirmDiscard:      raw.ConfirmDiscard,
+			ConsentedDirtyFiles: raw.ConsentedDirtyFiles,
+		})
+		if err != nil {
+			h.respondFreshBranchError(c, err)
+			return false
+		}
+		repos[i].BaseBranch = newBranch
+		repos[i].CheckoutBranch = ""
+	}
+	return true
+}
+
+// resolveFreshBranchName returns the user-supplied branch name when present,
+// otherwise generates one from the task title using the same semantic name +
+// random-suffix scheme as the worktree executor. Returns an empty string only
+// when both the raw name and the task title would produce nothing useful;
+// PerformFreshBranch's sanitizeGitRef rejects that downstream.
+func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
+	if name := strings.TrimSpace(rawNewBranch); name != "" {
+		return name
+	}
+	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+}
+
+func (h *TaskHandlers) resolveLocalRepoPath(c *gin.Context, raw httpTaskRepositoryInput) (string, bool) {
+	if raw.LocalPath != "" {
+		return raw.LocalPath, true
+	}
+	if raw.RepositoryID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "fresh_branch requires repository_id or local_path"})
+		return "", false
+	}
+	repo, err := h.service.GetRepository(c.Request.Context(), raw.RepositoryID)
+	if err != nil || repo == nil || repo.LocalPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository has no local path"})
+		return "", false
+	}
+	return repo.LocalPath, true
+}
+
+func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
+	var dirty *service.ErrDirtyWorkingTree
+	if errors.As(err, &dirty) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "working tree has uncommitted changes",
+			"dirty_files": dirty.DirtyFiles,
+		})
+		return
+	}
+	if errors.Is(err, service.ErrPathNotAllowed) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not within an allowed root"})
+		return
+	}
+	if errors.Is(err, service.ErrInvalidGitRef) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrFreshBranchCheckout) {
+		// git checkout failure (e.g. branch already exists, base branch unknown).
+		// Surface the underlying message — it tells the user what to fix.
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrPartialDiscard) {
+		// Tracked files already gone, untracked survived. The user needs to
+		// know they have lost work before retrying — never a generic 500.
+		h.logger.Error("partial discard during fresh-branch", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "tracked changes were discarded but git clean failed; untracked files remain — inspect the repo before retrying",
+			"partial": true,
+		})
+		return
+	}
+	h.logger.Error("fresh branch checkout failed", zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare fresh branch"})
 }
 
 // convertCreateTaskRepositories converts httpTaskRepositoryInput slice to dto.TaskRepositoryInput slice.

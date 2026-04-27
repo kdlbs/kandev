@@ -12,14 +12,14 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Default agentctl port. Clustered near the web port (37429) to avoid
-// collisions with commonly used ports (8080, 9090, 9999, etc.).
-const AgentCtlPort = 39429
+// AgentCtlPort is the default agentctl control port.
+const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {

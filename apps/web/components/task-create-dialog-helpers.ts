@@ -172,6 +172,11 @@ export function buildRepositoriesPayload(opts: {
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
+  /**
+   * Optional fresh-branch metadata. The UI gates this to single-row + local
+   * executor; when present we apply it to every row (which is at most one).
+   */
+  freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
   if (opts.useGitHubUrl && opts.githubUrl) {
     return [
@@ -183,6 +188,13 @@ export function buildRepositoriesPayload(opts: {
       },
     ];
   }
+  const fresh = opts.freshBranch
+    ? {
+        fresh_branch: true,
+        confirm_discard: opts.freshBranch.confirmDiscard,
+        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
+      }
+    : {};
   return opts.repositories
     .filter((row) => row.repositoryId || row.localPath)
     .map((row) => {
@@ -190,6 +202,7 @@ export function buildRepositoriesPayload(opts: {
         return {
           repository_id: row.repositoryId,
           base_branch: row.branch || undefined,
+          ...fresh,
         };
       }
       const local = opts.discoveredRepositories.find((d) => d.path === row.localPath);
@@ -198,6 +211,7 @@ export function buildRepositoriesPayload(opts: {
         base_branch: row.branch || undefined,
         local_path: row.localPath,
         default_branch: local?.default_branch || undefined,
+        ...fresh,
       };
     });
 }

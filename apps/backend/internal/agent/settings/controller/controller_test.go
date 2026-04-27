@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
@@ -497,5 +498,23 @@ func TestController_GetAgentLogo_NoLogoData(t *testing.T) {
 	_, err := ctrl.GetAgentLogo(context.Background(), "test-agent", agents.LogoLight)
 	if err != ErrLogoNotAvailable {
 		t.Errorf("GetAgentLogo() error = %v, want ErrLogoNotAvailable", err)
+	}
+}
+
+// TestSyncAgentFromDiscovery_UnknownAgentSkipped verifies that
+// syncAgentFromDiscovery returns nil (not an error) when the discovered agent
+// is not in the registry. This is the expected behaviour when
+// KANDEV_MOCK_AGENT=only suppresses all real agents: the filesystem scanner may
+// still detect installed CLIs, but they should be silently skipped rather than
+// aborting the entire profile-sync loop.
+func TestSyncAgentFromDiscovery_UnknownAgentSkipped(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{}) // empty registry
+
+	result := discovery.Availability{
+		Name:      "some-unregistered-agent",
+		Available: true,
+	}
+	if err := ctrl.syncAgentFromDiscovery(context.Background(), result); err != nil {
+		t.Errorf("expected nil error for unknown agent, got: %v", err)
 	}
 }

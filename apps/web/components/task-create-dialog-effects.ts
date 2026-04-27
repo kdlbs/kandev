@@ -5,7 +5,10 @@ import type { Repository, Executor } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
+import {
+  discoverRepositoriesAction,
+  getLocalRepositoryStatusAction,
+} from "@/app/actions/workspaces";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
@@ -145,9 +148,49 @@ export function useDiscoverReposEffect(
   ]);
 }
 
-// useLocalBranchesEffect removed: the chip row's RepoChip loads branches per
-// repo via useRepositoryBranches now (the store dedupes by id), so we don't
-// need a per-form "primary local repo branches" cache anymore.
+// Per-row branch listing now lives in the chip itself via useBranches, so the
+// old useLocalBranchesEffect is gone.
+//
+// useCurrentLocalBranchEffect still earns its keep — the fresh-branch
+// consent flow needs to know which branch the on-disk clone is currently on,
+// and that's only meaningful for a single-row local-executor task. For multi-
+// repo tasks fresh-branch is hidden in the UI, so we only resolve a path
+// when there's exactly one row.
+export function useCurrentLocalBranchEffect(
+  fs: DialogFormState,
+  open: boolean,
+  workspaceId: string | null,
+  repositories: Repository[],
+) {
+  const { repositories: rows, useGitHubUrl, setCurrentLocalBranch } = fs;
+  useEffect(() => {
+    if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
+      setCurrentLocalBranch("");
+      return;
+    }
+    const row = rows[0];
+    let path = row.localPath ?? "";
+    if (!path && row.repositoryId) {
+      const repo = repositories.find((r: Repository) => r.id === row.repositoryId);
+      path = repo?.local_path ?? "";
+    }
+    if (!path) {
+      setCurrentLocalBranch("");
+      return;
+    }
+    let cancelled = false;
+    getLocalRepositoryStatusAction(workspaceId, path)
+      .then((r) => {
+        if (!cancelled) setCurrentLocalBranch(r.current_branch ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentLocalBranch("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workspaceId, useGitHubUrl, rows, repositories, setCurrentLocalBranch]);
+}
 
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
@@ -379,6 +422,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs);
+  useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
 }

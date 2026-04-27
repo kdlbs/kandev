@@ -9,11 +9,19 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 /**
  * Centralizes form-field change handlers for the task-create dialog.
  *
- * The dialog now stores all repos in a single `fs.repositories` list (no
- * "primary vs extras" split), so the per-row handlers are uniform: changing
+ * The dialog stores all repos in a single `fs.repositories` list (no
+ * "primary vs extras" split), so per-row handlers are uniform: changing
  * a repo on row N is the same op whether N==0 or N==5.
+ *
+ * Fresh-branch (local-executor opt-in: discard local changes and start on
+ * a new branch) is a separate concern that lives alongside.
  */
-export function useDialogHandlers(fs: DialogFormState, repositories: Repository[]) {
+function clearFreshBranch(fs: DialogFormState) {
+  fs.setFreshBranchEnabled(false);
+  fs.setCurrentLocalBranch("");
+}
+
+function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) {
   /**
    * Resolves a picker value into the right shape for a row:
    * - If it matches a workspace repo id → `{ repositoryId, localPath: undefined }`.
@@ -28,6 +36,9 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
         : { repositoryId: undefined, localPath: value, branch: "" };
       fs.updateRepository(key, patch);
       if (isWorkspaceRepo) setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
+      // Switching the repo invalidates whatever local-status the fresh-branch
+      // panel had cached.
+      clearFreshBranch(fs);
     },
     [repositories, fs],
   );
@@ -40,6 +51,10 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     [fs],
   );
 
+  return { handleRowRepositoryChange, handleRowBranchChange };
+}
+
+function useProfileAndNameHandlers(fs: DialogFormState) {
   const handleAgentProfileChange = useCallback(
     (value: string) => {
       fs.setAgentProfileId(value);
@@ -69,12 +84,19 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     [fs],
   );
   const handleWorkflowChange = useCallback(
-    (value: string) => {
-      fs.setSelectedWorkflowId(value);
-    },
+    (value: string) => fs.setSelectedWorkflowId(value),
     [fs],
   );
+  return {
+    handleAgentProfileChange,
+    handleExecutorProfileChange,
+    handleTaskNameChange,
+    handleGitHubBranchChange,
+    handleWorkflowChange,
+  };
+}
 
+function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   /**
    * Toggles between "repo chips" mode and "GitHub URL" mode. URL mode
    * replaces the chip row with a single URL input; flipping back restores
@@ -83,18 +105,25 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
   const handleToggleGitHubUrl = useCallback(() => {
     const next = !fs.useGitHubUrl;
     fs.setUseGitHubUrl(next);
-    if (next) {
-      // Stash the rows aside while in URL mode; flipping back keeps them.
-      // (Nothing to do here — chips re-render off `fs.repositories` once
-      // useGitHubUrl flips back to false.)
-    } else {
+    if (!next) {
       fs.setGitHubUrl("");
       fs.setGitHubBranches([]);
       fs.setGitHubUrlError(null);
       fs.setGitHubPrHeadBranch(null);
     }
     fs.setGitHubBranch("");
+    clearFreshBranch(fs);
   }, [fs]);
+
+  const handleToggleFreshBranch = useCallback(
+    (enabled: boolean) => {
+      fs.setFreshBranchEnabled(enabled);
+      // Clearing fs.repositories[].branch on toggle would force a re-pick from
+      // the per-row branch list; for simplicity leave whatever the user picked.
+      // The submit path re-validates anyway.
+    },
+    [fs],
+  );
 
   const handleGitHubUrlChange = useCallback(
     (value: string) => {
@@ -108,14 +137,19 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
   );
 
   return {
-    handleRowRepositoryChange,
-    handleRowBranchChange,
-    handleAgentProfileChange,
-    handleExecutorProfileChange,
-    handleTaskNameChange,
-    handleGitHubBranchChange,
-    handleWorkflowChange,
     handleToggleGitHubUrl,
+    handleToggleFreshBranch,
     handleGitHubUrlChange,
+  };
+}
+
+export function useDialogHandlers(fs: DialogFormState, repositories: Repository[]) {
+  const repo = useRepositoryHandlers(fs, repositories);
+  const profile = useProfileAndNameHandlers(fs);
+  const gh = useGitHubAndFreshBranchHandlers(fs);
+  return {
+    ...repo,
+    ...profile,
+    ...gh,
   };
 }
