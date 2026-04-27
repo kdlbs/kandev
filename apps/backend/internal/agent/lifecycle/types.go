@@ -58,7 +58,8 @@ type AgentExecution struct {
 	standalonePort       int    // Port of the standalone execution
 
 	// Passthrough mode info (CLI passthrough without ACP)
-	PassthroughProcessID string // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 
 	// isResumedSession is true when this execution was created as part of a session resume
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions

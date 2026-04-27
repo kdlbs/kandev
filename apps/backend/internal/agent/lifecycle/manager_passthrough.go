@@ -312,6 +312,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 
 	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
 
 	m.logger.Info("passthrough session started",
 		zap.String("execution_id", execution.ID),
@@ -389,6 +390,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 
 	oldProcessID := execution.PassthroughProcessID
 	execution.PassthroughProcessID = ""
+	execution.PassthroughStartedAt = time.Time{}
 
 	if err := interactiveRunner.Stop(ctx, oldProcessID); err != nil {
 		m.logger.Warn("failed to stop passthrough process during context reset",
@@ -415,6 +417,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 
 	// 4. Update execution with new process ID
 	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
 
 	m.logger.Info("passthrough process restarted with fresh context",
 		zap.String("execution_id", execution.ID),
@@ -485,6 +488,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
 
 	m.logger.Info("passthrough session resumed",
 		zap.String("session_id", sessionID),
@@ -605,6 +609,10 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate) {
 	const restartDelay = 500 * time.Millisecond
 	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
+	// fastFailWindow is short enough to catch launch-time failures (bad CLI
+	// flag, missing binary, immediate auth rejection) but long enough that a
+	// healthy agent that does any startup work won't be mistaken for one.
+	const fastFailWindow = 2 * time.Second
 
 	sessionID := execution.SessionID
 
@@ -643,6 +651,25 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	exitCode := 0
 	if status.ExitCode != nil {
 		exitCode = *status.ExitCode
+	}
+
+	// Fast-fail short-circuit: a non-zero exit shortly after start almost
+	// always means the launch itself was wrong (bad CLI flag, missing binary,
+	// auth failure). Restarting just thrashes — the next run hits the same
+	// failure at the same speed. Surface the failure to the user instead.
+	if isFastFailExit(execution, exitCode, fastFailWindow) {
+		m.logger.Warn("passthrough process exited fast with non-zero code, skipping auto-restart",
+			zap.String("session_id", sessionID),
+			zap.Int("exit_code", exitCode),
+			zap.Duration("uptime", time.Since(execution.PassthroughStartedAt)))
+		failMsg := fmt.Sprintf("\r\n\x1b[31m[Agent exited (code %d) within %s. Likely cause: bad CLI flag, missing binary, or auth failure. Edit your profile and reconnect to retry.]\x1b[0m\r\n",
+			exitCode, fastFailWindow)
+		if err := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); err != nil {
+			m.logger.Debug("failed to write fast-fail message to terminal",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
 	}
 
 	m.logger.Info("passthrough process exited with active WebSocket, attempting auto-restart",
@@ -702,6 +729,17 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 			zap.String("session_id", sessionID),
 			zap.String("new_process_id", execution.PassthroughProcessID))
 	}
+}
+
+// isFastFailExit reports whether a passthrough process exit looks like a
+// launch failure rather than a runtime exit worth restarting. A zero start
+// time disables the check (e.g. recovered executions where the start time
+// is unknown), so the legacy restart path remains the default.
+func isFastFailExit(execution *AgentExecution, exitCode int, window time.Duration) bool {
+	if exitCode == 0 || execution.PassthroughStartedAt.IsZero() {
+		return false
+	}
+	return time.Since(execution.PassthroughStartedAt) < window
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.

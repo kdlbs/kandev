@@ -283,6 +283,54 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 	})
 }
 
+// TestIsFastFailExit covers the predicate that decides whether a passthrough
+// exit looks like a launch failure (bad CLI flag, missing binary, auth
+// rejection) and should bypass the auto-restart loop.
+func TestIsFastFailExit(t *testing.T) {
+	const window = 2 * time.Second
+	now := time.Now()
+
+	tests := []struct {
+		name      string
+		execution *AgentExecution
+		exitCode  int
+		want      bool
+	}{
+		{
+			name:      "fast exit with non-zero code → fast-fail",
+			execution: &AgentExecution{PassthroughStartedAt: now.Add(-100 * time.Millisecond)},
+			exitCode:  1,
+			want:      true,
+		},
+		{
+			name:      "slow exit with non-zero code → restart",
+			execution: &AgentExecution{PassthroughStartedAt: now.Add(-5 * time.Second)},
+			exitCode:  1,
+			want:      false,
+		},
+		{
+			name:      "fast exit with zero code → not fast-fail (clean exit)",
+			execution: &AgentExecution{PassthroughStartedAt: now.Add(-100 * time.Millisecond)},
+			exitCode:  0,
+			want:      false,
+		},
+		{
+			name:      "zero start time → check disabled (recovered execution)",
+			execution: &AgentExecution{PassthroughStartedAt: time.Time{}},
+			exitCode:  1,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isFastFailExit(tt.execution, tt.exitCode, window); got != tt.want {
+				t.Errorf("isFastFailExit() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestManager_ProfileCLIFlagTokens confirms profile-configured cli_flags
 // reach the passthrough launch path (regression for issue #718, where the
 // passthrough builder silently dropped them).
