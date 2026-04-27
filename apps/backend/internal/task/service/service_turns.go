@@ -101,9 +101,10 @@ func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.
 // getOrStartTurn returns the active turn for a session, or starts a new one if none exists.
 // This is used to ensure messages always have a valid turn ID.
 func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	// First try to get an active turn
-	turn, err := s.turns.GetActiveTurnBySessionID(ctx, sessionID)
-	if err == nil && turn != nil {
+	// Route through GetActiveTurn so the ErrNoRows → (nil, nil) normalization
+	// applies consistently. Real DB errors fall through to StartTurn, which
+	// will surface them.
+	if turn, err := s.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
 		return turn, nil
 	}
 

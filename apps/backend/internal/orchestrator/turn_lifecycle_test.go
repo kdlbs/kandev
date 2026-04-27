@@ -173,6 +173,37 @@ func TestCompleteTurnMopsUpMultipleZombies(t *testing.T) {
 	}
 }
 
+// TestCompleteTurnRespectsIterationCap verifies that the cleanup loop closes at
+// most maxIterations (16) turns per call and that a subsequent call mops up the
+// remainder. Locks in the cap behavior so future tweaks don't accidentally turn
+// the safety bound into a footgun.
+func TestCompleteTurnRespectsIterationCap(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	const seeded = 20
+	for i := 0; i < seeded; i++ {
+		if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+			t.Fatalf("seed turn %d: %v", i, err)
+		}
+	}
+	if open := openTurnCount(t, repo, "session1"); open != seeded {
+		t.Fatalf("expected %d open turns, got %d", seeded, open)
+	}
+
+	svc.completeTurnForSession(ctx, "session1")
+
+	if open := openTurnCount(t, repo, "session1"); open != seeded-16 {
+		t.Fatalf("expected %d open turns after first sweep (cap=16), got %d", seeded-16, open)
+	}
+
+	svc.completeTurnForSession(ctx, "session1")
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected 0 open turns after second sweep, got %d", open)
+	}
+}
+
 // TestCompleteTurnIsIdempotent covers the cancel-after-agent-already-completed
 // race: the agent's stream complete event closed the turn, then CancelAgent
 // runs completeTurnForSession again. Should be a no-op, not an error.

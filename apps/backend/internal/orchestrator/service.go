@@ -481,9 +481,17 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 		}
 	}
 
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
 		return turn.ID
+	} else if err != nil {
+		// A real DB read failure here would otherwise be silently dropped, and
+		// we'd fall through to StartTurn — potentially writing a duplicate next
+		// to an existing open turn we couldn't see. Log it; the next sweep via
+		// completeTurnForSession will mop up any duplicate.
+		s.logger.Warn("failed to look up active turn before starting a new one",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	turn, err := s.turnService.StartTurn(ctx, sessionID)
@@ -512,7 +520,8 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 	s.activeTurns.Delete(sessionID)
 
 	const maxIterations = 16
-	for i := 0; i < maxIterations; i++ {
+	closed := 0
+	for closed < maxIterations {
 		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 		if err != nil {
 			s.logger.Warn("failed to look up active turn",
@@ -524,16 +533,25 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 			return
 		}
 		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
-			s.logger.Warn("failed to complete turn",
+			// GetActiveTurn returns the latest open turn — retrying here
+			// would just hit the same row and loop. Bail; the next
+			// completeTurnForSession call will pick it up.
+			s.logger.Warn("failed to complete turn; will retry on next sweep",
 				zap.String("session_id", sessionID),
 				zap.String("turn_id", turn.ID),
 				zap.Error(err))
 			return
 		}
+		closed++
 	}
-	s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
-		zap.String("session_id", sessionID),
-		zap.Int("max_iterations", maxIterations))
+	// Only warn if turns are *still* accumulating after the cap. Closing
+	// exactly maxIterations turns and then finding the session clean is not a
+	// runaway.
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+		s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
+			zap.String("session_id", sessionID),
+			zap.Int("max_iterations", maxIterations))
+	}
 }
 
 // getActiveTurnID returns the active turn ID for a session.
