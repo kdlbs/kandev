@@ -8,23 +8,25 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/di
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
+import type { OrchestrateMeta } from "@/lib/state/slices/orchestrate/types";
 import { useIssueDraft, type IssueDraft } from "./new-issue-draft";
 import { NewIssueSelectorRow } from "./new-issue-selector-row";
 import { NewIssueBottomBar } from "./new-issue-bottom-bar";
 
-function priorityToNumber(priority: string): number {
-  switch (priority) {
-    case "critical":
-      return 4;
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-      return 1;
-    default:
-      return 0;
+const FALLBACK_PRIORITY_VALUES: Record<string, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+  none: 0,
+};
+
+function priorityToNumber(priority: string, meta: OrchestrateMeta | null): number {
+  if (meta) {
+    const p = meta.priorities.find((m) => m.id === priority);
+    if (p) return p.value;
   }
+  return FALLBACK_PRIORITY_VALUES[priority] ?? 0;
 }
 
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
@@ -51,6 +53,7 @@ export function NewIssueDialog({
   defaultAssigneeId,
 }: NewIssueDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const meta = useAppStore((s) => s.orchestrate.meta);
   const [submitting, setSubmitting] = useState(false);
 
   const { draft, updateDraft, clearDraft } = useIssueDraft(workspaceId, parentTaskId, {
@@ -68,7 +71,7 @@ export function NewIssueDialog({
         title: draft.title.trim(),
         description: draft.description.trim() || undefined,
         parent_id: parentTaskId,
-        priority: priorityToNumber(draft.priority),
+        priority: priorityToNumber(draft.priority, meta),
         metadata: buildMetadata(draft),
       });
       clearDraft();
@@ -79,7 +82,7 @@ export function NewIssueDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [draft, workspaceId, parentTaskId, clearDraft, onOpenChange]);
+  }, [draft, workspaceId, parentTaskId, meta, clearDraft, onOpenChange]);
 
   const handleDiscard = useCallback(() => {
     clearDraft();

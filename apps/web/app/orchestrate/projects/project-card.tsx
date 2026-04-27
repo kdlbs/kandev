@@ -27,15 +27,47 @@ type ProjectCardProps = {
   leadAgentName?: string;
 };
 
-export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
+function useProjectStatusDisplay(status: string) {
   const meta = useAppStore((s) => s.orchestrate.meta);
-  const metaStatus = meta?.projectStatuses.find((s) => s.id === project.status);
-  const badgeClass = metaStatus?.color ?? FALLBACK_BADGE_CLASSES[project.status] ?? "";
-  const statusLabel = metaStatus?.label ?? FALLBACK_LABELS[project.status] ?? project.status;
+  const metaStatus = meta?.projectStatuses.find((s) => s.id === status);
+  return {
+    badgeClass: metaStatus?.color ?? FALLBACK_BADGE_CLASSES[status] ?? "",
+    label: metaStatus?.label ?? FALLBACK_LABELS[status] ?? status,
+  };
+}
 
+function ProjectStats({ project }: { project: Project }) {
   const counts = project.taskCounts ?? { total: 0, in_progress: 0, done: 0, blocked: 0 };
   const repoCount = project.repositories?.length ?? 0;
   const progressPct = counts.total > 0 ? Math.round((counts.done / counts.total) * 100) : 0;
+
+  return (
+    <>
+      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <IconGitBranch className="h-3.5 w-3.5" />
+          {repoCount} {repoCount === 1 ? "repo" : "repos"}
+        </span>
+        <span>{counts.total} tasks</span>
+        {counts.in_progress > 0 && (
+          <span className="text-yellow-600 dark:text-yellow-400">
+            {counts.in_progress} in progress
+          </span>
+        )}
+        <span className="text-green-600 dark:text-green-400">{counts.done} done</span>
+      </div>
+      {counts.total > 0 && (
+        <div className="space-y-1">
+          <Progress value={progressPct} className="h-1.5" />
+          <p className="text-[10px] text-muted-foreground text-right">{progressPct}%</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
+  const { badgeClass, label: statusLabel } = useProjectStatusDisplay(project.status);
 
   return (
     <Link href={`/orchestrate/projects/${project.id}`} className="block cursor-pointer">
@@ -47,33 +79,11 @@ export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
               style={{ backgroundColor: project.color || "#6b7280" }}
             />
             <CardTitle className="text-sm font-medium truncate flex-1">{project.name}</CardTitle>
-            <Badge className={badgeClass}>
-              {statusLabel}
-            </Badge>
+            <Badge className={badgeClass}>{statusLabel}</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <IconGitBranch className="h-3.5 w-3.5" />
-              {repoCount} {repoCount === 1 ? "repo" : "repos"}
-            </span>
-            <span>{counts.total} tasks</span>
-            {counts.in_progress > 0 && (
-              <span className="text-yellow-600 dark:text-yellow-400">
-                {counts.in_progress} in progress
-              </span>
-            )}
-            <span className="text-green-600 dark:text-green-400">{counts.done} done</span>
-          </div>
-
-          {counts.total > 0 && (
-            <div className="space-y-1">
-              <Progress value={progressPct} className="h-1.5" />
-              <p className="text-[10px] text-muted-foreground text-right">{progressPct}%</p>
-            </div>
-          )}
-
+          <ProjectStats project={project} />
           {leadAgentName && <p className="text-xs text-muted-foreground">Lead: {leadAgentName}</p>}
         </CardContent>
       </Card>

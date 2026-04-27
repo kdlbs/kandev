@@ -43,6 +43,21 @@ func (r *Repository) HasAnyCompletedOnboarding(ctx context.Context) (bool, error
 	return count > 0, nil
 }
 
+// GetFirstCompletedOnboarding returns the first completed onboarding row, or nil.
+func (r *Repository) GetFirstCompletedOnboarding(ctx context.Context) (*OnboardingState, error) {
+	var state OnboardingState
+	err := r.ro.QueryRowxContext(ctx,
+		`SELECT workspace_id, completed, ceo_agent_id, first_task_id, completed_at, created_at
+		 FROM orchestrate_onboarding WHERE completed = 1 LIMIT 1`).StructScan(&state)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
 // MarkOnboardingComplete records that onboarding is finished for a workspace.
 func (r *Repository) MarkOnboardingComplete(ctx context.Context, workspaceID, ceoAgentID, firstTaskID string) error {
 	now := time.Now().UTC()

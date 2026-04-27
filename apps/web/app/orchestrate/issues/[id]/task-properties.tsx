@@ -28,32 +28,41 @@ function formatDate(dateStr: string): string {
   });
 }
 
+const FALLBACK_STATUS_LABELS: Record<string, string> = {
+  backlog: "Backlog",
+  todo: "Todo",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  done: "Done",
+  cancelled: "Cancelled",
+  blocked: "Blocked",
+};
+
+const FALLBACK_PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
+  critical: { label: "Critical", className: "text-red-600" },
+  high: { label: "High", className: "text-orange-600" },
+  medium: { label: "Medium", className: "text-yellow-600" },
+  low: { label: "Low", className: "text-blue-600" },
+};
+
 function StatusDisplay({ status }: { status: Issue["status"] }) {
-  const labels: Record<Issue["status"], string> = {
-    backlog: "Backlog",
-    todo: "Todo",
-    in_progress: "In Progress",
-    in_review: "In Review",
-    done: "Done",
-    cancelled: "Cancelled",
-    blocked: "Blocked",
-  };
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaStatus = meta?.statuses.find((s) => s.id === status);
+  const label = metaStatus?.label ?? FALLBACK_STATUS_LABELS[status] ?? status;
   return (
     <span className="flex items-center gap-1.5">
       <StatusIcon status={status} className="h-3.5 w-3.5" />
-      {labels[status]}
+      {label}
     </span>
   );
 }
 
 function PriorityDisplay({ priority }: { priority: Issue["priority"] }) {
-  const labels: Record<Issue["priority"], { label: string; className: string }> = {
-    critical: { label: "Critical", className: "text-red-600" },
-    high: { label: "High", className: "text-orange-600" },
-    medium: { label: "Medium", className: "text-yellow-600" },
-    low: { label: "Low", className: "text-blue-600" },
-  };
-  const config = labels[priority];
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const metaPriority = meta?.priorities.find((p) => p.id === priority);
+  const config = metaPriority
+    ? { label: metaPriority.label, className: metaPriority.color }
+    : FALLBACK_PRIORITY_CONFIG[priority] ?? { label: priority, className: "" };
   return <span className={config.className}>{config.label}</span>;
 }
 

@@ -19,11 +19,8 @@ import type {
 
 const BASE = "/api/v1/orchestrate";
 
-// --- Meta ---
-
-export function getMeta(options?: ApiRequestOptions) {
-  return fetchJson<OrchestrateMeta>(`${BASE}/meta`, options);
-}
+export const getMeta = (options?: ApiRequestOptions) =>
+  fetchJson<OrchestrateMeta>(`${BASE}/meta`, options);
 
 // --- Agent Instances ---
 
@@ -45,9 +42,8 @@ export function createAgentInstance(
   });
 }
 
-export function getAgentInstance(id: string, options?: ApiRequestOptions) {
-  return fetchJson<AgentInstance>(`${BASE}/agents/${id}`, options);
-}
+export const getAgentInstance = (id: string, options?: ApiRequestOptions) =>
+  fetchJson<AgentInstance>(`${BASE}/agents/${id}`, options);
 
 export function updateAgentInstance(
   id: string,
@@ -156,9 +152,8 @@ export function deleteProject(id: string, options?: ApiRequestOptions) {
 
 // --- Costs ---
 
-export function getCosts(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<CostSummary>(`${BASE}/workspaces/${workspaceId}/costs`, options);
-}
+export const getCosts = (workspaceId: string, options?: ApiRequestOptions) =>
+  fetchJson<CostSummary>(`${BASE}/workspaces/${workspaceId}/costs`, options);
 
 export function getCostSummary(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<{ total_cents: number }>(
@@ -463,9 +458,8 @@ export function exportConfig(workspaceId: string, options?: ApiRequestOptions) {
   );
 }
 
-export function exportConfigZipUrl(workspaceId: string) {
-  return `${BASE}/workspaces/${workspaceId}/config/export/zip`;
-}
+export const exportConfigZipUrl = (workspaceId: string) =>
+  `${BASE}/workspaces/${workspaceId}/config/export/zip`;
 
 export function previewImport(
   workspaceId: string,
@@ -611,6 +605,42 @@ export function searchTasks(
     `${BASE}/workspaces/${workspaceId}/tasks/search?${params.toString()}`,
     options,
   );
+}
+
+// --- Onboarding ---
+
+export type OnboardingStateData = {
+  completed: boolean;
+  workspaceId?: string;
+  ceoAgentId?: string;
+};
+
+export function getOnboardingState(options?: ApiRequestOptions) {
+  return fetchJson<OnboardingStateData>(`${BASE}/onboarding-state`, options);
+}
+
+export type OnboardingCompletePayload = {
+  workspaceName: string;
+  taskPrefix: string;
+  agentName: string;
+  agentProfileId: string;
+  executorPreference: string;
+  taskTitle?: string;
+  taskDescription?: string;
+};
+
+export type OnboardingCompleteResult = {
+  workspaceId: string;
+  agentId: string;
+  projectId?: string;
+  taskId?: string;
+};
+
+export function completeOnboarding(data: OnboardingCompletePayload, options?: ApiRequestOptions) {
+  return fetchJson<OnboardingCompleteResult>(`${BASE}/onboarding/complete`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+  });
 }
 
 // --- Dashboard ---

@@ -40,14 +40,18 @@ type OnboardingCompleteResult struct {
 
 // GetOnboardingState checks whether onboarding has been completed.
 func (s *Service) GetOnboardingState(ctx context.Context) (*OnboardingState, error) {
-	hasCompleted, err := s.repo.HasAnyCompletedOnboarding(ctx)
+	row, err := s.repo.GetFirstCompletedOnboarding(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("check onboarding state: %w", err)
 	}
-	if !hasCompleted {
+	if row == nil {
 		return &OnboardingState{Completed: false}, nil
 	}
-	return &OnboardingState{Completed: true}, nil
+	return &OnboardingState{
+		Completed:   true,
+		WorkspaceID: row.WorkspaceID,
+		CEOAgentID:  row.CEOAgentID,
+	}, nil
 }
 
 // CompleteOnboarding creates workspace, CEO agent, project, optional task,

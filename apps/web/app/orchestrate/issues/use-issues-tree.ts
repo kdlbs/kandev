@@ -47,21 +47,21 @@ function matchesFilters(issue: OrchestrateIssue, filters: IssueFilterState): boo
   return true;
 }
 
-function compareIssues(
-  a: OrchestrateIssue,
-  b: OrchestrateIssue,
-  field: IssueSortField,
-  dir: IssueSortDir,
-  statusOrder: Record<string, number>,
-  priorityOrder: Record<string, number>,
-): number {
+type SortContext = {
+  field: IssueSortField;
+  dir: IssueSortDir;
+  statusOrder: Record<string, number>;
+  priorityOrder: Record<string, number>;
+};
+
+function compareIssues(a: OrchestrateIssue, b: OrchestrateIssue, ctx: SortContext): number {
   let cmp = 0;
-  switch (field) {
+  switch (ctx.field) {
     case "status":
-      cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+      cmp = (ctx.statusOrder[a.status] ?? 99) - (ctx.statusOrder[b.status] ?? 99);
       break;
     case "priority":
-      cmp = (priorityOrder[a.priority] ?? 4) - (priorityOrder[b.priority] ?? 4);
+      cmp = (ctx.priorityOrder[a.priority] ?? 4) - (ctx.priorityOrder[b.priority] ?? 4);
       break;
     case "title":
       cmp = a.title.localeCompare(b.title);
@@ -74,7 +74,7 @@ function compareIssues(
       cmp = a.updatedAt.localeCompare(b.updatedAt);
       break;
   }
-  return dir === "asc" ? cmp : -cmp;
+  return ctx.dir === "asc" ? cmp : -cmp;
 }
 
 export type FlatIssueNode = {
@@ -112,9 +112,13 @@ export function useIssuesTree(opts: UseIssuesTreeOptions): FlatIssueNode[] {
 
   return useMemo(() => {
     const filtered = issues.filter((i) => matchesFilters(i, filters));
-    const sorted = [...filtered].sort((a, b) =>
-      compareIssues(a, b, sortField, sortDir, STATUS_ORDER, PRIORITY_ORDER),
-    );
+    const sortCtx: SortContext = {
+      field: sortField,
+      dir: sortDir,
+      statusOrder: STATUS_ORDER,
+      priorityOrder: PRIORITY_ORDER,
+    };
+    const sorted = [...filtered].sort((a, b) => compareIssues(a, b, sortCtx));
 
     if (!nestingEnabled) {
       return sorted.map((issue) => ({ issue, level: 0, hasChildren: false }));
