@@ -190,7 +190,7 @@ function SkillItems({
     <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
       {items.length === 0 && (
         <p className="text-sm text-muted-foreground px-3 py-2">
-          {search ? "No matching skills" : "No skills yet"}
+          {search ? "No matching skills" : "No skills yet. Import from GitHub or create your own."}
         </p>
       )}
       {items.map((s) => (

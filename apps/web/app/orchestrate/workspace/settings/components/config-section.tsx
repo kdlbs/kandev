@@ -74,6 +74,7 @@ export function ConfigSection() {
   return (
     <section className="space-y-4">
       <h2 className="text-sm font-semibold">Configuration</h2>
+      <p className="text-xs text-muted-foreground">Export your workspace config as a file, or import from another workspace.</p>
       <div className="flex gap-2">
         <Button variant="outline" onClick={handleExport} className="cursor-pointer">
           <IconDownload className="h-4 w-4 mr-1" />

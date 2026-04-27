@@ -26,7 +26,7 @@ function IssueListView({
   onToggleExpand: (id: string) => void;
   agentMap: Map<string, string>;
 }) {
-  if (flatNodes.length === 0) return <EmptyState message="No issues found" />;
+  if (flatNodes.length === 0) return <EmptyState message="No tasks found." description="Create a task or let agents generate them from routines." />;
 
   return (
     <div className="border border-border rounded-lg divide-y divide-border">

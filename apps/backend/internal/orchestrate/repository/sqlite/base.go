@@ -63,6 +63,7 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	r.migrateSchedulerColumns()
+	r.migrateTaskFTS()
 	return nil
 }
 
@@ -80,6 +81,61 @@ func (r *Repository) migrateSchedulerColumns() {
 	// Atomic task checkout fields.
 	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
 	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_at DATETIME`)
+}
+
+// migrateTaskFTS creates the FTS5 virtual table and triggers for full-text task search.
+// Skips entirely when the tasks table does not exist or when the SQLite build lacks FTS5.
+func (r *Repository) migrateTaskFTS() {
+	// Guard: tasks table may not exist yet (orchestrate schema runs before task schema).
+	var exists int
+	if err := r.db.QueryRow(
+		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'",
+	).Scan(&exists); err != nil {
+		return
+	}
+
+	// Attempt to create the FTS5 virtual table. If the SQLite build lacks FTS5,
+	// this will fail silently and we skip triggers + backfill.
+	if _, err := r.db.Exec(`
+		CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+			title, description, identifier,
+			content='tasks',
+			content_rowid='rowid'
+		)
+	`); err != nil {
+		return // FTS5 module not available
+	}
+
+	r.createFTSTriggers()
+	r.backfillFTS()
+}
+
+// createFTSTriggers installs INSERT/UPDATE/DELETE triggers to keep the FTS index in sync.
+func (r *Repository) createFTSTriggers() {
+	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks BEGIN
+		INSERT INTO tasks_fts(rowid, title, description, identifier)
+		VALUES (new.rowid, new.title, COALESCE(new.description,''), COALESCE(new.identifier,''));
+	END`)
+
+	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks BEGIN
+		INSERT INTO tasks_fts(tasks_fts, rowid, title, description, identifier)
+		VALUES('delete', old.rowid, old.title, COALESCE(old.description,''), COALESCE(old.identifier,''));
+		INSERT INTO tasks_fts(rowid, title, description, identifier)
+		VALUES (new.rowid, new.title, COALESCE(new.description,''), COALESCE(new.identifier,''));
+	END`)
+
+	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks BEGIN
+		INSERT INTO tasks_fts(tasks_fts, rowid, title, description, identifier)
+		VALUES('delete', old.rowid, old.title, COALESCE(old.description,''), COALESCE(old.identifier,''));
+	END`)
+}
+
+// backfillFTS populates the FTS index from existing task rows.
+func (r *Repository) backfillFTS() {
+	_, _ = r.db.Exec(`
+		INSERT OR IGNORE INTO tasks_fts(rowid, title, description, identifier)
+		SELECT rowid, title, COALESCE(description,''), COALESCE(identifier,'') FROM tasks
+	`)
 }
 
 func (r *Repository) createAgentTables() error {

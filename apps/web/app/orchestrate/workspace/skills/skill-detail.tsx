@@ -243,22 +243,33 @@ function SkillMetadataRow({ skill, readOnly }: { skill: Skill; readOnly: boolean
       <MetadataItem label="KEY">
         <span className="font-mono">{skill.slug}</span>
       </MetadataItem>
-      <MetadataItem label="MODE">
+      <MetadataItem label="MODE" hint="Whether this skill's content can be edited in Kandev">
         <span>{readOnly ? "Read only" : "Editable"}</span>
       </MetadataItem>
-      <MetadataItem label="USED BY">
+      <MetadataItem label="USED BY" hint="Agents that have this skill assigned to them">
         <span>--</span>
       </MetadataItem>
     </div>
   );
 }
 
-function MetadataItem({ label, children }: { label: string; children: React.ReactNode }) {
+function MetadataItem({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  const labelEl = (
+    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      {label}
+    </div>
+  );
+
   return (
     <div className="space-y-1">
-      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-        {label}
-      </div>
+      {hint ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{labelEl}</TooltipTrigger>
+          <TooltipContent>{hint}</TooltipContent>
+        </Tooltip>
+      ) : (
+        labelEl
+      )}
       <div>{children}</div>
     </div>
   );

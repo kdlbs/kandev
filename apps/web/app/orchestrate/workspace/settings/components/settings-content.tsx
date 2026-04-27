@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { ConfigSection } from "./config-section";
+import { GitSection } from "./git-section";
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
@@ -118,6 +119,14 @@ export function SettingsContent() {
               className="mt-1"
             />
           </div>
+        </SettingCard>
+      </div>
+
+      {/* Repository */}
+      <div>
+        <SectionHeader>Repository</SectionHeader>
+        <SettingCard>
+          <GitSection />
         </SettingCard>
       </div>
 

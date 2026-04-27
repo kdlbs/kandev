@@ -510,3 +510,48 @@ export function listWakeups(workspaceId: string, options?: ApiRequestOptions) {
     options,
   );
 }
+
+// --- Git ---
+
+export type GitStatusData = {
+  is_git: boolean;
+  branch?: string;
+  is_dirty: boolean;
+  has_remote: boolean;
+  ahead: number;
+  behind: number;
+  commit_count: number;
+};
+
+export function getGitStatus(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<GitStatusData>(`${BASE}/workspaces/${workspaceId}/git/status`, options);
+}
+
+export function gitClone(
+  workspaceId: string,
+  data: { repoUrl: string; branch: string; workspaceName: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/git/clone`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+  });
+}
+
+export function gitPull(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/git/pull`, {
+    ...options,
+    init: { method: "POST", ...options?.init },
+  });
+}
+
+export function gitPush(
+  workspaceId: string,
+  data: { message: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/git/push`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+  });
+}

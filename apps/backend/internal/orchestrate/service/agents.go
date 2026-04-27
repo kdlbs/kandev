@@ -8,6 +8,8 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+
+	"go.uber.org/zap"
 )
 
 // Orchestrate event types (local to service; events/types.go is not modified).
@@ -103,7 +105,16 @@ func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentIn
 	if agent.ExecutorPreference == "" {
 		agent.ExecutorPreference = "{}"
 	}
-	return s.repo.CreateAgentInstance(ctx, agent)
+	if err := s.repo.CreateAgentInstance(ctx, agent); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
+			s.logger.Warn("failed to write agent to filesystem",
+				zap.String("name", agent.Name), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // GetAgentInstance returns an agent instance by ID.
@@ -128,7 +139,16 @@ func (s *Service) UpdateAgentInstance(ctx context.Context, agent *models.AgentIn
 	if err := s.validateAgentUpdate(ctx, agent); err != nil {
 		return err
 	}
-	return s.repo.UpdateAgentInstance(ctx, agent)
+	if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
+			s.logger.Warn("failed to write agent to filesystem",
+				zap.String("name", agent.Name), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // UpdateAgentStatus validates a status transition and updates the agent.
@@ -152,7 +172,22 @@ func (s *Service) UpdateAgentStatus(
 
 // DeleteAgentInstance deletes an agent instance.
 func (s *Service) DeleteAgentInstance(ctx context.Context, id string) error {
-	return s.repo.DeleteAgentInstance(ctx, id)
+	var agentName string
+	if s.cfgWriter != nil {
+		if agent, err := s.repo.GetAgentInstance(ctx, id); err == nil {
+			agentName = agent.Name
+		}
+	}
+	if err := s.repo.DeleteAgentInstance(ctx, id); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && agentName != "" {
+		if err := s.cfgWriter.DeleteAgent(defaultWorkspaceName, agentName); err != nil {
+			s.logger.Warn("failed to delete agent from filesystem",
+				zap.String("name", agentName), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // validateAgentCreate checks all business rules for creating an agent.

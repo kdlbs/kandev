@@ -364,3 +364,28 @@ type TaskSearchResponse struct {
 type WakeupListResponse struct {
 	Wakeups []*models.WakeupRequest `json:"wakeups"`
 }
+
+// -- Git --
+
+// GitCloneRequest is the request body for cloning a workspace from a git repo.
+type GitCloneRequest struct {
+	RepoURL       string `json:"repoUrl"`
+	Branch        string `json:"branch"`
+	WorkspaceName string `json:"workspaceName"`
+}
+
+// GitPushRequest is the request body for pushing workspace changes.
+type GitPushRequest struct {
+	Message string `json:"message"`
+}
+
+// GitStatusResponse wraps the git status for a workspace.
+type GitStatusResponse struct {
+	IsGit       bool   `json:"is_git"`
+	Branch      string `json:"branch,omitempty"`
+	IsDirty     bool   `json:"is_dirty"`
+	HasRemote   bool   `json:"has_remote"`
+	Ahead       int    `json:"ahead"`
+	Behind      int    `json:"behind"`
+	CommitCount int    `json:"commit_count"`
+}

@@ -51,6 +51,7 @@ func newTestService(t *testing.T) *service.Service {
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
+
 	log := logger.Default()
 	return service.NewService(repo, log)
 }

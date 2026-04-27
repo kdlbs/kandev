@@ -1,5 +1,9 @@
 version: "2"
 
+run:
+  build-tags:
+    - fts5
+
 linters:
   enable:
     - funlen

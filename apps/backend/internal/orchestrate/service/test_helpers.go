@@ -19,3 +19,10 @@ func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 		t.Fatalf("exec sql: %v", err)
 	}
 }
+
+// RunSchedulerTick runs a single scheduler tick for testing.
+// This exercises the full processWakeup pipeline including task launch.
+func RunSchedulerTick(svc *Service, ctx context.Context) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.tick(ctx)
+}

@@ -12,19 +12,46 @@ import (
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"go.uber.org/zap"
 )
+
+// TaskStarter launches agent sessions on behalf of the orchestrate scheduler.
+// Implemented by the orchestrator service; the orchestrate package depends only
+// on this interface to avoid a direct import of the orchestrator package.
+type TaskStarter interface {
+	// StartTask starts agent execution for a task, creating a new session.
+	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string,
+		executorProfileID string, priority int, prompt string, workflowStepID string,
+		planMode bool, attachments []v1.MessageAttachment) error
+}
+
+// TaskStarterFunc adapts a function to the TaskStarter interface.
+// Useful for wrapping callers whose StartTask returns additional values.
+type TaskStarterFunc func(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority int, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment) error
+
+// StartTask implements TaskStarter.
+func (f TaskStarterFunc) StartTask(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority int, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment) error {
+	return f(ctx, taskID, agentProfileID, executorID, executorProfileID,
+		priority, prompt, workflowStepID, planMode, attachments)
+}
 
 // Service provides orchestrate business logic.
 type Service struct {
 	repo              *sqlite.Repository
 	cfgLoader         *configloader.ConfigLoader
 	cfgWriter         *configloader.FileWriter
+	gitManager        *configloader.GitManager
 	logger            *logger.Logger
 	eb                bus.EventBus
 	relay             *ChannelRelay
 	agentTypeResolver AgentTypeResolver
+	taskStarter       TaskStarter
 }
 
 // NewService creates a new orchestrate service.
@@ -42,6 +69,22 @@ func NewService(repo *sqlite.Repository, log *logger.Logger) *Service {
 func (s *Service) SetConfigLoader(loader *configloader.ConfigLoader, writer *configloader.FileWriter) {
 	s.cfgLoader = loader
 	s.cfgWriter = writer
+}
+
+// SetTaskStarter sets the interface used to launch agent sessions.
+// Called after construction because the orchestrator service is created later in startup.
+func (s *Service) SetTaskStarter(starter TaskStarter) {
+	s.taskStarter = starter
+}
+
+// SetGitManager sets the git manager for workspace git operations.
+func (s *Service) SetGitManager(gm *configloader.GitManager) {
+	s.gitManager = gm
+}
+
+// GitManager returns the git manager (may be nil).
+func (s *Service) GitManager() *configloader.GitManager {
+	return s.gitManager
 }
 
 // ConfigLoader returns the filesystem config loader (may be nil).
@@ -89,12 +132,36 @@ func (s *Service) ListSkills(ctx context.Context, workspaceID string) ([]*models
 
 // UpdateSkill updates a skill.
 func (s *Service) UpdateSkill(ctx context.Context, skill *models.Skill) error {
-	return s.repo.UpdateSkill(ctx, skill)
+	if err := s.repo.UpdateSkill(ctx, skill); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && skill.Content != "" {
+		if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, skill.Content); err != nil {
+			s.logger.Warn("failed to write skill to filesystem",
+				zap.String("slug", skill.Slug), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // DeleteSkill deletes a skill.
 func (s *Service) DeleteSkill(ctx context.Context, id string) error {
-	return s.repo.DeleteSkill(ctx, id)
+	var slug string
+	if s.cfgWriter != nil {
+		if skill, err := s.repo.GetSkill(ctx, id); err == nil {
+			slug = skill.Slug
+		}
+	}
+	if err := s.repo.DeleteSkill(ctx, id); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && slug != "" {
+		if err := s.cfgWriter.DeleteSkill(defaultWorkspaceName, slug); err != nil {
+			s.logger.Warn("failed to delete skill from filesystem",
+				zap.String("slug", slug), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // -- Projects --
@@ -109,6 +176,12 @@ func (s *Service) CreateProject(ctx context.Context, project *models.Project) er
 	}
 	if err := s.repo.CreateProject(ctx, project); err != nil {
 		return err
+	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
+			s.logger.Warn("failed to write project to filesystem",
+				zap.String("name", project.Name), zap.Error(err))
+		}
 	}
 	s.logger.Info("project created",
 		zap.String("project_id", project.ID),
@@ -144,6 +217,12 @@ func (s *Service) UpdateProject(ctx context.Context, project *models.Project) er
 	if err := s.repo.UpdateProject(ctx, project); err != nil {
 		return err
 	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
+			s.logger.Warn("failed to write project to filesystem",
+				zap.String("name", project.Name), zap.Error(err))
+		}
+	}
 	s.logger.Info("project updated",
 		zap.String("project_id", project.ID),
 		zap.String("name", project.Name))
@@ -152,7 +231,22 @@ func (s *Service) UpdateProject(ctx context.Context, project *models.Project) er
 
 // DeleteProject deletes a project.
 func (s *Service) DeleteProject(ctx context.Context, id string) error {
-	return s.repo.DeleteProject(ctx, id)
+	var projectName string
+	if s.cfgWriter != nil {
+		if project, err := s.repo.GetProject(ctx, id); err == nil {
+			projectName = project.Name
+		}
+	}
+	if err := s.repo.DeleteProject(ctx, id); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && projectName != "" {
+		if err := s.cfgWriter.DeleteProject(defaultWorkspaceName, projectName); err != nil {
+			s.logger.Warn("failed to delete project from filesystem",
+				zap.String("name", projectName), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 func (s *Service) validateProject(project *models.Project) error {
@@ -237,7 +331,16 @@ func (s *Service) DeleteBudgetPolicy(ctx context.Context, id string) error {
 
 // CreateRoutine creates a new routine.
 func (s *Service) CreateRoutine(ctx context.Context, routine *models.Routine) error {
-	return s.repo.CreateRoutine(ctx, routine)
+	if err := s.repo.CreateRoutine(ctx, routine); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
+			s.logger.Warn("failed to write routine to filesystem",
+				zap.String("name", routine.Name), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // GetRoutine returns a routine by ID.
@@ -252,12 +355,36 @@ func (s *Service) ListRoutines(ctx context.Context, wsID string) ([]*models.Rout
 
 // UpdateRoutine updates a routine.
 func (s *Service) UpdateRoutine(ctx context.Context, routine *models.Routine) error {
-	return s.repo.UpdateRoutine(ctx, routine)
+	if err := s.repo.UpdateRoutine(ctx, routine); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil {
+		if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
+			s.logger.Warn("failed to write routine to filesystem",
+				zap.String("name", routine.Name), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // DeleteRoutine deletes a routine.
 func (s *Service) DeleteRoutine(ctx context.Context, id string) error {
-	return s.repo.DeleteRoutine(ctx, id)
+	var routineName string
+	if s.cfgWriter != nil {
+		if routine, err := s.repo.GetRoutine(ctx, id); err == nil {
+			routineName = routine.Name
+		}
+	}
+	if err := s.repo.DeleteRoutine(ctx, id); err != nil {
+		return err
+	}
+	if s.cfgWriter != nil && routineName != "" {
+		if err := s.cfgWriter.DeleteRoutine(defaultWorkspaceName, routineName); err != nil {
+			s.logger.Warn("failed to delete routine from filesystem",
+				zap.String("name", routineName), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // -- Approvals --

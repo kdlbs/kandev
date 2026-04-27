@@ -64,7 +64,8 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
 
       {projects.length === 0 ? (
         <EmptyState
-          message="No projects yet"
+          message="No projects yet."
+          description="Projects group related tasks and repositories together."
           action={
             <Button
               variant="outline"

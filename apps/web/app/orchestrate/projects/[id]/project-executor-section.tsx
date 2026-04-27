@@ -64,7 +64,10 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Executor Configuration</h2>
+        <div>
+          <h2 className="text-sm font-semibold">Executor Configuration</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">How agent sessions run for this project.</p>
+        </div>
         {dirty && (
           <Button
             size="sm"

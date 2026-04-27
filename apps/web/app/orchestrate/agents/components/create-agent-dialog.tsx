@@ -95,6 +95,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
               className="mt-1"
               autoFocus
             />
+            <p className="text-xs text-muted-foreground mt-1">A unique name for this agent (e.g. CEO, Frontend Worker)</p>
           </div>
 
           <div className="flex gap-4">
@@ -111,6 +112,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                   <SelectItem value="assistant" className="cursor-pointer">Assistant</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">CEO manages other agents, workers execute tasks</p>
             </div>
             <div className="flex-1">
               <Label>Reports to</Label>
@@ -127,6 +129,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">Which agent manages this one</p>
             </div>
           </div>
 
@@ -140,6 +143,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                 onChange={(e) => setBudgetCents(Math.round(Number(e.target.value) * 100))}
                 className="mt-1"
               />
+              <p className="text-xs text-muted-foreground mt-1">Monthly spending limit ($0 = unlimited)</p>
             </div>
             <div className="flex-1">
               <Label>Max concurrent</Label>
@@ -151,6 +155,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                 onChange={(e) => setMaxConcurrent(Number(e.target.value))}
                 className="mt-1"
               />
+              <p className="text-xs text-muted-foreground mt-1">How many tasks this agent can run at once</p>
             </div>
           </div>
 
@@ -167,6 +172,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                 <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground mt-1">How agent sessions run (inherit uses project/workspace default)</p>
           </div>
         </div>
 

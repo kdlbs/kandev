@@ -99,10 +99,12 @@ export function CreateRoutineDialog({
           <div>
             <Label>Task Title Template</Label>
             <Input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="{{name}} - {{date}}" />
+            <p className="text-xs text-muted-foreground mt-1">Title for auto-created tasks. Use &#123;&#123;name&#125;&#125; and &#123;&#123;date&#125;&#125; as placeholders.</p>
           </div>
           <div>
             <Label>Task Description Template</Label>
             <Textarea value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} rows={2} />
+            <p className="text-xs text-muted-foreground mt-1">Instructions the agent receives when this routine triggers</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -126,6 +128,7 @@ export function CreateRoutineDialog({
                   <SelectItem value="always_create" className="cursor-pointer">Always create</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">What happens if the previous run is still active</p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -144,6 +147,7 @@ export function CreateRoutineDialog({
               <div>
                 <Label>Cron Expression</Label>
                 <Input value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} placeholder="0 9 * * *" />
+                <p className="text-xs text-muted-foreground mt-1">Standard cron expression (e.g. 0 9 * * MON for every Monday at 9am)</p>
               </div>
             )}
           </div>

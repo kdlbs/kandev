@@ -36,6 +36,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	registerDashboardRoutes(api, h)
 	registerWakeupRoutes(api, h)
 	registerIssueRoutes(api, h)
+	registerGitRoutes(api, h)
 }
 
 func registerIssueRoutes(api *gin.RouterGroup, h *Handlers) {
@@ -141,4 +142,11 @@ func registerDashboardRoutes(api *gin.RouterGroup, h *Handlers) {
 
 func registerWakeupRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/workspaces/:wsId/wakeups", h.listWakeups)
+}
+
+func registerGitRoutes(api *gin.RouterGroup, h *Handlers) {
+	api.POST("/workspaces/:wsId/git/clone", h.gitClone)
+	api.POST("/workspaces/:wsId/git/pull", h.gitPull)
+	api.POST("/workspaces/:wsId/git/push", h.gitPush)
+	api.GET("/workspaces/:wsId/git/status", h.gitStatus)
 }

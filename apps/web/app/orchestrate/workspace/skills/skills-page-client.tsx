@@ -157,6 +157,7 @@ function SkillContentPanel({
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
       <IconBoxMultiple className="h-12 w-12 mb-4 opacity-30" />
       <p className="text-sm">Select a skill to view</p>
+      <p className="text-xs mt-1">Skills teach agents how to perform specific tasks. Import from GitHub or create your own.</p>
     </div>
   );
 }

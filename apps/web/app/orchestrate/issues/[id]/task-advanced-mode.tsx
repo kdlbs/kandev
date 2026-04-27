@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   IconArrowLeft,
   IconLayoutList,
@@ -10,6 +10,7 @@ import {
   IconFiles,
   IconGitBranch,
   IconInfoCircle,
+  IconPointFilled,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -22,26 +23,56 @@ import { AdvancedTerminalPanel } from "./advanced-panels/terminal-panel";
 import { AdvancedPlanPanel } from "./advanced-panels/plan-panel";
 import { AdvancedFilesPanel } from "./advanced-panels/files-panel";
 import { AdvancedChangesPanel } from "./advanced-panels/changes-panel";
-import type { Issue, TaskSession } from "./types";
+import { useAdvancedSession } from "./use-advanced-session";
+import type { Issue } from "./types";
 
 type TaskAdvancedModeProps = {
   task: Issue;
-  sessions: TaskSession[];
   onToggleSimple: () => void;
 };
 
-export function TaskAdvancedMode({ task, sessions, onToggleSimple }: TaskAdvancedModeProps) {
+function SessionStatusIndicator({ sessionState }: { sessionState: string | null }) {
+  if (sessionState === "RUNNING" || sessionState === "STARTING") {
+    return (
+      <span className="flex items-center gap-1 text-xs text-cyan-500">
+        <IconPointFilled className="h-3 w-3 animate-pulse" />
+        Agent working
+      </span>
+    );
+  }
+  if (sessionState === "WAITING_FOR_INPUT") {
+    return (
+      <span className="flex items-center gap-1 text-xs text-green-500">
+        <IconPointFilled className="h-3 w-3" />
+        Ready for input
+      </span>
+    );
+  }
+  if (sessionState === "COMPLETED" || sessionState === "CANCELLED") {
+    return (
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        <IconPointFilled className="h-3 w-3" />
+        Session ended
+      </span>
+    );
+  }
+  if (sessionState === "FAILED") {
+    return (
+      <span className="flex items-center gap-1 text-xs text-destructive">
+        <IconPointFilled className="h-3 w-3" />
+        Session failed
+      </span>
+    );
+  }
+  return null;
+}
+
+export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps) {
   const [rightTab, setRightTab] = useState<"files" | "changes">("files");
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
-  const primarySession = useMemo(
-    () => sessions.find((s) => s.isPrimary) ?? sessions[0],
-    [sessions],
-  );
-  const sessionEnded =
-    primarySession?.state === "COMPLETED" || primarySession?.state === "FAILED";
-  const hasActiveSession =
-    Boolean(primarySession) && !sessionEnded;
+  const { sessionId, sessionState, hasActiveSession, isSessionEnded } =
+    useAdvancedSession(task.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -78,6 +109,7 @@ export function TaskAdvancedMode({ task, sessions, onToggleSimple }: TaskAdvance
         <span className="text-xs font-mono text-muted-foreground">{task.identifier}</span>
         <span className="text-sm font-medium truncate">{task.title}</span>
         <div className="ml-auto flex items-center gap-2">
+          <SessionStatusIndicator sessionState={sessionState} />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -105,16 +137,10 @@ export function TaskAdvancedMode({ task, sessions, onToggleSimple }: TaskAdvance
       </div>
 
       {/* Session ended banner */}
-      {sessionEnded && (
+      {isSessionEnded && (
         <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
           <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">
-            Agent session ended
-            {primarySession?.agentName ? ` (${primarySession.agentName})` : ""}
-          </span>
-          <Button variant="outline" size="sm" className="ml-auto cursor-pointer">
-            Start new session
-          </Button>
+          <span className="text-sm text-muted-foreground">Agent session ended</span>
         </div>
       )}
 
@@ -149,7 +175,7 @@ export function TaskAdvancedMode({ task, sessions, onToggleSimple }: TaskAdvance
               </TabsList>
             </div>
             <TabsContent value="chat" className="flex-1 min-h-0 mt-0">
-              <AdvancedChatPanel taskId={task.id} />
+              <AdvancedChatPanel taskId={task.id} sessionId={sessionId} />
             </TabsContent>
             <TabsContent value="terminal" className="flex-1 min-h-0 mt-0">
               <AdvancedTerminalPanel taskId={task.id} hasActiveSession={hasActiveSession} />

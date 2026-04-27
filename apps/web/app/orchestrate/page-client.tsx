@@ -65,16 +65,19 @@ export function OrchestratePageClient({ initialDashboard }: OrchestratePageClien
           icon={IconCircleDot}
           value={dashboard?.tasks_in_progress ?? 0}
           label="Tasks In Progress"
+          description="Currently running or queued tasks"
         />
         <MetricCard
           icon={IconCurrencyDollar}
           value={formatCents(monthSpend)}
           label="Month Spend"
+          description="Total API costs this billing period"
         />
         <MetricCard
           icon={IconShieldCheck}
           value={pendingApprovals}
           label="Pending Approvals"
+          description="Items waiting for your review"
         />
       </div>
 
@@ -87,7 +90,7 @@ export function OrchestratePageClient({ initialDashboard }: OrchestratePageClien
           <div className="divide-y divide-border">
             {recentActivity.length === 0 ? (
               <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                No recent activity
+                No recent activity. Actions by agents and users will appear here.
               </div>
             ) : (
               recentActivity.map((entry) => (

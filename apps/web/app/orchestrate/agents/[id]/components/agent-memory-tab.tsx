@@ -128,8 +128,9 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
       />
 
       {entries.length === 0 ? (
-        <div className="flex items-center justify-center py-12">
+        <div className="flex flex-col items-center justify-center py-12 text-center">
           <p className="text-sm text-muted-foreground">No memory entries yet.</p>
+          <p className="text-xs text-muted-foreground mt-1">Memory is accumulated as the agent works on tasks.</p>
         </div>
       ) : (
         <div className="space-y-4">

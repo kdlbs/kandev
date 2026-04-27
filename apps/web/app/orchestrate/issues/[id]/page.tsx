@@ -70,7 +70,6 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
     return (
       <TaskAdvancedMode
         task={task}
-        sessions={sessions}
         onToggleSimple={() => setMode("simple")}
       />
     );

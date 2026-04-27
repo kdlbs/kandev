@@ -21,7 +21,7 @@ export function CostBreakdownTable({ title, items, labelPrefix }: Props) {
           <CardTitle className="text-sm">{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No data available</p>
+          <p className="text-sm text-muted-foreground">No cost data yet. Costs are tracked when agents run tasks.</p>
         </CardContent>
       </Card>
     );

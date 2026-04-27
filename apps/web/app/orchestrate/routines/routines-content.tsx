@@ -189,7 +189,7 @@ function RoutinesList({
     return (
       <EmptyState
         message="No routines yet."
-        description="Create one to automate recurring tasks."
+        description="Routines automatically create tasks on a schedule or webhook trigger."
       />
     );
   }
@@ -212,7 +212,7 @@ function RoutinesList({
 
 function RunsList({ runs }: { runs: RoutineRun[] }) {
   if (runs.length === 0) {
-    return <EmptyState message="No runs yet." />;
+    return <EmptyState message="No runs yet." description="Runs appear here when a routine is triggered." />;
   }
   return (
     <div className="border border-border rounded-lg divide-y divide-border">

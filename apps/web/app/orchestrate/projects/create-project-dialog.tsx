@@ -144,6 +144,7 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Repositories</Label>
+            <p className="text-xs text-muted-foreground">Git URLs or local paths where agents will work</p>
             <div className="flex gap-2">
               <Input
                 placeholder="URL or path"
@@ -190,6 +191,7 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Lead Agent</Label>
+            <p className="text-xs text-muted-foreground">The agent responsible for managing this project</p>
             <Select value={leadAgentId} onValueChange={setLeadAgentId}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Select agent (optional)" />
@@ -207,6 +209,7 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Executor Type</Label>
+            <p className="text-xs text-muted-foreground">How agent sessions run (inherit uses workspace default)</p>
             <Select value={executorType} onValueChange={setExecutorType}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Inherit from workspace" />

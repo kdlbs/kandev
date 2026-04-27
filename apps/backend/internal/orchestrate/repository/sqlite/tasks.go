@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // TaskExecutionFields holds the execution-related fields from a task row.
@@ -144,12 +147,80 @@ type TaskSearchResult struct {
 	UpdatedAt               string `db:"updated_at"`
 }
 
-// SearchTasks performs a LIKE-based search on title, description, and identifier
-// for non-archived, non-ephemeral tasks in the given workspace.
+// SearchTasks performs a full-text search on tasks using FTS5, falling back to
+// LIKE-based search when the FTS5 table is not available.
 func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*TaskSearchResult, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	if r.hasFTSTable() {
+		return r.searchTasksFTS(ctx, workspaceID, query, limit)
+	}
+	return r.searchTasksLike(ctx, workspaceID, query, limit)
+}
+
+// hasFTSTable checks whether the tasks_fts virtual table exists.
+func (r *Repository) hasFTSTable() bool {
+	var exists int
+	err := r.ro.QueryRow(
+		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_fts'",
+	).Scan(&exists)
+	return err == nil && exists == 1
+}
+
+// ftsEscape quotes a user query for safe FTS5 MATCH usage and appends * for prefix matching.
+// Each whitespace-separated token is wrapped in double quotes so operators like - are literal.
+func ftsEscape(query string) string {
+	tokens := strings.Fields(query)
+	if len(tokens) == 0 {
+		return `""`
+	}
+	quoted := make([]string, len(tokens))
+	for i, tok := range tokens {
+		escaped := strings.ReplaceAll(tok, `"`, `""`)
+		quoted[i] = `"` + escaped + `"`
+	}
+	// Append * to the last token for prefix matching.
+	last := quoted[len(quoted)-1]
+	quoted[len(quoted)-1] = last + "*"
+	return strings.Join(quoted, " ")
+}
+
+// searchTasksFTS uses FTS5 MATCH for full-text search with prefix matching.
+func (r *Repository) searchTasksFTS(ctx context.Context, workspaceID, query string, limit int) ([]*TaskSearchResult, error) {
+	ftsQuery := ftsEscape(query)
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT t.id,
+		       COALESCE(t.workspace_id, '') AS workspace_id,
+		       COALESCE(t.identifier, '') AS identifier,
+		       COALESCE(t.title, '') AS title,
+		       COALESCE(t.description, '') AS description,
+		       COALESCE(t.state, '') AS status,
+		       COALESCE(t.priority, 0) AS priority,
+		       COALESCE(t.parent_id, '') AS parent_id,
+		       COALESCE(t.project_id, '') AS project_id,
+		       COALESCE(t.assignee_agent_instance_id, '') AS assignee_agent_instance_id,
+		       COALESCE(t.labels, '[]') AS labels,
+		       t.created_at,
+		       t.updated_at
+		FROM tasks t
+		JOIN tasks_fts fts ON t.rowid = fts.rowid
+		WHERE fts.tasks_fts MATCH ?
+		  AND t.workspace_id = ?
+		  AND t.archived_at IS NULL
+		  AND t.is_ephemeral = 0
+		ORDER BY rank
+		LIMIT ?
+	`), ftsQuery, workspaceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("fts search tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanSearchResults(rows)
+}
+
+// searchTasksLike is the LIKE-based fallback when FTS5 is unavailable.
+func (r *Repository) searchTasksLike(ctx context.Context, workspaceID, query string, limit int) ([]*TaskSearchResult, error) {
 	pattern := "%" + query + "%"
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT id,
@@ -177,7 +248,11 @@ func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string,
 		return nil, fmt.Errorf("search tasks: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	return scanSearchResults(rows)
+}
 
+// scanSearchResults scans rows into TaskSearchResult slices.
+func scanSearchResults(rows *sqlx.Rows) ([]*TaskSearchResult, error) {
 	var results []*TaskSearchResult
 	for rows.Next() {
 		var r TaskSearchResult

@@ -125,15 +125,51 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 	pc := si.buildPromptContext(ctx, wakeup.Reason, wakeup.Payload)
 	prompt := BuildPrompt(pc)
 
-	si.logger.Info("processing wakeup for agent (dry run)",
-		zap.String("wakeup_id", wakeupID),
-		zap.String("agent", agent.Name),
-		zap.String("reason", wakeup.Reason),
-		zap.String("executor_type", execCfg.Type),
-		zap.Int("prompt_len", len(prompt)),
-	)
+	if !si.launchOrLog(ctx, wakeup, agent, taskID, execCfg.Type, prompt) {
+		return
+	}
 
 	si.finishWakeup(ctx, wakeup, agent, taskID)
+}
+
+// launchOrLog starts the agent via the orchestrator or logs the wakeup when
+// no task starter is configured. Returns false if the launch failed and the
+// caller should abort (the failure is already handled).
+func (si *SchedulerIntegration) launchOrLog(
+	ctx context.Context, wakeup *models.WakeupRequest,
+	agent *models.AgentInstance, taskID, executorType, prompt string,
+) bool {
+	wakeupID := wakeup.ID
+
+	if taskID == "" || si.svc.taskStarter == nil {
+		si.logger.Info("processing wakeup (no task starter or task ID)",
+			zap.String("wakeup_id", wakeupID),
+			zap.String("agent", agent.Name),
+			zap.String("reason", wakeup.Reason),
+			zap.String("executor_type", executorType),
+			zap.Int("prompt_len", len(prompt)),
+		)
+		return true
+	}
+
+	si.logger.Info("launching agent for wakeup",
+		zap.String("wakeup_id", wakeupID),
+		zap.String("agent", agent.Name),
+		zap.String("task_id", taskID),
+		zap.String("executor_type", executorType),
+		zap.Int("prompt_len", len(prompt)),
+	)
+	if err := si.svc.taskStarter.StartTask(
+		ctx, taskID, agent.AgentProfileID, "", "",
+		0, prompt, "", false, nil,
+	); err != nil {
+		si.logger.Error("agent launch failed",
+			zap.String("wakeup_id", wakeupID), zap.Error(err))
+		si.releaseCheckoutIfNeeded(ctx, taskID)
+		_ = si.svc.HandleWakeupFailure(ctx, wakeup, err)
+		return false
+	}
+	return true
 }
 
 // tryCheckout attempts to acquire an exclusive lock on the task. Returns true

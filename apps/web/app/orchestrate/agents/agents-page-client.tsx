@@ -39,8 +39,8 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
 
       {agents.length === 0 ? (
         <EmptyState
-          message="No agent instances yet."
-          description="Create your first agent to get started with orchestration."
+          message="No agents yet."
+          description="Create a CEO agent to start orchestrating work across your projects."
           action={
             <Button
               variant="outline"

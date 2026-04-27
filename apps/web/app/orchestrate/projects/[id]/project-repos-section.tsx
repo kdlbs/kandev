@@ -47,6 +47,7 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold">Repositories</h2>
+      <p className="text-xs text-muted-foreground">Git URLs or local paths where agents will work on this project.</p>
       <div className="flex gap-2">
         <Input
           placeholder="Repository URL or path"

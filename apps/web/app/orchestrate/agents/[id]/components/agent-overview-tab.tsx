@@ -68,6 +68,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Identity</CardTitle>
+          <p className="text-xs text-muted-foreground">Name, role, and reporting structure for this agent.</p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
@@ -106,6 +107,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Configuration</CardTitle>
+          <p className="text-xs text-muted-foreground">Budget limits, concurrency, and execution environment.</p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex gap-4">

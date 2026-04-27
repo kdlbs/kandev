@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	orchestrateservice "github.com/kandev/kandev/internal/orchestrate/service"
 	"github.com/kandev/kandev/internal/orchestrator"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
@@ -483,6 +484,21 @@ func startGatewayAndServe(
 			log.Error("Failed to register orchestrate event subscribers", zap.Error(err))
 			return false
 		}
+
+		// Wire the orchestrator's StartTask into the orchestrate scheduler so
+		// wakeups launch real agent sessions instead of dry-running.
+		services.Orchestrate.SetTaskStarter(orchestrateservice.TaskStarterFunc(
+			func(ctx context.Context, taskID, agentProfileID, executorID,
+				executorProfileID string, priority int, prompt, workflowStepID string,
+				planMode bool, attachments []v1.MessageAttachment) error {
+				_, err := orchestratorSvc.StartTask(ctx, taskID, agentProfileID,
+					executorID, executorProfileID, priority, prompt,
+					workflowStepID, planMode, attachments)
+				return err
+			},
+		))
+		log.Info("Orchestrate scheduler wired to orchestrator StartTask")
+
 		orchScheduler := orchestrateservice.NewSchedulerIntegration(
 			services.Orchestrate, orchestrateservice.DefaultTickInterval,
 		)

@@ -26,9 +26,9 @@ export function AdvancedTerminalPanel({
   return (
     <div className="flex flex-col items-center justify-center h-full bg-muted/20">
       <IconTerminal2 className="h-8 w-8 text-muted-foreground/40 mb-3" />
-      <p className="text-sm text-muted-foreground">Terminal</p>
+      <p className="text-sm text-muted-foreground">Terminal available when agent is running</p>
       <p className="text-xs text-muted-foreground mt-1">
-        Terminal access will be available when an agent session is active.
+        Terminal access requires a Docker or remote executor.
       </p>
     </div>
   );

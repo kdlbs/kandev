@@ -40,7 +40,10 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-sm font-semibold">Budget Policies</h2>
+        <div>
+          <h2 className="text-sm font-semibold">Budget Policies</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Set spending limits per agent or project. Agents pause when limits are exceeded.</p>
+        </div>
         <Button
           size="sm"
           variant="outline"
@@ -61,7 +64,7 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
       )}
 
       {policies.length === 0 && !showCreate && (
-        <p className="text-sm text-muted-foreground">No budget policies configured.</p>
+        <p className="text-sm text-muted-foreground">No budget policies configured. Add one to enforce spending limits.</p>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
