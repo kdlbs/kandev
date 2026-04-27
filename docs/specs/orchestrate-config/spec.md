@@ -107,11 +107,11 @@ For repo-backed workspaces:
 
 ### Dual workspace creation
 
-When Orchestrate creates a workspace:
-1. Create DB row in existing `workspaces` table (for kanban compatibility)
-2. Optionally write `kandev.yml` to filesystem (if user wants git sync)
+When Orchestrate creates a workspace, it writes to both locations:
+1. Write `kandev.yml` to filesystem (`~/.kandev/workspaces/<name>/kandev.yml`) -- the source of truth for config.
+2. Create a DB row in the existing `workspaces` table -- for kanban board compatibility (tasks, columns, workflows).
 
-Both the kanban board and Orchestrate see the same workspace.
+Both the kanban board and Orchestrate see the same workspace. The filesystem config is authoritative for orchestrate entities (agents, skills, projects, routines). The DB workspace row is authoritative for kanban state (task sequence, default executor, workflow ID).
 
 ### Agent profiles
 
@@ -138,17 +138,19 @@ Before each agent session, the scheduler ensures symlinks are current. See [orch
 
 ### What stays in SQLite
 
-Everything. Config entities AND runtime state:
-- Agent instances, skills, projects, routines, workspace settings (config)
-- Agent runtime state (status, pause_reason -- survives restarts)
-- Wakeup queue (atomic claims)
-- Cost events (append-only ledger)
-- Budget policies (transactional)
-- Routine triggers + runs (atomic cron claims)
-- Approvals (transactional)
-- Activity log (append-only)
-- Channels (secrets)
-- Task blockers, comments (transactional)
+Only runtime/transactional data that cannot live on the filesystem:
+- `orchestrate_agent_runtime` (status, pause_reason, last_wakeup_finished_at -- survives restarts)
+- `orchestrate_wakeup_queue` (atomic claims)
+- `orchestrate_cost_events` (append-only ledger)
+- `orchestrate_budget_policies` (transactional, references config IDs)
+- `orchestrate_routine_triggers` + `orchestrate_routine_runs` (atomic cron claims, run tracking)
+- `orchestrate_routines` (FK target for triggers/runs)
+- `orchestrate_approvals` (transactional)
+- `orchestrate_activity_log` (append-only)
+- `orchestrate_channels` (secrets, not exportable)
+- `task_blockers`, `task_comments` (transactional)
+
+**Removed from SQLite** (now filesystem-only): `orchestrate_agent_instances`, `orchestrate_skills`, `orchestrate_projects`. These config tables are replaced by YAML files in `~/.kandev/workspaces/<name>/`.
 
 ### Export/import bundle
 

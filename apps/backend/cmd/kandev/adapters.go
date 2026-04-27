@@ -709,3 +709,17 @@ func (a *taskSessionCheckerAdapter) HasTaskSessions(ctx context.Context, taskID 
 	}
 	return len(sessions) > 0, nil
 }
+
+// taskWorkspaceCreatorAdapter adapts the task service to the orchestrate
+// WorkspaceCreator interface for dual workspace creation.
+type taskWorkspaceCreatorAdapter struct {
+	taskSvc *taskservice.Service
+}
+
+func (a *taskWorkspaceCreatorAdapter) CreateWorkspace(ctx context.Context, name, description string) error {
+	_, err := a.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name:        name,
+		Description: description,
+	})
+	return err
+}

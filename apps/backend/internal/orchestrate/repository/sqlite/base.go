@@ -32,10 +32,7 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 
 // initSchema creates all orchestrate tables if they don't exist.
 func (r *Repository) initSchema() error {
-	if err := r.createAgentTables(); err != nil {
-		return err
-	}
-	if err := r.createProjectTables(); err != nil {
+	if err := r.createAgentRuntimeTable(); err != nil {
 		return err
 	}
 	if err := r.createCostTables(); err != nil {
@@ -70,10 +67,6 @@ func (r *Repository) initSchema() error {
 // migrateSchedulerColumns adds scheduler-related columns to existing tables.
 // Each ALTER is idempotent: errors are ignored if the column already exists.
 func (r *Repository) migrateSchedulerColumns() {
-	// Heartbeat cooldown fields on agent instances.
-	_, _ = r.db.Exec(`ALTER TABLE orchestrate_agent_instances ADD COLUMN cooldown_sec INTEGER DEFAULT 10`)
-	_, _ = r.db.Exec(`ALTER TABLE orchestrate_agent_instances ADD COLUMN last_wakeup_finished_at DATETIME`)
-
 	// Retry fields on wakeup queue.
 	_, _ = r.db.Exec(`ALTER TABLE orchestrate_wakeup_queue ADD COLUMN retry_count INTEGER DEFAULT 0`)
 	_, _ = r.db.Exec(`ALTER TABLE orchestrate_wakeup_queue ADD COLUMN scheduled_retry_at DATETIME`)
@@ -138,64 +131,14 @@ func (r *Repository) backfillFTS() {
 	`)
 }
 
-func (r *Repository) createAgentTables() error {
+func (r *Repository) createAgentRuntimeTable() error {
 	_, err := r.db.Exec(`
-	CREATE TABLE IF NOT EXISTS orchestrate_agent_instances (
-		id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		agent_profile_id TEXT DEFAULT '',
-		role TEXT NOT NULL DEFAULT 'worker',
-		icon TEXT DEFAULT '',
+	CREATE TABLE IF NOT EXISTS orchestrate_agent_runtime (
+		agent_id TEXT PRIMARY KEY,
 		status TEXT NOT NULL DEFAULT 'idle',
-		reports_to TEXT DEFAULT '',
-		permissions TEXT DEFAULT '{}',
-		budget_monthly_cents INTEGER DEFAULT 0,
-		max_concurrent_sessions INTEGER DEFAULT 1,
-		cooldown_sec INTEGER DEFAULT 10,
-		last_wakeup_finished_at DATETIME,
-		desired_skills TEXT DEFAULT '[]',
-		executor_preference TEXT DEFAULT '{}',
 		pause_reason TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		UNIQUE(workspace_id, name)
-	);
-
-	CREATE TABLE IF NOT EXISTS orchestrate_skills (
-		id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		slug TEXT NOT NULL,
-		description TEXT DEFAULT '',
-		source_type TEXT NOT NULL DEFAULT 'inline',
-		source_locator TEXT DEFAULT '',
-		content TEXT DEFAULT '',
-		file_inventory TEXT DEFAULT '[]',
-		created_by_agent_instance_id TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		UNIQUE(workspace_id, slug)
-	);
-	`)
-	return err
-}
-
-func (r *Repository) createProjectTables() error {
-	_, err := r.db.Exec(`
-	CREATE TABLE IF NOT EXISTS orchestrate_projects (
-		id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		description TEXT DEFAULT '',
-		status TEXT NOT NULL DEFAULT 'active',
-		lead_agent_instance_id TEXT DEFAULT '',
-		color TEXT DEFAULT '',
-		budget_cents INTEGER DEFAULT 0,
-		repositories TEXT DEFAULT '[]',
-		executor_config TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		last_wakeup_finished_at DATETIME,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`)
 	return err

@@ -464,13 +464,22 @@ func startGatewayAndServe(
 		// list/get handlers read from the filesystem-backed config.
 		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
 		services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
+		services.Orchestrate.SetWorkspaceCreator(&taskWorkspaceCreatorAdapter{taskSvc: services.Task})
 		log.Info("Orchestrate service wired to ConfigLoader")
+
+		// Run initial reconciliation (best-effort, warns on errors)
+		reconciler := orchestrateservice.NewReconciler(services.Orchestrate)
+		reconciler.ReconcileAll(ctx)
+		log.Info("Orchestrate reconciliation complete")
 
 		// Start fsnotify watcher
 		cfgWatcher, err := configloader.NewWatcher(cfgLoader)
 		if err != nil {
 			log.Error("Failed to create config watcher", zap.Error(err))
 		} else {
+			cfgWatcher.SetOnReload(func(_ string) {
+				reconciler.ReconcileAll(context.Background())
+			})
 			go func() {
 				if watchErr := cfgWatcher.Start(ctx); watchErr != nil {
 					log.Error("Config watcher error", zap.Error(watchErr))

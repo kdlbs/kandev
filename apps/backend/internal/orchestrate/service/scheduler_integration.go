@@ -238,9 +238,10 @@ func (si *SchedulerIntegration) finishWakeup(
 
 	si.releaseCheckoutIfNeeded(ctx, taskID)
 
-	// Record cooldown timestamp in-memory.
+	// Record cooldown timestamp in-memory and DB.
 	now := time.Now().UTC()
 	agent.LastWakeupFinishedAt = &now
+	_ = si.svc.repo.UpdateRuntimeLastWakeupFinished(ctx, agent.ID, now)
 
 	si.svc.LogActivity(ctx, agent.WorkspaceID,
 		"scheduler", "orchestrate-scheduler",

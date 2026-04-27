@@ -12,32 +12,9 @@ import (
 
 func strPtr(s string) *string { return &s }
 
-func createTestAgent(t *testing.T, repo interface {
-	CreateAgentInstance(context.Context, *models.AgentInstance) error
-}, id, wsID string, maxSessions int,
-) {
-	t.Helper()
-	agent := &models.AgentInstance{
-		ID:                    id,
-		WorkspaceID:           wsID,
-		Name:                  "agent-" + id,
-		Role:                  models.AgentRoleWorker,
-		Status:                models.AgentStatusIdle,
-		MaxConcurrentSessions: maxSessions,
-		DesiredSkills:         "[]",
-		ExecutorPreference:    "{}",
-		Permissions:           "{}",
-	}
-	if err := repo.CreateAgentInstance(context.Background(), agent); err != nil {
-		t.Fatalf("create agent %s: %v", id, err)
-	}
-}
-
 func TestClaimNextEligibleWakeup_Basic(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
 
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a1",
@@ -65,8 +42,6 @@ func TestClaimNextEligibleWakeup_Basic(t *testing.T) {
 func TestClaimNextEligibleWakeup_SkipsBusyAgent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
 
 	// Create a claimed wakeup (agent at capacity).
 	claimed := &models.WakeupRequest{
@@ -102,9 +77,6 @@ func TestClaimNextEligibleWakeup_SkipsBusyAgent(t *testing.T) {
 func TestClaimNextEligibleWakeup_PicksNextEligible(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
-	createTestAgent(t, repo, "a2", "ws1", 1)
 
 	// a1 is at capacity (has a claimed wakeup).
 	atCap := &models.WakeupRequest{
@@ -182,8 +154,6 @@ func TestCoalesceWakeup(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	createTestAgent(t, repo, "a1", "ws1", 1)
-
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a1",
 		Reason:          "task_comment",
@@ -215,8 +185,6 @@ func TestCoalesceWakeup(t *testing.T) {
 func TestCheckIdempotencyKey(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
 
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a1",
@@ -250,8 +218,6 @@ func TestCheckIdempotencyKey(t *testing.T) {
 func TestCleanExpired(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
 
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a1",
@@ -309,28 +275,18 @@ func TestClaimNextEligibleWakeup_ClaimsWithoutCooldownCheck(t *testing.T) {
 }
 
 func TestClaimNextEligibleWakeup_AllowsAgentPastCooldown(t *testing.T) {
+	// Cooldown enforcement is done at the service layer, not the DB query.
+	// The DB claim only checks capacity. This test verifies the wakeup is
+	// claimed regardless of runtime state stored in orchestrate_agent_runtime.
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	agent := &models.AgentInstance{
-		ID:                    "a-cd2",
-		WorkspaceID:           "ws1",
-		Name:                  "past-cooldown-agent",
-		Role:                  models.AgentRoleWorker,
-		Status:                models.AgentStatusIdle,
-		MaxConcurrentSessions: 1,
-		CooldownSec:           5,
-		DesiredSkills:         "[]",
-		ExecutorPreference:    "{}",
-		Permissions:           "{}",
-	}
-	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
-	// Set last_wakeup_finished_at to 10 seconds ago (past cooldown).
+	// Store runtime state with a past wakeup timestamp.
 	past := time.Now().UTC().Add(-10 * time.Second)
-	if err := repo.UpdateLastWakeupFinished(ctx, "a-cd2", past); err != nil {
+	if err := repo.UpsertAgentRuntime(ctx, "a-cd2", "idle", ""); err != nil {
+		t.Fatalf("upsert runtime: %v", err)
+	}
+	if err := repo.UpdateRuntimeLastWakeupFinished(ctx, "a-cd2", past); err != nil {
 		t.Fatalf("update finished: %v", err)
 	}
 
@@ -358,8 +314,6 @@ func TestClaimNextEligibleWakeup_SkipsScheduledRetryInFuture(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	createTestAgent(t, repo, "a-retry", "ws1", 1)
-
 	future := time.Now().UTC().Add(10 * time.Minute)
 	req := &models.WakeupRequest{
 		AgentInstanceID:  "a-retry",
@@ -383,8 +337,6 @@ func TestClaimNextEligibleWakeup_SkipsScheduledRetryInFuture(t *testing.T) {
 func TestScheduleRetry_ResetsToQueued(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a-sr", "ws1", 1)
 
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a-sr",
@@ -419,8 +371,6 @@ func TestScheduleRetry_ResetsToQueued(t *testing.T) {
 func TestRecoverStale(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-
-	createTestAgent(t, repo, "a1", "ws1", 1)
 
 	req := &models.WakeupRequest{
 		AgentInstanceID: "a1",

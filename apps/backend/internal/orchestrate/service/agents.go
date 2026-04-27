@@ -182,10 +182,10 @@ func (s *Service) UpdateAgentInstance(ctx context.Context, agent *models.AgentIn
 	return nil
 }
 
-// UpdateAgentStatus validates a status transition and updates the agent in-memory.
-// Status is runtime state -- not persisted to YAML, reconstructable on restart.
+// UpdateAgentStatus validates a status transition, persists the new state to the
+// runtime DB table, and updates the in-memory cache.
 func (s *Service) UpdateAgentStatus(
-	_ context.Context, id string, newStatus models.AgentStatus, pauseReason string,
+	ctx context.Context, id string, newStatus models.AgentStatus, pauseReason string,
 ) (*models.AgentInstance, error) {
 	agent, err := s.getAgentFromCacheMutable(id)
 	if err != nil {
@@ -193,6 +193,10 @@ func (s *Service) UpdateAgentStatus(
 	}
 	if err := validateStatusTransition(agent.Status, newStatus); err != nil {
 		return nil, err
+	}
+	// Persist to DB so the status survives restarts.
+	if dbErr := s.repo.UpsertAgentRuntime(ctx, agent.ID, string(newStatus), pauseReason); dbErr != nil {
+		return nil, fmt.Errorf("persist agent runtime: %w", dbErr)
 	}
 	agent.Status = newStatus
 	agent.PauseReason = pauseReason

@@ -105,15 +105,30 @@ The CEO/CTO never explicitly picks an executor -- they assign tasks to projects 
 - **Paused**: manually paused by user, or auto-paused by budget enforcement. No new wakeups processed. Active sessions complete their current turn but receive no further prompts.
 - **Stopped**: deactivated. No longer appears in the CEO's org tree. Can be reactivated.
 
-### Agent storage model
+### Agent config vs runtime state
 
-All agent data lives in the **database** (source of truth). The filesystem is an optional sync target for portability.
+Agent data is split between the filesystem (config) and a small DB table (runtime state):
 
-- **DB** (`orchestrate_agent_instances`): all config fields (name, role, reports_to, permissions, budget, desired_skills, executor_preference, max_concurrent_sessions, icon) PLUS runtime state (status, pause_reason, last_wakeup_finished_at).
-- **Filesystem** (`agents/<name>.yml`): export format for git versioning, sharing, backup. Written on user-initiated export, read on user-initiated import.
-- **Agent profiles**: stay in the existing kandev `agent_profiles` DB table. Referenced by `agent_profile_id` from the agent instance. Managed via the existing settings UI (`/settings/agents/`).
+- **Filesystem** (`agents/<name>.yml`): name, role, reports_to, agent_profile_id, permissions, budget, desired_skills, executor_preference, max_concurrent_sessions, icon. Editable by users, versionable via git. This is the source of truth for agent configuration.
+- **DB** (`orchestrate_agent_runtime`): status, pause_reason, last_wakeup_finished_at. Runtime state that must survive restarts (e.g. a budget-paused agent stays paused after restart). Not user-editable, not exported.
+- **Agent profiles**: stay in the existing kandev `agent_profiles` DB table. Referenced by `agent_profile_id` from the agent instance YAML. Managed via the existing settings UI (`/settings/agents/`). Profiles may move to filesystem in the future.
 
-The user controls sync via the settings Sync UI -- import changes from filesystem, export changes to filesystem. No automatic sync. See [orchestrate-config](../orchestrate-config/spec.md).
+On startup, the ConfigLoader reads agent config from YAML and the reconciliation service merges runtime state from the DB. If an agent exists in YAML but has no runtime row, a default row is created (`status=idle`). If a runtime row exists for an agent no longer in YAML, the row is deleted. See [orchestrate-config](../orchestrate-config/spec.md).
+
+Example agent YAML:
+```yaml
+# agents/ceo.yml
+id: "abc-123"
+name: CEO
+role: ceo
+agent_profile_id: "prof_abc123"
+reports_to: ""
+icon: crown
+permissions: '{"can_create_tasks":true,"can_assign_tasks":true,"can_create_agents":true}'
+budget_monthly_cents: 5000
+max_concurrent_sessions: 1
+desired_skills: '["memory","delegation-playbook"]'
+```
 
 ### UI at `/orchestrate/agents`
 

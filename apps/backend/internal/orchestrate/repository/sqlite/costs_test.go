@@ -12,24 +12,10 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	// Need an agent instance to join against
-	agent := &models.AgentInstance{
-		WorkspaceID:        "ws-1",
-		Name:               "cost-agent",
-		Role:               models.AgentRoleWorker,
-		Status:             models.AgentStatusIdle,
-		Permissions:        "{}",
-		DesiredSkills:      "[]",
-		ExecutorPreference: "{}",
-	}
-	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
 	event := &models.CostEvent{
 		SessionID:       "session-1",
 		TaskID:          "task-1",
-		AgentInstanceID: agent.ID,
+		AgentInstanceID: "cost-agent-1",
 		Model:           "claude-4-sonnet",
 		Provider:        "anthropic",
 		TokensIn:        1000,
@@ -57,22 +43,9 @@ func TestCostBreakdowns(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	agent := &models.AgentInstance{
-		WorkspaceID:        "ws-1",
-		Name:               "breakdown-agent",
-		Role:               models.AgentRoleWorker,
-		Status:             models.AgentStatusIdle,
-		Permissions:        "{}",
-		DesiredSkills:      "[]",
-		ExecutorPreference: "{}",
-	}
-	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
 	for i := 0; i < 3; i++ {
 		event := &models.CostEvent{
-			AgentInstanceID: agent.ID,
+			AgentInstanceID: "breakdown-agent-1",
 			Model:           "claude-4-sonnet",
 			ProjectID:       "proj-1",
 			CostCents:       5,

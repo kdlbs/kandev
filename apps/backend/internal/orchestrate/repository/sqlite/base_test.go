@@ -38,9 +38,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 	}
 
 	expectedTables := []string{
-		"orchestrate_agent_instances",
-		"orchestrate_skills",
-		"orchestrate_projects",
+		"orchestrate_agent_runtime",
 		"orchestrate_cost_events",
 		"orchestrate_budget_policies",
 		"orchestrate_wakeup_queue",

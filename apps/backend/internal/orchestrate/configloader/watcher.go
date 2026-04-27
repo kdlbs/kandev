@@ -18,6 +18,7 @@ type Watcher struct {
 	loader   *ConfigLoader
 	watcher  *fsnotify.Watcher
 	debounce time.Duration
+	onReload func(workspace string)
 }
 
 // NewWatcher creates a file system watcher backed by the given config loader.
@@ -36,6 +37,12 @@ func NewWatcher(loader *ConfigLoader) (*Watcher, error) {
 // SetDebounceDuration overrides the debounce interval (useful for tests).
 func (w *Watcher) SetDebounceDuration(d time.Duration) {
 	w.debounce = d
+}
+
+// SetOnReload registers a callback invoked after a workspace is reloaded.
+// The callback receives the workspace name that was reloaded.
+func (w *Watcher) SetOnReload(fn func(workspace string)) {
+	w.onReload = fn
 }
 
 // Start begins watching all workspace directories. It blocks until ctx is cancelled.
@@ -102,6 +109,10 @@ func (w *Watcher) eventLoop(ctx context.Context) {
 				for _, n := range names {
 					if err := w.loader.Reload(n); err != nil {
 						log.Printf("configloader: reload %s: %v", n, err)
+						continue
+					}
+					if w.onReload != nil {
+						w.onReload(n)
 					}
 				}
 			})

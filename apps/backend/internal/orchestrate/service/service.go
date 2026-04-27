@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,6 +45,12 @@ func (f TaskStarterFunc) StartTask(ctx context.Context, taskID, agentProfileID, 
 		priority, prompt, workflowStepID, planMode, attachments)
 }
 
+// WorkspaceCreator creates a DB workspace row for kanban compatibility.
+// Implemented by the task service or its repository.
+type WorkspaceCreator interface {
+	CreateWorkspace(ctx context.Context, name, description string) error
+}
+
 // Service provides orchestrate business logic.
 type Service struct {
 	repo              *sqlite.Repository
@@ -54,6 +62,7 @@ type Service struct {
 	relay             *ChannelRelay
 	agentTypeResolver AgentTypeResolver
 	taskStarter       TaskStarter
+	workspaceCreator  WorkspaceCreator
 }
 
 // NewService creates a new orchestrate service.
@@ -77,6 +86,11 @@ func (s *Service) SetConfigLoader(loader *configloader.ConfigLoader, writer *con
 // Called after construction because the orchestrator service is created later in startup.
 func (s *Service) SetTaskStarter(starter TaskStarter) {
 	s.taskStarter = starter
+}
+
+// SetWorkspaceCreator sets the DB workspace creator for dual workspace creation.
+func (s *Service) SetWorkspaceCreator(creator WorkspaceCreator) {
+	s.workspaceCreator = creator
 }
 
 // SetGitManager sets the git manager for workspace git operations.
@@ -487,4 +501,42 @@ func (s *Service) GetDashboard(ctx context.Context, wsID string) (int, int, int,
 		return 0, 0, 0, nil, err
 	}
 	return len(agents), active, pending, activity, nil
+}
+
+// CreateOrchestrateWorkspace writes workspace config to the filesystem and,
+// if a WorkspaceCreator is configured, also creates a DB workspace row for
+// kanban board compatibility.
+func (s *Service) CreateOrchestrateWorkspace(ctx context.Context, name, description string) error {
+	// 1. Write kandev.yml to filesystem.
+	if s.cfgWriter != nil {
+		settings := &configloader.WorkspaceSettings{
+			Name:        name,
+			Description: description,
+			TaskPrefix:  "KAN",
+		}
+		data, err := configloader.MarshalSettings(*settings)
+		if err != nil {
+			return fmt.Errorf("marshal workspace settings: %w", err)
+		}
+		wsDir := filepath.Join(s.cfgLoader.BasePath(), "workspaces", name)
+		if mkErr := os.MkdirAll(wsDir, 0o755); mkErr != nil {
+			return fmt.Errorf("create workspace dir: %w", mkErr)
+		}
+		settingsPath := filepath.Join(wsDir, "kandev.yml")
+		if writeErr := os.WriteFile(settingsPath, data, 0o644); writeErr != nil {
+			return fmt.Errorf("write workspace settings: %w", writeErr)
+		}
+		if reloadErr := s.cfgLoader.Reload(name); reloadErr != nil {
+			return fmt.Errorf("reload workspace config: %w", reloadErr)
+		}
+	}
+
+	// 2. Create DB row for kanban compatibility.
+	if s.workspaceCreator != nil {
+		if err := s.workspaceCreator.CreateWorkspace(ctx, name, description); err != nil {
+			s.logger.Warn("dual workspace DB creation failed",
+				zap.String("name", name), zap.Error(err))
+		}
+	}
+	return nil
 }
