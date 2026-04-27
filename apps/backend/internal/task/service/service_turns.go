@@ -102,13 +102,19 @@ func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.
 // This is used to ensure messages always have a valid turn ID.
 func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	// Route through GetActiveTurn so the ErrNoRows → (nil, nil) normalization
-	// applies consistently. Real DB errors fall through to StartTurn, which
-	// will surface them.
-	if turn, err := s.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+	// applies consistently. A real DB read failure is logged before falling
+	// through to StartTurn — same observability contract as the orchestrator's
+	// startTurnForSession adoption path.
+	turn, err := s.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to look up active turn; will create a new one",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if turn != nil {
 		return turn, nil
 	}
 
-	// No active turn, start a new one
+	// No active turn (or read failed), start a new one
 	return s.StartTurn(ctx, sessionID)
 }
 

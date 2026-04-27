@@ -26,7 +26,7 @@ func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*mod
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
 		TaskSessionID: sessionID,
-		TaskID:        "task1",
+		TaskID:        "task1", // matches the taskID seedSession uses
 		StartedAt:     now,
 		CreatedAt:     now,
 		UpdatedAt:     now,
