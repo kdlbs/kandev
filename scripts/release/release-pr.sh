@@ -239,7 +239,7 @@ detect_current_app_version() {
 
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
-    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)$ ]]; then
       local major="${BASH_REMATCH[1]}"
       local minor="${BASH_REMATCH[2]}"
       if [[ "$found" -eq 0 ]] || (( 10#$major > 10#$best_major )) || \
@@ -435,7 +435,7 @@ latest_origin_app_tag() {
     [[ -z "${ref:-}" ]] && continue
     tag="${ref#refs/tags/}"
     tag="${tag%\^\{\}}"
-    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)$ ]]; then
       local major="${BASH_REMATCH[1]}"
       local minor="${BASH_REMATCH[2]}"
       if [[ "$found" -eq 0 ]] || (( 10#$major > 10#$best_major )) || \
