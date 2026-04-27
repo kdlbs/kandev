@@ -162,6 +162,7 @@ func (h *TaskHandlers) wsListTaskPlanRevisions(ctx context.Context, msg *ws.Mess
 // wsGetTaskPlanRevision returns a single revision with content.
 func (h *TaskHandlers) wsGetTaskPlanRevision(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
+		TaskID     string `json:"task_id"`
 		RevisionID string `json:"revision_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -181,6 +182,13 @@ func (h *TaskHandlers) wsGetTaskPlanRevision(ctx context.Context, msg *ws.Messag
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get revision: "+err.Error(), nil)
+	}
+	// Match wsRevertTaskPlan's ownership check so a caller can only read
+	// content for revisions belonging to the task they hold a reference to.
+	// Optional task_id keeps existing callers compatible while letting the
+	// frontend tighten the request shape.
+	if req.TaskID != "" && rev.TaskID != req.TaskID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Revision does not belong to task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanRevisionFromModel(rev))
 }

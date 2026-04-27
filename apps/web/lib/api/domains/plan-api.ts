@@ -96,13 +96,21 @@ export async function listPlanRevisions(taskId: string): Promise<TaskPlanRevisio
 
 /**
  * Fetch a single revision including its content (for diff/preview).
+ * `taskId` is optional but recommended — the backend uses it to enforce
+ * ownership (a connected client can only read revisions belonging to a
+ * task it already holds a reference to).
  */
-export async function getPlanRevision(revisionId: string): Promise<TaskPlanRevision> {
+export async function getPlanRevision(
+  revisionId: string,
+  taskId?: string,
+): Promise<TaskPlanRevision> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  const response = await client.request("task.plan.revision.get", { revision_id: revisionId });
+  const payload: Record<string, string> = { revision_id: revisionId };
+  if (taskId) payload.task_id = taskId;
+  const response = await client.request("task.plan.revision.get", payload);
   return response as TaskPlanRevision;
 }
 

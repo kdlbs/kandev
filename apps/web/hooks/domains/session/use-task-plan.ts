@@ -193,12 +193,13 @@ function useTaskPlanRevisions(
       // content-fetch effects (cache short-circuits, but the work is wasted).
       const cached = storeApi.getState().taskPlans.revisionContentCache[revisionId];
       if (cached !== undefined) return cached;
-      const rev = await getPlanRevision(revisionId);
+      // Pass taskId so the backend can enforce revision-belongs-to-task.
+      const rev = await getPlanRevision(revisionId, taskId ?? undefined);
       const content = rev.content ?? "";
       cachePlanRevisionContent(revisionId, content);
       return content;
     },
-    [storeApi, cachePlanRevisionContent],
+    [taskId, storeApi, cachePlanRevisionContent],
   );
 
   const revertTo = useCallback(

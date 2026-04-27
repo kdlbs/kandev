@@ -223,6 +223,11 @@ function RevisionsDialogStack({
           closePopover();
           setPreviewRevision(null);
           setDiffOpen(false);
+        } else {
+          // `revertTo` (the hook impl) swallows errors and returns null, so
+          // we surface the failure here too — without this branch the dialog
+          // closes silently on failure and the user has no feedback.
+          toast.error("Failed to restore plan");
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to restore plan");
