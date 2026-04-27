@@ -70,6 +70,46 @@ func TestService_ExpirePendingPermissionsForSession_MarksOnlyPending(t *testing.
 	}
 }
 
+// TestService_UpdatePermissionMessage_ExpiredCannotDemoteApproved guards the
+// race between the WS approve/reject path and the turn-complete sweep. If
+// `complete` lands before the approve write commits, the sweep would
+// otherwise clobber "approved" with "expired" — which the user observes as
+// a stuck banner whose next click hits "pending permission not found"
+// (agentctl already consumed the response).
+func TestService_UpdatePermissionMessage_ExpiredCannotDemoteApproved(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-perm-race")
+
+	mustCreatePermMsg(t, repo, sessionID, turnID, "msg-approved", "pend-A", map[string]any{
+		"pending_id": "pend-A",
+		"status":     "approved",
+	})
+	mustCreatePermMsg(t, repo, sessionID, turnID, "msg-rejected", "pend-R", map[string]any{
+		"pending_id": "pend-R",
+		"status":     "rejected",
+	})
+
+	if err := svc.UpdatePermissionMessage(ctx, sessionID, "pend-A", "expired"); err != nil {
+		t.Fatalf("UpdatePermissionMessage approved→expired: %v", err)
+	}
+	if err := svc.UpdatePermissionMessage(ctx, sessionID, "pend-R", "expired"); err != nil {
+		t.Fatalf("UpdatePermissionMessage rejected→expired: %v", err)
+	}
+
+	approved, _ := repo.GetMessage(ctx, "msg-approved")
+	if got, _ := approved.Metadata["status"].(string); got != "approved" {
+		t.Errorf("approved permission was demoted to %q", got)
+	}
+	rejected, _ := repo.GetMessage(ctx, "msg-rejected")
+	if got, _ := rejected.Metadata["status"].(string); got != "rejected" {
+		t.Errorf("rejected permission was demoted to %q", got)
+	}
+}
+
 // TestService_ExpirePendingPermissionsForSession_NoPending is a no-op
 // fast-path: when nothing is pending, the sweep must return zero and not
 // fail.

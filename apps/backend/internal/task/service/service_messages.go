@@ -535,6 +535,23 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	if message.Metadata == nil {
 		message.Metadata = make(map[string]interface{})
 	}
+
+	// Never demote a user-resolved permission. The turn-complete sweep races
+	// with the WS approve/reject path: if `complete` arrives before the
+	// approve write commits, the sweep can otherwise overwrite "approved"
+	// with "expired" — which is what the user sees as a stuck card whose
+	// next click hits "pending permission not found" because agentctl
+	// already consumed the response.
+	if status == "expired" {
+		current, _ := message.Metadata["status"].(string)
+		if current == "approved" || current == "rejected" {
+			s.logger.Debug("skipping expire of already-resolved permission",
+				zap.String("message_id", message.ID),
+				zap.String("pending_id", pendingID),
+				zap.String("current_status", current))
+			return nil
+		}
+	}
 	message.Metadata["status"] = status
 
 	if err := s.messages.UpdateMessage(ctx, message); err != nil {
