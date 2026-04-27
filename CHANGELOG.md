@@ -16,27 +16,6 @@ All notable changes to Kandev.
 - auto-open plan panel with unseen-changes indicator ([#650](https://github.com/kdlbs/kandev/pull/650))
 - add /spec for writing feature specs ([#700](https://github.com/kdlbs/kandev/pull/700))
 - support claude-acp Monitor tool and fix incremental tool_call updates ([#698](https://github.com/kdlbs/kandev/pull/698))
-- add GitHub token injection for remote executors and Docker session resume ([#654](https://github.com/kdlbs/kandev/pull/654))
-- add Ctrl+F search to session, plan, and terminal panels ([#686](https://github.com/kdlbs/kandev/pull/686))
-- configurable quick-action presets and PR branch checkout ([#689](https://github.com/kdlbs/kandev/pull/689))
-- add /github page for PRs and issues ([#687](https://github.com/kdlbs/kandev/pull/687))
-- collapse subtasks in sidebar ([#662](https://github.com/kdlbs/kandev/pull/662))
-- review uncommitted changes and add git safety rails ([#684](https://github.com/kdlbs/kandev/pull/684))
-- add issue watcher with task creation and auto-cleanup ([#672](https://github.com/kdlbs/kandev/pull/672))
-- per-launch authentication for agentctl ([#666](https://github.com/kdlbs/kandev/pull/666))
-- configurable CLI flags per agent profile ([#653](https://github.com/kdlbs/kandev/pull/653))
-- session tabs on kanban preview panel ([#648](https://github.com/kdlbs/kandev/pull/648))
-- sidebar filter UX polish — align ops, group steps by workflow ([#647](https://github.com/kdlbs/kandev/pull/647))
-- explain why Start task button is disabled via hover tooltip ([#649](https://github.com/kdlbs/kandev/pull/649))
-- add filter/group/sort and saved views to task sidebar ([#644](https://github.com/kdlbs/kandev/pull/644))
-- vscode-style preview tabs for files, diffs, and commits ([#622](https://github.com/kdlbs/kandev/pull/622))
-- add confirmation dialog before archiving tasks ([#621](https://github.com/kdlbs/kandev/pull/621))
-- introduce card multi-selection ([#573](https://github.com/kdlbs/kandev/pull/573))
-- render short tool-call output inline ([#604](https://github.com/kdlbs/kandev/pull/604))
-- associate agent profiles with workflows and steps ([#597](https://github.com/kdlbs/kandev/pull/597))
-- add start_agent and local_path params to create_task ([#505](https://github.com/kdlbs/kandev/pull/505))
-- acp-first profiles, models, and modes ([#566](https://github.com/kdlbs/kandev/pull/566))
-- add multi-select and drag-to-move for file tree and changes panel ([#490](https://github.com/kdlbs/kandev/pull/490))
 
 ### Bug Fixes
 
@@ -49,6 +28,23 @@ All notable changes to Kandev.
 - align sidebar filter toolbar height with panel headers ([#699](https://github.com/kdlbs/kandev/pull/699))
 - derive sidebar session state from most active session ([#697](https://github.com/kdlbs/kandev/pull/697))
 - auto-resume failed sessions with silent workspace-restore fallback ([#696](https://github.com/kdlbs/kandev/pull/696))
+
+## 0.37 - 2026-04-25
+
+### Features
+
+- add GitHub token injection for remote executors and Docker session resume ([#654](https://github.com/kdlbs/kandev/pull/654))
+- add Ctrl+F search to session, plan, and terminal panels ([#686](https://github.com/kdlbs/kandev/pull/686))
+- configurable quick-action presets and PR branch checkout ([#689](https://github.com/kdlbs/kandev/pull/689))
+- add /github page for PRs and issues ([#687](https://github.com/kdlbs/kandev/pull/687))
+- collapse subtasks in sidebar ([#662](https://github.com/kdlbs/kandev/pull/662))
+- review uncommitted changes and add git safety rails ([#684](https://github.com/kdlbs/kandev/pull/684))
+- add issue watcher with task creation and auto-cleanup ([#672](https://github.com/kdlbs/kandev/pull/672))
+- per-launch authentication for agentctl ([#666](https://github.com/kdlbs/kandev/pull/666))
+- configurable CLI flags per agent profile ([#653](https://github.com/kdlbs/kandev/pull/653))
+
+### Bug Fixes
+
 - ui polish — unified topbar, selector consistency, quick actions editor improvements ([#693](https://github.com/kdlbs/kandev/pull/693))
 - subtask sessions inherit agent profile from parent task ([#692](https://github.com/kdlbs/kandev/pull/692))
 - recover from stale execution ID when auto-starting agent on prepared workspace ([#690](https://github.com/kdlbs/kandev/pull/690))
@@ -62,6 +58,24 @@ All notable changes to Kandev.
 - send auto-start prompt after on_turn_complete context reset ([#669](https://github.com/kdlbs/kandev/pull/669))
 - include archived tasks in completed tasks over time chart ([#668](https://github.com/kdlbs/kandev/pull/668))
 - remove duplicate WebSocket event subscriptions ([#667](https://github.com/kdlbs/kandev/pull/667))
+
+### Refactoring
+
+- unify task.updated via single publisher and shared mapper ([#676](https://github.com/kdlbs/kandev/pull/676))
+- move system prompts from Go constants to external config files ([#673](https://github.com/kdlbs/kandev/pull/673))
+
+### Documentation
+
+- improve commit skill with mandatory verify and pre-commit check ([#691](https://github.com/kdlbs/kandev/pull/691))
+
+## 0.36 - 2026-04-20
+
+### Features
+
+- session tabs on kanban preview panel ([#648](https://github.com/kdlbs/kandev/pull/648))
+
+### Bug Fixes
+
 - prevent kanban topbar search from overlapping right buttons ([#661](https://github.com/kdlbs/kandev/pull/661))
 - enable Start task button when workflow provides agent override ([#665](https://github.com/kdlbs/kandev/pull/665))
 - default dev mode db to <repo>/.kandev-dev/data ([#664](https://github.com/kdlbs/kandev/pull/664))
@@ -72,6 +86,20 @@ All notable changes to Kandev.
 - exclude ephemeral tasks from stats page queries ([#656](https://github.com/kdlbs/kandev/pull/656))
 - add edit icon hint to utility agent rows ([#657](https://github.com/kdlbs/kandev/pull/657))
 - tighten default template prompts for commits, todos, and PR review ([#655](https://github.com/kdlbs/kandev/pull/655))
+
+## 0.35 - 2026-04-20
+
+### Features
+
+- sidebar filter UX polish — align ops, group steps by workflow ([#647](https://github.com/kdlbs/kandev/pull/647))
+- explain why Start task button is disabled via hover tooltip ([#649](https://github.com/kdlbs/kandev/pull/649))
+- add filter/group/sort and saved views to task sidebar ([#644](https://github.com/kdlbs/kandev/pull/644))
+- vscode-style preview tabs for files, diffs, and commits ([#622](https://github.com/kdlbs/kandev/pull/622))
+- add confirmation dialog before archiving tasks ([#621](https://github.com/kdlbs/kandev/pull/621))
+- introduce card multi-selection ([#573](https://github.com/kdlbs/kandev/pull/573))
+
+### Bug Fixes
+
 - release script tags fetching
 - show repo name instead of full path in task sidebar ([#652](https://github.com/kdlbs/kandev/pull/652))
 - unstick agent session when cancel times out ([#651](https://github.com/kdlbs/kandev/pull/651))
@@ -92,6 +120,25 @@ All notable changes to Kandev.
 - apply display filters in list view ([#612](https://github.com/kdlbs/kandev/pull/612))
 - isolate dev mode state when running inside a kandev task ([#617](https://github.com/kdlbs/kandev/pull/617))
 - disable multi-select mode after bulk archive or delete ([#623](https://github.com/kdlbs/kandev/pull/623))
+
+### Performance
+
+- focus-gated git polling to reduce CPU on retained worktrees ([#610](https://github.com/kdlbs/kandev/pull/610))
+
+### Documentation
+
+- add Discord link and require e2e tests for UI changes ([#630](https://github.com/kdlbs/kandev/pull/630))
+- refresh README, roadmap, and workflow templates ([#624](https://github.com/kdlbs/kandev/pull/624))
+
+## 0.34 - 2026-04-17
+
+### Features
+
+- render short tool-call output inline ([#604](https://github.com/kdlbs/kandev/pull/604))
+- associate agent profiles with workflows and steps ([#597](https://github.com/kdlbs/kandev/pull/597))
+
+### Bug Fixes
+
 - close file diff tab when uncommitted change is undone ([#618](https://github.com/kdlbs/kandev/pull/618))
 - stop killing live agents on resume race ([#619](https://github.com/kdlbs/kandev/pull/619))
 - treat skipped checks as passing and add ready-to-merge status ([#616](https://github.com/kdlbs/kandev/pull/616))
@@ -103,6 +150,16 @@ All notable changes to Kandev.
 - prevent duplicate review tasks via atomic PR reservation ([#605](https://github.com/kdlbs/kandev/pull/605))
 - stop panels from opening in the left sidebar group ([#603](https://github.com/kdlbs/kandev/pull/603))
 - align top-bar right button heights ([#601](https://github.com/kdlbs/kandev/pull/601))
+
+## 0.33 - 2026-04-16
+
+### Features
+
+- add start_agent and local_path params to create_task ([#505](https://github.com/kdlbs/kandev/pull/505))
+- acp-first profiles, models, and modes ([#566](https://github.com/kdlbs/kandev/pull/566))
+
+### Bug Fixes
+
 - improve plan comment formatting to match code review style ([#600](https://github.com/kdlbs/kandev/pull/600))
 - skip ExtraFiles liveness pipe on Windows to fix agentctl startup ([#599](https://github.com/kdlbs/kandev/pull/599))
 - disable resume and show agent selector when profile is deleted ([#578](https://github.com/kdlbs/kandev/pull/578))
@@ -122,6 +179,19 @@ All notable changes to Kandev.
 - stop vertical scroll on mobile column tabs ([#583](https://github.com/kdlbs/kandev/pull/583))
 - disable inherited git-crypt filters when repo is locked ([#577](https://github.com/kdlbs/kandev/pull/577))
 - handle locked git-crypt repos and localized git errors ([#532](https://github.com/kdlbs/kandev/pull/532))
+
+### Refactoring
+
+- re-key dockview panel state by environmentId instead of sessionId ([#491](https://github.com/kdlbs/kandev/pull/491))
+
+## 0.32 - 2026-04-13
+
+### Features
+
+- add multi-select and drag-to-move for file tree and changes panel ([#490](https://github.com/kdlbs/kandev/pull/490))
+
+### Bug Fixes
+
 - register MCP tools with _kandev suffix to match sysprompt ([#572](https://github.com/kdlbs/kandev/pull/572))
 - recalculate dockview layout after fast-path session switch ([#571](https://github.com/kdlbs/kandev/pull/571))
 - prevent worktree branches from inheriting upstream tracking ([#570](https://github.com/kdlbs/kandev/pull/570))
@@ -129,21 +199,8 @@ All notable changes to Kandev.
 - make PR Approve button look clickable ([#567](https://github.com/kdlbs/kandev/pull/567))
 - associate PRs with tasks after branch rename or PR replacement ([#565](https://github.com/kdlbs/kandev/pull/565))
 
-### Performance
-
-- focus-gated git polling to reduce CPU on retained worktrees ([#610](https://github.com/kdlbs/kandev/pull/610))
-
-### Refactoring
-
-- unify task.updated via single publisher and shared mapper ([#676](https://github.com/kdlbs/kandev/pull/676))
-- move system prompts from Go constants to external config files ([#673](https://github.com/kdlbs/kandev/pull/673))
-- re-key dockview panel state by environmentId instead of sessionId ([#491](https://github.com/kdlbs/kandev/pull/491))
-
 ### Documentation
 
-- improve commit skill with mandatory verify and pre-commit check ([#691](https://github.com/kdlbs/kandev/pull/691))
-- add Discord link and require e2e tests for UI changes ([#630](https://github.com/kdlbs/kandev/pull/630))
-- refresh README, roadmap, and workflow templates ([#624](https://github.com/kdlbs/kandev/pull/624))
 - enforce test requirements and improve agent skill resilience ([#543](https://github.com/kdlbs/kandev/pull/543))
 
 ## 0.31 - 2026-04-09
