@@ -4,11 +4,7 @@ import { useState } from "react";
 import { IconCode, IconChevronDown, IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@kandev/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { formatRelativeTime } from "@/lib/utils";
 import type { IssueComment } from "./types";
 

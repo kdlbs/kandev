@@ -42,12 +42,7 @@ export function OrgZoomControls({ onZoomIn, onZoomOut, onFit, onExport }: OrgZoo
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={onFit}
-          >
+          <Button variant="outline" size="icon" className="h-8 w-8 cursor-pointer" onClick={onFit}>
             <IconArrowsMaximize className="h-4 w-4" />
           </Button>
         </TooltipTrigger>

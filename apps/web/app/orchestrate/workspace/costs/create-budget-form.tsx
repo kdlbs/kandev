@@ -58,45 +58,85 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Scope Type">
             <Select value={scopeType} onValueChange={setScopeType}>
-              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="workspace" className="cursor-pointer">Workspace</SelectItem>
-                <SelectItem value="agent" className="cursor-pointer">Agent</SelectItem>
-                <SelectItem value="project" className="cursor-pointer">Project</SelectItem>
+                <SelectItem value="workspace" className="cursor-pointer">
+                  Workspace
+                </SelectItem>
+                <SelectItem value="agent" className="cursor-pointer">
+                  Agent
+                </SelectItem>
+                <SelectItem value="project" className="cursor-pointer">
+                  Project
+                </SelectItem>
               </SelectContent>
             </Select>
           </FormField>
           <FormField label="Scope ID">
-            <Input className="h-8 text-sm" value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder="Entity ID" />
+            <Input
+              className="h-8 text-sm"
+              value={scopeId}
+              onChange={(e) => setScopeId(e.target.value)}
+              placeholder="Entity ID"
+            />
           </FormField>
           <FormField label="Limit ($)">
-            <Input className="h-8 text-sm" type="number" value={limitDollars} onChange={(e) => setLimitDollars(e.target.value)} placeholder="10.00" />
+            <Input
+              className="h-8 text-sm"
+              type="number"
+              value={limitDollars}
+              onChange={(e) => setLimitDollars(e.target.value)}
+              placeholder="10.00"
+            />
           </FormField>
           <FormField label="Period">
             <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="monthly" className="cursor-pointer">Monthly</SelectItem>
-                <SelectItem value="total" className="cursor-pointer">Total</SelectItem>
+                <SelectItem value="monthly" className="cursor-pointer">
+                  Monthly
+                </SelectItem>
+                <SelectItem value="total" className="cursor-pointer">
+                  Total
+                </SelectItem>
               </SelectContent>
             </Select>
           </FormField>
           <FormField label="Alert Threshold (%)">
-            <Input className="h-8 text-sm" type="number" value={alertPct} onChange={(e) => setAlertPct(e.target.value)} />
+            <Input
+              className="h-8 text-sm"
+              type="number"
+              value={alertPct}
+              onChange={(e) => setAlertPct(e.target.value)}
+            />
           </FormField>
           <FormField label="Action on Exceed">
             <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="h-8 text-sm cursor-pointer"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm cursor-pointer">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="notify_only" className="cursor-pointer">Notify Only</SelectItem>
-                <SelectItem value="pause_agent" className="cursor-pointer">Pause Agent</SelectItem>
-                <SelectItem value="block_new_tasks" className="cursor-pointer">Block New Tasks</SelectItem>
+                <SelectItem value="notify_only" className="cursor-pointer">
+                  Notify Only
+                </SelectItem>
+                <SelectItem value="pause_agent" className="cursor-pointer">
+                  Pause Agent
+                </SelectItem>
+                <SelectItem value="block_new_tasks" className="cursor-pointer">
+                  Block New Tasks
+                </SelectItem>
               </SelectContent>
             </Select>
           </FormField>
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" size="sm" className="cursor-pointer" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" size="sm" className="cursor-pointer" onClick={onCancel}>
+            Cancel
+          </Button>
           <Button size="sm" className="cursor-pointer" disabled={saving} onClick={handleSubmit}>
             {saving ? "Creating..." : "Create Policy"}
           </Button>

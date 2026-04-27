@@ -63,10 +63,7 @@ describe("agent instance store actions", () => {
 
   it("removeAgentInstance removes by id", () => {
     const store = makeStore();
-    store.getState().setAgentInstances([
-      makeAgent("a1", "Agent 1"),
-      makeAgent("a2", "Agent 2"),
-    ]);
+    store.getState().setAgentInstances([makeAgent("a1", "Agent 1"), makeAgent("a2", "Agent 2")]);
     store.getState().removeAgentInstance("a1");
     expect(store.getState().orchestrate.agentInstances).toHaveLength(1);
     expect(store.getState().orchestrate.agentInstances[0].id).toBe("a2");

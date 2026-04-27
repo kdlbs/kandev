@@ -40,9 +40,7 @@ export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
               className="h-3 w-3 rounded-sm shrink-0"
               style={{ backgroundColor: project.color || "#6b7280" }}
             />
-            <CardTitle className="text-sm font-medium truncate flex-1">
-              {project.name}
-            </CardTitle>
+            <CardTitle className="text-sm font-medium truncate flex-1">{project.name}</CardTitle>
             <Badge className={statusBadgeClasses[project.status] ?? ""}>
               {statusLabels[project.status] ?? project.status}
             </Badge>
@@ -70,9 +68,7 @@ export function ProjectCard({ project, leadAgentName }: ProjectCardProps) {
             </div>
           )}
 
-          {leadAgentName && (
-            <p className="text-xs text-muted-foreground">Lead: {leadAgentName}</p>
-          )}
+          {leadAgentName && <p className="text-xs text-muted-foreground">Lead: {leadAgentName}</p>}
         </CardContent>
       </Card>
     </Link>

@@ -29,11 +29,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
           key={skill.id}
           className="flex items-center gap-3 py-1.5 px-2 rounded-md hover:bg-accent/50 cursor-pointer"
         >
-          <Checkbox
-            checked={assignedIds.has(skill.id)}
-            disabled
-            className="cursor-pointer"
-          />
+          <Checkbox checked={assignedIds.has(skill.id)} disabled className="cursor-pointer" />
           <span className="text-sm">{skill.name}</span>
           <span className="text-xs text-muted-foreground ml-auto">{skill.slug}</span>
         </label>

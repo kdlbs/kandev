@@ -71,8 +71,7 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
   const [rightTab, setRightTab] = useState<"files" | "changes">("files");
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
-  const { sessionId, sessionState, hasActiveSession, isSessionEnded } =
-    useAdvancedSession(task.id);
+  const { sessionId, sessionState, hasActiveSession, isSessionEnded } = useAdvancedSession(task.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -121,7 +120,9 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
                 <IconFiles className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{rightCollapsed ? "Show files panel" : "Hide files panel"}</TooltipContent>
+            <TooltipContent>
+              {rightCollapsed ? "Show files panel" : "Hide files panel"}
+            </TooltipContent>
           </Tooltip>
           {task.assigneeName && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

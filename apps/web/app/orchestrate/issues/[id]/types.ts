@@ -42,11 +42,7 @@ export type IssueActivityEntry = {
   createdAt: string;
 };
 
-export type TaskSessionState =
-  | "RUNNING"
-  | "WAITING_FOR_INPUT"
-  | "COMPLETED"
-  | "FAILED";
+export type TaskSessionState = "RUNNING" | "WAITING_FOR_INPUT" | "COMPLETED" | "FAILED";
 
 export type TaskSession = {
   id: string;

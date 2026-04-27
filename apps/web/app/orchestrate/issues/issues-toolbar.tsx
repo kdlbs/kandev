@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  IconPlus,
-  IconSearch,
-  IconList,
-  IconColumns3,
-  IconListTree,
-} from "@tabler/icons-react";
+import { IconPlus, IconSearch, IconList, IconColumns3, IconListTree } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";

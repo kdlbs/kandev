@@ -40,9 +40,7 @@ export function TaskSimpleMode({
 }: TaskSimpleModeProps) {
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const hasMultipleSessions = sessions.length >= 2;
-  const [activeSessionId, setActiveSessionId] = useState<string>(
-    sessions[0]?.id ?? "",
-  );
+  const [activeSessionId, setActiveSessionId] = useState<string>(sessions[0]?.id ?? "");
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId),
     [sessions, activeSessionId],
@@ -65,9 +63,7 @@ export function TaskSimpleMode({
                 <BreadcrumbSeparator />
                 <BreadcrumbItem>
                   <BreadcrumbLink asChild>
-                    <Link href={`/orchestrate/issues/${task.parentId}`}>
-                      {task.parentTitle}
-                    </Link>
+                    <Link href={`/orchestrate/issues/${task.parentId}`}>{task.parentTitle}</Link>
                   </BreadcrumbLink>
                 </BreadcrumbItem>
               </>

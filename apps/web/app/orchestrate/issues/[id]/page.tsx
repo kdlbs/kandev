@@ -60,19 +60,15 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
   const hasSession = Boolean(task.assigneeAgentInstanceId) || sessions.length > 0;
 
   const setMode = (newMode: string) => {
-    const url = newMode === "advanced"
-      ? `/orchestrate/issues/${id}?mode=advanced`
-      : `/orchestrate/issues/${id}`;
+    const url =
+      newMode === "advanced"
+        ? `/orchestrate/issues/${id}?mode=advanced`
+        : `/orchestrate/issues/${id}`;
     router.push(url);
   };
 
   if (mode === "advanced" && hasSession) {
-    return (
-      <TaskAdvancedMode
-        task={task}
-        onToggleSimple={() => setMode("simple")}
-      />
-    );
+    return <TaskAdvancedMode task={task} onToggleSimple={() => setMode("simple")} />;
   }
 
   return (

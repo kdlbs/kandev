@@ -4,13 +4,7 @@ import { useState, useCallback } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/orchestrate-api";
@@ -66,7 +60,9 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold">Executor Configuration</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">How agent sessions run for this project.</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            How agent sessions run for this project.
+          </p>
         </div>
         {dirty && (
           <Button
@@ -96,11 +92,21 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
               <SelectValue placeholder="Inherit from workspace" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="inherit" className="cursor-pointer">Inherit from workspace</SelectItem>
-              <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
-              <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
-              <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
-              <SelectItem value="remote_docker" className="cursor-pointer">Remote Docker</SelectItem>
+              <SelectItem value="inherit" className="cursor-pointer">
+                Inherit from workspace
+              </SelectItem>
+              <SelectItem value="local_pc" className="cursor-pointer">
+                Local (standalone)
+              </SelectItem>
+              <SelectItem value="local_docker" className="cursor-pointer">
+                Local Docker
+              </SelectItem>
+              <SelectItem value="sprites" className="cursor-pointer">
+                Sprites (remote sandbox)
+              </SelectItem>
+              <SelectItem value="remote_docker" className="cursor-pointer">
+                Remote Docker
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -112,7 +118,10 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
               <Input
                 placeholder="e.g. node:20-slim"
                 value={image}
-                onChange={(e) => { setImage(e.target.value); setDirty(true); }}
+                onChange={(e) => {
+                  setImage(e.target.value);
+                  setDirty(true);
+                }}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -122,7 +131,10 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
                   type="number"
                   placeholder="4096"
                   value={memoryMb}
-                  onChange={(e) => { setMemoryMb(e.target.value); setDirty(true); }}
+                  onChange={(e) => {
+                    setMemoryMb(e.target.value);
+                    setDirty(true);
+                  }}
                 />
               </div>
               <div className="space-y-1">
@@ -131,7 +143,10 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
                   type="number"
                   placeholder="2"
                   value={cpuCores}
-                  onChange={(e) => { setCpuCores(e.target.value); setDirty(true); }}
+                  onChange={(e) => {
+                    setCpuCores(e.target.value);
+                    setDirty(true);
+                  }}
                 />
               </div>
             </div>

@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconCurrencyDollar, IconRobot, IconFolder, IconCpu } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { getCostSummary, getCostsByAgent, getCostsByProject, getCostsByModel } from "@/lib/api/domains/orchestrate-api";
+import {
+  getCostSummary,
+  getCostsByAgent,
+  getCostsByProject,
+  getCostsByModel,
+} from "@/lib/api/domains/orchestrate-api";
 import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/orchestrate/types";
 import { CostBreakdownTable } from "./cost-breakdown-table";

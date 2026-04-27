@@ -1,12 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import {
-  IconRobot,
-  IconCircleDot,
-  IconCurrencyDollar,
-  IconShieldCheck,
-} from "@tabler/icons-react";
+import { IconRobot, IconCircleDot, IconCurrencyDollar, IconShieldCheck } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
@@ -93,9 +88,7 @@ export function OrchestratePageClient({ initialDashboard }: OrchestratePageClien
                 No recent activity. Actions by agents and users will appear here.
               </div>
             ) : (
-              recentActivity.map((entry) => (
-                <ActivityRow key={entry.id} entry={entry} />
-              ))
+              recentActivity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
             )}
           </div>
         </Card>

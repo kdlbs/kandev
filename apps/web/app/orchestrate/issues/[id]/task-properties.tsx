@@ -151,7 +151,11 @@ export function TaskProperties({ task }: TaskPropertiesProps) {
 
       <PropertyRow label="Created by">{task.createdBy}</PropertyRow>
       <PropertyRow label="Started">
-        {task.startedAt ? formatDate(task.startedAt) : <span className="text-muted-foreground">--</span>}
+        {task.startedAt ? (
+          formatDate(task.startedAt)
+        ) : (
+          <span className="text-muted-foreground">--</span>
+        )}
       </PropertyRow>
       <PropertyRow label="Completed">
         {task.completedAt ? (

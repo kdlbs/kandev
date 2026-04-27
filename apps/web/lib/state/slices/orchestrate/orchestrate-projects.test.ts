@@ -58,10 +58,7 @@ describe("project store actions", () => {
 
   it("removeProject removes by id", () => {
     const store = makeStore();
-    store.getState().setProjects([
-      makeProject("p1", "Project 1"),
-      makeProject("p2", "Project 2"),
-    ]);
+    store.getState().setProjects([makeProject("p1", "Project 1"), makeProject("p2", "Project 2")]);
     store.getState().removeProject("p1");
     expect(store.getState().orchestrate.projects).toHaveLength(1);
     expect(store.getState().orchestrate.projects[0].id).toBe("p2");

@@ -22,11 +22,7 @@ export function ParticipantRow({
   onHide,
 }: ParticipantRowProps) {
   const toggle = (id: string) => {
-    onSelect(
-      selectedIds.includes(id)
-        ? selectedIds.filter((x) => x !== id)
-        : [...selectedIds, id],
-    );
+    onSelect(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
   };
 
   return (
@@ -58,12 +54,7 @@ export function ParticipantRow({
       </Popover>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 cursor-pointer"
-            onClick={onHide}
-          >
+          <Button variant="ghost" size="icon" className="h-6 w-6 cursor-pointer" onClick={onHide}>
             <IconX className="h-3 w-3" />
           </Button>
         </TooltipTrigger>

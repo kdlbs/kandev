@@ -9,10 +9,7 @@ export {
 } from "./session-runtime/session-runtime-slice";
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
-export {
-  createOrchestrateSlice,
-  defaultOrchestrateState,
-} from "./orchestrate/orchestrate-slice";
+export { createOrchestrateSlice, defaultOrchestrateState } from "./orchestrate/orchestrate-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";

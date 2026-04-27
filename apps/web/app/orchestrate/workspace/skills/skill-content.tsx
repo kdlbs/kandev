@@ -44,19 +44,10 @@ export function SkillContent({
           placeholder="# Skill instructions..."
         />
         <div className="flex justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            className="cursor-pointer"
-          >
+          <Button variant="ghost" size="sm" onClick={onCancel} className="cursor-pointer">
             Cancel
           </Button>
-          <Button
-            size="sm"
-            onClick={() => onSave?.(draft)}
-            className="cursor-pointer"
-          >
+          <Button size="sm" onClick={() => onSave?.(draft)} className="cursor-pointer">
             Save
           </Button>
         </div>

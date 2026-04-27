@@ -125,7 +125,9 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
         {filteredItems.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <p className="text-sm text-muted-foreground">All clear.</p>
-            <p className="text-xs text-muted-foreground mt-1">Approvals, alerts, and items needing your attention appear here.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Approvals, alerts, and items needing your attention appear here.
+            </p>
           </div>
         ) : (
           filteredItems.map((item) => (

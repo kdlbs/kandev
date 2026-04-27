@@ -57,9 +57,19 @@ export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSideba
       <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 px-3 py-2">
         {/* Top actions */}
         <div className="flex flex-col gap-0.5">
-          <SidebarNavItem icon={IconSquarePlus} label="New Task" href="/orchestrate/issues" onClick={() => setNewIssueOpen(true)} />
+          <SidebarNavItem
+            icon={IconSquarePlus}
+            label="New Task"
+            href="/orchestrate/issues"
+            onClick={() => setNewIssueOpen(true)}
+          />
           <SidebarNavItem icon={IconLayoutDashboard} label="Dashboard" href="/orchestrate" />
-          <SidebarNavItem icon={IconInbox} label="Inbox" href="/orchestrate/inbox" badge={inboxCount} />
+          <SidebarNavItem
+            icon={IconInbox}
+            label="Inbox"
+            href="/orchestrate/inbox"
+            badge={inboxCount}
+          />
         </div>
 
         {/* Work section */}
@@ -77,10 +87,26 @@ export function OrchestrateSidebar({ workspaceName: ssrName }: OrchestrateSideba
         {/* Company section */}
         <SidebarSection label="Workspace">
           <SidebarNavItem icon={IconSitemap} label="Org" href="/orchestrate/workspace/org" />
-          <SidebarNavItem icon={IconBoxMultiple} label="Skills" href="/orchestrate/workspace/skills" />
-          <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/orchestrate/workspace/costs" />
-          <SidebarNavItem icon={IconHistory} label="Activity" href="/orchestrate/workspace/activity" />
-          <SidebarNavItem icon={IconSettings} label="Settings" href="/orchestrate/workspace/settings" />
+          <SidebarNavItem
+            icon={IconBoxMultiple}
+            label="Skills"
+            href="/orchestrate/workspace/skills"
+          />
+          <SidebarNavItem
+            icon={IconCurrencyDollar}
+            label="Costs"
+            href="/orchestrate/workspace/costs"
+          />
+          <SidebarNavItem
+            icon={IconHistory}
+            label="Activity"
+            href="/orchestrate/workspace/activity"
+          />
+          <SidebarNavItem
+            icon={IconSettings}
+            label="Settings"
+            href="/orchestrate/workspace/settings"
+          />
         </SidebarSection>
       </nav>
 

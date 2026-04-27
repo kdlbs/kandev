@@ -5,13 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Button } from "@kandev/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentInstance } from "@/lib/api/domains/orchestrate-api";
@@ -68,37 +62,54 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Identity</CardTitle>
-          <p className="text-xs text-muted-foreground">Name, role, and reporting structure for this agent.</p>
+          <p className="text-xs text-muted-foreground">
+            Name, role, and reporting structure for this agent.
+          </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
             <Label>Name</Label>
             <Input
               value={name}
-              onChange={(e) => { setName(e.target.value); markDirty(); }}
+              onChange={(e) => {
+                setName(e.target.value);
+                markDirty();
+              }}
               className="mt-1"
             />
           </div>
           <div className="flex gap-4">
             <div className="flex-1">
               <Label>Role</Label>
-              <Select value={role} onValueChange={(v) => { setRole(v as AgentRole); markDirty(); }}>
-                <SelectTrigger className="mt-1 cursor-pointer"><SelectValue /></SelectTrigger>
+              <Select
+                value={role}
+                onValueChange={(v) => {
+                  setRole(v as AgentRole);
+                  markDirty();
+                }}
+              >
+                <SelectTrigger className="mt-1 cursor-pointer">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ceo" className="cursor-pointer">CEO</SelectItem>
-                  <SelectItem value="worker" className="cursor-pointer">Worker</SelectItem>
-                  <SelectItem value="specialist" className="cursor-pointer">Specialist</SelectItem>
-                  <SelectItem value="assistant" className="cursor-pointer">Assistant</SelectItem>
+                  <SelectItem value="ceo" className="cursor-pointer">
+                    CEO
+                  </SelectItem>
+                  <SelectItem value="worker" className="cursor-pointer">
+                    Worker
+                  </SelectItem>
+                  <SelectItem value="specialist" className="cursor-pointer">
+                    Specialist
+                  </SelectItem>
+                  <SelectItem value="assistant" className="cursor-pointer">
+                    Assistant
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex-1">
               <Label>Reports to</Label>
-              <Input
-                value={reportsToAgent?.name ?? "None"}
-                disabled
-                className="mt-1"
-              />
+              <Input value={reportsToAgent?.name ?? "None"} disabled className="mt-1" />
             </div>
           </div>
         </CardContent>
@@ -107,7 +118,9 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Configuration</CardTitle>
-          <p className="text-xs text-muted-foreground">Budget limits, concurrency, and execution environment.</p>
+          <p className="text-xs text-muted-foreground">
+            Budget limits, concurrency, and execution environment.
+          </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex gap-4">
@@ -117,7 +130,10 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
                 type="number"
                 min={0}
                 value={budget}
-                onChange={(e) => { setBudget(Number(e.target.value)); markDirty(); }}
+                onChange={(e) => {
+                  setBudget(Number(e.target.value));
+                  markDirty();
+                }}
                 className="mt-1"
               />
             </div>
@@ -128,7 +144,10 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
                 min={1}
                 max={10}
                 value={maxConcurrent}
-                onChange={(e) => { setMaxConcurrent(Number(e.target.value)); markDirty(); }}
+                onChange={(e) => {
+                  setMaxConcurrent(Number(e.target.value));
+                  markDirty();
+                }}
                 className="mt-1"
               />
             </div>
@@ -137,16 +156,27 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
             <Label>Executor preference</Label>
             <Select
               value={executorType || "__inherit__"}
-              onValueChange={(v) => { setExecutorType(v === "__inherit__" ? "" : v); markDirty(); }}
+              onValueChange={(v) => {
+                setExecutorType(v === "__inherit__" ? "" : v);
+                markDirty();
+              }}
             >
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue placeholder="Inherit from project/workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__inherit__" className="cursor-pointer">Inherit</SelectItem>
-                <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
-                <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
-                <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
+                <SelectItem value="__inherit__" className="cursor-pointer">
+                  Inherit
+                </SelectItem>
+                <SelectItem value="local_pc" className="cursor-pointer">
+                  Local (standalone)
+                </SelectItem>
+                <SelectItem value="local_docker" className="cursor-pointer">
+                  Local Docker
+                </SelectItem>
+                <SelectItem value="sprites" className="cursor-pointer">
+                  Sprites (remote sandbox)
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

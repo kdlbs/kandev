@@ -42,15 +42,21 @@ function toggleInArray<T>(arr: T[], value: T): T[] {
 
 export function IssueFilters({ filters, onFilterChange }: IssueFiltersProps) {
   const activeCount =
-    filters.statuses.length + filters.priorities.length +
-    filters.assigneeIds.length + filters.projectIds.length;
+    filters.statuses.length +
+    filters.priorities.length +
+    filters.assigneeIds.length +
+    filters.projectIds.length;
 
   return (
     <Popover>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant={activeCount > 0 ? "secondary" : "ghost"} size="icon-sm" className="cursor-pointer">
+            <Button
+              variant={activeCount > 0 ? "secondary" : "ghost"}
+              size="icon-sm"
+              className="cursor-pointer"
+            >
               <IconFilter className="h-4 w-4" />
               {activeCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">

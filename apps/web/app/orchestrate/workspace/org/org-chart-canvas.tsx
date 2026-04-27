@@ -85,7 +85,12 @@ export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {
 
   return (
     <div className="relative flex-1 min-h-0 overflow-auto">
-      <OrgZoomControls onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onFit={handleFit} onExport={handleExport} />
+      <OrgZoomControls
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onFit={handleFit}
+        onExport={handleExport}
+      />
 
       <div
         style={{

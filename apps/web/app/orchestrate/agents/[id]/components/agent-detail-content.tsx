@@ -19,9 +19,7 @@ type AgentDetailContentProps = {
 };
 
 export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
-  const agent = useAppStore((s) =>
-    s.orchestrate.agentInstances.find((a) => a.id === agentId),
-  );
+  const agent = useAppStore((s) => s.orchestrate.agentInstances.find((a) => a.id === agentId));
 
   if (!agent) {
     return (
@@ -69,11 +67,21 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
 
       <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="overview" className="cursor-pointer">Overview</TabsTrigger>
-          <TabsTrigger value="skills" className="cursor-pointer">Skills</TabsTrigger>
-          <TabsTrigger value="runs" className="cursor-pointer">Runs</TabsTrigger>
-          <TabsTrigger value="memory" className="cursor-pointer">Memory</TabsTrigger>
-          <TabsTrigger value="channels" className="cursor-pointer">Channels</TabsTrigger>
+          <TabsTrigger value="overview" className="cursor-pointer">
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="skills" className="cursor-pointer">
+            Skills
+          </TabsTrigger>
+          <TabsTrigger value="runs" className="cursor-pointer">
+            Runs
+          </TabsTrigger>
+          <TabsTrigger value="memory" className="cursor-pointer">
+            Memory
+          </TabsTrigger>
+          <TabsTrigger value="channels" className="cursor-pointer">
+            Channels
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <AgentOverviewTab agent={agent} />

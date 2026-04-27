@@ -12,10 +12,7 @@ export function SidebarProjectsList() {
   const activeProjects = projects.filter((p) => p.status !== "archived");
 
   return (
-    <SidebarCollapsibleSection
-      label="Projects"
-      onAdd={() => router.push("/orchestrate/projects")}
-    >
+    <SidebarCollapsibleSection label="Projects" onAdd={() => router.push("/orchestrate/projects")}>
       {activeProjects.length === 0 ? (
         <p className="px-3 py-2 text-xs text-muted-foreground">No projects yet</p>
       ) : (

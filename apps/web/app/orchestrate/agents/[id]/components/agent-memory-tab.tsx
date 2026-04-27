@@ -11,13 +11,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import type { AgentInstance } from "@/lib/state/slices/orchestrate/types";
@@ -45,14 +39,19 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
 
   useEffect(() => {
     let cancelled = false;
-    orchestrateApi.getMemory(agent.id).then((res) => {
-      if (!cancelled) {
-        setEntries((res as { memory?: MemoryEntry[] }).memory ?? []);
-      }
-    }).catch((err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to load memory");
-    });
-    return () => { cancelled = true; };
+    orchestrateApi
+      .getMemory(agent.id)
+      .then((res) => {
+        if (!cancelled) {
+          setEntries((res as { memory?: MemoryEntry[] }).memory ?? []);
+        }
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load memory");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [agent.id]);
 
   const filtered = useMemo(() => {
@@ -130,7 +129,9 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <p className="text-sm text-muted-foreground">No memory entries yet.</p>
-          <p className="text-xs text-muted-foreground mt-1">Memory is accumulated as the agent works on tasks.</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Memory is accumulated as the agent works on tasks.
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -267,10 +268,7 @@ function MemoryEntryRow({
 }) {
   return (
     <div className="px-4 py-2.5">
-      <div
-        className="flex items-center gap-2 text-sm cursor-pointer"
-        onClick={onToggle}
-      >
+      <div className="flex items-center gap-2 text-sm cursor-pointer" onClick={onToggle}>
         <Badge variant="outline" className="text-[10px] font-mono shrink-0">
           {entry.key}
         </Badge>

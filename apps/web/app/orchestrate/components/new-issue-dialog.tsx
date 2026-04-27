@@ -4,12 +4,7 @@ import { useState, useCallback } from "react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-} from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
@@ -35,11 +30,10 @@ export function NewIssueDialog({
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [submitting, setSubmitting] = useState(false);
 
-  const { draft, updateDraft, clearDraft } = useIssueDraft(
-    workspaceId,
-    parentTaskId,
-    { projectId: defaultProjectId, assigneeId: defaultAssigneeId },
-  );
+  const { draft, updateDraft, clearDraft } = useIssueDraft(workspaceId, parentTaskId, {
+    projectId: defaultProjectId,
+    assigneeId: defaultAssigneeId,
+  });
 
   const handleCreate = useCallback(async () => {
     if (!draft.title.trim() || !workspaceId) return;

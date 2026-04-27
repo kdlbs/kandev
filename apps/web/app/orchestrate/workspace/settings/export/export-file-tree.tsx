@@ -48,17 +48,14 @@ export function ExportFileTree({
     return dirs;
   });
 
-  const toggleExpand = useCallback(
-    (path: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-    },
-    [],
-  );
+  const toggleExpand = useCallback((path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
 
   const toggleSelection = useCallback(
     (node: FileTreeNode) => {
@@ -154,17 +151,9 @@ function TreeRow({
     }
   };
 
-  const ChevronIcon = node.isDir
-    ? isExpanded
-      ? IconChevronDown
-      : IconChevronRight
-    : null;
+  const ChevronIcon = node.isDir ? (isExpanded ? IconChevronDown : IconChevronRight) : null;
 
-  const FileIcon = node.isDir
-    ? isExpanded
-      ? IconFolderOpen
-      : IconFolder
-    : IconFile;
+  const FileIcon = node.isDir ? (isExpanded ? IconFolderOpen : IconFolder) : IconFile;
 
   return (
     <>
@@ -188,21 +177,23 @@ function TreeRow({
       </div>
       {node.isDir &&
         isExpanded &&
-        node.children.filter(matchesSearch).map((child) => (
-          <TreeRow
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            expanded={expanded}
-            selectedPaths={selectedPaths}
-            previewPath={previewPath}
-            onToggleExpand={onToggleExpand}
-            onToggleSelection={onToggleSelection}
-            onPreview={onPreview}
-            matchesSearch={matchesSearch}
-            allFiles={allFiles}
-          />
-        ))}
+        node.children
+          .filter(matchesSearch)
+          .map((child) => (
+            <TreeRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              selectedPaths={selectedPaths}
+              previewPath={previewPath}
+              onToggleExpand={onToggleExpand}
+              onToggleSelection={onToggleSelection}
+              onPreview={onPreview}
+              matchesSearch={matchesSearch}
+              allFiles={allFiles}
+            />
+          ))}
     </>
   );
 }

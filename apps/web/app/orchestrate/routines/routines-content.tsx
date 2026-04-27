@@ -51,7 +51,10 @@ export function RoutinesContent() {
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
       try {
-        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<string, unknown>);
+        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<
+          string,
+          unknown
+        >);
         await fetchRoutines();
         toast.success(active ? "Routine activated" : "Routine paused");
       } catch (err) {
@@ -101,7 +104,10 @@ export function RoutinesContent() {
     }) => {
       if (!workspaceId) return;
       try {
-        const template = JSON.stringify({ title: data.taskTitle, description: data.taskDescription });
+        const template = JSON.stringify({
+          title: data.taskTitle,
+          description: data.taskDescription,
+        });
         const res = await createRoutine(workspaceId, {
           name: data.name,
           description: data.description,
@@ -143,8 +149,12 @@ export function RoutinesContent() {
 
       <Tabs defaultValue="routines">
         <TabsList>
-          <TabsTrigger value="routines" className="cursor-pointer">Routines</TabsTrigger>
-          <TabsTrigger value="runs" className="cursor-pointer">Runs</TabsTrigger>
+          <TabsTrigger value="routines" className="cursor-pointer">
+            Routines
+          </TabsTrigger>
+          <TabsTrigger value="runs" className="cursor-pointer">
+            Runs
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="routines">
@@ -212,7 +222,12 @@ function RoutinesList({
 
 function RunsList({ runs }: { runs: RoutineRun[] }) {
   if (runs.length === 0) {
-    return <EmptyState message="No runs yet." description="Runs appear here when a routine is triggered." />;
+    return (
+      <EmptyState
+        message="No runs yet."
+        description="Runs appear here when a routine is triggered."
+      />
+    );
   }
   return (
     <div className="border border-border rounded-lg divide-y divide-border">

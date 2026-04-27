@@ -253,7 +253,15 @@ function SkillMetadataRow({ skill, readOnly }: { skill: Skill; readOnly: boolean
   );
 }
 
-function MetadataItem({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function MetadataItem({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   const labelEl = (
     <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
       {label}

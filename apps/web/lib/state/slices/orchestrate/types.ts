@@ -147,7 +147,14 @@ export type Routine = {
 };
 
 export type RoutineTriggerKind = "cron" | "webhook" | "manual";
-export type RoutineRunStatus = "received" | "task_created" | "skipped" | "coalesced" | "failed" | "done" | "cancelled";
+export type RoutineRunStatus =
+  | "received"
+  | "task_created"
+  | "skipped"
+  | "coalesced"
+  | "failed"
+  | "done"
+  | "cancelled";
 
 export type RoutineTrigger = {
   id: string;

@@ -61,9 +61,7 @@ export function IssueRow({
         <span className="w-3.5 shrink-0" />
       )}
       <StatusIcon status={issue.status} className="h-4 w-4 shrink-0" />
-      <span className="text-xs text-muted-foreground font-mono shrink-0">
-        {issue.identifier}
-      </span>
+      <span className="text-xs text-muted-foreground font-mono shrink-0">{issue.identifier}</span>
       <span className="flex-1 truncate">{issue.title}</span>
       {agentName && (
         <span className="text-xs text-muted-foreground shrink-0 truncate max-w-[100px]">

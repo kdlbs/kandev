@@ -32,8 +32,7 @@ export function AdvancedChatPanel({ taskId, sessionId }: AdvancedChatPanelProps)
 
   const sessionState = session?.state ?? null;
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
-  const canSend =
-    sessionId !== null && (sessionState === "WAITING_FOR_INPUT" || isAgentBusy);
+  const canSend = sessionId !== null && (sessionState === "WAITING_FOR_INPUT" || isAgentBusy);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -84,7 +83,9 @@ export function AdvancedChatPanel({ taskId, sessionId }: AdvancedChatPanelProps)
       <div className="flex flex-col h-full">
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <p className="text-sm text-muted-foreground mb-1">No active session for this task.</p>
-          <p className="text-xs text-muted-foreground mb-4">Start a session or send a message to begin.</p>
+          <p className="text-xs text-muted-foreground mb-4">
+            Start a session or send a message to begin.
+          </p>
           {defaultProfile && (
             <Button
               size="sm"
@@ -142,9 +143,7 @@ export function AdvancedChatPanel({ taskId, sessionId }: AdvancedChatPanelProps)
         onSend={handleSend}
         disabled={!canSend && sessionId !== null}
         placeholder={
-          isAgentBusy
-            ? "Agent is working... message will be queued"
-            : "Send a message..."
+          isAgentBusy ? "Agent is working... message will be queued" : "Send a message..."
         }
       />
     </div>

@@ -23,9 +23,7 @@ export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore(
-    (s) => s.orchestrate.projects.find((p) => p.id === id),
-  );
+  const storeProject = useAppStore((s) => s.orchestrate.projects.find((p) => p.id === id));
   const [project, setProject] = useState<Project | null>(storeProject ?? null);
 
   useEffect(() => {
@@ -33,11 +31,13 @@ export default function ProjectDetailPage({ params }: PageProps) {
       setProject(storeProject);
       return;
     }
-    getProject(id).then((res) => {
-      if (res) setProject(res as unknown as Project);
-    }).catch((err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to load project");
-    });
+    getProject(id)
+      .then((res) => {
+        if (res) setProject(res as unknown as Project);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load project");
+      });
   }, [id, storeProject]);
 
   const handleDelete = async () => {
@@ -112,12 +112,7 @@ export default function ProjectDetailPage({ params }: PageProps) {
       <Separator />
 
       <div className="flex justify-end">
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={handleDelete}
-          className="cursor-pointer"
-        >
+        <Button variant="destructive" size="sm" onClick={handleDelete} className="cursor-pointer">
           <IconTrash className="h-4 w-4 mr-1" />
           Delete Project
         </Button>

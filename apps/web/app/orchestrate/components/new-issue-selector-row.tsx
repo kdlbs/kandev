@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  IconDotsVertical,
-  IconEye,
-  IconCircleCheck,
-} from "@tabler/icons-react";
+import { IconDotsVertical, IconEye, IconCircleCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {

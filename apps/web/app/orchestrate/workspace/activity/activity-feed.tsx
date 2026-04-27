@@ -52,7 +52,10 @@ export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
       />
 
       {entries.length === 0 ? (
-        <EmptyState message="No activity yet." description="Actions by agents and users are logged here." />
+        <EmptyState
+          message="No activity yet."
+          description="Actions by agents and users are logged here."
+        />
       ) : (
         <div className="border border-border rounded-lg divide-y divide-border">
           {entries.map((entry) => (

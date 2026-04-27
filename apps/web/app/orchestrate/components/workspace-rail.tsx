@@ -17,7 +17,10 @@ interface WorkspaceRailProps {
   activeWorkspaceId: string | null;
 }
 
-export function WorkspaceRail({ workspaces: ssrWorkspaces, activeWorkspaceId: ssrActiveId }: WorkspaceRailProps) {
+export function WorkspaceRail({
+  workspaces: ssrWorkspaces,
+  activeWorkspaceId: ssrActiveId,
+}: WorkspaceRailProps) {
   const router = useRouter();
   const storeWorkspaces = useAppStore((s) => s.workspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);

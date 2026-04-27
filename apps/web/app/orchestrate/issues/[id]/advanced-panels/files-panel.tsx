@@ -7,10 +7,7 @@ type AdvancedFilesPanelProps = {
   hasActiveSession: boolean;
 };
 
-export function AdvancedFilesPanel({
-  taskId: _taskId,
-  hasActiveSession,
-}: AdvancedFilesPanelProps) {
+export function AdvancedFilesPanel({ taskId: _taskId, hasActiveSession }: AdvancedFilesPanelProps) {
   if (!hasActiveSession) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[200px] p-4">

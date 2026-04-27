@@ -15,9 +15,17 @@ type SidebarNavItemProps = {
   onClick?: () => void;
 };
 
-export function SidebarNavItem({ icon: Icon, label, href, badge, liveCount, onClick }: SidebarNavItemProps) {
+export function SidebarNavItem({
+  icon: Icon,
+  label,
+  href,
+  badge,
+  liveCount,
+  onClick,
+}: SidebarNavItemProps) {
   const pathname = usePathname();
-  const isActive = pathname === href || (href !== "/orchestrate" && pathname.startsWith(href + "/"));
+  const isActive =
+    pathname === href || (href !== "/orchestrate" && pathname.startsWith(href + "/"));
 
   const content = (
     <>

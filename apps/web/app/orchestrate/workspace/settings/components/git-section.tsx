@@ -106,24 +106,28 @@ export function GitSection() {
     <section className="space-y-4">
       {error && <ErrorBanner message={error} />}
 
-      {!isGit && <CloneForm
-        repoUrl={repoUrl}
-        branch={branch}
-        loading={loading}
-        onRepoUrlChange={setRepoUrl}
-        onBranchChange={setBranch}
-        onClone={handleClone}
-      />}
+      {!isGit && (
+        <CloneForm
+          repoUrl={repoUrl}
+          branch={branch}
+          loading={loading}
+          onRepoUrlChange={setRepoUrl}
+          onBranchChange={setBranch}
+          onClone={handleClone}
+        />
+      )}
 
-      {isGit && gitStatus && <GitStatusDisplay
-        status={gitStatus}
-        commitMessage={commitMessage}
-        loading={loading}
-        onCommitMessageChange={setCommitMessage}
-        onPull={handlePull}
-        onPush={handlePush}
-        onRefresh={fetchStatus}
-      />}
+      {isGit && gitStatus && (
+        <GitStatusDisplay
+          status={gitStatus}
+          commitMessage={commitMessage}
+          loading={loading}
+          onCommitMessageChange={setCommitMessage}
+          onPull={handlePull}
+          onPush={handlePush}
+          onRefresh={fetchStatus}
+        />
+      )}
     </section>
   );
 }
@@ -175,11 +179,7 @@ function CloneForm({
           className="mt-1"
         />
       </div>
-      <Button
-        onClick={onClone}
-        disabled={loading || !repoUrl}
-        className="cursor-pointer"
-      >
+      <Button onClick={onClone} disabled={loading || !repoUrl} className="cursor-pointer">
         <IconGitBranch className="h-4 w-4 mr-1" />
         {loading ? "Cloning..." : "Clone"}
       </Button>

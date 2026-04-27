@@ -121,7 +121,12 @@ function SkillListHeader({
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" onClick={onRefresh} className="h-7 w-7 p-0 cursor-pointer">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRefresh}
+              className="h-7 w-7 p-0 cursor-pointer"
+            >
               <IconRefresh className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -129,7 +134,12 @@ function SkillListHeader({
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" onClick={onAdd} className="h-7 w-7 p-0 cursor-pointer">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onAdd}
+              className="h-7 w-7 p-0 cursor-pointer"
+            >
               <IconPlus className="h-4 w-4" />
             </Button>
           </TooltipTrigger>

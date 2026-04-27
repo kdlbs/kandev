@@ -46,7 +46,12 @@ function matchesFilters(issue: OrchestrateIssue, filters: IssueFilterState): boo
   return true;
 }
 
-function compareIssues(a: OrchestrateIssue, b: OrchestrateIssue, field: IssueSortField, dir: IssueSortDir): number {
+function compareIssues(
+  a: OrchestrateIssue,
+  b: OrchestrateIssue,
+  field: IssueSortField,
+  dir: IssueSortDir,
+): number {
   let cmp = 0;
   switch (field) {
     case "status":

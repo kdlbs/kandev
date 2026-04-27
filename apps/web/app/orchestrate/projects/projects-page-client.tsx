@@ -51,11 +51,7 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
       <PageHeader
         title="Projects"
         action={
-          <Button
-            size="sm"
-            onClick={() => setDialogOpen(true)}
-            className="cursor-pointer"
-          >
+          <Button size="sm" onClick={() => setDialogOpen(true)} className="cursor-pointer">
             <IconPlus className="h-4 w-4 mr-1" />
             New Project
           </Button>

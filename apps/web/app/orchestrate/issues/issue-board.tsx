@@ -2,7 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "@kandev/ui/scroll-area";
-import type { OrchestrateIssue, OrchestrateIssueStatus } from "@/lib/state/slices/orchestrate/types";
+import type {
+  OrchestrateIssue,
+  OrchestrateIssueStatus,
+} from "@/lib/state/slices/orchestrate/types";
 import { StatusIcon } from "./status-icon";
 
 const BOARD_COLUMNS: { status: OrchestrateIssueStatus; label: string }[] = [

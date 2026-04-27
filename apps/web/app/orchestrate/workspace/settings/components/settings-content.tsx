@@ -21,14 +21,15 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 function SettingCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border p-4 space-y-4">
-      {children}
-    </div>
-  );
+  return <div className="rounded-lg border border-border p-4 space-y-4">{children}</div>;
 }
 
-function ToggleRow({ label, description, checked, onCheckedChange }: {
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
   label: string;
   description?: string;
   checked: boolean;

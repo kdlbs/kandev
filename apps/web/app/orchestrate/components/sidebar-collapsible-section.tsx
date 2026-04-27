@@ -27,7 +27,10 @@ export function SidebarCollapsibleSection({
       <div className="flex items-center justify-between px-3 py-1.5">
         <CollapsibleTrigger className="flex items-center gap-1 cursor-pointer">
           <IconChevronRight
-            className={cn("h-3 w-3 text-muted-foreground/60 transition-transform", open && "rotate-90")}
+            className={cn(
+              "h-3 w-3 text-muted-foreground/60 transition-transform",
+              open && "rotate-90",
+            )}
           />
           <span className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60">
             {label}

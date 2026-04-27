@@ -21,7 +21,9 @@ export function CostBreakdownTable({ title, items, labelPrefix }: Props) {
           <CardTitle className="text-sm">{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No cost data yet. Costs are tracked when agents run tasks.</p>
+          <p className="text-sm text-muted-foreground">
+            No cost data yet. Costs are tracked when agents run tasks.
+          </p>
         </CardContent>
       </Card>
     );
@@ -50,14 +52,9 @@ export function CostBreakdownTable({ title, items, labelPrefix }: Props) {
                   {item.group_key || "(unassigned)"}
                 </span>
                 <span className="w-20 text-right text-muted-foreground">{item.count}</span>
-                <span className="w-24 text-right font-medium">
-                  {formatCents(item.total_cents)}
-                </span>
+                <span className="w-24 text-right font-medium">{formatCents(item.total_cents)}</span>
                 <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-blue-500"
-                    style={{ width: `${pct}%` }}
-                  />
+                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
                 </div>
               </div>
             );

@@ -44,7 +44,8 @@ function getBudgetStatus(pct: number): { label: string; className: string } {
 }
 
 export function BudgetPolicyCard({ policy, spentCents = 0, onDelete }: Props) {
-  const pct = policy.limitCents > 0 ? Math.min(100, Math.round((spentCents / policy.limitCents) * 100)) : 0;
+  const pct =
+    policy.limitCents > 0 ? Math.min(100, Math.round((spentCents / policy.limitCents) * 100)) : 0;
   const remaining = Math.max(0, policy.limitCents - spentCents);
   const status = getBudgetStatus(pct);
   const barColor = getBarColor(pct);
@@ -53,7 +54,9 @@ export function BudgetPolicyCard({ policy, spentCents = 0, onDelete }: Props) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-sm">{policy.scopeType}: {policy.scopeId}</CardTitle>
+          <CardTitle className="text-sm">
+            {policy.scopeType}: {policy.scopeId}
+          </CardTitle>
           <Badge className={status.className}>{status.label}</Badge>
         </div>
         {onDelete && (
@@ -81,10 +84,7 @@ export function BudgetPolicyCard({ policy, spentCents = 0, onDelete }: Props) {
             </span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className={cn("h-full rounded-full", barColor)}
-              style={{ width: `${pct}%` }}
-            />
+            <div className={cn("h-full rounded-full", barColor)} style={{ width: `${pct}%` }} />
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Budget: {formatCents(policy.limitCents)}</span>

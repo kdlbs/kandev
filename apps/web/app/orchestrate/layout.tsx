@@ -7,7 +7,18 @@ import { WorkspaceRail } from "./components/workspace-rail";
 import { OrchestrateSidebar } from "./components/orchestrate-sidebar";
 import { OrchestrateTopbar } from "./components/orchestrate-topbar";
 
-function mapWorkspaceItem(ws: { id: string; name: string; description?: string | null; owner_id: string; default_executor_id?: string | null; default_environment_id?: string | null; default_agent_profile_id?: string | null; default_config_agent_profile_id?: string | null; created_at: string; updated_at: string }) {
+function mapWorkspaceItem(ws: {
+  id: string;
+  name: string;
+  description?: string | null;
+  owner_id: string;
+  default_executor_id?: string | null;
+  default_environment_id?: string | null;
+  default_agent_profile_id?: string | null;
+  default_config_agent_profile_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}) {
   return {
     id: ws.id,
     name: ws.name,
@@ -31,9 +42,7 @@ export default async function OrchestrateLayout({ children }: { children: React.
   const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
   const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
   const activeWorkspaceId =
-    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ??
-    workspaceItems[0]?.id ??
-    null;
+    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ?? workspaceItems[0]?.id ?? null;
 
   const initialState: Partial<AppState> = {
     workspaces: {
@@ -50,12 +59,11 @@ export default async function OrchestrateLayout({ children }: { children: React.
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
       <div className="flex h-screen">
-        <WorkspaceRail
-          workspaces={workspaceItems}
-          activeWorkspaceId={activeWorkspaceId}
-        />
+        <WorkspaceRail workspaces={workspaceItems} activeWorkspaceId={activeWorkspaceId} />
         <OrchestrateSidebar
-          workspaceName={workspaceItems.find((w) => w.id === activeWorkspaceId)?.name || "Workspace"}
+          workspaceName={
+            workspaceItems.find((w) => w.id === activeWorkspaceId)?.name || "Workspace"
+          }
         />
         <div className="flex-1 min-w-0 flex flex-col">
           <OrchestrateTopbar />

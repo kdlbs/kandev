@@ -14,9 +14,5 @@ export async function getActiveWorkspaceId(): Promise<string | null> {
   const workspaces = workspacesRes.workspaces;
   const settingsWorkspaceId = settingsRes?.settings?.workspace_id || null;
 
-  return (
-    workspaces.find((w) => w.id === settingsWorkspaceId)?.id ??
-    workspaces[0]?.id ??
-    null
-  );
+  return workspaces.find((w) => w.id === settingsWorkspaceId)?.id ?? workspaces[0]?.id ?? null;
 }

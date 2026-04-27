@@ -9,11 +9,7 @@ type SessionTabsProps = {
   onSelect: (id: string) => void;
 };
 
-export function SessionTabs({
-  sessions,
-  activeSessionId,
-  onSelect,
-}: SessionTabsProps) {
+export function SessionTabs({ sessions, activeSessionId, onSelect }: SessionTabsProps) {
   return (
     <div className="flex gap-1 border-b border-border mb-3 -mt-1">
       {sessions.map((session) => {
@@ -31,9 +27,7 @@ export function SessionTabs({
             )}
           >
             {session.agentName || "Agent"}
-            {isRunning && (
-              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-            )}
+            {isRunning && <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />}
           </button>
         );
       })}

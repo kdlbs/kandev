@@ -33,21 +33,26 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
     }
   }, [repoInput, repos, project.id, updateProjectStore]);
 
-  const handleRemove = useCallback(async (repo: string) => {
-    const updated = repos.filter((r) => r !== repo);
-    try {
-      await updateProject(project.id, { repositories: updated });
-      updateProjectStore(project.id, { repositories: updated });
-      toast.success("Repository removed");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to remove repository");
-    }
-  }, [repos, project.id, updateProjectStore]);
+  const handleRemove = useCallback(
+    async (repo: string) => {
+      const updated = repos.filter((r) => r !== repo);
+      try {
+        await updateProject(project.id, { repositories: updated });
+        updateProjectStore(project.id, { repositories: updated });
+        toast.success("Repository removed");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to remove repository");
+      }
+    },
+    [repos, project.id, updateProjectStore],
+  );
 
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold">Repositories</h2>
-      <p className="text-xs text-muted-foreground">Git URLs or local paths where agents will work on this project.</p>
+      <p className="text-xs text-muted-foreground">
+        Git URLs or local paths where agents will work on this project.
+      </p>
       <div className="flex gap-2">
         <Input
           placeholder="Repository URL or path"

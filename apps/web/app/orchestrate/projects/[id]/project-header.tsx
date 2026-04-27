@@ -6,13 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/orchestrate-api";
 import { useAppStore } from "@/components/state-provider";
@@ -68,12 +62,18 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
         />
         <Input
           value={name}
-          onChange={(e) => { setName(e.target.value); setDirty(true); }}
+          onChange={(e) => {
+            setName(e.target.value);
+            setDirty(true);
+          }}
           className="text-lg font-semibold border-0 p-0 h-auto focus-visible:ring-0"
         />
         <Select
           value={status}
-          onValueChange={(v) => { setStatus(v as ProjectStatus); setDirty(true); }}
+          onValueChange={(v) => {
+            setStatus(v as ProjectStatus);
+            setDirty(true);
+          }}
         >
           <SelectTrigger className="w-[140px] cursor-pointer">
             <SelectValue />
@@ -87,12 +87,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           </SelectContent>
         </Select>
         {dirty && (
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={saving}
-            className="cursor-pointer"
-          >
+          <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
             <IconDeviceFloppy className="h-4 w-4 mr-1" />
             {saving ? "Saving..." : "Save"}
           </Button>
@@ -100,7 +95,10 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
       </div>
       <Textarea
         value={description}
-        onChange={(e) => { setDescription(e.target.value); setDirty(true); }}
+        onChange={(e) => {
+          setDescription(e.target.value);
+          setDirty(true);
+        }}
         placeholder="Add a description..."
         className="min-h-[60px] text-sm resize-none"
       />

@@ -49,10 +49,7 @@ describe("buildForest", () => {
   });
 
   it("treats agents with missing parent as roots", () => {
-    const agents = [
-      makeAgent("a", "Alice", "missing-id"),
-      makeAgent("b", "Bob"),
-    ];
+    const agents = [makeAgent("a", "Alice", "missing-id"), makeAgent("b", "Bob")];
     const roots = buildForest(agents);
     expect(roots).toHaveLength(2);
   });
@@ -79,10 +76,7 @@ describe("layoutForest", () => {
   });
 
   it("positions children below parent", () => {
-    const agents = [
-      makeAgent("ceo", "CEO"),
-      makeAgent("eng", "Engineer", "ceo"),
-    ];
+    const agents = [makeAgent("ceo", "CEO"), makeAgent("eng", "Engineer", "ceo")];
     const roots = buildForest(agents);
     layoutForest(roots);
     const child = roots[0].children[0];
@@ -149,10 +143,7 @@ describe("collectEdges", () => {
   });
 
   it("provides edge coordinates suitable for L-shaped paths", () => {
-    const agents = [
-      makeAgent("ceo", "CEO"),
-      makeAgent("eng", "Engineer", "ceo"),
-    ];
+    const agents = [makeAgent("ceo", "CEO"), makeAgent("eng", "Engineer", "ceo")];
     const roots = buildForest(agents);
     layoutForest(roots);
     const edges = collectEdges(roots);

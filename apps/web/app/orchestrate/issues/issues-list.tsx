@@ -68,12 +68,18 @@ export function IssuesList() {
     let cancelled = false;
     setIssuesLoading(true);
     listIssues(workspaceId)
-      .then((res) => { if (!cancelled) setIssues(res.issues ?? []); })
+      .then((res) => {
+        if (!cancelled) setIssues(res.issues ?? []);
+      })
       .catch((err) => {
         if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load issues");
       })
-      .finally(() => { if (!cancelled) setIssuesLoading(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        if (!cancelled) setIssuesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId, setIssues, setIssuesLoading]);
 
   const handleFilterChange = useCallback(
@@ -107,7 +113,12 @@ export function IssuesList() {
   const treeFilters = searchResults ? { ...filters, search: "" } : filters;
 
   const flatNodes = useIssuesTree({
-    issues: activeIssues, filters: treeFilters, sortField, sortDir, nestingEnabled, expandedIds,
+    issues: activeIssues,
+    filters: treeFilters,
+    sortField,
+    sortDir,
+    nestingEnabled,
+    expandedIds,
   });
 
   return (

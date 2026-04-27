@@ -9,19 +9,19 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
 import { createProject } from "@/lib/api/domains/orchestrate-api";
 
 const COLOR_OPTIONS = [
-  "#ef4444", "#f97316", "#eab308", "#22c55e",
-  "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#06b6d4",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
 ];
 
 type CreateProjectDialogProps = {
@@ -30,11 +30,7 @@ type CreateProjectDialogProps = {
   workspaceId: string;
 };
 
-export function CreateProjectDialog({
-  open,
-  onOpenChange,
-  workspaceId,
-}: CreateProjectDialogProps) {
+export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
   const addProject = useAppStore((s) => s.addProject);
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
 
@@ -91,8 +87,16 @@ export function CreateProjectDialog({
       setSubmitting(false);
     }
   }, [
-    name, description, color, repos, leadAgentId,
-    executorType, dockerImage, workspaceId, addProject, onOpenChange,
+    name,
+    description,
+    color,
+    repos,
+    leadAgentId,
+    executorType,
+    dockerImage,
+    workspaceId,
+    addProject,
+    onOpenChange,
   ]);
 
   return (
@@ -144,7 +148,9 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Repositories</Label>
-            <p className="text-xs text-muted-foreground">Git URLs or local paths where agents will work</p>
+            <p className="text-xs text-muted-foreground">
+              Git URLs or local paths where agents will work
+            </p>
             <div className="flex gap-2">
               <Input
                 placeholder="URL or path"
@@ -191,13 +197,17 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Lead Agent</Label>
-            <p className="text-xs text-muted-foreground">The agent responsible for managing this project</p>
+            <p className="text-xs text-muted-foreground">
+              The agent responsible for managing this project
+            </p>
             <Select value={leadAgentId} onValueChange={setLeadAgentId}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Select agent (optional)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none" className="cursor-pointer">None</SelectItem>
+                <SelectItem value="none" className="cursor-pointer">
+                  None
+                </SelectItem>
                 {agents.map((a) => (
                   <SelectItem key={a.id} value={a.id} className="cursor-pointer">
                     {a.name}
@@ -209,17 +219,29 @@ export function CreateProjectDialog({
 
           <div className="space-y-2">
             <Label>Executor Type</Label>
-            <p className="text-xs text-muted-foreground">How agent sessions run (inherit uses workspace default)</p>
+            <p className="text-xs text-muted-foreground">
+              How agent sessions run (inherit uses workspace default)
+            </p>
             <Select value={executorType} onValueChange={setExecutorType}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Inherit from workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit" className="cursor-pointer">Inherit from workspace</SelectItem>
-                <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
-                <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
-                <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
-                <SelectItem value="remote_docker" className="cursor-pointer">Remote Docker</SelectItem>
+                <SelectItem value="inherit" className="cursor-pointer">
+                  Inherit from workspace
+                </SelectItem>
+                <SelectItem value="local_pc" className="cursor-pointer">
+                  Local (standalone)
+                </SelectItem>
+                <SelectItem value="local_docker" className="cursor-pointer">
+                  Local Docker
+                </SelectItem>
+                <SelectItem value="sprites" className="cursor-pointer">
+                  Sprites (remote sandbox)
+                </SelectItem>
+                <SelectItem value="remote_docker" className="cursor-pointer">
+                  Remote Docker
+                </SelectItem>
               </SelectContent>
             </Select>
             {(executorType === "local_docker" || executorType === "remote_docker") && (
@@ -234,11 +256,7 @@ export function CreateProjectDialog({
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t border-border">
-          <Button
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            className="cursor-pointer"
-          >
+          <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Cancel
           </Button>
           <Button

@@ -4,20 +4,8 @@ import { useState, useCallback } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@kandev/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createAgentInstance } from "@/lib/api/domains/orchestrate-api";
@@ -74,8 +62,16 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
       setSubmitting(false);
     }
   }, [
-    name, role, reportsTo, budgetCents, maxConcurrent,
-    executorPref, workspaceId, addAgentInstance, onOpenChange, resetForm,
+    name,
+    role,
+    reportsTo,
+    budgetCents,
+    maxConcurrent,
+    executorPref,
+    workspaceId,
+    addAgentInstance,
+    onOpenChange,
+    resetForm,
   ]);
 
   return (
@@ -95,7 +91,9 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
               className="mt-1"
               autoFocus
             />
-            <p className="text-xs text-muted-foreground mt-1">A unique name for this agent (e.g. CEO, Frontend Worker)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              A unique name for this agent (e.g. CEO, Frontend Worker)
+            </p>
           </div>
 
           <div className="flex gap-4">
@@ -106,22 +104,37 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ceo" className="cursor-pointer">CEO</SelectItem>
-                  <SelectItem value="worker" className="cursor-pointer">Worker</SelectItem>
-                  <SelectItem value="specialist" className="cursor-pointer">Specialist</SelectItem>
-                  <SelectItem value="assistant" className="cursor-pointer">Assistant</SelectItem>
+                  <SelectItem value="ceo" className="cursor-pointer">
+                    CEO
+                  </SelectItem>
+                  <SelectItem value="worker" className="cursor-pointer">
+                    Worker
+                  </SelectItem>
+                  <SelectItem value="specialist" className="cursor-pointer">
+                    Specialist
+                  </SelectItem>
+                  <SelectItem value="assistant" className="cursor-pointer">
+                    Assistant
+                  </SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground mt-1">CEO manages other agents, workers execute tasks</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                CEO manages other agents, workers execute tasks
+              </p>
             </div>
             <div className="flex-1">
               <Label>Reports to</Label>
-              <Select value={reportsTo || "__none__"} onValueChange={(v) => setReportsTo(v === "__none__" ? "" : v)}>
+              <Select
+                value={reportsTo || "__none__"}
+                onValueChange={(v) => setReportsTo(v === "__none__" ? "" : v)}
+              >
                 <SelectTrigger className="mt-1 cursor-pointer">
                   <SelectValue placeholder="None (top-level)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__" className="cursor-pointer">None</SelectItem>
+                  <SelectItem value="__none__" className="cursor-pointer">
+                    None
+                  </SelectItem>
                   {agents.map((a) => (
                     <SelectItem key={a.id} value={a.id} className="cursor-pointer">
                       {a.name}
@@ -143,7 +156,9 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                 onChange={(e) => setBudgetCents(Math.round(Number(e.target.value) * 100))}
                 className="mt-1"
               />
-              <p className="text-xs text-muted-foreground mt-1">Monthly spending limit ($0 = unlimited)</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Monthly spending limit ($0 = unlimited)
+              </p>
             </div>
             <div className="flex-1">
               <Label>Max concurrent</Label>
@@ -155,33 +170,44 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
                 onChange={(e) => setMaxConcurrent(Number(e.target.value))}
                 className="mt-1"
               />
-              <p className="text-xs text-muted-foreground mt-1">How many tasks this agent can run at once</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                How many tasks this agent can run at once
+              </p>
             </div>
           </div>
 
           <div>
             <Label>Executor preference</Label>
-            <Select value={executorPref || "__inherit__"} onValueChange={(v) => setExecutorPref(v === "__inherit__" ? "" : v)}>
+            <Select
+              value={executorPref || "__inherit__"}
+              onValueChange={(v) => setExecutorPref(v === "__inherit__" ? "" : v)}
+            >
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue placeholder="Inherit from project/workspace" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__inherit__" className="cursor-pointer">Inherit</SelectItem>
-                <SelectItem value="local_pc" className="cursor-pointer">Local (standalone)</SelectItem>
-                <SelectItem value="local_docker" className="cursor-pointer">Local Docker</SelectItem>
-                <SelectItem value="sprites" className="cursor-pointer">Sprites (remote sandbox)</SelectItem>
+                <SelectItem value="__inherit__" className="cursor-pointer">
+                  Inherit
+                </SelectItem>
+                <SelectItem value="local_pc" className="cursor-pointer">
+                  Local (standalone)
+                </SelectItem>
+                <SelectItem value="local_docker" className="cursor-pointer">
+                  Local Docker
+                </SelectItem>
+                <SelectItem value="sprites" className="cursor-pointer">
+                  Sprites (remote sandbox)
+                </SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground mt-1">How agent sessions run (inherit uses project/workspace default)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              How agent sessions run (inherit uses project/workspace default)
+            </p>
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            className="cursor-pointer"
-          >
+          <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Cancel
           </Button>
           <Button

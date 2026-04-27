@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  IconShieldCheck,
-  IconAlertTriangle,
-  IconBug,
-  IconEye,
-} from "@tabler/icons-react";
+import { IconShieldCheck, IconAlertTriangle, IconBug, IconEye } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import type { InboxItem } from "@/lib/state/slices/orchestrate/types";

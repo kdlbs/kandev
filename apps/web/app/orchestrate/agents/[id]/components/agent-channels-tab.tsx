@@ -12,20 +12,8 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@kandev/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import type { AgentInstance } from "@/lib/state/slices/orchestrate/types";
@@ -57,14 +45,19 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
 
   useEffect(() => {
     let cancelled = false;
-    orchestrateApi.listChannels(agent.id).then((res) => {
-      if (!cancelled) {
-        setChannels((res as { channels?: Channel[] }).channels ?? []);
-      }
-    }).catch((err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to load channels");
-    });
-    return () => { cancelled = true; };
+    orchestrateApi
+      .listChannels(agent.id)
+      .then((res) => {
+        if (!cancelled) {
+          setChannels((res as { channels?: Channel[] }).channels ?? []);
+        }
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to load channels");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [agent.id]);
 
   const handleDelete = useCallback(
@@ -80,13 +73,10 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
     [agent.id],
   );
 
-  const handleCreated = useCallback(
-    (channel: Channel) => {
-      setChannels((prev) => [...prev, channel]);
-      setAddDialogOpen(false);
-    },
-    [],
-  );
+  const handleCreated = useCallback((channel: Channel) => {
+    setChannels((prev) => [...prev, channel]);
+    setAddDialogOpen(false);
+  }, []);
 
   return (
     <div className="mt-4 space-y-4">
@@ -130,13 +120,7 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
   );
 }
 
-function ChannelRow({
-  channel,
-  onDelete,
-}: {
-  channel: Channel;
-  onDelete: () => void;
-}) {
+function ChannelRow({ channel, onDelete }: { channel: Channel; onDelete: () => void }) {
   const PlatformIcon = PLATFORM_ICONS[channel.platform] ?? IconWebhook;
   const statusColor =
     channel.status === "active"
@@ -217,10 +201,18 @@ function AddChannelDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="telegram" className="cursor-pointer">Telegram</SelectItem>
-                <SelectItem value="slack" className="cursor-pointer">Slack</SelectItem>
-                <SelectItem value="discord" className="cursor-pointer">Discord</SelectItem>
-                <SelectItem value="webhook" className="cursor-pointer">Webhook</SelectItem>
+                <SelectItem value="telegram" className="cursor-pointer">
+                  Telegram
+                </SelectItem>
+                <SelectItem value="slack" className="cursor-pointer">
+                  Slack
+                </SelectItem>
+                <SelectItem value="discord" className="cursor-pointer">
+                  Discord
+                </SelectItem>
+                <SelectItem value="webhook" className="cursor-pointer">
+                  Webhook
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
