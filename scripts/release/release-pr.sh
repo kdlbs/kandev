@@ -427,7 +427,9 @@ ensure_app_tag_available() {
 
 latest_origin_app_tag() {
   local refs
-  refs="$(git -C "$ROOT_DIR" ls-remote --tags origin 'refs/tags/v*')"
+  if ! refs="$(git -C "$ROOT_DIR" ls-remote --tags origin 'refs/tags/v*')"; then
+    return 2
+  fi
 
   local found=0
   local best_major=0
@@ -460,8 +462,17 @@ ensure_latest_app_tag_present() {
 
   log "Verifying latest app tag $(bold "$CURRENT_APP_TAG") is present locally..."
   if [[ "$CURRENT_APP_TAG_FOUND" -eq 0 ]]; then
-    if latest_origin_app_tag >/dev/null 2>&1; then
+    local origin_status
+    if latest_origin_app_tag >/dev/null; then
+      origin_status=0
+    else
+      origin_status="$?"
+    fi
+    if [[ "$origin_status" -eq 0 ]]; then
       die "No local app tag found, but origin has app tags. Fetch origin tags and retry."
+    fi
+    if [[ "$origin_status" -ne 1 ]]; then
+      die "Could not reach origin to verify app tags. Check your connection and retry."
     fi
     log_ok "No prior app tags on origin or locally"
     return 0
