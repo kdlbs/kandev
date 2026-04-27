@@ -72,6 +72,10 @@ const (
 	MetadataKeyRemoteAuthHome  = "remote_auth_target_home"
 	MetadataKeyGitUserName     = "git_user_name"
 	MetadataKeyGitUserEmail    = "git_user_email"
+
+	// Orchestrate metadata keys
+	MetadataKeyKandevRuntimeDir  = "kandev_runtime_dir"
+	MetadataKeySkillManifestJSON = "skill_manifest_json"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous

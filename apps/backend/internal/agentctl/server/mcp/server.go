@@ -30,14 +30,21 @@ const (
 	ModeTask = "task"
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
 	ModeConfig = "config"
+	// ModeOrchestrate registers plan and interaction tools for orchestrate agents.
+	// Kanban tools are excluded because orchestrate agents use CLI commands instead.
+	ModeOrchestrate = "orchestrate"
 )
 
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
-	if mode == ModeConfig {
+	switch mode {
+	case ModeConfig:
 		return ModeConfig
+	case ModeOrchestrate:
+		return ModeOrchestrate
+	default:
+		return ModeTask
 	}
-	return ModeTask
 }
 
 // Server wraps the MCP server with backend client for communication.
@@ -46,7 +53,7 @@ type Server struct {
 	sessionID          string
 	taskID             string
 	disableAskQuestion bool
-	mode               string // "task" (default) or "config"
+	mode               string // "task" (default), "config", or "orchestrate"
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -240,6 +247,13 @@ func (s *Server) registerTools() {
 			s.registerInteractionTools()
 			count++
 		}
+	case ModeOrchestrate:
+		if !s.disableAskQuestion {
+			s.registerInteractionTools()
+			count++
+		}
+		s.registerPlanTools()
+		count += 4
 	default: // ModeTask
 		s.registerKanbanTools()
 		count += 8

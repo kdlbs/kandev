@@ -56,17 +56,19 @@ type WorkspaceCreator interface {
 
 // Service provides orchestrate business logic.
 type Service struct {
-	repo              *sqlite.Repository
-	cfgLoader         *configloader.ConfigLoader
-	cfgWriter         *configloader.FileWriter
-	gitManager        *configloader.GitManager
-	logger            *logger.Logger
-	eb                bus.EventBus
-	relay             *ChannelRelay
-	agentTypeResolver AgentTypeResolver
-	taskStarter       TaskStarter
-	workspaceCreator  WorkspaceCreator
-	apiBaseURL        string
+	repo               *sqlite.Repository
+	cfgLoader          *configloader.ConfigLoader
+	cfgWriter          *configloader.FileWriter
+	gitManager         *configloader.GitManager
+	logger             *logger.Logger
+	eb                 bus.EventBus
+	relay              *ChannelRelay
+	agentTypeResolver  AgentTypeResolver
+	taskStarter        TaskStarter
+	workspaceCreator   WorkspaceCreator
+	apiBaseURL         string
+	agentctlBinaryPath string
+	agentAuth          *AgentAuth
 }
 
 // NewService creates a new orchestrate service.
@@ -95,6 +97,26 @@ func (s *Service) SetTaskStarter(starter TaskStarter) {
 // SetWorkspaceCreator sets the DB workspace creator for dual workspace creation.
 func (s *Service) SetWorkspaceCreator(creator WorkspaceCreator) {
 	s.workspaceCreator = creator
+}
+
+// SetAgentctlBinaryPath sets the host path to the agentctl binary.
+// Used to inject KANDEV_CLI into orchestrate agent sessions.
+func (s *Service) SetAgentctlBinaryPath(path string) {
+	s.agentctlBinaryPath = path
+}
+
+// SetAgentAuth sets the JWT minter/validator for agent authentication.
+func (s *Service) SetAgentAuth(auth *AgentAuth) {
+	s.agentAuth = auth
+}
+
+// ValidateAgentJWT validates an agent JWT and returns the claims.
+// Returns an error if no AgentAuth has been configured.
+func (s *Service) ValidateAgentJWT(token string) (*AgentClaims, error) {
+	if s.agentAuth == nil {
+		return nil, fmt.Errorf("agent auth not configured")
+	}
+	return s.agentAuth.ValidateAgentJWT(token)
 }
 
 // SetGitManager sets the git manager for workspace git operations.

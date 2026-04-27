@@ -230,22 +230,27 @@ func startServices( //nolint:cyclop
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	agentctlCleanup, err := provideAgentctlLauncher(ctx, cfg, log)
+	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log)
 	if err != nil {
 		log.Error("Failed to start agentctl subprocess", zap.Error(err))
 		return false
 	}
-	if agentctlCleanup != nil {
-		addCleanup(agentctlCleanup)
+	if agentctlResult != nil {
+		addCleanup(agentctlResult.cleanup)
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("panic recovered, stopping agentctl", zap.Any("panic", r))
-				if stopErr := agentctlCleanup(); stopErr != nil {
+				if stopErr := agentctlResult.cleanup(); stopErr != nil {
 					log.Error("failed to stop agentctl on panic", zap.Error(stopErr))
 				}
 				panic(r)
 			}
 		}()
+
+		// Pass agentctl binary path to orchestrate service for KANDEV_CLI injection
+		if services.Orchestrate != nil {
+			services.Orchestrate.SetAgentctlBinaryPath(agentctlResult.binaryPath)
+		}
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, runCleanups)

@@ -35,9 +35,15 @@ func (h *Handlers) listAgents(c *gin.Context) {
 }
 
 func (h *Handlers) createAgent(c *gin.Context) {
+	if err := checkAgentPermission(c, service.PermCanCreateAgents); err != nil {
+		return
+	}
 	var req dto.CreateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := checkNoEscalation(c, req.Permissions); err != nil {
 		return
 	}
 	agent := &models.AgentInstance{
@@ -91,6 +97,12 @@ func (h *Handlers) updateAgent(c *gin.Context) {
 }
 
 func (h *Handlers) deleteAgent(c *gin.Context) {
+	if caller := agentCallerFromCtx(c); caller != nil {
+		if !isAdminRole(caller.Role) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only CEO or admin can delete agents"})
+			return
+		}
+	}
 	if err := h.ctrl.Svc.DeleteAgentInstance(c.Request.Context(), c.Param("id")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -99,6 +111,13 @@ func (h *Handlers) deleteAgent(c *gin.Context) {
 }
 
 func (h *Handlers) updateAgentStatus(c *gin.Context) {
+	if caller := agentCallerFromCtx(c); caller != nil {
+		targetID := c.Param("id")
+		if targetID != caller.ID && !isAdminRole(caller.Role) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only CEO or admin can change other agents' status"})
+			return
+		}
+	}
 	var req dto.UpdateAgentStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -112,6 +131,41 @@ func (h *Handlers) updateAgentStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.AgentResponse{Agent: agent})
+}
+
+// checkAgentPermission returns nil and does nothing for UI requests.
+// For agent callers, it checks the specified permission and returns 403 if denied.
+func checkAgentPermission(c *gin.Context, permKey string) error {
+	caller := agentCallerFromCtx(c)
+	if caller == nil {
+		return nil
+	}
+	perms := service.ResolvePermissions(caller.Role, caller.Permissions)
+	if !service.HasPermission(perms, permKey) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: missing " + permKey})
+		return service.ErrForbidden
+	}
+	return nil
+}
+
+// checkNoEscalation verifies an agent caller is not granting permissions it
+// does not itself hold. No-op for UI requests or empty permission strings.
+func checkNoEscalation(c *gin.Context, permsJSON string) error {
+	caller := agentCallerFromCtx(c)
+	if caller == nil || permsJSON == "" || permsJSON == "{}" {
+		return nil
+	}
+	callerPerms := service.ResolvePermissions(caller.Role, caller.Permissions)
+	if err := service.ValidateNoEscalation(callerPerms, permsJSON); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return err
+	}
+	return nil
+}
+
+// isAdminRole returns true for roles that have administrative privileges.
+func isAdminRole(role models.AgentRole) bool {
+	return role == models.AgentRoleCEO
 }
 
 func applyAgentUpdates(agent *models.AgentInstance, req *dto.UpdateAgentRequest) {

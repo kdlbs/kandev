@@ -24,27 +24,24 @@ For each piece of work you review, check:
 After reviewing, post a comment with your findings:
 
 ```bash
-curl -s -X POST "${KANDEV_API_URL}/tasks/${KANDEV_TASK_ID}/comments" \
-  -H "Authorization: Bearer ${KANDEV_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "body": "## Review Result: APPROVED\n\nSummary of findings...",
-    "author_type": "agent",
-    "author_id": "'${KANDEV_AGENT_ID}'"
-  }'
+$KANDEV_CLI kandev comment add --body "## Review Result: APPROVED
+
+Summary of findings..."
 ```
 
 If rejecting, be specific about what needs to change:
 
 ```bash
-curl -s -X POST "${KANDEV_API_URL}/tasks/${KANDEV_TASK_ID}/comments" \
-  -H "Authorization: Bearer ${KANDEV_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "body": "## Review Result: CHANGES REQUESTED\n\n1. Issue description and suggested fix\n2. ...",
-    "author_type": "agent",
-    "author_id": "'${KANDEV_AGENT_ID}'"
-  }'
+cat <<'EOF' | $KANDEV_CLI kandev comment add --body -
+## Review Result: CHANGES REQUESTED
+
+1. Issue description and suggested fix
+2. ...
+EOF
 ```
 
-Then update the task status accordingly.
+Then update the task status accordingly:
+
+```bash
+$KANDEV_CLI kandev task update --status done
+```

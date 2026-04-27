@@ -73,6 +73,13 @@ func (a *AgentAuth) mintWithExpiry(
 	return signJWT(a.signingKey, &claims)
 }
 
+// MintExpiredJWT creates a JWT that is already expired. Useful for testing.
+func (a *AgentAuth) MintExpiredJWT(
+	agentInstanceID, taskID, workspaceID, sessionID string,
+) (string, error) {
+	return a.mintWithExpiry(agentInstanceID, taskID, workspaceID, sessionID, -1*time.Hour)
+}
+
 // ValidateAgentJWT parses and validates a signed JWT.
 func (a *AgentAuth) ValidateAgentJWT(tokenString string) (*AgentClaims, error) {
 	claims, err := verifyJWT(a.signingKey, tokenString)

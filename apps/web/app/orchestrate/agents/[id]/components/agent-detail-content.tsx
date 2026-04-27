@@ -9,6 +9,7 @@ import { AgentStatusDot } from "../../components/agent-status-dot";
 import { AgentRoleBadge } from "../../components/agent-role-badge";
 import { BudgetGauge } from "../../components/budget-gauge";
 import { AgentOverviewTab } from "./agent-overview-tab";
+import { AgentPermissionsTab } from "./agent-permissions-tab";
 import { AgentInstructionsTab } from "./agent-instructions-tab";
 import { AgentSkillsTab } from "./agent-skills-tab";
 import { AgentRunsTab } from "./agent-runs-tab";
@@ -71,6 +72,9 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
           <TabsTrigger value="overview" className="cursor-pointer">
             Overview
           </TabsTrigger>
+          <TabsTrigger value="permissions" className="cursor-pointer">
+            Permissions
+          </TabsTrigger>
           <TabsTrigger value="instructions" className="cursor-pointer">
             Instructions
           </TabsTrigger>
@@ -89,6 +93,9 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
         </TabsList>
         <TabsContent value="overview">
           <AgentOverviewTab agent={agent} />
+        </TabsContent>
+        <TabsContent value="permissions">
+          <AgentPermissionsTab agent={agent} />
         </TabsContent>
         <TabsContent value="instructions">
           <AgentInstructionsTab agent={agent} />

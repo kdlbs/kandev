@@ -24,16 +24,8 @@ You are a worker agent. You implement tasks assigned to you.
 If a task is too large, you can create subtasks for yourself:
 
 ```bash
-curl -s -X POST "${KANDEV_API_URL}/tasks" \
-  -H "Authorization: Bearer ${KANDEV_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Subtask title",
-    "description": "What this subtask covers",
-    "parent_id": "'${KANDEV_TASK_ID}'",
-    "assignee_agent_instance_id": "'${KANDEV_AGENT_ID}'",
-    "workspace_id": "'${KANDEV_WORKSPACE_ID}'"
-  }'
+$KANDEV_CLI kandev task create --title "Subtask title" \
+  --parent "$KANDEV_TASK_ID" --assignee "$KANDEV_AGENT_ID"
 ```
 
 ## Commit Rules

@@ -1,43 +1,33 @@
 # Memory
 
-Read and write persistent memory entries via the kandev API. Memory is organized by layer:
+Read and write persistent memory entries via the CLI. Memory is organized by layer:
 - **operating** -- behavioral guidelines, preferences, communication style
 - **knowledge** -- facts about people, projects, systems, decisions
 
 ## Write Memory
 
 ```bash
-curl -s -X PUT http://localhost:${KANDEV_PORT}/api/orchestrate/agents/${KANDEV_AGENT_ID}/memory \
-  -H "Authorization: Bearer ${KANDEV_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "layer": "knowledge",
-    "key": "people-alice",
-    "content": "Alice is the frontend lead. Prefers TypeScript, reviews PRs quickly."
-  }'
+$KANDEV_CLI kandev memory set --layer knowledge --key "people-alice" \
+  --content "Alice is the frontend lead. Prefers TypeScript, reviews PRs quickly."
 ```
 
 ## Read Memory
 
 ```bash
 # List all memory entries
-curl -s http://localhost:${KANDEV_PORT}/api/orchestrate/agents/${KANDEV_AGENT_ID}/memory \
-  -H "Authorization: Bearer ${KANDEV_TOKEN}"
+$KANDEV_CLI kandev memory get
 
 # List by layer
-curl -s http://localhost:${KANDEV_PORT}/api/orchestrate/agents/${KANDEV_AGENT_ID}/memory?layer=knowledge \
-  -H "Authorization: Bearer ${KANDEV_TOKEN}"
+$KANDEV_CLI kandev memory get --layer knowledge
 
 # Get specific entry
-curl -s http://localhost:${KANDEV_PORT}/api/orchestrate/agents/${KANDEV_AGENT_ID}/memory/knowledge/people-alice \
-  -H "Authorization: Bearer ${KANDEV_TOKEN}"
+$KANDEV_CLI kandev memory get --layer knowledge --key "people-alice"
 ```
 
-## Delete Memory
+## Memory Summary
 
 ```bash
-curl -s -X DELETE http://localhost:${KANDEV_PORT}/api/orchestrate/agents/${KANDEV_AGENT_ID}/memory/knowledge/people-alice \
-  -H "Authorization: Bearer ${KANDEV_TOKEN}"
+$KANDEV_CLI kandev memory summary
 ```
 
 ## Guidelines

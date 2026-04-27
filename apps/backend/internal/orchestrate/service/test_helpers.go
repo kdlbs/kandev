@@ -53,3 +53,38 @@ func PrepareRuntimeForTest(
 ) (string, error) {
 	return si.prepareRuntime(ctx, agent, workspaceSlug)
 }
+
+// BuildSkillManifestForTest exposes buildSkillManifest for external test packages.
+func BuildSkillManifestForTest(
+	si *SchedulerIntegration,
+	ctx context.Context,
+	agent *models.AgentInstance,
+	workspaceSlug string,
+) *SkillManifest {
+	return si.buildSkillManifest(ctx, agent, workspaceSlug)
+}
+
+// DeliverSkillsForTest exposes deliverSkills for external test packages.
+func DeliverSkillsForTest(
+	si *SchedulerIntegration,
+	ctx context.Context,
+	manifest *SkillManifest,
+	execCfg *ExecutorConfig,
+) string {
+	return si.deliverSkills(ctx, manifest, execCfg)
+}
+
+// RuntimeDirForTest returns the transient runtimeDir set by deliverSkillsDocker.
+func RuntimeDirForTest(si *SchedulerIntegration) string {
+	return si.runtimeDir
+}
+
+// SkillManifestJSONForTest returns the transient skillManifestJSON set by deliverSkillsSprites.
+func SkillManifestJSONForTest(si *SchedulerIntegration) string {
+	return si.skillManifestJSON
+}
+
+// BuildSymlinkScriptForTest exposes BuildSymlinkScript for external test packages.
+func BuildSymlinkScriptForTest(manifest *SkillManifest, runtimeDir string) string {
+	return BuildSymlinkScript(manifest, runtimeDir)
+}

@@ -106,3 +106,39 @@ func TestBuildEnvVars_TaskIDExtractedFromPayload(t *testing.T) {
 		t.Errorf("KANDEV_TASK_ID = %q, want %q", env["KANDEV_TASK_ID"], "task-xyz")
 	}
 }
+
+func TestBuildEnvVars_KandevCLI(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetAgentctlBinaryPath("/usr/local/bin/agentctl")
+	si := service.NewSchedulerIntegration(svc, 0)
+
+	agent := &models.AgentInstance{ID: "a1", Name: "W"}
+	wakeup := &models.WakeupRequest{
+		ID:      "w1",
+		Reason:  "task_assigned",
+		Payload: `{}`,
+	}
+
+	env := service.BuildEnvVarsForTest(si, wakeup, agent, "jwt", "ws-1")
+	if env["KANDEV_CLI"] != "/usr/local/bin/agentctl" {
+		t.Errorf("KANDEV_CLI = %q, want %q", env["KANDEV_CLI"], "/usr/local/bin/agentctl")
+	}
+}
+
+func TestBuildEnvVars_KandevCLI_NotSetWhenEmpty(t *testing.T) {
+	svc := newTestService(t)
+	// Do not set agentctl binary path
+	si := service.NewSchedulerIntegration(svc, 0)
+
+	agent := &models.AgentInstance{ID: "a1", Name: "W"}
+	wakeup := &models.WakeupRequest{
+		ID:      "w1",
+		Reason:  "task_assigned",
+		Payload: `{}`,
+	}
+
+	env := service.BuildEnvVarsForTest(si, wakeup, agent, "jwt", "ws-1")
+	if _, ok := env["KANDEV_CLI"]; ok {
+		t.Error("KANDEV_CLI should not be set when agentctlBinaryPath is empty")
+	}
+}

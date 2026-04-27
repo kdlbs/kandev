@@ -33,8 +33,9 @@ type ContainerConfig struct {
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
 	McpMode         string
-	PrepareScript   string // Script to run inside container before agent starts (e.g., clone repo)
-	BootstrapNonce  string // one-time nonce for agentctl handshake (set internally)
+	PrepareScript   string                 // Script to run inside container before agent starts (e.g., clone repo)
+	BootstrapNonce  string                 // one-time nonce for agentctl handshake (set internally)
+	Metadata        map[string]interface{} // Optional metadata (e.g., orchestrate runtime dir)
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -281,6 +282,19 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		})
 		cm.logger.Debug("added main repo .git directory mount for worktree",
 			zap.String("path", config.MainRepoGitDir))
+	}
+
+	// Add kandev runtime directory mount for orchestrate sessions.
+	// Only present when the orchestrate scheduler passes it via metadata;
+	// normal kanban tasks never set this key.
+	if runtimeDir := getMetadataString(config.Metadata, MetadataKeyKandevRuntimeDir); runtimeDir != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   runtimeDir,
+			Target:   runtimeDir, // Same path inside container
+			ReadOnly: true,
+		})
+		cm.logger.Debug("added kandev runtime directory mount for orchestrate",
+			zap.String("path", runtimeDir))
 	}
 
 	// Build environment variables

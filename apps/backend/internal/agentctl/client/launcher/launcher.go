@@ -75,6 +75,11 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 	}
 }
 
+// BinaryPath returns the resolved path to the agentctl binary.
+func (l *Launcher) BinaryPath() string {
+	return l.binaryPath
+}
+
 // Port returns the actual port agentctl is running on.
 // This may differ from the configured port if fallback port selection was used.
 func (l *Launcher) Port() int {

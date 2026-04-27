@@ -16,3 +16,4 @@ See `.agents/skills/spec/SKILL.md` for the workflow.
 | [orchestrate-projects](orchestrate-projects/spec.md) | draft | 2026-04-25 | — |
 | [orchestrate-assistant](orchestrate-assistant/spec.md) | draft | 2026-04-25 | — |
 | [orchestrate-config](orchestrate-config/spec.md) | draft | 2026-04-25 | — |
+| [orchestrate-agent-cli](orchestrate-agent-cli/spec.md) | draft | 2026-04-27 | — |

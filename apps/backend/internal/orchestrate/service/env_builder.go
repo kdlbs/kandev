@@ -27,7 +27,22 @@ func (si *SchedulerIntegration) buildEnvVars(
 	if commentID := extractField(wakeup.Payload, "comment_id"); commentID != "" {
 		env["KANDEV_WAKE_COMMENT_ID"] = commentID
 	}
+	// KANDEV_CLI - path to agentctl binary for CLI operations.
+	// Default to host binary path; overridden per executor type by injectKandevCLI.
+	if si.svc.agentctlBinaryPath != "" {
+		env["KANDEV_CLI"] = si.svc.agentctlBinaryPath
+	}
 	return env
+}
+
+// injectKandevCLI overrides KANDEV_CLI for remote executor types where the
+// host binary path does not apply. For Docker and Sprites, the agentctl
+// binary is baked into the image or uploaded, so we use the container-side path.
+func (si *SchedulerIntegration) injectKandevCLI(env map[string]string, executorType string) {
+	switch executorType {
+	case "local_docker", "sprites":
+		env["KANDEV_CLI"] = "/usr/local/bin/agentctl"
+	}
 }
 
 // extractField parses a single key from a JSON payload string.

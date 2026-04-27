@@ -59,6 +59,134 @@ func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sp
 	return nil
 }
 
+// uploadSkillFiles uploads orchestrate skill and instruction files to a sprite.
+// This is a no-op when the request metadata does not contain a skill manifest
+// (i.e., for normal kanban tasks). Only orchestrate sessions set the manifest.
+func (r *SpritesExecutor) uploadSkillFiles(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+) error {
+	manifestJSON := getMetadataString(req.Metadata, MetadataKeySkillManifestJSON)
+	if manifestJSON == "" {
+		return nil // No-op for normal kanban tasks.
+	}
+
+	var manifest struct {
+		Skills []struct {
+			Slug    string `json:"Slug"`
+			Content string `json:"Content"`
+		} `json:"Skills"`
+		Instructions []struct {
+			Filename string `json:"Filename"`
+			Content  string `json:"Content"`
+		} `json:"Instructions"`
+		WorkspaceSlug string `json:"WorkspaceSlug"`
+		AgentID       string `json:"AgentID"`
+		AgentTypeID   string `json:"AgentTypeID"`
+	}
+	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+		return fmt.Errorf("unmarshal skill manifest: %w", err)
+	}
+
+	runtimeBase := "/root/.kandev/runtime"
+
+	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer cancel()
+
+	// Upload skill files.
+	for _, skill := range manifest.Skills {
+		path := fmt.Sprintf("%s/%s/skills/%s/SKILL.md",
+			runtimeBase, manifest.WorkspaceSlug, skill.Slug)
+		if err := r.writeFileWithRetry(stepCtx, sprite, path, []byte(skill.Content), 0o644); err != nil {
+			r.logger.Warn("failed to upload skill file",
+				zap.String("slug", skill.Slug), zap.Error(err))
+		}
+	}
+
+	// Upload instruction files.
+	for _, instr := range manifest.Instructions {
+		path := fmt.Sprintf("%s/%s/instructions/%s/%s",
+			runtimeBase, manifest.WorkspaceSlug, manifest.AgentID, instr.Filename)
+		if err := r.writeFileWithRetry(stepCtx, sprite, path, []byte(instr.Content), 0o644); err != nil {
+			r.logger.Warn("failed to upload instruction file",
+				zap.String("filename", instr.Filename), zap.Error(err))
+		}
+	}
+
+	// Create symlinks inside the sprite for agent skill discovery.
+	symlinkScript := buildSpriteSymlinkScript(manifest.AgentTypeID, manifest.WorkspaceSlug,
+		manifest.Skills, runtimeBase)
+	if symlinkScript != "" {
+		if _, err := sprite.CommandContext(stepCtx, "bash", "-c", symlinkScript).Output(); err != nil {
+			r.logger.Warn("failed to create skill symlinks in sprite", zap.Error(err))
+		}
+	}
+
+	r.logger.Debug("uploaded skill files to sprite",
+		zap.Int("skills", len(manifest.Skills)),
+		zap.Int("instructions", len(manifest.Instructions)))
+	return nil
+}
+
+// buildSpriteSymlinkScript generates shell commands to symlink skills
+// into agent type discovery directories inside a sprite.
+func buildSpriteSymlinkScript(
+	agentTypeID, workspaceSlug string,
+	skills []struct {
+		Slug    string `json:"Slug"`
+		Content string `json:"Content"`
+	},
+	runtimeBase string,
+) string {
+	if len(skills) == 0 {
+		return ""
+	}
+
+	// Use /root as home dir inside sprites.
+	targetDirs := agentSkillDirsForHome(agentTypeID, "/root")
+	if len(targetDirs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, dir := range targetDirs {
+		fmt.Fprintf(&sb, "mkdir -p %s\n", dir)
+		for _, skill := range skills {
+			skillPath := fmt.Sprintf("%s/%s/skills/%s", runtimeBase, workspaceSlug, skill.Slug)
+			fmt.Fprintf(&sb, "ln -sf %s %s/%s\n", skillPath, dir, skill.Slug)
+		}
+	}
+	return sb.String()
+}
+
+// agentSkillDirsForHome is like agentSkillDirs but with a specified home directory
+// rather than reading os.UserHomeDir(). Used for remote environments.
+func agentSkillDirsForHome(agentTypeID, home string) []string {
+	if home == "" {
+		return nil
+	}
+	agents := home + "/.agents/skills"
+	switch agentTypeID {
+	case "claude-acp":
+		return []string{home + "/.claude/skills", agents}
+	case "codex-acp":
+		return []string{home + "/.codex/skills", agents}
+	case "opencode-acp":
+		return []string{home + "/.config/opencode/skills", home + "/.claude/skills", agents}
+	case "gemini":
+		return []string{home + "/.gemini/skills"}
+	case "copilot-acp":
+		return []string{home + "/.copilot/skills", home + "/.claude/skills", agents}
+	case "auggie":
+		return []string{home + "/.augment/skills", home + "/.claude/skills", agents}
+	case "amp-acp":
+		return []string{agents}
+	default:
+		return nil
+	}
+}
+
 // runPrepareScript resolves the prepare script with scriptengine and executes it,
 // streaming stdout/stderr output through the onOutput callback.
 func (r *SpritesExecutor) runPrepareScript(

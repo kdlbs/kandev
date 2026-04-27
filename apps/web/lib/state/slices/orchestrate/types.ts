@@ -332,6 +332,13 @@ export type InboxItemTypeMeta = {
   icon: string;
 };
 
+export type PermissionMeta = {
+  key: string;
+  label: string;
+  description: string;
+  type: "bool" | "int";
+};
+
 export type OrchestrateMeta = {
   statuses: StatusMeta[];
   priorities: PriorityMeta[];
@@ -342,6 +349,8 @@ export type OrchestrateMeta = {
   agentStatuses: AgentStatusMeta[];
   routineRunStatuses: RoutineRunStatusMeta[];
   inboxItemTypes: InboxItemTypeMeta[];
+  permissions: PermissionMeta[];
+  permissionDefaults: Record<string, Record<string, unknown>>;
 };
 
 // --- Slice state & actions ---

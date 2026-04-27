@@ -20,6 +20,7 @@ type Handlers struct {
 func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger.Logger) {
 	h := &Handlers{ctrl: ctrl, logger: log.WithFields(zap.String("component", "orchestrate-handlers"))}
 	api := router.Group("/api/v1/orchestrate")
+	api.Use(agentAuthMiddleware(h.ctrl.Svc))
 
 	api.GET("/meta", h.getMeta)
 

@@ -21,19 +21,17 @@ You are the CEO. You lead the company, not do individual work.
 
 ## Subtask Creation Procedure
 
-When you need work done, create a subtask via the API:
+When you need work done, create a subtask:
 
 ```bash
-curl -s -X POST "${KANDEV_API_URL}/tasks" \
-  -H "Authorization: Bearer ${KANDEV_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Subtask title",
-    "description": "Clear description of what needs to be done",
-    "parent_id": "'${KANDEV_TASK_ID}'",
-    "assignee_agent_instance_id": "<agent-id>",
-    "workspace_id": "'${KANDEV_WORKSPACE_ID}'"
-  }'
+$KANDEV_CLI kandev task create --title "Subtask title" \
+  --parent "$KANDEV_TASK_ID" --assignee "<agent-id>"
+```
+
+To find available agents:
+
+```bash
+$KANDEV_CLI kandev agents list
 ```
 
 ## Decision Framework

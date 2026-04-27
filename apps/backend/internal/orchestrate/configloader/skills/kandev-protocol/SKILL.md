@@ -1,24 +1,12 @@
 ---
 name: kandev-protocol
-description: How to interact with the kandev orchestrate API
+description: How to interact with the kandev orchestrator via the CLI
 ---
 
 # Kandev Protocol
 
-You are an agent managed by kandev. This document describes how to authenticate,
-communicate, and coordinate with the orchestrator.
-
-## Authentication
-
-All API calls use a bearer token and a run-ID header for audit:
-
-```
-Authorization: Bearer $KANDEV_API_KEY
-X-Kandev-Run-Id: $KANDEV_RUN_ID
-Content-Type: application/json
-```
-
-Base URL: `$KANDEV_API_URL`
+You are an agent managed by kandev. This document describes how to communicate
+and coordinate with the orchestrator using the `$KANDEV_CLI` command-line tool.
 
 ## Environment Variables
 
@@ -26,16 +14,18 @@ These are injected into your session automatically. Do not hardcode them.
 
 | Variable | Purpose |
 |----------|---------|
-| `KANDEV_API_URL` | Base URL for all API calls |
-| `KANDEV_API_KEY` | Bearer token for authentication |
+| `KANDEV_CLI` | Path to the CLI binary -- use this for all orchestrator operations |
 | `KANDEV_AGENT_ID` | Your agent instance ID |
 | `KANDEV_AGENT_NAME` | Your display name (e.g. "CEO") |
 | `KANDEV_WORKSPACE_ID` | Current workspace scope |
 | `KANDEV_TASK_ID` | Task you are working on (if applicable) |
-| `KANDEV_RUN_ID` | Current run ID -- include on all mutating calls |
+| `KANDEV_RUN_ID` | Current run ID (included automatically by the CLI) |
 | `KANDEV_WAKE_REASON` | Why you were woken (see wake reasons below) |
 | `KANDEV_WAKE_COMMENT_ID` | Comment ID that triggered the wake (if applicable) |
 | `KANDEV_WAKE_PAYLOAD_JSON` | Pre-computed task context -- parse this first |
+
+Note: `KANDEV_API_URL` and `KANDEV_API_KEY` are also set but you do not need
+to use them directly. The CLI handles authentication and run-ID headers for you.
 
 ## Heartbeat Procedure
 
@@ -88,11 +78,7 @@ If `task.blockedBy` is not empty, post a comment explaining you are blocked and 
 Never work on blocked tasks -- the orchestrator will wake you when blockers clear.
 
 ```bash
-curl -s -X POST "$KANDEV_API_URL/orchestrate/tasks/$KANDEV_TASK_ID/comments" \
-  -H "Authorization: Bearer $KANDEV_API_KEY" \
-  -H "X-Kandev-Run-Id: $KANDEV_RUN_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"body": "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."}'
+$KANDEV_CLI kandev comment add --body "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."
 ```
 
 ### Step 4: Do the work
@@ -106,11 +92,18 @@ Always post a comment before changing task status. This creates an audit trail
 and keeps other agents informed.
 
 ```bash
-curl -s -X POST "$KANDEV_API_URL/orchestrate/tasks/$KANDEV_TASK_ID/comments" \
-  -H "Authorization: Bearer $KANDEV_API_KEY" \
-  -H "X-Kandev-Run-Id: $KANDEV_RUN_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"body": "Implemented OAuth2 login flow with Google provider. Tests pass."}'
+$KANDEV_CLI kandev comment add --body "Implemented OAuth2 login flow with Google provider. Tests pass."
+```
+
+For multiline comments, pipe via stdin:
+
+```bash
+cat <<'EOF' | $KANDEV_CLI kandev comment add --body -
+Implementation summary:
+- Added Google OAuth2 provider with PKCE flow
+- Wrote integration tests covering token refresh
+- Updated user model with provider_id column
+EOF
 ```
 
 ### Step 6: Update task status
@@ -118,39 +111,25 @@ curl -s -X POST "$KANDEV_API_URL/orchestrate/tasks/$KANDEV_TASK_ID/comments" \
 Mark the task as done (or in_review if reviewers are assigned):
 
 ```bash
-curl -s -X PATCH "$KANDEV_API_URL/orchestrate/tasks/$KANDEV_TASK_ID" \
-  -H "Authorization: Bearer $KANDEV_API_KEY" \
-  -H "X-Kandev-Run-Id: $KANDEV_RUN_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "done"}'
+$KANDEV_CLI kandev task update --status done
 ```
 
-Use `"status": "in_review"` instead of `"done"` when the task has reviewers.
-Use `"status": "blocked"` if you discover a blocker during execution.
+Use `--status in_review` instead of `done` when the task has reviewers.
+Use `--status blocked` if you discover a blocker during execution.
 
 ### Step 7: Create subtasks (if needed)
 
 If the task is too large, decompose it into subtasks:
 
 ```bash
-curl -s -X POST "$KANDEV_API_URL/tasks" \
-  -H "Authorization: Bearer $KANDEV_API_KEY" \
-  -H "X-Kandev-Run-Id: $KANDEV_RUN_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Implement Google OAuth provider",
-    "description": "Add Google OAuth2 provider with PKCE flow",
-    "parent_id": "'"$KANDEV_TASK_ID"'",
-    "assignee_agent_instance_id": "worker-agent-id",
-    "project_id": "project-id"
-  }'
+$KANDEV_CLI kandev task create --title "Implement Google OAuth provider" \
+  --parent "$KANDEV_TASK_ID" --assignee "worker-agent-id"
 ```
 
 To find available agents for delegation:
 
 ```bash
-curl -s "$KANDEV_API_URL/orchestrate/agents" \
-  -H "Authorization: Bearer $KANDEV_API_KEY"
+$KANDEV_CLI kandev agents list
 ```
 
 ### Step 8: Exit
@@ -158,72 +137,96 @@ curl -s "$KANDEV_API_URL/orchestrate/agents" \
 Your session will end after you finish. The orchestrator will wake you again
 when relevant events happen (new comments, child tasks completing, etc.).
 
-## API Reference
+## CLI Reference
 
-### Tasks
+All commands use `$KANDEV_CLI kandev <command>`. Authentication, run-ID, and
+agent-ID headers are handled automatically from environment variables.
 
-```
-GET    /orchestrate/tasks/{id}           -- read task details
-PATCH  /orchestrate/tasks/{id}           -- update status, priority, assignee
-POST   /tasks                            -- create task or subtask
-GET    /orchestrate/tasks/{id}/comments  -- list comments on a task
-POST   /orchestrate/tasks/{id}/comments  -- post a comment
-```
-
-### Agents
+### task
 
 ```
-GET  /orchestrate/agents                 -- list all agent instances (for delegation)
+task get [--id ID]                    Read task details (defaults to $KANDEV_TASK_ID)
+task update [--id ID] --status S      Update task status
+task update [--id ID] --comment C     Add a status-change comment
+task create --title T [--parent ID]   Create a task or subtask
+         [--assignee A] [--priority P]
 ```
 
-### Memory
+### comment
+
+```
+comment add [--task ID] --body BODY   Post a comment (--body - reads stdin)
+comment list [--task ID] [--limit N]  List comments on a task
+```
+
+### agents
+
+```
+agents list [--role R] [--status S]   List agent instances in the workspace
+```
+
+### memory
 
 Persist information across sessions. Use memory to remember decisions,
 discovered tools, learned patterns, etc.
 
 ```
-GET    /orchestrate/agents/{id}/memory/summary  -- read your memory summary
-GET    /orchestrate/agents/{id}/memory          -- list all memory entries
-PUT    /orchestrate/agents/{id}/memory          -- store a memory entry
-DELETE /orchestrate/agents/{id}/memory/{entryId} -- delete a memory entry
+memory get [--layer L] [--key K]      Read memory entries
+memory set --layer L --key K          Store a memory entry
+           --content C
+memory summary                        Get a summary of all memory entries
 ```
 
-Memory PUT body format:
+Layers: `operating` (how you work), `knowledge` (facts you learned).
 
-```json
-{
-  "entries": [
-    {"layer": "knowledge", "key": "oauth-providers", "content": "Google, GitHub supported"}
-  ]
-}
+### checkout
+
+```
+checkout [--task ID]                  Atomically claim a task for this agent
 ```
 
-Layers: `operating` (how you work), `knowledge` (facts you learned), `session` (temporary).
+Returns task details on success. Exits with code 1 and a clear message on
+409 (already claimed by another agent).
+
+## Error Handling
+
+All CLI commands follow these conventions:
+
+- **Exit code 0**: success. JSON result on stdout.
+- **Exit code 1**: error. JSON error on stderr: `{"error": "message"}`.
+- **HTTP 409 on checkout**: task already claimed. Do not retry.
+
+Always check the exit code before parsing output:
+
+```bash
+if output=$($KANDEV_CLI kandev task get 2>/dev/null); then
+  echo "$output" | jq .title
+else
+  echo "Failed to fetch task" >&2
+fi
+```
 
 ## Critical Rules
 
-1. **Always include X-Kandev-Run-Id** on mutating calls (POST, PUT, PATCH, DELETE).
-   This header ties your actions to the current run for audit.
-
-2. **Never retry a 409 Conflict.** This means another agent has claimed the task.
+1. **Never retry a 409 Conflict.** This means another agent has claimed the task.
    Post a comment and move on.
 
-3. **Always post a comment before changing task status.** The comment explains
+2. **Always post a comment before changing task status.** The comment explains
    what you did; the status change signals completion. Never change status silently.
 
-4. **Do not work on blocked tasks.** If `blockedBy` is non-empty, post a comment
+3. **Do not work on blocked tasks.** If `blockedBy` is non-empty, post a comment
    and exit. The orchestrator will wake you when blockers resolve.
 
-5. **If you cannot complete a task,** post a comment explaining why (missing
+4. **If you cannot complete a task,** post a comment explaining why (missing
    permissions, unclear requirements, dependency on external system) and exit.
    Do not set the task to done if it is not actually done.
 
-6. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** It contains pre-computed context.
+5. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** It contains pre-computed context.
    Only call the API for data not in the payload. This saves tokens.
 
-7. **Keep comments concise but informative.** Other agents and humans read them.
+6. **Keep comments concise but informative.** Other agents and humans read them.
    Include what you did, what changed, and any decisions you made.
 
-8. **Respect your role.** CEO agents delegate, they do not implement.
+7. **Respect your role.** CEO agents delegate, they do not implement.
    Worker agents implement, they do not delegate to peers.
    Reviewers review, they do not modify code.

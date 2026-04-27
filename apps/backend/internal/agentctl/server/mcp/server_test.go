@@ -222,7 +222,69 @@ func TestServerModeConfig_ToolDescriptions(t *testing.T) {
 	assert.Contains(t, toolsMap["get_mcp_config_kandev"].Tool.Description, "Get MCP server configuration")
 }
 
+func TestServerModeOrchestrate_RegistersCorrectTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOrchestrate)
+	require.NotNil(t, s)
+
+	tools := getRegisteredToolNames(s)
+
+	// Orchestrate mode should have plan tools
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	assert.Contains(t, tools, "get_task_plan_kandev")
+	assert.Contains(t, tools, "update_task_plan_kandev")
+	assert.Contains(t, tools, "delete_task_plan_kandev")
+
+	// Orchestrate mode should have interaction tools
+	assert.Contains(t, tools, "ask_user_question_kandev")
+
+	// Orchestrate mode should NOT have kanban tools
+	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "list_tasks_kandev")
+	assert.NotContains(t, tools, "update_task_kandev")
+	assert.NotContains(t, tools, "list_workspaces_kandev")
+	assert.NotContains(t, tools, "list_workflows_kandev")
+	assert.NotContains(t, tools, "list_workflow_steps_kandev")
+	assert.NotContains(t, tools, "list_agents_kandev")
+	assert.NotContains(t, tools, "list_executor_profiles_kandev")
+
+	// Orchestrate mode should NOT have config tools
+	assert.NotContains(t, tools, "create_workflow_kandev")
+	assert.NotContains(t, tools, "update_workflow_kandev")
+	assert.NotContains(t, tools, "update_agent_kandev")
+}
+
+func TestServerModeOrchestrate_ToolCount(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOrchestrate)
+	tools := getRegisteredToolNames(s)
+	// 4 plan + 1 interaction = 5
+	assert.Equal(t, 5, len(tools))
+}
+
+func TestServerModeOrchestrate_DisableAskQuestion(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", true, ModeOrchestrate)
+	require.NotNil(t, s)
+
+	tools := getRegisteredToolNames(s)
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	// 4 plan tools only
+	assert.Equal(t, 4, len(tools))
+}
+
 func TestServerModeConstants(t *testing.T) {
 	assert.Equal(t, "task", ModeTask)
 	assert.Equal(t, "config", ModeConfig)
+	assert.Equal(t, "orchestrate", ModeOrchestrate)
 }

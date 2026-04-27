@@ -271,6 +271,13 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	}
 	report(step, 2)
 
+	// Step 2.5: Upload orchestrate skill files (no-op for normal kanban tasks).
+	if !reconnect {
+		if err := r.uploadSkillFiles(ctx, sprite, req); err != nil {
+			r.logger.Warn("failed to upload skill files (non-fatal)", zap.Error(err))
+		}
+	}
+
 	// Step 3: Run prepare script (with output streaming)
 	step = beginStep("Running prepare script")
 	report(step, 3)

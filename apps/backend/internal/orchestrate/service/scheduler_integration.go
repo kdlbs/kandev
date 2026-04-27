@@ -22,6 +22,11 @@ type SchedulerIntegration struct {
 	svc          *Service
 	tickInterval time.Duration
 	logger       *logger.Logger
+
+	// Per-wakeup transient state set by deliverSkills and consumed by processWakeup.
+	// These are reset at the start of each processWakeup call.
+	runtimeDir        string // host-side runtime dir for Docker bind mount
+	skillManifestJSON string // serialized SkillManifest for Sprites upload
 }
 
 // NewSchedulerIntegration creates a new SchedulerIntegration.
@@ -106,20 +111,7 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
-	// Export instructions and skills to runtime directory (best-effort).
-	instructionsDir, rtErr := si.prepareRuntime(ctx, agent, defaultWorkspaceName)
-	if rtErr != nil {
-		si.logger.Warn("runtime export failed",
-			zap.String("wakeup_id", wakeupID), zap.Error(rtErr))
-	}
-
-	// Inject desired skills into the agent's config directory (best-effort).
-	if err := si.svc.InjectSkillsForAgent(ctx, agentInstanceID, defaultWorkspaceName); err != nil {
-		si.logger.Warn("failed to inject skills",
-			zap.String("wakeup_id", wakeupID), zap.Error(err))
-	}
-
-	// Resolve executor config.
+	// Resolve executor config (needed before delivery to choose strategy).
 	execCfg, err := si.resolveExecutorForWakeup(ctx, agent, wakeup.Payload)
 	if err != nil {
 		si.logger.Warn("executor resolution failed; retrying wakeup",
@@ -129,8 +121,19 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
+	// Build skill manifest (pure data, no side effects).
+	manifest := si.buildSkillManifest(ctx, agent, defaultWorkspaceName)
+
+	// Reset per-wakeup transient state.
+	si.runtimeDir = ""
+	si.skillManifestJSON = ""
+
+	// Deliver skills and instructions based on executor type.
+	instructionsDir := si.deliverSkills(ctx, manifest, execCfg)
+
 	// Build env vars.
 	env := si.buildEnvVars(wakeup, agent, "", agent.WorkspaceID)
+	si.injectKandevCLI(env, execCfg.Type)
 
 	// Attach wake payload to env.
 	if payload, pErr := si.svc.BuildWakePayload(ctx, &WakeupPayloadInput{
