@@ -134,7 +134,7 @@ func (s *Server) registerConfigAgentTools() {
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID to create a profile for")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
 			mcp.WithString("model", mcp.Required(), mcp.Description("Model name (e.g. 'claude-sonnet-4-5-20250514')")),
-			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions (default: false)")),
+			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions (default: true)")),
 		),
 		s.wrapHandler("create_agent_profile_kandev", s.createAgentProfileHandler()),
 	)

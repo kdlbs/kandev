@@ -87,9 +87,10 @@ func (h *Handlers) handleCreateAgentProfile(ctx context.Context, msg *ws.Message
 	}
 
 	profile, err := h.agentSettingsCtrl.CreateProfile(ctx, agentsettingscontroller.CreateProfileRequest{
-		AgentID: req.AgentID,
-		Name:    req.Name,
-		Model:   req.Model,
+		AgentID:     req.AgentID,
+		Name:        req.Name,
+		Model:       req.Model,
+		AutoApprove: req.AutoApprove,
 	})
 	if err != nil {
 		h.logger.Error("failed to create agent profile", zap.Error(err))
@@ -123,10 +124,11 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 
 func (h *Handlers) handleUpdateAgentProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		ProfileID string  `json:"profile_id"`
-		Name      *string `json:"name"`
-		Model     *string `json:"model"`
-		Mode      *string `json:"mode"`
+		ProfileID   string  `json:"profile_id"`
+		Name        *string `json:"name"`
+		Model       *string `json:"model"`
+		Mode        *string `json:"mode"`
+		AutoApprove *bool   `json:"auto_approve"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -136,10 +138,11 @@ func (h *Handlers) handleUpdateAgentProfile(ctx context.Context, msg *ws.Message
 	}
 
 	profile, err := h.agentSettingsCtrl.UpdateProfile(ctx, agentsettingscontroller.UpdateProfileRequest{
-		ID:    req.ProfileID,
-		Name:  req.Name,
-		Model: req.Model,
-		Mode:  req.Mode,
+		ID:          req.ProfileID,
+		Name:        req.Name,
+		Model:       req.Model,
+		Mode:        req.Mode,
+		AutoApprove: req.AutoApprove,
 	})
 	if err != nil {
 		h.logger.Error("failed to update agent profile", zap.Error(err))

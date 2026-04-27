@@ -146,7 +146,10 @@ func (c *Controller) GetAgentLogo(ctx context.Context, agentName string, variant
 }
 
 // resolvePermissionDefaults extracts the default permission values from agent settings.
+// autoApprove defaults to true so that agents without an explicit auto_approve setting
+// (i.e. all ACP agents) auto-approve permission requests out of the box.
 func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting) (autoApprove, allowIndexing, skipPermissions bool) {
+	autoApprove = true
 	if permSettings == nil {
 		return
 	}

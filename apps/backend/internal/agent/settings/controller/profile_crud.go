@@ -20,6 +20,7 @@ type CreateProfileRequest struct {
 	Model          string
 	Mode           string
 	AllowIndexing  bool
+	AutoApprove    bool
 	CLIPassthrough bool
 	// CLIFlags is the explicit list to persist. When nil, the profile is
 	// seeded from the agent's curated PermissionSettings() list so a fresh
@@ -57,6 +58,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Model:            req.Model,
 		Mode:             req.Mode,
 		AllowIndexing:    req.AllowIndexing,
+		AutoApprove:      req.AutoApprove,
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
 		UserModified:     true,
@@ -106,6 +108,7 @@ type UpdateProfileRequest struct {
 	Model          *string
 	Mode           *string
 	AllowIndexing  *bool
+	AutoApprove    *bool
 	CLIPassthrough *bool
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
@@ -133,6 +136,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
+	}
+	if req.AutoApprove != nil {
+		profile.AutoApprove = *req.AutoApprove
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough

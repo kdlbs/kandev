@@ -1802,26 +1802,31 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 		sessionID = fallbackSessionID
 	}
 
-	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
-	// When a ToolCall notification exists (tracked in activeToolCalls), the message
-	// was already created by convertToolCallUpdate → handleToolCallEvent.
-	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
-	a.mu.RLock()
-	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
-	a.mu.RUnlock()
+	// Skip the synthetic tool_call event when auto-approve is enabled — the
+	// permission is granted immediately and a "pending_permission" tool_call
+	// in the frontend is misleading (no user action is needed).
+	if !a.cfg.AutoApprove {
+		// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
+		// When a ToolCall notification exists (tracked in activeToolCalls), the message
+		// was already created by convertToolCallUpdate → handleToolCallEvent.
+		// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
+		a.mu.RLock()
+		_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
+		a.mu.RUnlock()
 
-	if !alreadyTracked {
-		toolCallEvent := AgentEvent{
-			Type:       streams.EventTypeToolCall,
-			SessionID:  sessionID,
-			ToolCallID: req.ToolCallID,
-			ToolName:   req.ActionType,
-			ToolTitle:  req.Title,
-			ToolStatus: "pending_permission",
+		if !alreadyTracked {
+			toolCallEvent := AgentEvent{
+				Type:       streams.EventTypeToolCall,
+				SessionID:  sessionID,
+				ToolCallID: req.ToolCallID,
+				ToolName:   req.ActionType,
+				ToolTitle:  req.Title,
+				ToolStatus: "pending_permission",
+			}
+			a.sendUpdate(toolCallEvent)
+			a.logger.Debug("emitted synthetic tool_call for permission (no prior ToolCall)",
+				zap.String("tool_call_id", req.ToolCallID))
 		}
-		a.sendUpdate(toolCallEvent)
-		a.logger.Debug("emitted synthetic tool_call for permission (no prior ToolCall)",
-			zap.String("tool_call_id", req.ToolCallID))
 	}
 
 	if handler == nil {

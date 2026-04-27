@@ -313,6 +313,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoStart != nil {
 		cfg.AutoStart = *overrides.AutoStart
 	}
+	if overrides.AutoApprovePermissions != nil {
+		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
+	}
 	if overrides.Env != nil {
 		cfg.AgentEnv = overrides.Env
 	}
@@ -344,19 +347,20 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	Protocol           agent.Protocol
-	AgentCommand       string
-	WorkDir            string
-	AutoStart          *bool
-	Env                []string
-	ApprovalPolicy     string
-	AgentType          string
-	McpServers         []McpServerConfig
-	SessionID          string
-	TaskID             string
-	DisableAskQuestion bool
-	AssumeMcpSse       bool
-	McpMode            string
+	Protocol               agent.Protocol
+	AgentCommand           string
+	WorkDir                string
+	AutoStart              *bool
+	AutoApprovePermissions *bool
+	Env                    []string
+	ApprovalPolicy         string
+	AgentType              string
+	McpServers             []McpServerConfig
+	SessionID              string
+	TaskID                 string
+	DisableAskQuestion     bool
+	AssumeMcpSse           bool
+	McpMode                string
 }
 
 // ParseCommand splits a command string into arguments
