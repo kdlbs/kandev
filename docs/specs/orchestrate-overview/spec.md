@@ -119,10 +119,9 @@ For users who want to micro-manage a task with full kandev tooling:
 
 ### Configuration storage
 
-- Orchestrate config (agents, skills, projects, routines, workspace settings) lives on the **filesystem** at `~/.kandev/workspaces/<name>/`, not in the database. See [orchestrate-config](../orchestrate-config/spec.md).
-- The database stores only runtime/transactional state: tasks, sessions, wakeup queue, cost events, activity log, agent memory, approvals.
-- API requests are served from an in-memory cache of the filesystem. UI writes go to disk first, then invalidate the cache.
-- `fsnotify` watches workspace directories for external changes (manual edits, git pull). Parse errors (git conflicts, invalid YAML) surface as config_error in the UI while stale cache is served.
+- The **database** is the source of truth for all orchestrate config (agents, skills, projects, routines, workspace settings) and runtime state.
+- The **filesystem** (`~/.kandev/workspaces/<name>/`) is an optional sync target for git versioning, sharing, and backup. Users control import/export via the settings Sync UI.
+- See [orchestrate-config](../orchestrate-config/spec.md) for the full sync model.
 
 ### Task model extensions
 

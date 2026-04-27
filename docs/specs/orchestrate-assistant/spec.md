@@ -104,11 +104,12 @@ User sends Telegram message
 
 ### Agent memory
 
-Agents need persistent knowledge that survives across sessions -- who the user is, what they prefer, what happened last week, lessons learned from past mistakes. Memory is stored on the **filesystem** alongside the agent's config at `~/.kandev/workspaces/<name>/agents/<agent>/memory/` (see [orchestrate-config](../orchestrate-config/spec.md)). This makes memory versionable, shareable between team members via git, and browsable with standard tools.
+Agents need persistent knowledge that survives across sessions -- who the user is, what they prefer, what happened last week, lessons learned from past mistakes. Memory is stored in the **database** (`orchestrate_agent_memory` table) and can be exported to the filesystem via the Sync UI for sharing and backup.
 
 #### Memory storage
 
-- Memory entries are stored as **one markdown file per entry**, organized by layer:
+- Memory entries are stored in the DB, scoped per agent instance.
+- For filesystem export, entries are written as **one markdown file per entry**, organized by layer:
   ```
   agents/ceo/memory/
     operating/

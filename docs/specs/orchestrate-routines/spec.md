@@ -36,13 +36,12 @@ Routines let users define task templates that fire automatically, creating real 
 
 ### Routine config vs operational state
 
-Routine data is split between the filesystem and DB:
+All routine data lives in the **database** (source of truth). The filesystem is an optional sync target.
 
-- **Filesystem** (`routines/<name>.yml`): name, description, task template, assignee, concurrency policy, variables, trigger config (cron expression, webhook settings). Editable by users, versionable via git.
+- **DB** (`orchestrate_routines`): routine definition -- name, description, task template, assignee, concurrency policy, variables.
 - **DB** (`orchestrate_routine_triggers`): operational trigger state -- `next_run_at`, `last_fired_at`, `public_id` (for webhooks), `enabled`. Needs atomic claims for cron scheduling.
 - **DB** (`orchestrate_routine_runs`): run history -- status, linked task, trigger payload, timestamps.
-
-On startup and config reload, the reconciliation service syncs triggers from YAML to DB: creates triggers for new routines, updates triggers for changed config (e.g. cron expression changed), deletes triggers and orphan runs for routines removed from filesystem.
+- **Filesystem** (`routines/<name>.yml`): export format for git versioning. Written/read via Sync UI. See [orchestrate-config](../orchestrate-config/spec.md).
 
 ### Triggers
 

@@ -105,14 +105,15 @@ The CEO/CTO never explicitly picks an executor -- they assign tasks to projects 
 - **Paused**: manually paused by user, or auto-paused by budget enforcement. No new wakeups processed. Active sessions complete their current turn but receive no further prompts.
 - **Stopped**: deactivated. No longer appears in the CEO's org tree. Can be reactivated.
 
-### Agent config vs runtime state
+### Agent storage model
 
-Agent data is split between the filesystem (config) and a small DB table (runtime state):
+All agent data lives in the **database** (source of truth). The filesystem is an optional sync target for portability.
 
-- **Filesystem** (`agents/<name>.yml`): name, role, reports_to, permissions, budget, desired_skills, executor_preference, max_concurrent_sessions, icon. Editable by users, versionable via git.
-- **DB** (`orchestrate_agent_runtime`): status, pause_reason, last_wakeup_finished_at. Runtime state that must survive restarts (e.g. a budget-paused agent stays paused after restart). Not user-editable, not exported.
+- **DB** (`orchestrate_agent_instances`): all config fields (name, role, reports_to, permissions, budget, desired_skills, executor_preference, max_concurrent_sessions, icon) PLUS runtime state (status, pause_reason, last_wakeup_finished_at).
+- **Filesystem** (`agents/<name>.yml`): export format for git versioning, sharing, backup. Written on user-initiated export, read on user-initiated import.
+- **Agent profiles**: stay in the existing kandev `agent_profiles` DB table. Referenced by `agent_profile_id` from the agent instance. Managed via the existing settings UI (`/settings/agents/`).
 
-On startup, the ConfigLoader reads agent config from YAML and merges runtime state from the DB. If an agent exists in YAML but has no runtime row, a default row is created (`status=idle`). If a runtime row exists for an agent no longer in YAML, the row is deleted (reconciliation).
+The user controls sync via the settings Sync UI -- import changes from filesystem, export changes to filesystem. No automatic sync. See [orchestrate-config](../orchestrate-config/spec.md).
 
 ### UI at `/orchestrate/agents`
 

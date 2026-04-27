@@ -50,12 +50,14 @@ Orchestrate introduces a skill registry where users create, edit, and manage ski
 
 ### Skill injection via symlinks
 
-Skills live on disk and are symlinked into each agent CLI's native skill discovery directory. No materialization needed -- the agent reads the skill directly via the symlink.
+Skill content is stored in the **database** (source of truth). For agent session injection, skills are materialized to disk and symlinked into agent CLI discovery directories.
 
-**Skill source directories:**
-- Workspace skills: `~/.kandev/workspaces/<name>/skills/<slug>/`
-- Bundled system skills: `~/.kandev/skills/<slug>/`
+**Skill materialization:**
+- Inline skills (DB content) are written to a cache directory: `~/.kandev/skill-cache/<slug>/SKILL.md`
+- Git/URL-imported skills are fetched and cached on disk at import time
+- Bundled system skills ship with the binary and are written to `~/.kandev/skills/<slug>/`
 - In dev mode: `.kandev-dev/` instead of `~/.kandev/`
+- Skills can also be exported to `~/.kandev/workspaces/<name>/skills/<slug>/` via the Sync UI for git versioning
 
 **Agent skill discovery directories** (all get symlinks):
 
