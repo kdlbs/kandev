@@ -125,6 +125,10 @@ type PassthroughOptions struct {
 	Resume           bool            // generic "continue last session" (e.g. -c, --resume latest)
 	PermissionValues map[string]bool // e.g. {"auto_approve": true}
 	WorkDir          string
+	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
+	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
+	// verbatim to the built passthrough command, mirroring CommandOptions.
+	CLIFlagTokens []string
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.
