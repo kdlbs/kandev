@@ -73,6 +73,11 @@ type MessageCreator interface {
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error
+	// ExpirePendingPermissionsForSession marks any still-pending
+	// permission_request messages for a session as expired. Used by the
+	// turn-complete sweep to recover from agents that emit a permission
+	// frame but never resolve it (issue #717).
+	ExpirePendingPermissionsForSession(ctx context.Context, sessionID string) (int, error)
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message

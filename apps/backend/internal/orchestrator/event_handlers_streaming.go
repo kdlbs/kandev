@@ -542,6 +542,22 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		}
 	}
 
+	// Expire any permission_request messages still showing as pending. Some
+	// agents (issue #717: OpenCode) emit a session/request_permission frame
+	// but never resolve it, leaving the user with a phantom approval card
+	// that nothing else clears.
+	if s.messageCreator != nil && payload.SessionID != "" {
+		if n, err := s.messageCreator.ExpirePendingPermissionsForSession(ctx, payload.SessionID); err != nil {
+			s.logger.Error("failed to expire pending permission messages on turn complete",
+				zap.String("session_id", payload.SessionID),
+				zap.Error(err))
+		} else if n > 0 {
+			s.logger.Info("expired pending permission messages on turn complete",
+				zap.String("session_id", payload.SessionID),
+				zap.Int("count", n))
+		}
+	}
+
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if session != nil && session.State == models.TaskSessionStateRunning {
@@ -780,7 +796,7 @@ func (s *Service) handlePermissionCancelledEvent(ctx context.Context, payload *l
 		return
 	}
 	if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, payload.Data.PendingID, "expired"); err != nil {
-		s.logger.Warn("failed to mark permission as expired",
+		s.logger.Error("failed to mark permission as expired",
 			zap.String("session_id", sessionID),
 			zap.String("pending_id", payload.Data.PendingID),
 			zap.Error(err))

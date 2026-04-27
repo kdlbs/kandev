@@ -164,6 +164,10 @@ func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context,
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }
 
+func (a *testMessageCreatorAdapter) ExpirePendingPermissionsForSession(ctx context.Context, sessionID string) (int, error) {
+	return a.svc.ExpirePendingPermissionsForSession(ctx, sessionID)
+}
+
 func (a *testMessageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
 	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,

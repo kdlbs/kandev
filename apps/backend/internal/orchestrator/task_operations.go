@@ -1743,7 +1743,7 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 		// Permission likely expired — update message so frontend reflects this
 		if s.messageCreator != nil {
 			if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, "expired"); updateErr != nil {
-				s.logger.Warn("failed to mark expired permission message",
+				s.logger.Error("failed to mark expired permission message",
 					zap.String("session_id", sessionID),
 					zap.String("pending_id", pendingID),
 					zap.Error(updateErr))
@@ -1761,7 +1761,7 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 	// Update the permission message with the new status
 	if s.messageCreator != nil {
 		if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, status); err != nil {
-			s.logger.Warn("failed to update permission message status",
+			s.logger.Error("failed to update permission message status",
 				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
 				zap.String("status", status),

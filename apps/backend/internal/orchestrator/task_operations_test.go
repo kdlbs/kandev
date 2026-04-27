@@ -390,6 +390,10 @@ func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, st
 	return nil
 }
 
+func (m *mockMessageCreator) ExpirePendingPermissionsForSession(context.Context, string) (int, error) {
+	return 0, nil
+}
+
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
 	return nil
 }

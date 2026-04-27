@@ -578,6 +578,14 @@ func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, ses
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }
 
+// ExpirePendingPermissionsForSession sweeps any still-pending permission_request
+// messages for the session and marks them as expired. Used by the orchestrator
+// on turn complete to clean up agent-emitted permission frames that were never
+// resolved.
+func (a *messageCreatorAdapter) ExpirePendingPermissionsForSession(ctx context.Context, sessionID string) (int, error) {
+	return a.svc.ExpirePendingPermissionsForSession(ctx, sessionID)
+}
+
 // CreateClarificationRequestMessage creates a message for a clarification request.
 // This allows clarification requests to appear in the chat as messages.
 func (a *messageCreatorAdapter) CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error) {

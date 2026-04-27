@@ -569,6 +569,61 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
+// ExpirePendingPermissionsForSession marks all permission_request messages
+// for the session that are still pending (no terminal status set) as
+// "expired", reusing UpdatePermissionMessage so each message also publishes
+// the message.updated event and cancels its related tool_call.
+//
+// Called by the orchestrator on agent turn completion to recover from agents
+// that emit permission_request frames but never resolve them — see issue
+// #717 (OpenCode ACP). Returns the number of messages transitioned.
+func (s *Service) ExpirePendingPermissionsForSession(ctx context.Context, sessionID string) (int, error) {
+	msgs, err := s.messages.ListMessages(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+
+	expired := 0
+	for _, msg := range msgs {
+		if msg.Type != models.MessageTypePermissionRequest {
+			continue
+		}
+		if !isPendingPermissionStatus(msg.Metadata) {
+			continue
+		}
+		pendingID, _ := msg.Metadata["pending_id"].(string)
+		if pendingID == "" {
+			continue
+		}
+		if err := s.UpdatePermissionMessage(ctx, sessionID, pendingID, "expired"); err != nil {
+			s.logger.Error("failed to expire pending permission message",
+				zap.String("session_id", sessionID),
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", msg.ID),
+				zap.Error(err))
+			continue
+		}
+		expired++
+	}
+	return expired, nil
+}
+
+// isPendingPermissionStatus reports whether a permission_request message's
+// metadata indicates it is still awaiting user resolution. Missing or empty
+// status counts as pending — the create path doesn't always set it.
+func isPendingPermissionStatus(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return true
+	}
+	status, _ := metadata["status"].(string)
+	switch status {
+	case "", "pending":
+		return true
+	default:
+		return false
+	}
+}
+
 // UpdateClarificationMessage updates a clarification request message's status and response.
 // It includes retry logic to handle race conditions.
 // The answers parameter should be a slice of answer objects with question_id, selected_options, and custom_text.
