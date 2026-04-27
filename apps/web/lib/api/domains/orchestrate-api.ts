@@ -556,6 +556,43 @@ export function listIssues(workspaceId: string, options?: ApiRequestOptions) {
   );
 }
 
+export function getIssue(issueId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ issue: OrchestrateIssue }>(`${BASE}/issues/${issueId}`, options);
+}
+
+// --- Comments ---
+
+export type TaskCommentResponse = {
+  id: string;
+  taskId: string;
+  authorType: string;
+  authorId: string;
+  body: string;
+  source: string;
+  createdAt: string;
+};
+
+export function listComments(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ comments: TaskCommentResponse[] }>(
+    `${BASE}/tasks/${taskId}/comments`,
+    options,
+  );
+}
+
+export function createComment(
+  taskId: string,
+  data: { body: string; author_type?: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ comment: TaskCommentResponse }>(
+    `${BASE}/tasks/${taskId}/comments`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+    },
+  );
+}
+
 export function searchTasks(
   workspaceId: string,
   query: string,
@@ -582,6 +619,25 @@ export function listWakeups(workspaceId: string, options?: ApiRequestOptions) {
     `${BASE}/workspaces/${workspaceId}/wakeups`,
     options,
   );
+}
+
+// --- Workspace Settings ---
+
+export function updateWorkspaceSettings(
+  workspaceId: string,
+  data: {
+    name?: string;
+    description?: string;
+    require_approval_for_new_agents?: boolean;
+    require_approval_for_task_completion?: boolean;
+    require_approval_for_skill_changes?: boolean;
+  },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/settings`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
+  });
 }
 
 // --- Git ---

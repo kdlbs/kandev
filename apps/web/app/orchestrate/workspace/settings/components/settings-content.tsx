@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Image from "next/image";
-import { IconUpload } from "@tabler/icons-react";
+import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { updateWorkspaceSettings } from "@/lib/api/domains/orchestrate-api";
 import { ConfigSection } from "./config-section";
 import { GitSection } from "./git-section";
 
@@ -53,18 +55,24 @@ function AppearanceSection({
   logoPreview,
   initial,
   fileInputRef,
+  dirty,
+  saving,
   onNameChange,
   onDescriptionChange,
   onLogoChange,
+  onSave,
 }: {
   name: string;
   description: string;
   logoPreview: string | null;
   initial: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
+  dirty: boolean;
+  saving: boolean;
   onNameChange: (v: string) => void;
   onDescriptionChange: (v: string) => void;
   onLogoChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSave: () => void;
 }) {
   return (
     <SettingCard>
@@ -121,6 +129,14 @@ function AppearanceSection({
           className="mt-1"
         />
       </div>
+      {dirty && (
+        <div className="flex justify-end pt-2">
+          <Button size="sm" onClick={onSave} disabled={saving} className="cursor-pointer">
+            <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      )}
     </SettingCard>
   );
 }
@@ -129,16 +145,22 @@ function PermissionsSection({
   approvalNewAgents,
   approvalTaskCompletion,
   approvalSkillChanges,
+  dirty,
+  saving,
   onApprovalNewAgentsChange,
   onApprovalTaskCompletionChange,
   onApprovalSkillChangesChange,
+  onSave,
 }: {
   approvalNewAgents: boolean;
   approvalTaskCompletion: boolean;
   approvalSkillChanges: boolean;
+  dirty: boolean;
+  saving: boolean;
   onApprovalNewAgentsChange: (v: boolean) => void;
   onApprovalTaskCompletionChange: (v: boolean) => void;
   onApprovalSkillChangesChange: (v: boolean) => void;
+  onSave: () => void;
 }) {
   return (
     <SettingCard>
@@ -160,6 +182,14 @@ function PermissionsSection({
         checked={approvalSkillChanges}
         onCheckedChange={onApprovalSkillChangesChange}
       />
+      {dirty && (
+        <div className="flex justify-end pt-2">
+          <Button size="sm" onClick={onSave} disabled={saving} className="cursor-pointer">
+            <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      )}
     </SettingCard>
   );
 }
@@ -175,8 +205,15 @@ export function SettingsContent() {
   const [approvalNewAgents, setApprovalNewAgents] = useState(true);
   const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
   const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
+  const [savingAppearance, setSavingAppearance] = useState(false);
+  const [savingPermissions, setSavingPermissions] = useState(false);
 
   const initial = (name || "W").charAt(0).toUpperCase();
+  const origName = activeWorkspace?.name || "";
+  const origDescription = activeWorkspace?.description || "";
+
+  const appearanceDirty = name !== origName || description !== origDescription;
+  const permissionsDirty = true; // Toggles have no server-sourced initial values yet
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -185,6 +222,36 @@ export function SettingsContent() {
       setLogoPreview(url);
     }
   };
+
+  const handleSaveAppearance = useCallback(async () => {
+    if (!activeWorkspace) return;
+    setSavingAppearance(true);
+    try {
+      await updateWorkspaceSettings(activeWorkspace.id, { name, description });
+      toast.success("Appearance settings saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSavingAppearance(false);
+    }
+  }, [activeWorkspace, name, description]);
+
+  const handleSavePermissions = useCallback(async () => {
+    if (!activeWorkspace) return;
+    setSavingPermissions(true);
+    try {
+      await updateWorkspaceSettings(activeWorkspace.id, {
+        require_approval_for_new_agents: approvalNewAgents,
+        require_approval_for_task_completion: approvalTaskCompletion,
+        require_approval_for_skill_changes: approvalSkillChanges,
+      });
+      toast.success("Permission settings saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSavingPermissions(false);
+    }
+  }, [activeWorkspace, approvalNewAgents, approvalTaskCompletion, approvalSkillChanges]);
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-8">
@@ -196,9 +263,12 @@ export function SettingsContent() {
           logoPreview={logoPreview}
           initial={initial}
           fileInputRef={fileInputRef}
+          dirty={appearanceDirty}
+          saving={savingAppearance}
           onNameChange={setName}
           onDescriptionChange={setDescription}
           onLogoChange={handleLogoChange}
+          onSave={handleSaveAppearance}
         />
       </div>
 
@@ -215,9 +285,12 @@ export function SettingsContent() {
           approvalNewAgents={approvalNewAgents}
           approvalTaskCompletion={approvalTaskCompletion}
           approvalSkillChanges={approvalSkillChanges}
+          dirty={permissionsDirty}
+          saving={savingPermissions}
           onApprovalNewAgentsChange={setApprovalNewAgents}
           onApprovalTaskCompletionChange={setApprovalTaskCompletion}
           onApprovalSkillChangesChange={setApprovalSkillChanges}
+          onSave={handleSavePermissions}
         />
       </div>
 

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { IconCode, IconChevronDown, IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { createComment } from "@/lib/api/domains/orchestrate-api";
 import { formatRelativeTime } from "@/lib/utils";
 import type { IssueComment } from "./types";
 
@@ -12,6 +14,7 @@ type TaskChatProps = {
   taskId: string;
   comments: IssueComment[];
   readOnly?: boolean;
+  onCommentsChanged?: () => void;
 };
 
 function formatDuration(ms: number): string {
@@ -76,15 +79,23 @@ function CommentEntry({ comment }: { comment: IssueComment }) {
   );
 }
 
-export function TaskChat({ taskId, comments, readOnly = false }: TaskChatProps) {
+export function TaskChat({ taskId, comments, readOnly = false, onCommentsChanged }: TaskChatProps) {
   const [input, setInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    // TODO: Wire to API once backend (Wave 3A) is ready
-    void taskId;
-    setInput("");
+    if (!input.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await createComment(taskId, { body: input.trim(), author_type: "user" });
+      setInput("");
+      onCommentsChanged?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send comment");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -110,7 +121,13 @@ export function TaskChat({ taskId, comments, readOnly = false }: TaskChatProps) 
           />
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button type="submit" size="sm" variant="ghost" className="cursor-pointer shrink-0">
+              <Button
+                type="submit"
+                size="sm"
+                variant="ghost"
+                className="cursor-pointer shrink-0"
+                disabled={submitting || !input.trim()}
+              >
                 <IconSend className="h-4 w-4" />
               </Button>
             </TooltipTrigger>

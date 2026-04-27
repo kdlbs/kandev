@@ -66,6 +66,8 @@ export async function createTask(
     plan_mode?: boolean;
     attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
     parent_id?: string;
+    priority?: number;
+    metadata?: Record<string, unknown>;
   },
   options?: ApiRequestOptions,
 ) {

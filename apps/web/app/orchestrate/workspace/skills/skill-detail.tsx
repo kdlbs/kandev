@@ -17,6 +17,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useAppStore } from "@/components/state-provider";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/orchestrate/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { SkillContent } from "./skill-content";
@@ -56,6 +57,11 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   const [contentMode, setContentMode] = useState<ContentMode>("view");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const readOnly = isReadOnly(skill.sourceType);
+  const agents = useAppStore((s) => s.orchestrate.agentInstances);
+  const usedByCount = useMemo(
+    () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
+    [agents, skill.id],
+  );
 
   const fileTree = useMemo(() => buildFileTree(skill.fileInventory), [skill.fileInventory]);
   const hasFiles = fileTree.length > 0;
@@ -79,7 +85,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
         onDelete={() => onDelete(skill.id)}
       />
       <Separator />
-      <SkillMetadataRow skill={skill} readOnly={readOnly} />
+      <SkillMetadataRow skill={skill} readOnly={readOnly} usedByCount={usedByCount} />
 
       {hasFiles && (
         <div className="border border-border rounded-lg max-h-[200px] overflow-y-auto">
@@ -234,7 +240,19 @@ function SourceValue({ skill }: { skill: Skill }) {
   );
 }
 
-function SkillMetadataRow({ skill, readOnly }: { skill: Skill; readOnly: boolean }) {
+function SkillMetadataRow({
+  skill,
+  readOnly,
+  usedByCount,
+}: {
+  skill: Skill;
+  readOnly: boolean;
+  usedByCount: number;
+}) {
+  const usedByLabel = usedByCount === 0
+    ? "No agents attached"
+    : `${usedByCount} agent${usedByCount !== 1 ? "s" : ""}`;
+
   return (
     <div className="grid grid-cols-4 gap-4 text-sm">
       <MetadataItem label="SOURCE">
@@ -247,7 +265,7 @@ function SkillMetadataRow({ skill, readOnly }: { skill: Skill; readOnly: boolean
         <span>{readOnly ? "Read only" : "Editable"}</span>
       </MetadataItem>
       <MetadataItem label="USED BY" hint="Agents that have this skill assigned to them">
-        <span>--</span>
+        <span>{usedByLabel}</span>
       </MetadataItem>
     </div>
   );

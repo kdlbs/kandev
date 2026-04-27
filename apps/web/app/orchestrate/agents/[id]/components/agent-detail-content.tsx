@@ -10,6 +10,7 @@ import { AgentRoleBadge } from "../../components/agent-role-badge";
 import { BudgetGauge } from "../../components/budget-gauge";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentSkillsTab } from "./agent-skills-tab";
+import { AgentRunsTab } from "./agent-runs-tab";
 import { AgentMemoryTab } from "./agent-memory-tab";
 import { AgentChannelsTab } from "./agent-channels-tab";
 
@@ -89,7 +90,7 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
           <AgentSkillsTab agent={agent} />
         </TabsContent>
         <TabsContent value="runs">
-          <PlaceholderTab label="Runs" />
+          <AgentRunsTab agent={agent} />
         </TabsContent>
         <TabsContent value="memory">
           <AgentMemoryTab agent={agent} />
@@ -102,10 +103,3 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
   );
 }
 
-function PlaceholderTab({ label }: { label: string }) {
-  return (
-    <div className="flex items-center justify-center py-12">
-      <p className="text-sm text-muted-foreground">{label} -- coming soon</p>
-    </div>
-  );
-}

@@ -212,6 +212,8 @@ function RoutinesList({
   onRunNow: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   if (routines.length === 0) {
     return (
       <EmptyState
@@ -227,10 +229,11 @@ function RoutinesList({
           key={routine.id}
           routine={routine}
           agents={agents}
+          expanded={expandedId === routine.id}
           onToggle={onToggle}
           onRunNow={onRunNow}
           onDelete={onDelete}
-          onClick={() => {}}
+          onClick={(id) => setExpandedId(expandedId === id ? null : id)}
         />
       ))}
     </div>

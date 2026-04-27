@@ -29,6 +29,7 @@ type TaskSimpleModeProps = {
   activity: IssueActivityEntry[];
   sessions: TaskSession[];
   onToggleAdvanced?: () => void;
+  onCommentsChanged?: () => void;
 };
 
 function TaskBreadcrumb({ task }: { task: Issue }) {
@@ -135,6 +136,7 @@ function ChatActivityTabs({
   hasMultipleSessions,
   activeSession,
   onSelectSession,
+  onCommentsChanged,
 }: {
   task: Issue;
   comments: IssueComment[];
@@ -144,6 +146,7 @@ function ChatActivityTabs({
   hasMultipleSessions: boolean;
   activeSession: TaskSession | undefined;
   onSelectSession: (id: string) => void;
+  onCommentsChanged?: () => void;
 }) {
   return (
     <Tabs defaultValue="chat" className="mt-6">
@@ -167,6 +170,7 @@ function ChatActivityTabs({
           taskId={task.id}
           comments={comments}
           readOnly={activeSession?.state === "COMPLETED" || activeSession?.state === "FAILED"}
+          onCommentsChanged={onCommentsChanged}
         />
       </TabsContent>
       <TabsContent value="activity">
@@ -182,6 +186,7 @@ export function TaskSimpleMode({
   activity,
   sessions,
   onToggleAdvanced,
+  onCommentsChanged,
 }: TaskSimpleModeProps) {
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const hasMultipleSessions = sessions.length >= 2;
@@ -227,6 +232,7 @@ export function TaskSimpleMode({
           hasMultipleSessions={hasMultipleSessions}
           activeSession={activeSession}
           onSelectSession={setActiveSessionId}
+          onCommentsChanged={onCommentsChanged}
         />
         <ChildIssuesList items={task.children} />
       </div>
