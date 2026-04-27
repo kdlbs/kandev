@@ -89,8 +89,13 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 }
 
 // GetActiveTurn returns the currently active (non-completed) turn for a session.
+// Returns (nil, nil) when no turn is active. Other errors (DB failures) are returned as-is.
 func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.turns.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.turns.GetActiveTurnBySessionID(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
 }
 
 // getOrStartTurn returns the active turn for a session, or starts a new one if none exists.

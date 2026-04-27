@@ -1803,6 +1803,13 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			zap.Error(err))
 	}
 
+	// Capture the active turn before cancelling so the cancel message attaches
+	// to the turn the user was actually cancelling. If we waited until after
+	// agentManager.CancelAgent, the agent's complete event could have already
+	// closed the turn, and getActiveTurnID would lazily create a phantom turn
+	// just to host the cancel message.
+	cancelTurnID := s.getActiveTurnID(sessionID)
+
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
 		switch {
 		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
@@ -1842,7 +1849,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			"Turn cancelled by user",
 			sessionID,
 			string(v1.MessageTypeStatus),
-			s.getActiveTurnID(sessionID),
+			cancelTurnID,
 			metadata,
 			false,
 		); err != nil {
@@ -1852,7 +1859,8 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 		}
 	}
 
-	// Complete the turn since the agent was cancelled
+	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
+	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))

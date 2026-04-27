@@ -459,10 +459,31 @@ func (s *Service) initWorkflowEngine() {
 	s.workflowEngine = engine.New(store, callbacks)
 }
 
-// startTurnForSession starts a new turn for the session and stores it.
+// startTurnForSession ensures the session has an active turn and returns its ID.
+//
+// Idempotent: if an open turn already exists (either tracked in activeTurns or
+// only present in the DB — the latter happens when service.CreateMessage lazily
+// started a turn for an inbound user message before the orchestrator's prompt
+// cycle began, or when the backend restarted with open turns in the DB), it is
+// adopted rather than duplicated. A new turn is created only when none exists.
+//
+// This avoids the classic dual-creation leak: user message → service.CreateMessage
+// starts turn X (DB only) → PromptTask → startTurnForSession → would create turn Y
+// (DB + activeTurns), leaving X open forever because nothing tracks it.
 func (s *Service) startTurnForSession(ctx context.Context, sessionID string) string {
 	if s.turnService == nil {
 		return ""
+	}
+
+	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
+		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			return turnID
+		}
+	}
+
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+		s.activeTurns.Store(sessionID, turn.ID)
+		return turn.ID
 	}
 
 	turn, err := s.turnService.StartTurn(ctx, sessionID)
@@ -477,28 +498,42 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 	return turn.ID
 }
 
-// completeTurnForSession completes the active turn for the session.
+// completeTurnForSession closes any open turn for the session.
+//
+// The DB is the source of truth — activeTurns is just an in-memory cache that
+// can drift (see startTurnForSession) or be wiped by a backend restart. We
+// query the DB for any open turn and close it. Loops to mop up multiple
+// zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
 	if s.turnService == nil {
 		return
 	}
 
-	turnIDVal, ok := s.activeTurns.LoadAndDelete(sessionID)
-	if !ok {
-		return
-	}
+	s.activeTurns.Delete(sessionID)
 
-	turnID, ok := turnIDVal.(string)
-	if !ok || turnID == "" {
-		return
+	const maxIterations = 16
+	for i := 0; i < maxIterations; i++ {
+		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to look up active turn",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
+		if turn == nil {
+			return
+		}
+		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
+			s.logger.Warn("failed to complete turn",
+				zap.String("session_id", sessionID),
+				zap.String("turn_id", turn.ID),
+				zap.Error(err))
+			return
+		}
 	}
-
-	if err := s.turnService.CompleteTurn(ctx, turnID); err != nil {
-		s.logger.Warn("failed to complete turn",
-			zap.String("session_id", sessionID),
-			zap.String("turn_id", turnID),
-			zap.Error(err))
-	}
+	s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
+		zap.String("session_id", sessionID),
+		zap.Int("max_iterations", maxIterations))
 }
 
 // getActiveTurnID returns the active turn ID for a session.
