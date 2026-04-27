@@ -1,12 +1,15 @@
 package service_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
 	"github.com/kandev/kandev/internal/orchestrate/service"
 )
@@ -53,5 +56,23 @@ func newTestService(t *testing.T) *service.Service {
 	}
 
 	log := logger.Default()
-	return service.NewService(repo, log)
+	svc := service.NewService(repo, log)
+
+	// Always set up ConfigLoader + FileWriter so config entity CRUD works.
+	base := t.TempDir()
+	wsDir := filepath.Join(base, "workspaces", "default")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "kandev.yml"), []byte("name: default\n"), 0o644); err != nil {
+		t.Fatalf("write kandev.yml: %v", err)
+	}
+	loader := configloader.NewConfigLoader(base)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	writer := configloader.NewFileWriter(base, loader)
+	svc.SetConfigLoader(loader, writer)
+
+	return svc
 }

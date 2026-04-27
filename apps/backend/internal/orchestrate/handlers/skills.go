@@ -58,14 +58,14 @@ func (h *Handlers) getSkill(c *gin.Context) {
 }
 
 func (h *Handlers) updateSkill(c *gin.Context) {
-	// Bind first to fail fast on malformed input before hitting the database.
+	// Bind first to fail fast on malformed input before hitting storage.
 	var req dto.UpdateSkillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	ctx := c.Request.Context()
-	skill, err := h.ctrl.Svc.GetSkill(ctx, c.Param("id"))
+	skill, err := h.ctrl.Svc.GetSkillFromConfig(ctx, c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

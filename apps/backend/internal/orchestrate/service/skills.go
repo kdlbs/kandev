@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrate/models"
-
-	"go.uber.org/zap"
 )
 
 var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -31,53 +29,65 @@ func GenerateSlug(name string) string {
 }
 
 // ListSkillsWithUsage returns all skills for a workspace with used-by-agent counts.
-func (s *Service) ListSkillsWithUsage(ctx context.Context, wsID string) ([]*SkillWithUsage, error) {
-	skills, err := s.repo.ListSkills(ctx, wsID)
+func (s *Service) ListSkillsWithUsage(ctx context.Context, _ string) ([]*SkillWithUsage, error) {
+	skills, err := s.ListSkillsFromConfig(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	counts, err := s.repo.CountSkillUsage(ctx, wsID)
-	if err != nil {
-		s.logger.Warn("failed to count skill usage", zap.Error(err))
-		counts = make(map[string]int)
-	}
+	// Count usage by scanning agent desired_skills from ConfigLoader.
+	counts := s.countSkillUsageFromConfig()
 	result := make([]*SkillWithUsage, len(skills))
 	for i, sk := range skills {
-		result[i] = &SkillWithUsage{Skill: *sk, UsedByCount: counts[sk.ID]}
+		result[i] = &SkillWithUsage{Skill: *sk, UsedByCount: counts[sk.Slug]}
 	}
 	return result, nil
 }
 
+// countSkillUsageFromConfig counts how many agents reference each skill slug.
+func (s *Service) countSkillUsageFromConfig() map[string]int {
+	counts := make(map[string]int)
+	if s.cfgLoader == nil {
+		return counts
+	}
+	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
+		for _, slug := range ParseDesiredSlugs(a.DesiredSkills) {
+			counts[slug]++
+		}
+	}
+	return counts
+}
+
 // ValidateAndPrepareSkill validates and prepares a skill for creation.
 // Call this before CreateSkill to auto-generate slug and validate uniqueness.
-func (s *Service) ValidateAndPrepareSkill(ctx context.Context, skill *models.Skill) error {
+func (s *Service) ValidateAndPrepareSkill(_ context.Context, skill *models.Skill) error {
 	if skill.Name == "" {
 		return fmt.Errorf("skill name is required")
 	}
 	if skill.Slug == "" {
 		skill.Slug = GenerateSlug(skill.Name)
 	}
-	if err := s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, ""); err != nil {
+	if err := s.validateSlugUnique(skill.Slug, ""); err != nil {
 		return err
 	}
 	return s.validateSourceType(skill.SourceType)
 }
 
 // ValidateSkillUpdate validates a skill update for slug uniqueness.
-func (s *Service) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
+func (s *Service) ValidateSkillUpdate(_ context.Context, skill *models.Skill) error {
 	if skill.Slug != "" {
-		return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
+		return s.validateSlugUnique(skill.Slug, skill.ID)
 	}
 	return nil
 }
 
-func (s *Service) validateSlugUnique(ctx context.Context, wsID, slug, excludeID string) error {
-	existing, err := s.repo.GetSkillBySlug(ctx, wsID, slug)
-	if err != nil {
-		return fmt.Errorf("checking slug uniqueness: %w", err)
+func (s *Service) validateSlugUnique(slug, excludeID string) error {
+	if s.cfgLoader == nil {
+		return nil
 	}
-	if existing != nil && existing.ID != excludeID {
-		return fmt.Errorf("skill slug %q already exists in this workspace", slug)
+	for _, si := range s.cfgLoader.GetSkills(defaultWorkspaceName) {
+		if si.Slug == slug && si.ID != excludeID {
+			return fmt.Errorf("skill slug %q already exists in this workspace", slug)
+		}
 	}
 	return nil
 }

@@ -88,8 +88,8 @@ func (s *Service) ExportBundle(ctx context.Context, workspaceID string) (*Config
 	return bundle, nil
 }
 
-func (s *Service) exportAgents(ctx context.Context, wsID string, bundle *ConfigBundle) error {
-	agents, err := s.repo.ListAgentInstances(ctx, wsID)
+func (s *Service) exportAgents(ctx context.Context, _ string, bundle *ConfigBundle) error {
+	agents, err := s.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}
@@ -114,8 +114,8 @@ func (s *Service) exportAgents(ctx context.Context, wsID string, bundle *ConfigB
 	return nil
 }
 
-func (s *Service) exportSkills(ctx context.Context, wsID string, bundle *ConfigBundle) error {
-	skills, err := s.repo.ListSkills(ctx, wsID)
+func (s *Service) exportSkills(ctx context.Context, _ string, bundle *ConfigBundle) error {
+	skills, err := s.ListSkillsFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list skills: %w", err)
 	}
@@ -132,12 +132,12 @@ func (s *Service) exportSkills(ctx context.Context, wsID string, bundle *ConfigB
 	return nil
 }
 
-func (s *Service) exportRoutines(ctx context.Context, wsID string, bundle *ConfigBundle) error {
-	routines, err := s.repo.ListRoutines(ctx, wsID)
+func (s *Service) exportRoutines(ctx context.Context, _ string, bundle *ConfigBundle) error {
+	routines, err := s.ListRoutinesFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list routines: %w", err)
 	}
-	agents, err := s.repo.ListAgentInstances(ctx, wsID)
+	agents, err := s.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list agents for routine resolution: %w", err)
 	}
@@ -158,12 +158,12 @@ func (s *Service) exportRoutines(ctx context.Context, wsID string, bundle *Confi
 	return nil
 }
 
-func (s *Service) exportProjects(ctx context.Context, wsID string, bundle *ConfigBundle) error {
-	projects, err := s.repo.ListProjects(ctx, wsID)
+func (s *Service) exportProjects(ctx context.Context, _ string, bundle *ConfigBundle) error {
+	projects, err := s.ListProjectsFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list projects: %w", err)
 	}
-	agents, err := s.repo.ListAgentInstances(ctx, wsID)
+	agents, err := s.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list agents for project resolution: %w", err)
 	}

@@ -6,7 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
+	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
 	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
@@ -45,9 +50,20 @@ func TestListAgentsFromConfig(t *testing.T) {
 }
 
 func TestListAgentsFromConfig_NoLoader(t *testing.T) {
-	svc := newTestService(t) // no config loader
-	_, err := svc.ListAgentsFromConfig(context.Background(), "any")
-	if err == nil {
+	// Build a minimal service without a config loader to test the error path.
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	repo, err := sqlite.NewWithDB(db, db)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	svc := service.NewService(repo, logger.Default())
+	// Deliberately do NOT set ConfigLoader.
+	_, listErr := svc.ListAgentsFromConfig(context.Background(), "any")
+	if listErr == nil {
 		t.Error("expected error when config loader not initialized")
 	}
 }

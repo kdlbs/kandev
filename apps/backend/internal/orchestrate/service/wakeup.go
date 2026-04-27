@@ -97,8 +97,8 @@ func (s *Service) QueueWakeup(
 }
 
 // guardAgentStatus returns an error if the agent is paused or stopped.
-func (s *Service) guardAgentStatus(ctx context.Context, agentInstanceID string) error {
-	agent, err := s.repo.GetAgentInstance(ctx, agentInstanceID)
+func (s *Service) guardAgentStatus(_ context.Context, agentInstanceID string) error {
+	agent, err := s.GetAgentFromConfig(context.Background(), agentInstanceID)
 	if err != nil {
 		return fmt.Errorf("get agent instance: %w", err)
 	}

@@ -54,7 +54,7 @@ func (h *Handlers) getRoutine(c *gin.Context) {
 func (h *Handlers) updateRoutine(c *gin.Context) {
 	ctx := c.Request.Context()
 	routineID := c.Param("id")
-	routine, err := h.ctrl.Svc.GetRoutine(ctx, routineID)
+	routine, err := h.ctrl.Svc.GetRoutineFromConfig(ctx, routineID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

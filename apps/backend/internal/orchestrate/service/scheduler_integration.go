@@ -76,7 +76,7 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 	agentInstanceID := wakeup.AgentInstanceID
 
 	// Guard: check agent status.
-	agent, err := si.svc.repo.GetAgentInstance(ctx, agentInstanceID)
+	agent, err := si.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
 			zap.String("wakeup_id", wakeupID), zap.Error(err))
@@ -238,12 +238,9 @@ func (si *SchedulerIntegration) finishWakeup(
 
 	si.releaseCheckoutIfNeeded(ctx, taskID)
 
-	// Record cooldown timestamp.
+	// Record cooldown timestamp in-memory.
 	now := time.Now().UTC()
-	if err := si.svc.repo.UpdateLastWakeupFinished(ctx, agent.ID, now); err != nil {
-		si.logger.Error("failed to update last wakeup finished",
-			zap.String("agent_id", agent.ID), zap.Error(err))
-	}
+	agent.LastWakeupFinishedAt = &now
 
 	si.svc.LogActivity(ctx, agent.WorkspaceID,
 		"scheduler", "orchestrate-scheduler",
@@ -342,7 +339,7 @@ func (si *SchedulerIntegration) enrichTaskContext(
 	pc.TaskPriority = info.Priority
 
 	if info.ProjectID != "" {
-		project, projErr := si.svc.repo.GetProject(ctx, info.ProjectID)
+		project, projErr := si.svc.GetProjectFromConfig(ctx, info.ProjectID)
 		if projErr == nil && project != nil {
 			pc.ProjectName = project.Name
 		}

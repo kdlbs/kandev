@@ -193,8 +193,8 @@ func (s *Service) CheckPreExecutionBudget(
 	return true, "", nil
 }
 
-func (s *Service) pauseAgentForBudget(ctx context.Context, agentID string) bool {
-	agent, err := s.repo.GetAgentInstance(ctx, agentID)
+func (s *Service) pauseAgentForBudget(_ context.Context, agentID string) bool {
+	agent, err := s.getAgentFromCacheMutable(agentID)
 	if err != nil {
 		s.logger.Error("failed to get agent for budget pause",
 			zap.String("agent_id", agentID), zap.Error(err))
@@ -205,11 +205,6 @@ func (s *Service) pauseAgentForBudget(ctx context.Context, agentID string) bool 
 	}
 	agent.Status = models.AgentStatusPaused
 	agent.PauseReason = "budget_exceeded"
-	if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
-		s.logger.Error("failed to pause agent for budget",
-			zap.String("agent_id", agentID), zap.Error(err))
-		return false
-	}
 	s.logger.Info("agent paused due to budget exceeded",
 		zap.String("agent_id", agentID))
 	return true

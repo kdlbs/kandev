@@ -66,8 +66,8 @@ func allKnownSkillDirs() []string {
 }
 
 // InjectSkillsForAgent symlinks desired skills into the agent's skill dirs.
-func (s *Service) InjectSkillsForAgent(ctx context.Context, agentInstanceID, workspaceName string) error {
-	agent, err := s.repo.GetAgentInstance(ctx, agentInstanceID)
+func (s *Service) InjectSkillsForAgent(_ context.Context, agentInstanceID, workspaceName string) error {
+	agent, err := s.GetAgentFromConfig(context.Background(), agentInstanceID)
 	if err != nil {
 		return fmt.Errorf("get agent instance: %w", err)
 	}

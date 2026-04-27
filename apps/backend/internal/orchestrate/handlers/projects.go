@@ -63,7 +63,7 @@ func (h *Handlers) updateProject(c *gin.Context) {
 
 func (h *Handlers) doUpdateProject(c *gin.Context) (*models.Project, int, error) {
 	ctx := c.Request.Context()
-	project, err := h.ctrl.Svc.GetProject(ctx, c.Param("id"))
+	project, err := h.ctrl.Svc.GetProjectFromConfig(ctx, c.Param("id"))
 	if err != nil {
 		return nil, http.StatusNotFound, err
 	}

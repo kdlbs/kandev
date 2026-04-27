@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/orchestrate/models"
-	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
-
-	"go.uber.org/zap"
 )
 
 // Orchestrate event types (local to service; events/types.go is not modified).
@@ -85,10 +84,16 @@ func defaultPermsForRole(role models.AgentRole) map[string]interface{} {
 	}
 }
 
-// CreateAgentInstance validates and creates a new agent instance.
+// CreateAgentInstance validates and creates a new agent instance via the filesystem.
 func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentInstance) error {
 	if err := s.validateAgentCreate(ctx, agent); err != nil {
 		return err
+	}
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
+	}
+	if agent.ID == "" {
+		agent.ID = uuid.New().String()
 	}
 	if agent.Permissions == "" || agent.Permissions == "{}" {
 		agent.Permissions = DefaultPermissions(agent.Role)
@@ -105,57 +110,84 @@ func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentIn
 	if agent.ExecutorPreference == "" {
 		agent.ExecutorPreference = "{}"
 	}
-	if err := s.repo.CreateAgentInstance(ctx, agent); err != nil {
-		return err
-	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
-			s.logger.Warn("failed to write agent to filesystem",
-				zap.String("name", agent.Name), zap.Error(err))
-		}
+	now := time.Now().UTC()
+	agent.CreatedAt = now
+	agent.UpdatedAt = now
+	if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
+		return fmt.Errorf("write agent: %w", err)
 	}
 	return nil
 }
 
-// GetAgentInstance returns an agent instance by ID.
+// GetAgentInstance returns an agent instance by ID from the ConfigLoader.
 func (s *Service) GetAgentInstance(ctx context.Context, id string) (*models.AgentInstance, error) {
-	return s.repo.GetAgentInstance(ctx, id)
+	return s.GetAgentFromConfig(ctx, id)
 }
 
-// ListAgentInstances returns all agent instances for a workspace.
-func (s *Service) ListAgentInstances(ctx context.Context, workspaceID string) ([]*models.AgentInstance, error) {
-	return s.repo.ListAgentInstances(ctx, workspaceID)
+// ListAgentInstances returns all agent instances for a workspace from the ConfigLoader.
+func (s *Service) ListAgentInstances(ctx context.Context, wsID string) ([]*models.AgentInstance, error) {
+	return s.ListAgentsFromConfig(ctx, wsID)
 }
 
-// ListAgentInstancesFiltered returns filtered agents.
+// AgentListFilter specifies optional filters for listing agents.
+type AgentListFilter struct {
+	Role      string
+	Status    string
+	ReportsTo string
+}
+
+// ListAgentInstancesFiltered returns agents matching the given filters from ConfigLoader.
 func (s *Service) ListAgentInstancesFiltered(
-	ctx context.Context, workspaceID string, filter sqlite.AgentListFilter,
+	_ context.Context, _ string, filter AgentListFilter,
 ) ([]*models.AgentInstance, error) {
-	return s.repo.ListAgentInstancesFiltered(ctx, workspaceID, filter)
+	if s.cfgLoader == nil {
+		return nil, fmt.Errorf("config loader not initialized")
+	}
+	all := s.cfgLoader.GetAgents(defaultWorkspaceName)
+	return filterAgents(all, filter), nil
 }
 
-// UpdateAgentInstance validates and updates an existing agent instance.
+func filterAgents(agents []*models.AgentInstance, f AgentListFilter) []*models.AgentInstance {
+	var result []*models.AgentInstance
+	for _, a := range agents {
+		if f.Role != "" && string(a.Role) != f.Role {
+			continue
+		}
+		if f.Status != "" && string(a.Status) != f.Status {
+			continue
+		}
+		if f.ReportsTo != "" && a.ReportsTo != f.ReportsTo {
+			continue
+		}
+		result = append(result, a)
+	}
+	if result == nil {
+		result = []*models.AgentInstance{}
+	}
+	return result
+}
+
+// UpdateAgentInstance validates and updates an existing agent instance via the filesystem.
 func (s *Service) UpdateAgentInstance(ctx context.Context, agent *models.AgentInstance) error {
 	if err := s.validateAgentUpdate(ctx, agent); err != nil {
 		return err
 	}
-	if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
-		return err
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
-			s.logger.Warn("failed to write agent to filesystem",
-				zap.String("name", agent.Name), zap.Error(err))
-		}
+	agent.UpdatedAt = time.Now().UTC()
+	if err := s.cfgWriter.WriteAgent(defaultWorkspaceName, agent); err != nil {
+		return fmt.Errorf("write agent: %w", err)
 	}
 	return nil
 }
 
-// UpdateAgentStatus validates a status transition and updates the agent.
+// UpdateAgentStatus validates a status transition and updates the agent in-memory.
+// Status is runtime state -- not persisted to YAML, reconstructable on restart.
 func (s *Service) UpdateAgentStatus(
-	ctx context.Context, id string, newStatus models.AgentStatus, pauseReason string,
+	_ context.Context, id string, newStatus models.AgentStatus, pauseReason string,
 ) (*models.AgentInstance, error) {
-	agent, err := s.repo.GetAgentInstance(ctx, id)
+	agent, err := s.getAgentFromCacheMutable(id)
 	if err != nil {
 		return nil, err
 	}
@@ -164,34 +196,40 @@ func (s *Service) UpdateAgentStatus(
 	}
 	agent.Status = newStatus
 	agent.PauseReason = pauseReason
-	if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
-		return nil, err
-	}
 	return agent, nil
 }
 
-// DeleteAgentInstance deletes an agent instance.
-func (s *Service) DeleteAgentInstance(ctx context.Context, id string) error {
-	var agentName string
-	if s.cfgWriter != nil {
-		if agent, err := s.repo.GetAgentInstance(ctx, id); err == nil {
-			agentName = agent.Name
+// getAgentFromCacheMutable returns a pointer to the agent in the ConfigLoader cache.
+// The caller can mutate runtime fields (status, pause reason) directly.
+func (s *Service) getAgentFromCacheMutable(id string) (*models.AgentInstance, error) {
+	if s.cfgLoader == nil {
+		return nil, fmt.Errorf("config loader not initialized")
+	}
+	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
+		if a.ID == id || a.Name == id {
+			return a, nil
 		}
 	}
-	if err := s.repo.DeleteAgentInstance(ctx, id); err != nil {
+	return nil, fmt.Errorf("agent not found: %s", id)
+}
+
+// DeleteAgentInstance deletes an agent instance from the filesystem.
+func (s *Service) DeleteAgentInstance(_ context.Context, id string) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
+	}
+	agent, err := s.GetAgentFromConfig(context.Background(), id)
+	if err != nil {
 		return err
 	}
-	if s.cfgWriter != nil && agentName != "" {
-		if err := s.cfgWriter.DeleteAgent(defaultWorkspaceName, agentName); err != nil {
-			s.logger.Warn("failed to delete agent from filesystem",
-				zap.String("name", agentName), zap.Error(err))
-		}
+	if err := s.cfgWriter.DeleteAgent(defaultWorkspaceName, agent.Name); err != nil {
+		return fmt.Errorf("delete agent: %w", err)
 	}
 	return nil
 }
 
 // validateAgentCreate checks all business rules for creating an agent.
-func (s *Service) validateAgentCreate(ctx context.Context, agent *models.AgentInstance) error {
+func (s *Service) validateAgentCreate(_ context.Context, agent *models.AgentInstance) error {
 	if agent.Name == "" {
 		return ErrAgentNameRequired
 	}
@@ -199,22 +237,23 @@ func (s *Service) validateAgentCreate(ctx context.Context, agent *models.AgentIn
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
-		count, err := s.repo.CountAgentInstancesByRole(ctx, agent.WorkspaceID, models.AgentRoleCEO)
-		if err != nil {
-			return fmt.Errorf("checking CEO count: %w", err)
-		}
-		if count > 0 {
+		if s.countAgentsByRole(models.AgentRoleCEO, "") > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
 	}
+	if agent.Name != "" {
+		if err := s.validateAgentNameUnique(agent.Name, ""); err != nil {
+			return err
+		}
+	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.WorkspaceID, agent.ReportsTo, "")
+		return s.validateReportsTo(agent.ReportsTo, "")
 	}
 	return nil
 }
 
 // validateAgentUpdate checks business rules for updating an agent.
-func (s *Service) validateAgentUpdate(ctx context.Context, agent *models.AgentInstance) error {
+func (s *Service) validateAgentUpdate(_ context.Context, agent *models.AgentInstance) error {
 	if agent.Name == "" {
 		return ErrAgentNameRequired
 	}
@@ -222,31 +261,50 @@ func (s *Service) validateAgentUpdate(ctx context.Context, agent *models.AgentIn
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
-		count, err := s.repo.CountAgentInstancesByRoleExcluding(
-			ctx, agent.WorkspaceID, models.AgentRoleCEO, agent.ID)
-		if err != nil {
-			return fmt.Errorf("checking CEO count: %w", err)
-		}
-		if count > 0 {
+		if s.countAgentsByRole(models.AgentRoleCEO, agent.ID) > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
 	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.WorkspaceID, agent.ReportsTo, agent.ID)
+		return s.validateReportsTo(agent.ReportsTo, agent.ID)
 	}
 	return nil
 }
 
-// validateReportsTo ensures the target agent exists in the same workspace.
-func (s *Service) validateReportsTo(ctx context.Context, wsID, reportsTo, selfID string) error {
+// countAgentsByRole counts agents with a role, optionally excluding one ID.
+func (s *Service) countAgentsByRole(role models.AgentRole, excludeID string) int {
+	if s.cfgLoader == nil {
+		return 0
+	}
+	count := 0
+	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
+		if a.Role == role && a.ID != excludeID {
+			count++
+		}
+	}
+	return count
+}
+
+// validateAgentNameUnique ensures no other agent has the same name.
+func (s *Service) validateAgentNameUnique(name, excludeID string) error {
+	if s.cfgLoader == nil {
+		return nil
+	}
+	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
+		if a.Name == name && a.ID != excludeID {
+			return fmt.Errorf("agent name %q already exists", name)
+		}
+	}
+	return nil
+}
+
+// validateReportsTo ensures the target agent exists.
+func (s *Service) validateReportsTo(reportsTo, selfID string) error {
 	if selfID != "" && reportsTo == selfID {
 		return ErrAgentReportsToSelf
 	}
-	parent, err := s.repo.GetAgentInstance(ctx, reportsTo)
+	_, err := s.GetAgentFromConfig(context.Background(), reportsTo)
 	if err != nil {
-		return ErrAgentReportsToInvalid
-	}
-	if parent.WorkspaceID != wsID {
 		return ErrAgentReportsToInvalid
 	}
 	return nil

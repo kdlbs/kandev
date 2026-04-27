@@ -60,14 +60,13 @@ func (r *Repository) GetTriggerByPublicID(ctx context.Context, publicID string) 
 }
 
 // GetDueTriggers returns cron triggers that are due to fire.
+// Routine status filtering is done in the service layer via ConfigLoader.
 func (r *Repository) GetDueTriggers(ctx context.Context, now time.Time) ([]*models.RoutineTrigger, error) {
 	var triggers []*models.RoutineTrigger
 	err := r.ro.SelectContext(ctx, &triggers, r.ro.Rebind(`
-		SELECT t.* FROM orchestrate_routine_triggers t
-		JOIN orchestrate_routines r ON t.routine_id = r.id
-		WHERE t.kind = 'cron' AND t.enabled = 1
-		  AND r.status = 'active'
-		  AND t.next_run_at IS NOT NULL AND t.next_run_at <= ?
+		SELECT * FROM orchestrate_routine_triggers
+		WHERE kind = 'cron' AND enabled = 1
+		  AND next_run_at IS NOT NULL AND next_run_at <= ?
 	`), now)
 	if err != nil {
 		return nil, err
@@ -213,15 +212,13 @@ func (r *Repository) ListRuns(ctx context.Context, routineID string, limit, offs
 	return runs, nil
 }
 
-// ListAllRuns returns recent runs across all routines in a workspace.
-func (r *Repository) ListAllRuns(ctx context.Context, wsID string, limit int) ([]*models.RoutineRun, error) {
+// ListAllRuns returns recent runs across all routines.
+func (r *Repository) ListAllRuns(ctx context.Context, _ string, limit int) ([]*models.RoutineRun, error) {
 	var runs []*models.RoutineRun
 	err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(`
-		SELECT rr.* FROM orchestrate_routine_runs rr
-		JOIN orchestrate_routines rt ON rr.routine_id = rt.id
-		WHERE rt.workspace_id = ?
-		ORDER BY rr.created_at DESC LIMIT ?
-	`), wsID, limit)
+		SELECT * FROM orchestrate_routine_runs
+		ORDER BY created_at DESC LIMIT ?
+	`), limit)
 	if err != nil {
 		return nil, err
 	}

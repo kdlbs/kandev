@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
@@ -105,83 +107,91 @@ const defaultWorkspaceName = "default"
 
 // -- Skills --
 
-// CreateSkill creates a new skill and writes it to the filesystem.
-func (s *Service) CreateSkill(ctx context.Context, skill *models.Skill) error {
-	if err := s.repo.CreateSkill(ctx, skill); err != nil {
-		return err
+// CreateSkill creates a new skill via the filesystem.
+func (s *Service) CreateSkill(_ context.Context, skill *models.Skill) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if s.cfgWriter != nil && skill.Content != "" {
-		if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, skill.Content); err != nil {
-			s.logger.Warn("failed to write skill to filesystem",
-				zap.String("slug", skill.Slug),
-				zap.Error(err))
-		}
+	// Skill ID matches slug for filesystem-based identity.
+	if skill.ID == "" {
+		skill.ID = skill.Slug
 	}
-	return nil
-}
-
-// GetSkill returns a skill by ID.
-func (s *Service) GetSkill(ctx context.Context, id string) (*models.Skill, error) {
-	return s.repo.GetSkill(ctx, id)
-}
-
-// ListSkills returns all skills for a workspace.
-func (s *Service) ListSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error) {
-	return s.repo.ListSkills(ctx, workspaceID)
-}
-
-// UpdateSkill updates a skill.
-func (s *Service) UpdateSkill(ctx context.Context, skill *models.Skill) error {
-	if err := s.repo.UpdateSkill(ctx, skill); err != nil {
-		return err
+	now := time.Now().UTC()
+	skill.CreatedAt = now
+	skill.UpdatedAt = now
+	// Always write SKILL.md so the skill is registered on disk.
+	content := skill.Content
+	if content == "" {
+		content = "# " + skill.Name + "\n"
 	}
-	if s.cfgWriter != nil && skill.Content != "" {
-		if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, skill.Content); err != nil {
-			s.logger.Warn("failed to write skill to filesystem",
-				zap.String("slug", skill.Slug), zap.Error(err))
-		}
+	if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, content); err != nil {
+		return fmt.Errorf("write skill: %w", err)
 	}
 	return nil
 }
 
-// DeleteSkill deletes a skill.
-func (s *Service) DeleteSkill(ctx context.Context, id string) error {
-	var slug string
-	if s.cfgWriter != nil {
-		if skill, err := s.repo.GetSkill(ctx, id); err == nil {
-			slug = skill.Slug
-		}
+// GetSkill returns a skill by ID from the ConfigLoader.
+func (s *Service) GetSkill(_ context.Context, id string) (*models.Skill, error) {
+	return s.GetSkillFromConfig(context.Background(), id)
+}
+
+// ListSkills returns all skills for a workspace from the ConfigLoader.
+func (s *Service) ListSkills(_ context.Context, _ string) ([]*models.Skill, error) {
+	return s.ListSkillsFromConfig(context.Background(), "")
+}
+
+// UpdateSkill updates a skill via the filesystem.
+func (s *Service) UpdateSkill(_ context.Context, skill *models.Skill) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if err := s.repo.DeleteSkill(ctx, id); err != nil {
+	skill.UpdatedAt = time.Now().UTC()
+	content := skill.Content
+	if content == "" {
+		content = "# " + skill.Name + "\n"
+	}
+	if err := s.cfgWriter.WriteSkill(defaultWorkspaceName, skill.Slug, content); err != nil {
+		return fmt.Errorf("write skill: %w", err)
+	}
+	return nil
+}
+
+// DeleteSkill deletes a skill from the filesystem.
+func (s *Service) DeleteSkill(_ context.Context, id string) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
+	}
+	skill, err := s.GetSkillFromConfig(context.Background(), id)
+	if err != nil {
 		return err
 	}
-	if s.cfgWriter != nil && slug != "" {
-		if err := s.cfgWriter.DeleteSkill(defaultWorkspaceName, slug); err != nil {
-			s.logger.Warn("failed to delete skill from filesystem",
-				zap.String("slug", slug), zap.Error(err))
-		}
+	if err := s.cfgWriter.DeleteSkill(defaultWorkspaceName, skill.Slug); err != nil {
+		return fmt.Errorf("delete skill: %w", err)
 	}
 	return nil
 }
 
 // -- Projects --
 
-// CreateProject validates and creates a new project.
-func (s *Service) CreateProject(ctx context.Context, project *models.Project) error {
+// CreateProject validates and creates a new project via the filesystem.
+func (s *Service) CreateProject(_ context.Context, project *models.Project) error {
 	if err := s.validateProject(project); err != nil {
 		return err
+	}
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
+	}
+	if project.ID == "" {
+		project.ID = uuid.New().String()
 	}
 	if project.Status == "" {
 		project.Status = models.ProjectStatusActive
 	}
-	if err := s.repo.CreateProject(ctx, project); err != nil {
-		return err
-	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
-			s.logger.Warn("failed to write project to filesystem",
-				zap.String("name", project.Name), zap.Error(err))
-		}
+	now := time.Now().UTC()
+	project.CreatedAt = now
+	project.UpdatedAt = now
+	if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
+		return fmt.Errorf("write project: %w", err)
 	}
 	s.logger.Info("project created",
 		zap.String("project_id", project.ID),
@@ -189,19 +199,19 @@ func (s *Service) CreateProject(ctx context.Context, project *models.Project) er
 	return nil
 }
 
-// GetProject returns a project by ID.
-func (s *Service) GetProject(ctx context.Context, id string) (*models.Project, error) {
-	return s.repo.GetProject(ctx, id)
+// GetProject returns a project by ID from the ConfigLoader.
+func (s *Service) GetProject(_ context.Context, id string) (*models.Project, error) {
+	return s.GetProjectFromConfig(context.Background(), id)
 }
 
-// ListProjects returns all projects for a workspace.
-func (s *Service) ListProjects(ctx context.Context, workspaceID string) ([]*models.Project, error) {
-	return s.repo.ListProjects(ctx, workspaceID)
+// ListProjects returns all projects for a workspace from the ConfigLoader.
+func (s *Service) ListProjects(_ context.Context, _ string) ([]*models.Project, error) {
+	return s.ListProjectsFromConfig(context.Background(), "")
 }
 
 // ListProjectsWithCounts returns all projects with aggregated task counts.
-func (s *Service) ListProjectsWithCounts(ctx context.Context, workspaceID string) ([]*models.ProjectWithCounts, error) {
-	return s.repo.ListProjectsWithCounts(ctx, workspaceID)
+func (s *Service) ListProjectsWithCounts(ctx context.Context, _ string) ([]*models.ProjectWithCounts, error) {
+	return s.ListProjectsWithCountsFromConfig(ctx, "")
 }
 
 // GetTaskCounts returns task status counts for a project.
@@ -209,19 +219,17 @@ func (s *Service) GetTaskCounts(ctx context.Context, projectID string) (*models.
 	return s.repo.GetTaskCounts(ctx, projectID)
 }
 
-// UpdateProject validates and updates a project.
-func (s *Service) UpdateProject(ctx context.Context, project *models.Project) error {
+// UpdateProject validates and updates a project via the filesystem.
+func (s *Service) UpdateProject(_ context.Context, project *models.Project) error {
 	if err := s.validateProject(project); err != nil {
 		return err
 	}
-	if err := s.repo.UpdateProject(ctx, project); err != nil {
-		return err
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
-			s.logger.Warn("failed to write project to filesystem",
-				zap.String("name", project.Name), zap.Error(err))
-		}
+	project.UpdatedAt = time.Now().UTC()
+	if err := s.cfgWriter.WriteProject(defaultWorkspaceName, project); err != nil {
+		return fmt.Errorf("write project: %w", err)
 	}
 	s.logger.Info("project updated",
 		zap.String("project_id", project.ID),
@@ -229,22 +237,17 @@ func (s *Service) UpdateProject(ctx context.Context, project *models.Project) er
 	return nil
 }
 
-// DeleteProject deletes a project.
-func (s *Service) DeleteProject(ctx context.Context, id string) error {
-	var projectName string
-	if s.cfgWriter != nil {
-		if project, err := s.repo.GetProject(ctx, id); err == nil {
-			projectName = project.Name
-		}
+// DeleteProject deletes a project from the filesystem.
+func (s *Service) DeleteProject(_ context.Context, id string) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if err := s.repo.DeleteProject(ctx, id); err != nil {
+	project, err := s.GetProjectFromConfig(context.Background(), id)
+	if err != nil {
 		return err
 	}
-	if s.cfgWriter != nil && projectName != "" {
-		if err := s.cfgWriter.DeleteProject(defaultWorkspaceName, projectName); err != nil {
-			s.logger.Warn("failed to delete project from filesystem",
-				zap.String("name", projectName), zap.Error(err))
-		}
+	if err := s.cfgWriter.DeleteProject(defaultWorkspaceName, project.Name); err != nil {
+		return fmt.Errorf("delete project: %w", err)
 	}
 	return nil
 }
@@ -329,60 +332,56 @@ func (s *Service) DeleteBudgetPolicy(ctx context.Context, id string) error {
 
 // -- Routines --
 
-// CreateRoutine creates a new routine.
-func (s *Service) CreateRoutine(ctx context.Context, routine *models.Routine) error {
-	if err := s.repo.CreateRoutine(ctx, routine); err != nil {
-		return err
+// CreateRoutine creates a new routine via the filesystem.
+func (s *Service) CreateRoutine(_ context.Context, routine *models.Routine) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
-			s.logger.Warn("failed to write routine to filesystem",
-				zap.String("name", routine.Name), zap.Error(err))
-		}
+	if routine.ID == "" {
+		routine.ID = uuid.New().String()
 	}
-	return nil
-}
-
-// GetRoutine returns a routine by ID.
-func (s *Service) GetRoutine(ctx context.Context, id string) (*models.Routine, error) {
-	return s.repo.GetRoutine(ctx, id)
-}
-
-// ListRoutines returns all routines for a workspace.
-func (s *Service) ListRoutines(ctx context.Context, wsID string) ([]*models.Routine, error) {
-	return s.repo.ListRoutines(ctx, wsID)
-}
-
-// UpdateRoutine updates a routine.
-func (s *Service) UpdateRoutine(ctx context.Context, routine *models.Routine) error {
-	if err := s.repo.UpdateRoutine(ctx, routine); err != nil {
-		return err
-	}
-	if s.cfgWriter != nil {
-		if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
-			s.logger.Warn("failed to write routine to filesystem",
-				zap.String("name", routine.Name), zap.Error(err))
-		}
+	now := time.Now().UTC()
+	routine.CreatedAt = now
+	routine.UpdatedAt = now
+	if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
+		return fmt.Errorf("write routine: %w", err)
 	}
 	return nil
 }
 
-// DeleteRoutine deletes a routine.
-func (s *Service) DeleteRoutine(ctx context.Context, id string) error {
-	var routineName string
-	if s.cfgWriter != nil {
-		if routine, err := s.repo.GetRoutine(ctx, id); err == nil {
-			routineName = routine.Name
-		}
+// GetRoutine returns a routine by ID from the ConfigLoader.
+func (s *Service) GetRoutine(_ context.Context, id string) (*models.Routine, error) {
+	return s.GetRoutineFromConfig(context.Background(), id)
+}
+
+// ListRoutines returns all routines for a workspace from the ConfigLoader.
+func (s *Service) ListRoutines(_ context.Context, _ string) ([]*models.Routine, error) {
+	return s.ListRoutinesFromConfig(context.Background(), "")
+}
+
+// UpdateRoutine updates a routine via the filesystem.
+func (s *Service) UpdateRoutine(_ context.Context, routine *models.Routine) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
 	}
-	if err := s.repo.DeleteRoutine(ctx, id); err != nil {
+	routine.UpdatedAt = time.Now().UTC()
+	if err := s.cfgWriter.WriteRoutine(defaultWorkspaceName, routine); err != nil {
+		return fmt.Errorf("write routine: %w", err)
+	}
+	return nil
+}
+
+// DeleteRoutine deletes a routine from the filesystem.
+func (s *Service) DeleteRoutine(_ context.Context, id string) error {
+	if s.cfgWriter == nil {
+		return fmt.Errorf("config writer not initialized")
+	}
+	routine, err := s.GetRoutineFromConfig(context.Background(), id)
+	if err != nil {
 		return err
 	}
-	if s.cfgWriter != nil && routineName != "" {
-		if err := s.cfgWriter.DeleteRoutine(defaultWorkspaceName, routineName); err != nil {
-			s.logger.Warn("failed to delete routine from filesystem",
-				zap.String("name", routineName), zap.Error(err))
-		}
+	if err := s.cfgWriter.DeleteRoutine(defaultWorkspaceName, routine.Name); err != nil {
+		return fmt.Errorf("delete routine: %w", err)
 	}
 	return nil
 }
@@ -463,7 +462,7 @@ func (s *Service) SearchTasks(ctx context.Context, wsID, query string, limit int
 
 // GetDashboard returns dashboard summary data for a workspace.
 func (s *Service) GetDashboard(ctx context.Context, wsID string) (int, int, int, []*models.ActivityEntry, error) {
-	agents, err := s.repo.ListAgentInstances(ctx, wsID)
+	agents, err := s.ListAgentsFromConfig(ctx, wsID)
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}

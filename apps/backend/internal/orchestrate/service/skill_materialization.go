@@ -22,7 +22,7 @@ type SkillDir struct {
 func (s *Service) MaterializeSkills(ctx context.Context, skillIDs []string, cacheDir string) ([]SkillDir, error) {
 	var dirs []SkillDir
 	for _, id := range skillIDs {
-		skill, err := s.repo.GetSkill(ctx, id)
+		skill, err := s.GetSkillFromConfig(ctx, id)
 		if err != nil {
 			s.logger.Warn("skipping skill: " + err.Error())
 			continue
@@ -39,7 +39,7 @@ func (s *Service) MaterializeSkills(ctx context.Context, skillIDs []string, cach
 
 func (s *Service) materializeSkill(skill *models.Skill, cacheDir string) (SkillDir, error) {
 	switch skill.SourceType {
-	case "inline":
+	case "inline", "filesystem":
 		return materializeInline(skill, cacheDir)
 	case "local_path":
 		return materializeLocalPath(skill)

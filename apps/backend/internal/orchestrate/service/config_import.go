@@ -49,9 +49,9 @@ func (s *Service) PreviewImport(
 }
 
 func (s *Service) previewAgents(
-	ctx context.Context, wsID string, incoming []AgentConfig, diff *ImportDiff,
+	ctx context.Context, _ string, incoming []AgentConfig, diff *ImportDiff,
 ) error {
-	existing, err := s.repo.ListAgentInstances(ctx, wsID)
+	existing, err := s.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -70,9 +70,9 @@ func (s *Service) previewAgents(
 }
 
 func (s *Service) previewSkills(
-	ctx context.Context, wsID string, incoming []SkillConfig, diff *ImportDiff,
+	ctx context.Context, _ string, incoming []SkillConfig, diff *ImportDiff,
 ) error {
-	existing, err := s.repo.ListSkills(ctx, wsID)
+	existing, err := s.ListSkillsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -91,9 +91,9 @@ func (s *Service) previewSkills(
 }
 
 func (s *Service) previewRoutines(
-	ctx context.Context, wsID string, incoming []RoutineConfig, diff *ImportDiff,
+	ctx context.Context, _ string, incoming []RoutineConfig, diff *ImportDiff,
 ) error {
-	existing, err := s.repo.ListRoutines(ctx, wsID)
+	existing, err := s.ListRoutinesFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -112,9 +112,9 @@ func (s *Service) previewRoutines(
 }
 
 func (s *Service) previewProjects(
-	ctx context.Context, wsID string, incoming []ProjectConfig, diff *ImportDiff,
+	ctx context.Context, _ string, incoming []ProjectConfig, diff *ImportDiff,
 ) error {
-	existing, err := s.repo.ListProjects(ctx, wsID)
+	existing, err := s.ListProjectsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (s *Service) ApplyImport(
 func (s *Service) applyAgents(
 	ctx context.Context, wsID string, incoming []AgentConfig, result *ImportResult,
 ) error {
-	existing, err := s.repo.ListAgentInstances(ctx, wsID)
+	existing, err := s.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (s *Service) applyAgents(
 			agent.MaxConcurrentSessions = cfg.MaxConcurrentSessions
 			agent.DesiredSkills = cfg.DesiredSkills
 			agent.ExecutorPreference = cfg.ExecutorPreference
-			if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
+			if err := s.UpdateAgentInstance(ctx, agent); err != nil {
 				return err
 			}
 			result.UpdatedCount++
@@ -193,7 +193,7 @@ func (s *Service) applyAgents(
 				DesiredSkills:         cfg.DesiredSkills,
 				ExecutorPreference:    cfg.ExecutorPreference,
 			}
-			if err := s.repo.CreateAgentInstance(ctx, agent); err != nil {
+			if err := s.CreateAgentInstance(ctx, agent); err != nil {
 				return err
 			}
 			result.CreatedCount++
@@ -203,9 +203,9 @@ func (s *Service) applyAgents(
 }
 
 func (s *Service) applySkills(
-	ctx context.Context, wsID string, incoming []SkillConfig, result *ImportResult,
+	ctx context.Context, _ string, incoming []SkillConfig, result *ImportResult,
 ) error {
-	existing, err := s.repo.ListSkills(ctx, wsID)
+	existing, err := s.ListSkillsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -219,20 +219,19 @@ func (s *Service) applySkills(
 			skill.Description = cfg.Description
 			skill.SourceType = cfg.SourceType
 			skill.Content = cfg.Content
-			if err := s.repo.UpdateSkill(ctx, skill); err != nil {
+			if err := s.UpdateSkill(ctx, skill); err != nil {
 				return err
 			}
 			result.UpdatedCount++
 		} else {
 			skill := &models.Skill{
-				WorkspaceID: wsID,
 				Name:        cfg.Name,
 				Slug:        cfg.Slug,
 				Description: cfg.Description,
 				SourceType:  cfg.SourceType,
 				Content:     cfg.Content,
 			}
-			if err := s.repo.CreateSkill(ctx, skill); err != nil {
+			if err := s.CreateSkill(ctx, skill); err != nil {
 				return err
 			}
 			result.CreatedCount++
@@ -242,9 +241,9 @@ func (s *Service) applySkills(
 }
 
 func (s *Service) applyRoutines(
-	ctx context.Context, wsID string, incoming []RoutineConfig, result *ImportResult,
+	ctx context.Context, _ string, incoming []RoutineConfig, result *ImportResult,
 ) error {
-	existing, err := s.repo.ListRoutines(ctx, wsID)
+	existing, err := s.ListRoutinesFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -257,20 +256,19 @@ func (s *Service) applyRoutines(
 			routine.Description = cfg.Description
 			routine.TaskTemplate = cfg.TaskTemplate
 			routine.ConcurrencyPolicy = cfg.ConcurrencyPolicy
-			if err := s.repo.UpdateRoutine(ctx, routine); err != nil {
+			if err := s.UpdateRoutine(ctx, routine); err != nil {
 				return err
 			}
 			result.UpdatedCount++
 		} else {
 			routine := &models.Routine{
-				WorkspaceID:       wsID,
 				Name:              cfg.Name,
 				Description:       cfg.Description,
 				TaskTemplate:      cfg.TaskTemplate,
 				Status:            "active",
 				ConcurrencyPolicy: cfg.ConcurrencyPolicy,
 			}
-			if err := s.repo.CreateRoutine(ctx, routine); err != nil {
+			if err := s.CreateRoutine(ctx, routine); err != nil {
 				return err
 			}
 			result.CreatedCount++
@@ -280,9 +278,9 @@ func (s *Service) applyRoutines(
 }
 
 func (s *Service) applyProjects(
-	ctx context.Context, wsID string, incoming []ProjectConfig, result *ImportResult,
+	ctx context.Context, _ string, incoming []ProjectConfig, result *ImportResult,
 ) error {
-	existing, err := s.repo.ListProjects(ctx, wsID)
+	existing, err := s.ListProjectsFromConfig(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -297,13 +295,12 @@ func (s *Service) applyProjects(
 			project.BudgetCents = cfg.BudgetCents
 			project.Repositories = cfg.Repositories
 			project.ExecutorConfig = cfg.ExecutorConfig
-			if err := s.repo.UpdateProject(ctx, project); err != nil {
+			if err := s.UpdateProject(ctx, project); err != nil {
 				return err
 			}
 			result.UpdatedCount++
 		} else {
 			project := &models.Project{
-				WorkspaceID:    wsID,
 				Name:           cfg.Name,
 				Description:    cfg.Description,
 				Status:         models.ProjectStatusActive,
@@ -312,7 +309,7 @@ func (s *Service) applyProjects(
 				Repositories:   cfg.Repositories,
 				ExecutorConfig: cfg.ExecutorConfig,
 			}
-			if err := s.repo.CreateProject(ctx, project); err != nil {
+			if err := s.CreateProject(ctx, project); err != nil {
 				return err
 			}
 			result.CreatedCount++

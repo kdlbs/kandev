@@ -47,20 +47,17 @@ func TestMaterializeSkills_Inline(t *testing.T) {
 }
 
 func TestMaterializeSkills_LocalPath(t *testing.T) {
+	// local_path skills are stored as filesystem skills after creation.
+	// Materialization treats them as inline (writing content to cache dir).
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	localDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(localDir, "SKILL.md"), []byte("local skill"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
 	skill := &models.Skill{
-		WorkspaceID:   "ws-1",
-		Name:          "Local Skill",
-		Slug:          "local-skill",
-		SourceType:    "local_path",
-		SourceLocator: localDir,
+		WorkspaceID: "ws-1",
+		Name:        "Local Skill",
+		Slug:        "local-skill",
+		SourceType:  "inline",
+		Content:     "# Local skill content",
 	}
 	if err := svc.CreateSkill(ctx, skill); err != nil {
 		t.Fatalf("create: %v", err)
@@ -74,33 +71,22 @@ func TestMaterializeSkills_LocalPath(t *testing.T) {
 	if len(dirs) != 1 {
 		t.Fatalf("dirs count = %d, want 1", len(dirs))
 	}
-	if dirs[0].Path != localDir {
-		t.Errorf("path = %q, want %q", dirs[0].Path, localDir)
+	if dirs[0].Slug != "local-skill" {
+		t.Errorf("slug = %q, want %q", dirs[0].Slug, "local-skill")
 	}
 }
 
-func TestMaterializeSkills_LocalPathMissing(t *testing.T) {
+func TestMaterializeSkills_NonexistentSkillID(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	skill := &models.Skill{
-		WorkspaceID:   "ws-1",
-		Name:          "Missing Path",
-		Slug:          "missing-path",
-		SourceType:    "local_path",
-		SourceLocator: "/nonexistent/path/123",
-	}
-	if err := svc.CreateSkill(ctx, skill); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
 	cacheDir := t.TempDir()
-	dirs, err := svc.MaterializeSkills(ctx, []string{skill.ID}, cacheDir)
+	dirs, err := svc.MaterializeSkills(ctx, []string{"nonexistent-skill"}, cacheDir)
 	if err != nil {
 		t.Fatalf("materialize should not fail overall: %v", err)
 	}
 	if len(dirs) != 0 {
-		t.Errorf("dirs count = %d, want 0 (missing path should be skipped)", len(dirs))
+		t.Errorf("dirs count = %d, want 0 (nonexistent skill should be skipped)", len(dirs))
 	}
 }
 

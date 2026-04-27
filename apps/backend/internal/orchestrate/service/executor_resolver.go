@@ -64,16 +64,16 @@ func (s *Service) ResolveExecutor(
 	return nil, fmt.Errorf("no executor configuration found")
 }
 
-func (s *Service) resolveFromAgent(ctx context.Context, agentInstanceID string) (ExecutorConfig, error) {
-	agent, err := s.repo.GetAgentInstance(ctx, agentInstanceID)
+func (s *Service) resolveFromAgent(_ context.Context, agentInstanceID string) (ExecutorConfig, error) {
+	agent, err := s.GetAgentFromConfig(context.Background(), agentInstanceID)
 	if err != nil {
 		return ExecutorConfig{}, fmt.Errorf("get agent: %w", err)
 	}
 	return parseExecutorConfig(agent.ExecutorPreference), nil
 }
 
-func (s *Service) resolveFromProject(ctx context.Context, projectID string) (ExecutorConfig, error) {
-	project, err := s.repo.GetProject(ctx, projectID)
+func (s *Service) resolveFromProject(_ context.Context, projectID string) (ExecutorConfig, error) {
+	project, err := s.GetProjectFromConfig(context.Background(), projectID)
 	if err != nil {
 		return ExecutorConfig{}, fmt.Errorf("get project: %w", err)
 	}

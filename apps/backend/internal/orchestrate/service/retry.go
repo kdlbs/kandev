@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrate/models"
-	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
 )
 
 // MaxRetryCount is the maximum number of retry attempts before marking failed.
@@ -58,7 +57,7 @@ func (s *Service) escalateFailure(
 		return fmt.Errorf("fail wakeup: %w", err)
 	}
 
-	agent, err := s.repo.GetAgentInstance(ctx, wakeup.AgentInstanceID)
+	agent, err := s.GetAgentFromConfig(ctx, wakeup.AgentInstanceID)
 	if err != nil {
 		s.logger.Error("failed to get agent for escalation",
 			zap.String("agent_id", wakeup.AgentInstanceID), zap.Error(err))
@@ -94,8 +93,8 @@ func (s *Service) queueCEOAgentError(
 	ctx context.Context, agent *models.AgentInstance,
 	wakeup *models.WakeupRequest, errMsg string,
 ) {
-	ceos, err := s.repo.ListAgentInstancesFiltered(ctx, agent.WorkspaceID,
-		sqlite.AgentListFilter{Role: string(models.AgentRoleCEO)})
+	ceos, err := s.ListAgentInstancesFiltered(ctx, agent.WorkspaceID,
+		AgentListFilter{Role: string(models.AgentRoleCEO)})
 	if err != nil || len(ceos) == 0 {
 		return
 	}

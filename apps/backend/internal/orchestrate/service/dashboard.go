@@ -10,7 +10,7 @@ import (
 // including agent counts by status, task counts, cost summary, pending
 // approvals, and recent activity.
 func (s *Service) GetDashboardData(ctx context.Context, wsID string) (*models.DashboardData, error) {
-	agents, err := s.repo.ListAgentInstances(ctx, wsID)
+	agents, err := s.ListAgentsFromConfig(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}

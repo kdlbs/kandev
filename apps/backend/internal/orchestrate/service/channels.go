@@ -21,7 +21,7 @@ func (s *Service) SetupChannel(ctx context.Context, channel *models.Channel) err
 		return fmt.Errorf("workspace_id is required")
 	}
 
-	agent, err := s.repo.GetAgentInstance(ctx, channel.AgentInstanceID)
+	agent, err := s.GetAgentFromConfig(ctx, channel.AgentInstanceID)
 	if err != nil {
 		return fmt.Errorf("agent not found: %w", err)
 	}

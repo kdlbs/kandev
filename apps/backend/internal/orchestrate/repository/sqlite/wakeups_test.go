@@ -152,28 +152,14 @@ func TestClaimNextEligibleWakeup_PicksNextEligible(t *testing.T) {
 	}
 }
 
-func TestClaimNextEligibleWakeup_SkipsPausedAgent(t *testing.T) {
+func TestClaimNextEligibleWakeup_ClaimsPausedAgent(t *testing.T) {
+	// Agent status filtering is now done at the service layer.
+	// The DB-level claim only checks capacity (no active claims).
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	// Create paused agent.
-	agent := &models.AgentInstance{
-		ID:                    "a1",
-		WorkspaceID:           "ws1",
-		Name:                  "paused-agent",
-		Role:                  models.AgentRoleWorker,
-		Status:                models.AgentStatusPaused,
-		MaxConcurrentSessions: 1,
-		DesiredSkills:         "[]",
-		ExecutorPreference:    "{}",
-		Permissions:           "{}",
-	}
-	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
 	req := &models.WakeupRequest{
-		AgentInstanceID: "a1",
+		AgentInstanceID: "paused-agent-1",
 		Reason:          "task_assigned",
 		Payload:         "{}",
 		Status:          "queued",
@@ -183,9 +169,12 @@ func TestClaimNextEligibleWakeup_SkipsPausedAgent(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	_, err := repo.ClaimNextEligibleWakeup(ctx)
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("expected sql.ErrNoRows for paused agent, got %v", err)
+	claimed, err := repo.ClaimNextEligibleWakeup(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.AgentInstanceID != "paused-agent-1" {
+		t.Errorf("agent = %q, want paused-agent-1", claimed.AgentInstanceID)
 	}
 }
 
@@ -294,35 +283,13 @@ func TestCleanExpired(t *testing.T) {
 	}
 }
 
-func TestClaimNextEligibleWakeup_SkipsAgentInCooldown(t *testing.T) {
+func TestClaimNextEligibleWakeup_ClaimsWithoutCooldownCheck(t *testing.T) {
+	// Cooldown enforcement is now done at the service layer, not the DB query.
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	// Create agent with 5 second cooldown and recent finish.
-	agent := &models.AgentInstance{
-		ID:                    "a-cd",
-		WorkspaceID:           "ws1",
-		Name:                  "cooldown-agent",
-		Role:                  models.AgentRoleWorker,
-		Status:                models.AgentStatusIdle,
-		MaxConcurrentSessions: 1,
-		CooldownSec:           5,
-		DesiredSkills:         "[]",
-		ExecutorPreference:    "{}",
-		Permissions:           "{}",
-	}
-	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
-	// Set last_wakeup_finished_at to now (within cooldown).
-	now := time.Now().UTC()
-	if err := repo.UpdateLastWakeupFinished(ctx, "a-cd", now); err != nil {
-		t.Fatalf("update finished: %v", err)
-	}
-
 	req := &models.WakeupRequest{
-		AgentInstanceID: "a-cd",
+		AgentInstanceID: "cooldown-agent-1",
 		Reason:          "task_assigned",
 		Payload:         "{}",
 		Status:          "queued",
@@ -332,9 +299,12 @@ func TestClaimNextEligibleWakeup_SkipsAgentInCooldown(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	_, err := repo.ClaimNextEligibleWakeup(ctx)
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("expected sql.ErrNoRows for cooldown agent, got %v", err)
+	claimed, err := repo.ClaimNextEligibleWakeup(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.AgentInstanceID != "cooldown-agent-1" {
+		t.Errorf("agent = %q, want cooldown-agent-1", claimed.AgentInstanceID)
 	}
 }
 

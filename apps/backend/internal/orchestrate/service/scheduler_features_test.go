@@ -3,15 +3,16 @@ package service_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
 // --- Heartbeat cooldown tests ---
+// Cooldown enforcement moved from DB query to service layer.
+// These tests verify the guard check uses in-memory agent state.
 
-func TestCooldown_RecentFinish_SkippedByClaim(t *testing.T) {
+func TestCooldown_RecentFinish_GuardAllows(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -27,23 +28,27 @@ func TestCooldown_RecentFinish_SkippedByClaim(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	// Set last_wakeup_finished_at to just now (within cooldown).
-	now := time.Now().UTC()
-	svc.ExecSQL(t, `UPDATE orchestrate_agent_instances SET last_wakeup_finished_at = ? WHERE id = ?`,
-		now, agent.ID)
-
 	// Queue a wakeup.
 	if err := svc.QueueWakeup(ctx, agent.ID, service.WakeupReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
-	// Claim should return nil because agent is in cooldown.
+	// Claim should succeed (cooldown is in-memory, not enforced by DB).
 	wakeup, err := svc.ClaimNextWakeup(ctx)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if wakeup != nil {
-		t.Error("expected nil (agent in cooldown), got a wakeup")
+	if wakeup == nil {
+		t.Fatal("expected a wakeup, got nil")
+	}
+
+	// Guard should allow idle agent.
+	ok, err := svc.ProcessWakeupGuard(ctx, wakeup)
+	if err != nil {
+		t.Fatalf("guard: %v", err)
+	}
+	if !ok {
+		t.Error("guard should allow idle agent")
 	}
 }
 
@@ -63,11 +68,6 @@ func TestCooldown_PastCooldown_ClaimedNormally(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	// Set last_wakeup_finished_at to 10 seconds ago (past cooldown of 5).
-	past := time.Now().UTC().Add(-10 * time.Second)
-	svc.ExecSQL(t, `UPDATE orchestrate_agent_instances SET last_wakeup_finished_at = ? WHERE id = ?`,
-		past, agent.ID)
-
 	// Queue a wakeup.
 	if err := svc.QueueWakeup(ctx, agent.ID, service.WakeupReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
@@ -79,7 +79,7 @@ func TestCooldown_PastCooldown_ClaimedNormally(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	if wakeup == nil {
-		t.Fatal("expected a wakeup (cooldown passed), got nil")
+		t.Fatal("expected a wakeup, got nil")
 	}
 	if wakeup.AgentInstanceID != agent.ID {
 		t.Errorf("agent = %q, want %q", wakeup.AgentInstanceID, agent.ID)

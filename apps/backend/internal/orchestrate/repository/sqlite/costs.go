@@ -29,15 +29,13 @@ func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEven
 	return err
 }
 
-// ListCostEvents returns cost events for a workspace within a time range.
-func (r *Repository) ListCostEvents(ctx context.Context, workspaceID string) ([]*models.CostEvent, error) {
+// ListCostEvents returns all cost events ordered by time.
+func (r *Repository) ListCostEvents(ctx context.Context, _ string) ([]*models.CostEvent, error) {
 	var events []*models.CostEvent
-	err := r.ro.SelectContext(ctx, &events, r.ro.Rebind(`
-		SELECT ce.* FROM orchestrate_cost_events ce
-		JOIN orchestrate_agent_instances ai ON ce.agent_instance_id = ai.id
-		WHERE ai.workspace_id = ?
-		ORDER BY ce.occurred_at DESC
-	`), workspaceID)
+	err := r.ro.SelectContext(ctx, &events, `
+		SELECT * FROM orchestrate_cost_events
+		ORDER BY occurred_at DESC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -48,17 +46,15 @@ func (r *Repository) ListCostEvents(ctx context.Context, workspaceID string) ([]
 }
 
 // GetCostsByAgent returns aggregated costs grouped by agent.
-func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+func (r *Repository) GetCostsByAgent(ctx context.Context, _ string) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
-		SELECT ce.agent_instance_id AS group_key,
-			SUM(ce.cost_cents) AS total_cents,
+	err := r.ro.SelectContext(ctx, &results, `
+		SELECT agent_instance_id AS group_key,
+			SUM(cost_cents) AS total_cents,
 			COUNT(*) AS count
-		FROM orchestrate_cost_events ce
-		JOIN orchestrate_agent_instances ai ON ce.agent_instance_id = ai.id
-		WHERE ai.workspace_id = ?
-		GROUP BY ce.agent_instance_id
-	`), workspaceID)
+		FROM orchestrate_cost_events
+		GROUP BY agent_instance_id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -69,17 +65,15 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 }
 
 // GetCostsByProject returns aggregated costs grouped by project.
-func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+func (r *Repository) GetCostsByProject(ctx context.Context, _ string) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
-		SELECT ce.project_id AS group_key,
-			SUM(ce.cost_cents) AS total_cents,
+	err := r.ro.SelectContext(ctx, &results, `
+		SELECT project_id AS group_key,
+			SUM(cost_cents) AS total_cents,
 			COUNT(*) AS count
-		FROM orchestrate_cost_events ce
-		JOIN orchestrate_agent_instances ai ON ce.agent_instance_id = ai.id
-		WHERE ai.workspace_id = ?
-		GROUP BY ce.project_id
-	`), workspaceID)
+		FROM orchestrate_cost_events
+		GROUP BY project_id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -90,17 +84,15 @@ func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) 
 }
 
 // GetCostsByModel returns aggregated costs grouped by model.
-func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+func (r *Repository) GetCostsByModel(ctx context.Context, _ string) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
-		SELECT ce.model AS group_key,
-			SUM(ce.cost_cents) AS total_cents,
+	err := r.ro.SelectContext(ctx, &results, `
+		SELECT model AS group_key,
+			SUM(cost_cents) AS total_cents,
 			COUNT(*) AS count
-		FROM orchestrate_cost_events ce
-		JOIN orchestrate_agent_instances ai ON ce.agent_instance_id = ai.id
-		WHERE ai.workspace_id = ?
-		GROUP BY ce.model
-	`), workspaceID)
+		FROM orchestrate_cost_events
+		GROUP BY model
+	`)
 	if err != nil {
 		return nil, err
 	}

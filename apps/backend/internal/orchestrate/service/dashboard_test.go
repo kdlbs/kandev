@@ -35,19 +35,14 @@ func TestGetDashboardData_WithAgentsAndApprovals(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "agent-2")
 	createTestAgent(t, svc, "ws-1", "agent-3")
 
-	// Set agent-2 to working.
-	agent2, _ := svc.GetAgentInstance(ctx, "agent-2")
-	agent2.Status = models.AgentStatusWorking
-	if err := svc.UpdateAgentInstance(ctx, agent2); err != nil {
-		t.Fatalf("update agent: %v", err)
+	// Set agent-2 to working (in-memory status update).
+	if _, err := svc.UpdateAgentStatus(ctx, "agent-2", models.AgentStatusWorking, ""); err != nil {
+		t.Fatalf("update agent status: %v", err)
 	}
 
-	// Set agent-3 to paused.
-	agent3, _ := svc.GetAgentInstance(ctx, "agent-3")
-	agent3.Status = models.AgentStatusPaused
-	agent3.PauseReason = "budget_exceeded"
-	if err := svc.UpdateAgentInstance(ctx, agent3); err != nil {
-		t.Fatalf("update agent: %v", err)
+	// Set agent-3 to paused (in-memory status update).
+	if _, err := svc.UpdateAgentStatus(ctx, "agent-3", models.AgentStatusPaused, "budget_exceeded"); err != nil {
+		t.Fatalf("update agent status: %v", err)
 	}
 
 	// Create a pending approval.

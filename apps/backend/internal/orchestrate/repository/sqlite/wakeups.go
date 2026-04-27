@@ -27,15 +27,13 @@ func (r *Repository) CreateWakeupRequest(ctx context.Context, req *models.Wakeup
 	return err
 }
 
-// ListWakeupRequests returns wakeup requests for a workspace.
-func (r *Repository) ListWakeupRequests(ctx context.Context, workspaceID string) ([]*models.WakeupRequest, error) {
+// ListWakeupRequests returns all wakeup requests ordered by time.
+func (r *Repository) ListWakeupRequests(ctx context.Context, _ string) ([]*models.WakeupRequest, error) {
 	var reqs []*models.WakeupRequest
 	err := r.ro.SelectContext(ctx, &reqs, r.ro.Rebind(`
-		SELECT wq.* FROM orchestrate_wakeup_queue wq
-		JOIN orchestrate_agent_instances ai ON wq.agent_instance_id = ai.id
-		WHERE ai.workspace_id = ?
-		ORDER BY wq.requested_at DESC
-	`), workspaceID)
+		SELECT * FROM orchestrate_wakeup_queue
+		ORDER BY requested_at DESC
+	`))
 	if err != nil {
 		return nil, err
 	}
@@ -116,9 +114,10 @@ func (r *Repository) CoalesceWakeup(
 	return rows > 0, nil
 }
 
-// ClaimNextEligibleWakeup atomically claims the next queued wakeup for an agent
-// that is not at capacity, respects cooldown periods, and skips wakeups
-// with a scheduled retry time in the future.
+// ClaimNextEligibleWakeup atomically claims the next queued wakeup,
+// skipping wakeups with a scheduled retry time in the future and
+// agents that already have a claimed wakeup. Agent status and cooldown
+// checks are performed in the service layer.
 func (r *Repository) ClaimNextEligibleWakeup(ctx context.Context) (*models.WakeupRequest, error) {
 	now := time.Now().UTC()
 	var req models.WakeupRequest
@@ -127,22 +126,18 @@ func (r *Repository) ClaimNextEligibleWakeup(ctx context.Context) (*models.Wakeu
 		SET status = 'claimed', claimed_at = ?
 		WHERE id = (
 			SELECT w.id FROM orchestrate_wakeup_queue w
-			JOIN orchestrate_agent_instances a ON a.id = w.agent_instance_id
 			WHERE w.status = 'queued'
-			  AND a.status IN ('idle', 'working')
 			  AND (
 				SELECT COUNT(*) FROM orchestrate_wakeup_queue cw
 				WHERE cw.agent_instance_id = w.agent_instance_id
 				  AND cw.status = 'claimed'
-			  ) < a.max_concurrent_sessions
-			  AND (a.last_wakeup_finished_at IS NULL
-			       OR datetime(a.last_wakeup_finished_at, '+' || a.cooldown_sec || ' seconds') <= datetime(?))
+			  ) = 0
 			  AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
 			ORDER BY w.requested_at ASC
 			LIMIT 1
 		)
 		RETURNING *
-	`), now, now, now).StructScan(&req)
+	`), now, now).StructScan(&req)
 	if err != nil {
 		return nil, err
 	}

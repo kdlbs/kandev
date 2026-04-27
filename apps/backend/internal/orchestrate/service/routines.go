@@ -59,7 +59,7 @@ func (s *Service) processCronTrigger(ctx context.Context, trigger *models.Routin
 	} else {
 		_ = s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &next)
 	}
-	routine, err := s.repo.GetRoutine(ctx, trigger.RoutineID)
+	routine, err := s.GetRoutineFromConfig(ctx, trigger.RoutineID)
 	if err != nil {
 		return fmt.Errorf("get routine: %w", err)
 	}
@@ -118,7 +118,6 @@ func (s *Service) DispatchRoutineRun(
 	}
 
 	routine.LastRunAt = &now
-	_ = s.repo.UpdateRoutine(ctx, routine)
 
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),
@@ -161,7 +160,7 @@ func (s *Service) applyConcurrencyPolicy(
 func (s *Service) FireManual(
 	ctx context.Context, routineID string, variableValues map[string]string,
 ) (*models.RoutineRun, error) {
-	routine, err := s.repo.GetRoutine(ctx, routineID)
+	routine, err := s.GetRoutineFromConfig(ctx, routineID)
 	if err != nil {
 		return nil, fmt.Errorf("get routine: %w", err)
 	}

@@ -84,7 +84,9 @@ func TestValidateAndPrepareSkill_RejectsDuplicateSlug(t *testing.T) {
 	}
 }
 
-func TestValidateAndPrepareSkill_AllowsSameSlugDifferentWorkspace(t *testing.T) {
+func TestValidateAndPrepareSkill_RejectsSameSlugInSameWorkspace(t *testing.T) {
+	// With filesystem-backed config, all skills live in a single "default" workspace.
+	// Duplicate slugs are always rejected.
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -96,9 +98,10 @@ func TestValidateAndPrepareSkill_AllowsSameSlugDifferentWorkspace(t *testing.T) 
 		t.Fatalf("create first: %v", err)
 	}
 
-	s2 := &models.Skill{WorkspaceID: "ws-2", Name: "Test Skill", SourceType: "inline"}
-	if err := svc.ValidateAndPrepareSkill(ctx, s2); err != nil {
-		t.Fatalf("different workspace should succeed: %v", err)
+	s2 := &models.Skill{WorkspaceID: "ws-1", Name: "Test Skill", SourceType: "inline"}
+	err := svc.ValidateAndPrepareSkill(ctx, s2)
+	if err == nil {
+		t.Fatal("expected duplicate slug error in same workspace")
 	}
 }
 

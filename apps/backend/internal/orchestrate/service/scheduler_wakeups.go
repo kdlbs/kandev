@@ -39,8 +39,8 @@ func (s *Service) FailWakeup(ctx context.Context, id string) error {
 
 // ProcessWakeupGuard checks if the agent is still eligible to be woken.
 // Returns true if the wakeup should proceed, false if it should be skipped.
-func (s *Service) ProcessWakeupGuard(ctx context.Context, wakeup *models.WakeupRequest) (bool, error) {
-	agent, err := s.repo.GetAgentInstance(ctx, wakeup.AgentInstanceID)
+func (s *Service) ProcessWakeupGuard(_ context.Context, wakeup *models.WakeupRequest) (bool, error) {
+	agent, err := s.GetAgentFromConfig(context.Background(), wakeup.AgentInstanceID)
 	if err != nil {
 		return false, err
 	}

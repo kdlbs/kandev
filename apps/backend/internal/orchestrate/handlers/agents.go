@@ -7,11 +7,11 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrate/dto"
 	"github.com/kandev/kandev/internal/orchestrate/models"
-	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
 func (h *Handlers) listAgents(c *gin.Context) {
-	filter := sqlite.AgentListFilter{
+	filter := service.AgentListFilter{
 		Role:      c.Query("role"),
 		Status:    c.Query("status"),
 		ReportsTo: c.Query("reports_to"),
@@ -72,7 +72,7 @@ func (h *Handlers) getAgent(c *gin.Context) {
 
 func (h *Handlers) updateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
-	agent, err := h.ctrl.Svc.GetAgentInstance(ctx, c.Param("id"))
+	agent, err := h.ctrl.Svc.GetAgentFromConfig(ctx, c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

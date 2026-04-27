@@ -75,19 +75,21 @@ func TestCreateAgent_SingleCEO(t *testing.T) {
 }
 
 func TestCreateAgent_CEOAllowedInDifferentWorkspace(t *testing.T) {
+	// With filesystem-backed config, all agents live in a single "default" workspace.
+	// Multi-workspace CEO isolation was a DB-era concept; this test now verifies
+	// that only one CEO is allowed in the (single) workspace.
 	svc := newTestService(t)
 	ctx := context.Background()
 
 	ceo1 := makeAgent("ceo-ws1", models.AgentRoleCEO)
-	ceo1.WorkspaceID = "ws-1"
 	if err := svc.CreateAgentInstance(ctx, ceo1); err != nil {
-		t.Fatalf("create CEO in ws-1: %v", err)
+		t.Fatalf("create first CEO: %v", err)
 	}
 
 	ceo2 := makeAgent("ceo-ws2", models.AgentRoleCEO)
-	ceo2.WorkspaceID = "ws-2"
-	if err := svc.CreateAgentInstance(ctx, ceo2); err != nil {
-		t.Fatalf("should allow CEO in different workspace: %v", err)
+	err := svc.CreateAgentInstance(ctx, ceo2)
+	if err == nil {
+		t.Fatal("expected error creating second CEO in same workspace")
 	}
 }
 

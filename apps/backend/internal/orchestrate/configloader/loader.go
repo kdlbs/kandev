@@ -164,6 +164,7 @@ func (cl *ConfigLoader) loadSkillsLocked(cfg *WorkspaceConfig, wsPath, wsName st
 		}
 		cfg.Skills[slug] = &SkillInfo{
 			Skill: models.Skill{
+				ID:          slug,
 				WorkspaceID: wsName,
 				Name:        slug,
 				Slug:        slug,
