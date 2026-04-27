@@ -103,6 +103,15 @@ type Adapter struct {
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
 
+	// terminalToolCalls remembers tool_call IDs that have already streamed a
+	// terminal status (completed/error/cancelled) within the current prompt.
+	// Used by handlePermissionRequest to drop ghost permission requests that
+	// arrive after the tool already finished — observed with OpenCode (issue
+	// #717), where forwarding such a request creates a permission_request
+	// message nothing later resolves. Cleared at the same boundaries as
+	// activeToolCalls.
+	terminalToolCalls map[string]bool
+
 	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
 	// Claude-acp's Monitor tool runs a background script that streams events
 	// back to the LLM as `<task-notification>` envelopes. We hold this map so
@@ -157,17 +166,18 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:             cfg,
-		logger:          l,
-		agentID:         cfg.AgentID,
-		normalizer:      NewNormalizer(),
-		updatesCh:       make(chan AgentEvent, 100),
-		activeToolCalls: make(map[string]*streams.NormalizedPayload),
-		activeMonitors:  make(map[string]map[string]string),
-		pendingWakeups:  make(map[string]*pendingWakeup),
-		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		lifetimeCtx:     ctx,
-		lifetimeCancel:  cancel,
+		cfg:               cfg,
+		logger:            l,
+		agentID:           cfg.AgentID,
+		normalizer:        NewNormalizer(),
+		updatesCh:         make(chan AgentEvent, 100),
+		activeToolCalls:   make(map[string]*streams.NormalizedPayload),
+		terminalToolCalls: make(map[string]bool),
+		activeMonitors:    make(map[string]map[string]string),
+		pendingWakeups:    make(map[string]*pendingWakeup),
+		attachMgr:         shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		lifetimeCtx:       ctx,
+		lifetimeCancel:    cancel,
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	return a
@@ -854,6 +864,7 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 		}
 	}
 	a.activeToolCalls = preserved
+	a.terminalToolCalls = make(map[string]bool)
 	a.mu.Unlock()
 
 	for toolCallID, normalized := range toCancel {
@@ -1700,6 +1711,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 
 	if isTerminal {
 		delete(a.activeToolCalls, toolCallID)
+		a.terminalToolCalls[toolCallID] = true
 		// Also drop tracked Monitor: this terminal update is the
 		// agent-emitted close, so the prompt-end sweep must not re-emit a
 		// "Monitor exited" event for this same toolCallID.
@@ -1802,14 +1814,28 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 		sessionID = fallbackSessionID
 	}
 
+	// Drop ghost permission requests for tool calls that already finished.
+	// OpenCode (issue #717) has been observed emitting session/request_permission
+	// after streaming a terminal tool_call_update for the same tool_call_id.
+	// Forwarding it would create a permission_request message nothing later
+	// resolves; instead auto-cancel upstream so the agent can proceed.
+	a.mu.RLock()
+	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
+	terminal := a.terminalToolCalls[req.ToolCallID]
+	a.mu.RUnlock()
+
+	if terminal {
+		a.logger.Warn("dropping permission request for already-terminal tool_call",
+			zap.String("session_id", sessionID),
+			zap.String("tool_call_id", req.ToolCallID),
+			zap.String("title", req.Title))
+		return &PermissionResponse{Cancelled: true}, nil
+	}
+
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// When a ToolCall notification exists (tracked in activeToolCalls), the message
 	// was already created by convertToolCallUpdate → handleToolCallEvent.
 	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
-	a.mu.RLock()
-	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
-	a.mu.RUnlock()
-
 	if !alreadyTracked {
 		toolCallEvent := AgentEvent{
 			Type:       streams.EventTypeToolCall,
