@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -221,11 +222,30 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 		SessionID:        execution.ACPSessionID,
 		Prompt:           taskDescription,
 		PermissionValues: profilePermissionValues(profileInfo),
+		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
 	})
 	if cmd.IsEmpty() {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
 	return ptAgent, pt, rt, cmd, nil
+}
+
+// profileCLIFlagTokens resolves the user-configured CLI flag argv tokens from
+// a profile, mirroring the ACP launch path (manager_launch.go). Returns nil
+// on resolve error and logs a warning so a malformed flag does not block the
+// session — matches the warn-and-continue behaviour of the ACP path.
+func (m *Manager) profileCLIFlagTokens(p *AgentProfileInfo) []string {
+	if p == nil {
+		return nil
+	}
+	tokens, err := cliflags.Resolve(p.CLIFlags)
+	if err != nil {
+		m.logger.Warn("failed to resolve cli_flags for passthrough profile, launching without user-configured flags",
+			zap.String("profile_id", p.ProfileID),
+			zap.Error(err))
+		return nil
+	}
+	return tokens
 }
 
 // buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
@@ -341,6 +361,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
+		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", resolved.agentID)
@@ -433,6 +454,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		Model:            profileModel(resolved.profile),
 		Resume:           true,
 		PermissionValues: profilePermissionValues(resolved.profile),
+		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
 		return fmt.Errorf("passthrough resume command is empty for agent %s", resolved.agentID)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -201,6 +202,30 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			opts:    agents.PassthroughOptions{Model: "mock-fast", SessionID: "sess-123"},
 			wantCmd: []string{"mock-agent", "--tui", "--model", "mock-fast", "--resume", "sess-123"},
 		},
+		{
+			name: "user cli flag tokens appended after model + settings",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:      true,
+						PassthroughCmd: agents.NewCommand("test-cli"),
+						ModelFlag:      agents.NewParam("--model", "{model}"),
+						ResumeFlag:     agents.NewParam("-c"),
+					},
+					PermSettings: map[string]agents.PermissionSetting{
+						"auto_approve": {Supported: true, ApplyMethod: "cli_flag", CLIFlag: "--yes"},
+					},
+				},
+			},
+			opts: agents.PassthroughOptions{
+				Model:            "gpt-4",
+				Resume:           true,
+				PermissionValues: map[string]bool{"auto_approve": true},
+				CLIFlagTokens:    []string{"--debug", "--log-level", "trace"},
+			},
+			wantCmd: []string{"test-cli", "--model", "gpt-4", "--yes", "--debug", "--log-level", "trace", "-c"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -254,6 +279,52 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 		mgr.handlePassthroughExit(execution, status)
 		if elapsed := time.Since(start); elapsed != 0 {
 			t.Errorf("handlePassthroughExit advanced fake time by %v — did not short-circuit during shutdown", elapsed)
+		}
+	})
+}
+
+// TestManager_ProfileCLIFlagTokens confirms profile-configured cli_flags
+// reach the passthrough launch path (regression for issue #718, where the
+// passthrough builder silently dropped them).
+func TestManager_ProfileCLIFlagTokens(t *testing.T) {
+	mgr := newTestManager()
+
+	t.Run("nil profile returns nil", func(t *testing.T) {
+		if got := mgr.profileCLIFlagTokens(nil); got != nil {
+			t.Errorf("profileCLIFlagTokens(nil) = %v, want nil", got)
+		}
+	})
+
+	t.Run("enabled flags tokenised, disabled skipped", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID: "p1",
+			CLIFlags: []settingsmodels.CLIFlag{
+				{Flag: "--allow-all-tools", Enabled: true},
+				{Flag: "--skip-me", Enabled: false},
+				{Flag: "--add-dir /shared", Enabled: true},
+			},
+		}
+		got := mgr.profileCLIFlagTokens(profile)
+		want := []string{"--allow-all-tools", "--add-dir", "/shared"}
+		if len(got) != len(want) {
+			t.Fatalf("profileCLIFlagTokens() = %v, want %v", got, want)
+		}
+		for i, tok := range want {
+			if got[i] != tok {
+				t.Errorf("profileCLIFlagTokens()[%d] = %q, want %q", i, got[i], tok)
+			}
+		}
+	})
+
+	t.Run("malformed flag does not abort — returns nil and warns", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID: "p2",
+			CLIFlags: []settingsmodels.CLIFlag{
+				{Flag: `--broken "unterminated`, Enabled: true},
+			},
+		}
+		if got := mgr.profileCLIFlagTokens(profile); got != nil {
+			t.Errorf("profileCLIFlagTokens(malformed) = %v, want nil", got)
 		}
 	})
 }
