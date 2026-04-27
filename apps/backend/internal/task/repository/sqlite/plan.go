@@ -15,6 +15,10 @@ import (
 // every SELECT in this file (and by scanRevisionRow / scanRevisionRows).
 const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at`
 
+// authorKindAgent matches the task_plan_revisions.author_kind column DEFAULT
+// and is the fallback for unknown values when persisting plan history rows.
+const authorKindAgent = "agent"
+
 // CreateTaskPlan creates a new task plan.
 func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
 	if plan.ID == "" {
@@ -28,7 +32,7 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 		plan.Title = "Plan"
 	}
 	if plan.CreatedBy == "" {
-		plan.CreatedBy = "agent"
+		plan.CreatedBy = authorKindAgent
 	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
@@ -250,7 +254,7 @@ func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.
 		head.Title = "Plan"
 	}
 	if head.CreatedBy == "" {
-		head.CreatedBy = "agent"
+		head.CreatedBy = authorKindAgent
 	}
 	if head.CreatedAt.IsZero() {
 		head.CreatedAt = now

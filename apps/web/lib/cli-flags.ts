@@ -1,4 +1,4 @@
-import type { CLIFlag } from "@/lib/types/http";
+import type { CLIFlag, PermissionSetting } from "@/lib/types/http";
 
 /**
  * Deep-equality comparison for a profile's cli_flags list. Used by the
@@ -23,4 +23,30 @@ export function areCLIFlagsEqual(
     }
   }
   return true;
+}
+
+/**
+ * Build the default cli_flags list for a new draft profile from the
+ * agent's curated PermissionSettings catalogue. Mirrors the backend
+ * seedCLIFlags in apps/backend/internal/agent/settings/controller/profile_crud.go
+ * so a draft created in the UI matches what the backend would seed when
+ * the field is omitted from a create request. Only entries that target a
+ * CLI flag are included; per-flag metadata (description, flag text,
+ * default enabled) is copied so the draft is self-contained.
+ */
+export function seedDefaultCLIFlags(
+  permissionSettings: Record<string, PermissionSetting>,
+): CLIFlag[] {
+  const out: CLIFlag[] = [];
+  for (const s of Object.values(permissionSettings)) {
+    if (!s.supported || s.apply_method !== "cli_flag" || !s.cli_flag) continue;
+    const flagText = s.cli_flag_value ? `${s.cli_flag} ${s.cli_flag_value}` : s.cli_flag;
+    out.push({
+      description: s.description || s.label,
+      flag: flagText,
+      enabled: s.default,
+    });
+  }
+  out.sort((a, b) => a.flag.localeCompare(b.flag));
+  return out;
 }

@@ -15,6 +15,7 @@ import type {
   ModelConfig,
 } from "@/lib/types/http";
 import { buildDefaultPermissions } from "@/lib/agent-permissions";
+import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
@@ -51,7 +52,7 @@ const createDraftProfile = (
   model: defaultModel,
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cli_passthrough: false,
-  cli_flags: [],
+  cli_flags: seedDefaultCLIFlags(permissionSettings ?? {}),
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   isNew: true,
