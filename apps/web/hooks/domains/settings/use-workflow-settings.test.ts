@@ -97,4 +97,44 @@ describe("useWorkflowSettings", () => {
 
     expect(result.current.workflowItems.map((w) => w.id).sort()).toEqual(["wf-a1", "wf-b1"]);
   });
+
+  it("syncs name updates from the store within the current workspace", () => {
+    const initial = [wf("wf-b1", "ws-b", NAME_B1)];
+    setStore([STORE_B1]);
+
+    const { result, rerender } = renderHook(
+      ({ store }: { store: StoreWorkflow[] }) => {
+        setStore(store);
+        return useWorkflowSettings(initial, "ws-b");
+      },
+      { initialProps: { store: [STORE_B1] } },
+    );
+
+    expect(result.current.workflowItems[0].name).toEqual(NAME_B1);
+
+    act(() => {
+      rerender({ store: [{ id: "wf-b1", workspaceId: "ws-b", name: "Renamed B1" }] });
+    });
+
+    expect(result.current.workflowItems[0].name).toEqual("Renamed B1");
+  });
+
+  it("starts scoping store entries once a workspaceId becomes defined", () => {
+    setStore([STORE_A1, STORE_B1]);
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId?: string }) => useWorkflowSettings([], workspaceId),
+      { initialProps: { workspaceId: undefined as string | undefined } },
+    );
+
+    // No workspaceId → unscoped fallback shows both
+    expect(result.current.workflowItems.map((w) => w.id).sort()).toEqual(["wf-a1", "wf-b1"]);
+
+    act(() => {
+      rerender({ workspaceId: "ws-b" });
+    });
+
+    // Once scoped to B, A's workflow is dropped
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+  });
 });
