@@ -105,6 +105,15 @@ The CEO/CTO never explicitly picks an executor -- they assign tasks to projects 
 - **Paused**: manually paused by user, or auto-paused by budget enforcement. No new wakeups processed. Active sessions complete their current turn but receive no further prompts.
 - **Stopped**: deactivated. No longer appears in the CEO's org tree. Can be reactivated.
 
+### Agent config vs runtime state
+
+Agent data is split between the filesystem (config) and a small DB table (runtime state):
+
+- **Filesystem** (`agents/<name>.yml`): name, role, reports_to, permissions, budget, desired_skills, executor_preference, max_concurrent_sessions, icon. Editable by users, versionable via git.
+- **DB** (`orchestrate_agent_runtime`): status, pause_reason, last_wakeup_finished_at. Runtime state that must survive restarts (e.g. a budget-paused agent stays paused after restart). Not user-editable, not exported.
+
+On startup, the ConfigLoader reads agent config from YAML and merges runtime state from the DB. If an agent exists in YAML but has no runtime row, a default row is created (`status=idle`). If a runtime row exists for an agent no longer in YAML, the row is deleted (reconciliation).
+
 ### UI at `/orchestrate/agents`
 
 - Agent list showing cards for each instance: icon, name, role, status indicator, current task (if working), budget gauge, skill badges.

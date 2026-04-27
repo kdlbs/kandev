@@ -76,18 +76,60 @@ Orchestrate uses a **filesystem-first** model: `~/.kandev/workspaces/<name>/` is
 1. Scan `~/.kandev/workspaces/*/` for workspace directories.
 2. For each workspace: read `kandev.yml`, parse agents/skills/routines/projects from YAML files and skill directories.
 3. Build in-memory cache: `map[workspaceID]*WorkspaceConfig`.
-4. Serve all config API requests from memory cache.
+4. **Reconcile** DB operational state with filesystem config (see reconciliation below).
+5. Serve all config API requests from memory cache.
 
 **On UI write (e.g. user creates an agent):**
 1. Write YAML file to `~/.kandev/workspaces/<name>/agents/<agent-name>.yml`.
 2. Invalidate memory cache for that workspace.
-3. Return success to the UI.
+3. Reconcile DB operational state (create runtime row, triggers, etc.).
+4. Return success to the UI.
 
 **On external file change (user edits YAML, git pull):**
 1. `fsnotify` detects change in workspace directory.
 2. Invalidate memory cache for that workspace.
 3. Re-read affected files.
-4. If parse error (git conflict markers, invalid YAML): mark workspace as `config_error`, surface error in UI, keep serving stale cache until fixed.
+4. **Reconcile** DB operational state with the new config.
+5. If parse error (git conflict markers, invalid YAML): mark workspace as `config_error`, surface error in UI, keep serving stale cache until fixed.
+
+### Filesystem-DB reconciliation
+
+Some operational state lives in SQLite and references config entities from the filesystem. When config changes (startup, UI write, git pull, manual edit), the DB must be reconciled:
+
+**Agent runtime state:**
+- A small `orchestrate_agent_runtime` table stores agent status (`idle`, `working`, `paused`), `pause_reason`, and `last_wakeup_finished_at`.
+- This is NOT config -- it's runtime state that must survive restarts (e.g. a budget-paused agent must stay paused after restart).
+- On reconciliation: create runtime rows for new agents (default `idle`), delete rows for agents removed from filesystem, keep existing status for agents still in config.
+- On startup: merge runtime status from DB into the ConfigLoader's in-memory cache.
+
+**Routine triggers and runs:**
+- Routine definitions live in YAML. Triggers (`orchestrate_routine_triggers`) and runs (`orchestrate_routine_runs`) live in DB (they need atomic cron claims and run tracking).
+- On reconciliation: create triggers for new routines (from YAML trigger config), update triggers for changed routines (cron expression, webhook config), delete triggers and orphan runs for routines removed from filesystem.
+
+**Budget policies:**
+- Budget policies reference agent/project IDs from the filesystem.
+- On reconciliation: delete budget policies whose `scope_id` (agent or project) no longer exists in the filesystem config.
+
+**Channels:**
+- Channels reference agent instance IDs.
+- On reconciliation: delete channels whose `agent_instance_id` no longer exists in the filesystem config.
+
+**Skills:**
+- No DB operational state. No reconciliation needed.
+
+### What stays in SQLite
+
+Only runtime/transactional data that cannot live on the filesystem:
+- `orchestrate_agent_runtime` (status, pause_reason -- survives restarts)
+- `orchestrate_wakeup_queue` (atomic claims)
+- `orchestrate_cost_events` (append-only ledger)
+- `orchestrate_budget_policies` (transactional, references config IDs)
+- `orchestrate_routine_triggers` (atomic cron claims, next_run_at tracking)
+- `orchestrate_routine_runs` (run status, linked tasks)
+- `orchestrate_approvals` (transactional state)
+- `orchestrate_activity_log` (append-only)
+- `orchestrate_channels` (secrets, not exportable)
+- `task_blockers`, `task_comments` (transactional)
 
 ### Skill symlinks
 

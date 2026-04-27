@@ -34,6 +34,16 @@ Routines let users define task templates that fire automatically, creating real 
   - `concurrency_policy`: how to handle overlapping runs (see below).
   - `variables`: declared template variables with types and defaults.
 
+### Routine config vs operational state
+
+Routine data is split between the filesystem and DB:
+
+- **Filesystem** (`routines/<name>.yml`): name, description, task template, assignee, concurrency policy, variables, trigger config (cron expression, webhook settings). Editable by users, versionable via git.
+- **DB** (`orchestrate_routine_triggers`): operational trigger state -- `next_run_at`, `last_fired_at`, `public_id` (for webhooks), `enabled`. Needs atomic claims for cron scheduling.
+- **DB** (`orchestrate_routine_runs`): run history -- status, linked task, trigger payload, timestamps.
+
+On startup and config reload, the reconciliation service syncs triggers from YAML to DB: creates triggers for new routines, updates triggers for changed config (e.g. cron expression changed), deletes triggers and orphan runs for routines removed from filesystem.
+
 ### Triggers
 
 Each routine has one or more triggers that cause it to fire:
