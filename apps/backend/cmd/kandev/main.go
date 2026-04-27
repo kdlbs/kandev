@@ -434,93 +434,9 @@ func startGatewayAndServe(
 	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
 	// ============================================
 	if services.Orchestrate != nil {
-		// Initialize filesystem config loader
-		configBasePath := cfg.ResolvedHomeDir()
-		cfgLoader := configloader.NewConfigLoader(configBasePath)
-		if err := cfgLoader.EnsureDefaultWorkspace(); err != nil {
-			log.Error("Failed to ensure default workspace directory", zap.Error(err))
-		}
-		if err := cfgLoader.Load(); err != nil {
-			log.Error("Failed to load orchestrate config from filesystem", zap.Error(err))
-		} else {
-			log.Info("Orchestrate config loaded from filesystem",
-				zap.String("base_path", configBasePath),
-				zap.Int("workspaces", len(cfgLoader.GetWorkspaces())))
-		}
-
-		// Write bundled system skills
-		if err := configloader.EnsureBundledSkills(configBasePath); err != nil {
-			log.Error("Failed to write bundled skills", zap.Error(err))
-		} else {
-			slugs, _ := configloader.BundledSkillSlugs()
-			log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
-		}
-
-		// Clean dangling skill symlinks on startup + register shutdown cleanup
-		orchestrateservice.CleanDanglingSymlinks(configBasePath)
-		log.Info("Cleaned dangling skill symlinks")
-		addCleanup(func() error {
-			orchestrateservice.CleanupOwnedSymlinks(configBasePath)
-			log.Info("Cleaned owned skill symlinks on shutdown")
-			return nil
-		})
-
-		// Wire ConfigLoader + FileWriter into the orchestrate service. The
-		// service treats the database as the source of truth for config
-		// (agents/skills/projects/routines); the loader/writer are only
-		// retained for the manual sync UI and bundled-skill discovery.
-		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
-		services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
-		services.Orchestrate.SetWorkspaceCreator(&taskWorkspaceCreatorAdapter{taskSvc: services.Task})
-		apiPort := cfg.Server.Port
-		if apiPort == 0 {
-			apiPort = ports.Backend
-		}
-		services.Orchestrate.SetAPIBaseURL(fmt.Sprintf("http://localhost:%d/api/v1", apiPort))
-		log.Info("Orchestrate service wired to ConfigLoader (manual-sync only)")
-
-		// Reconcile derived DB state (drop dead runtime/budget/channel rows,
-		// seed default routine triggers). No FS↔DB sync is performed here.
-		reconciler := orchestrateservice.NewReconciler(services.Orchestrate)
-		reconciler.ReconcileAll(ctx)
-		log.Info("Orchestrate reconciliation complete")
-
-		// Register event subscribers and start scheduler
-		if err := services.Orchestrate.RegisterEventSubscribers(eventBus); err != nil {
-			log.Error("Failed to register orchestrate event subscribers", zap.Error(err))
+		if ok := initOrchestrateServices(ctx, cfg, log, services, orchestratorSvc, eventBus, addCleanup); !ok {
 			return false
 		}
-
-		// Wire the orchestrator's StartTask into the orchestrate scheduler so
-		// wakeups launch real agent sessions instead of dry-running.
-		services.Orchestrate.SetTaskStarter(orchestrateservice.TaskStarterFunc(
-			func(ctx context.Context, taskID, agentProfileID, executorID,
-				executorProfileID string, priority int, prompt, workflowStepID string,
-				planMode bool, attachments []v1.MessageAttachment) error {
-				_, err := orchestratorSvc.StartTask(ctx, taskID, agentProfileID,
-					executorID, executorProfileID, priority, prompt,
-					workflowStepID, planMode, attachments)
-				return err
-			},
-		))
-		log.Info("Orchestrate scheduler wired to orchestrator StartTask")
-
-		orchScheduler := orchestrateservice.NewSchedulerIntegration(
-			services.Orchestrate, orchestrateservice.DefaultTickInterval,
-		)
-		go orchScheduler.Start(ctx)
-		log.Info("Orchestrate wakeup scheduler started")
-
-		// Start GC sweep for orphaned worktrees and containers
-		worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
-		gc := orchestrateservice.NewGarbageCollector(
-			services.Orchestrate,
-			worktreeBase,
-			nil, // dockerClient - pass if Docker available
-			3*time.Hour,
-		)
-		go gc.Start(ctx)
-		log.Info("Orchestrate GC sweep started")
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
@@ -549,6 +465,100 @@ func startGatewayAndServe(
 	)
 
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	return true
+}
+
+// initOrchestrateServices sets up the orchestrate config loader, reconciler,
+// event subscribers, scheduler, and garbage collector. Returns false if a fatal
+// error prevents startup.
+func initOrchestrateServices(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	services *Services,
+	orchestratorSvc *orchestrator.Service,
+	eventBus bus.EventBus,
+	addCleanup func(func() error),
+) bool {
+	// Initialize filesystem config loader
+	configBasePath := cfg.ResolvedHomeDir()
+	cfgLoader := configloader.NewConfigLoader(configBasePath)
+	if err := cfgLoader.EnsureDefaultWorkspace(); err != nil {
+		log.Error("Failed to ensure default workspace directory", zap.Error(err))
+	}
+	if err := cfgLoader.Load(); err != nil {
+		log.Error("Failed to load orchestrate config from filesystem", zap.Error(err))
+	} else {
+		log.Info("Orchestrate config loaded from filesystem",
+			zap.String("base_path", configBasePath),
+			zap.Int("workspaces", len(cfgLoader.GetWorkspaces())))
+	}
+
+	// Write bundled system skills
+	if err := configloader.EnsureBundledSkills(configBasePath); err != nil {
+		log.Error("Failed to write bundled skills", zap.Error(err))
+	} else {
+		slugs, _ := configloader.BundledSkillSlugs()
+		log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
+	}
+
+	// Clean dangling skill symlinks on startup + register shutdown cleanup
+	orchestrateservice.CleanDanglingSymlinks(configBasePath)
+	log.Info("Cleaned dangling skill symlinks")
+	addCleanup(func() error {
+		orchestrateservice.CleanupOwnedSymlinks(configBasePath)
+		log.Info("Cleaned owned skill symlinks on shutdown")
+		return nil
+	})
+
+	// Wire ConfigLoader + FileWriter into the orchestrate service.
+	cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
+	services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
+	services.Orchestrate.SetWorkspaceCreator(&taskWorkspaceCreatorAdapter{taskSvc: services.Task})
+	apiPort := cfg.Server.Port
+	if apiPort == 0 {
+		apiPort = ports.Backend
+	}
+	services.Orchestrate.SetAPIBaseURL(fmt.Sprintf("http://localhost:%d/api/v1", apiPort))
+	log.Info("Orchestrate service wired to ConfigLoader (manual-sync only)")
+
+	reconciler := orchestrateservice.NewReconciler(services.Orchestrate)
+	reconciler.ReconcileAll(ctx)
+	log.Info("Orchestrate reconciliation complete")
+
+	// Register event subscribers and start scheduler
+	if err := services.Orchestrate.RegisterEventSubscribers(eventBus); err != nil {
+		log.Error("Failed to register orchestrate event subscribers", zap.Error(err))
+		return false
+	}
+
+	// Wire the orchestrator's StartTask so wakeups launch real agent sessions.
+	services.Orchestrate.SetTaskStarter(orchestrateservice.TaskStarterFunc(
+		func(ctx context.Context, taskID, agentProfileID, executorID,
+			executorProfileID string, priority int, prompt, workflowStepID string,
+			planMode bool, attachments []v1.MessageAttachment) error {
+			_, err := orchestratorSvc.StartTask(ctx, taskID, agentProfileID,
+				executorID, executorProfileID, priority, prompt,
+				workflowStepID, planMode, attachments)
+			return err
+		},
+	))
+	log.Info("Orchestrate scheduler wired to orchestrator StartTask")
+	orchScheduler := orchestrateservice.NewSchedulerIntegration(
+		services.Orchestrate, orchestrateservice.DefaultTickInterval,
+	)
+	go orchScheduler.Start(ctx)
+	log.Info("Orchestrate wakeup scheduler started")
+	// Start GC sweep for orphaned worktrees and containers
+	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
+	gc := orchestrateservice.NewGarbageCollector(
+		services.Orchestrate,
+		worktreeBase,
+		nil, // dockerClient - pass if Docker available
+		3*time.Hour,
+	)
+	go gc.Start(ctx)
+	log.Info("Orchestrate GC sweep started")
 	return true
 }
 

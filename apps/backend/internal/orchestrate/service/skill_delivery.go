@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"go.uber.org/zap"
 )
+
+// validSlugRe matches slugs that are safe for use in shell commands and file paths.
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Metadata keys used to pass orchestrate skill data through to executor backends.
 const (
@@ -120,6 +124,11 @@ func (si *SchedulerIntegration) deliverSkillsSprites(
 // writeSkillFiles writes each skill's SKILL.md to runtimeDir/<ws>/skills/<slug>/SKILL.md.
 func (si *SchedulerIntegration) writeSkillFiles(manifest *SkillManifest, runtimeDir string) {
 	for _, skill := range manifest.Skills {
+		if !validSlugRe.MatchString(skill.Slug) {
+			si.logger.Warn("skipping skill with invalid slug",
+				zap.String("slug", skill.Slug))
+			continue
+		}
 		targetDir := filepath.Join(runtimeDir, manifest.WorkspaceSlug, "skills", skill.Slug)
 		if err := os.MkdirAll(targetDir, 0o755); err != nil {
 			si.logger.Warn("failed to create skill dir",
@@ -146,6 +155,11 @@ func (si *SchedulerIntegration) writeInstructionFiles(manifest *SkillManifest, i
 		return
 	}
 	for _, instr := range manifest.Instructions {
+		if !isValidPathComponent(instr.Filename) {
+			si.logger.Warn("skipping instruction with invalid filename",
+				zap.String("filename", instr.Filename))
+			continue
+		}
 		if err := os.WriteFile(
 			filepath.Join(instructionsDir, instr.Filename),
 			[]byte(instr.Content), 0o644,
@@ -197,6 +211,9 @@ func BuildSymlinkScript(manifest *SkillManifest, runtimeDir string) string {
 	for _, targetDir := range targetDirs {
 		fmt.Fprintf(&sb, "mkdir -p %s\n", targetDir)
 		for _, skill := range manifest.Skills {
+			if !validSlugRe.MatchString(skill.Slug) {
+				continue
+			}
 			skillPath := filepath.Join(
 				runtimeDir, manifest.WorkspaceSlug, "skills", skill.Slug,
 			)

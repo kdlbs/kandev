@@ -75,6 +75,30 @@ func (w *Watcher) addWorkspaceSubdirs(wsPath string) {
 	}
 }
 
+// flushPending drains the pending workspace set, reloads each, and fires the
+// onReload callback. It is called from the debounce timer.
+func (w *Watcher) flushPending(mu *sync.Mutex, pending map[string]struct{}) {
+	mu.Lock()
+	names := make([]string, 0, len(pending))
+	for n := range pending {
+		names = append(names, n)
+	}
+	for n := range pending {
+		delete(pending, n)
+	}
+	mu.Unlock()
+
+	for _, n := range names {
+		if err := w.loader.Reload(n); err != nil {
+			log.Printf("configloader: reload %s: %v", n, err)
+			continue
+		}
+		if w.onReload != nil {
+			w.onReload(n)
+		}
+	}
+}
+
 // eventLoop processes fsnotify events with debouncing.
 func (w *Watcher) eventLoop(ctx context.Context) {
 	var mu sync.Mutex
@@ -99,22 +123,7 @@ func (w *Watcher) eventLoop(ctx context.Context) {
 				timer.Stop()
 			}
 			timer = time.AfterFunc(w.debounce, func() {
-				mu.Lock()
-				names := make([]string, 0, len(pending))
-				for n := range pending {
-					names = append(names, n)
-				}
-				pending = make(map[string]struct{})
-				mu.Unlock()
-				for _, n := range names {
-					if err := w.loader.Reload(n); err != nil {
-						log.Printf("configloader: reload %s: %v", n, err)
-						continue
-					}
-					if w.onReload != nil {
-						w.onReload(n)
-					}
-				}
+				w.flushPending(&mu, pending)
 			})
 			mu.Unlock()
 		case err, ok := <-w.watcher.Errors:

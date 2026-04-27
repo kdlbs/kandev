@@ -83,6 +83,9 @@ func (s *Service) ExportInstructionsToDir(
 		return err
 	}
 	for _, f := range files {
+		if !isValidPathComponent(f.Filename) {
+			continue
+		}
 		path := filepath.Join(targetDir, f.Filename)
 		if wErr := os.WriteFile(path, []byte(f.Content), 0o644); wErr != nil {
 			return wErr

@@ -234,7 +234,7 @@ func (g *GitManager) readCommitCount(ctx context.Context, wsPath string) int {
 // isAllowedRepoURL validates that the repository URL uses a known safe scheme,
 // preventing argument injection via URLs that start with "--".
 func isAllowedRepoURL(u string) bool {
-	for _, prefix := range []string{"https://", "git://", "ssh://", "git@"} {
+	for _, prefix := range []string{"https://", "git://", "ssh://", "git@", "file://", "/"} {
 		if strings.HasPrefix(u, prefix) {
 			return true
 		}

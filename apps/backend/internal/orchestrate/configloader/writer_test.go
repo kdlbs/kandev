@@ -74,7 +74,7 @@ func TestWriteAndDeleteSkill(t *testing.T) {
 	writer := NewFileWriter(base, loader)
 
 	// Write a new skill.
-	if err := writer.WriteSkill("default", "deploy", "# Deploy\nDeploy things."); err != nil {
+	if err := writer.WriteSkill("default", "deploy", "# Deploy\nRun deployments."); err != nil {
 		t.Fatalf("WriteSkill() error: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestWriteAndDeleteSkill(t *testing.T) {
 	for _, s := range skills {
 		if s.Slug == "deploy" {
 			found = true
-			if s.Content != "# Deploy\nDeploy things." {
+			if s.Content != "# Deploy\nRun deployments." {
 				t.Errorf("unexpected content: %q", s.Content)
 			}
 		}

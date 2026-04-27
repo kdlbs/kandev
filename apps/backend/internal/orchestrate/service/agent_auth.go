@@ -45,7 +45,9 @@ func NewAgentAuth(key string) *AgentAuth {
 		signingKey = []byte(key)
 	} else {
 		signingKey = make([]byte, 32)
-		_, _ = rand.Read(signingKey)
+		if _, err := rand.Read(signingKey); err != nil {
+			panic(fmt.Sprintf("crypto/rand.Read failed: %v", err))
+		}
 	}
 	return &AgentAuth{signingKey: signingKey}
 }

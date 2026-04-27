@@ -14,7 +14,7 @@ import (
 // returns the created approval.
 func (s *Service) CreateApprovalWithActivity(ctx context.Context, approval *models.Approval) error {
 	if approval.Status == "" {
-		approval.Status = "pending"
+		approval.Status = execStatusPending
 	}
 	if err := s.repo.CreateApproval(ctx, approval); err != nil {
 		return fmt.Errorf("create approval: %w", err)
@@ -37,7 +37,7 @@ func (s *Service) DecideApproval(
 	ctx context.Context,
 	approvalID, status, decidedBy, note string,
 ) (*models.Approval, error) {
-	if status != "approved" && status != "rejected" {
+	if status != execStatusApproved && status != execStatusRejected {
 		return nil, fmt.Errorf("invalid status: %s (must be approved or rejected)", status)
 	}
 
@@ -45,7 +45,7 @@ func (s *Service) DecideApproval(
 	if err != nil {
 		return nil, fmt.Errorf("get approval: %w", err)
 	}
-	if approval.Status != "pending" {
+	if approval.Status != execStatusPending {
 		return nil, fmt.Errorf("approval already decided: %s", approval.Status)
 	}
 
@@ -81,7 +81,7 @@ func (s *Service) DecideApproval(
 func (s *Service) applyApprovalSideEffects(
 	ctx context.Context, approval *models.Approval,
 ) error {
-	if approval.Status == "rejected" {
+	if approval.Status == execStatusRejected {
 		return s.queueApprovalWakeup(ctx, approval)
 	}
 

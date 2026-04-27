@@ -3,7 +3,6 @@ package configloader
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -206,18 +205,6 @@ func UnmarshalRoutine(data []byte, workspaceID string) (*models.Routine, error) 
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}, nil
-}
-
-// readYAMLFile reads and unmarshals a YAML file.
-func readYAMLFile(path string, dest interface{}) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", filepath.Base(path), err)
-	}
-	if err := yaml.Unmarshal(data, dest); err != nil {
-		return fmt.Errorf("parse %s: %w", filepath.Base(path), err)
-	}
-	return nil
 }
 
 // isYAMLFile checks if a filename has a YAML extension.

@@ -63,8 +63,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
         <CardHeader>
           <CardTitle className="text-sm">Permissions</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Control what this agent is allowed to do. Defaults are based on the
-            agent&apos;s role.
+            Control what this agent is allowed to do. Defaults are based on the agent&apos;s role.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">

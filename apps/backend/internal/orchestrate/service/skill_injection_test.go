@@ -47,7 +47,7 @@ func TestSymlinkSkillsSafe_Creates(t *testing.T) {
 	targetDir := t.TempDir()
 	sourceDir := t.TempDir()
 	skillPath := filepath.Join(sourceDir, "test-skill")
-	os.MkdirAll(skillPath, 0o755)
+	_ = os.MkdirAll(skillPath, 0o755)
 
 	err := symlinkSkillsSafe(targetDir, []SkillDir{{Slug: "test-skill", Path: skillPath}}, sourceDir)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestSymlinkSkillsSafe_Creates(t *testing.T) {
 
 func TestSymlinkSkillsSafe_SkipsRealDir(t *testing.T) {
 	targetDir := t.TempDir()
-	os.MkdirAll(filepath.Join(targetDir, "my-skill"), 0o755)
+	_ = os.MkdirAll(filepath.Join(targetDir, "my-skill"), 0o755)
 
 	err := symlinkSkillsSafe(targetDir, []SkillDir{{Slug: "my-skill", Path: "/other"}}, "/kandev")
 	if err != nil {
@@ -80,7 +80,7 @@ func TestSymlinkSkillsSafe_SkipsForeignSymlink(t *testing.T) {
 	targetDir := t.TempDir()
 	foreignDir := t.TempDir()
 	link := filepath.Join(targetDir, "foreign")
-	os.Symlink(foreignDir, link)
+	_ = os.Symlink(foreignDir, link)
 
 	err := symlinkSkillsSafe(targetDir, []SkillDir{{Slug: "foreign", Path: "/kandev/x"}}, "/kandev")
 	if err != nil {
@@ -97,11 +97,11 @@ func TestSymlinkSkillsSafe_ReplacesOwned(t *testing.T) {
 	kandevBase := t.TempDir()
 	oldPath := filepath.Join(kandevBase, "old")
 	newPath := filepath.Join(kandevBase, "new")
-	os.MkdirAll(oldPath, 0o755)
-	os.MkdirAll(newPath, 0o755)
+	_ = os.MkdirAll(oldPath, 0o755)
+	_ = os.MkdirAll(newPath, 0o755)
 
 	link := filepath.Join(targetDir, "skill")
-	os.Symlink(oldPath, link)
+	_ = os.Symlink(oldPath, link)
 
 	err := symlinkSkillsSafe(targetDir, []SkillDir{{Slug: "skill", Path: newPath}}, kandevBase)
 	if err != nil {
@@ -119,9 +119,9 @@ func TestCleanupOwned(t *testing.T) {
 	foreignDir := t.TempDir()
 
 	ownedLink := filepath.Join(dir, "owned")
-	os.Symlink(filepath.Join(kandevBase, "x"), ownedLink)
+	_ = os.Symlink(filepath.Join(kandevBase, "x"), ownedLink)
 	foreignLink := filepath.Join(dir, "foreign")
-	os.Symlink(foreignDir, foreignLink)
+	_ = os.Symlink(foreignDir, foreignLink)
 
 	removeOwnedSymlinksInDir(dir, kandevBase)
 

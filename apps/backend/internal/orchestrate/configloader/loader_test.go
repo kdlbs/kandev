@@ -40,7 +40,7 @@ budget_monthly_cents: 5000
 	// Create skills
 	skillDir := filepath.Join(wsDir, "skills", "code-review")
 	mkdirAll(t, skillDir)
-	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "# Code Review\nReview code for quality.")
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "# Code Review\nCheck code for quality.")
 
 	// Create projects
 	mkdirAll(t, filepath.Join(wsDir, "projects"))

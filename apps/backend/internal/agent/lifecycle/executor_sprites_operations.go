@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,9 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
+
+// validSlugRe matches slugs that are safe for use in shell commands and file paths.
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // createSprite creates a new sprite via the API (explicit POST, not lazy).
 func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Client, name string) (*sprites.Sprite, error) {
@@ -153,6 +157,9 @@ func buildSpriteSymlinkScript(
 	for _, dir := range targetDirs {
 		fmt.Fprintf(&sb, "mkdir -p %s\n", dir)
 		for _, skill := range skills {
+			if !validSlugRe.MatchString(skill.Slug) {
+				continue
+			}
 			skillPath := fmt.Sprintf("%s/%s/skills/%s", runtimeBase, workspaceSlug, skill.Slug)
 			fmt.Fprintf(&sb, "ln -sf %s %s/%s\n", skillPath, dir, skill.Slug)
 		}
