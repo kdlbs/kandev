@@ -304,6 +304,7 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 - **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
 
 ### Frontend
+- **Thin client principle:** The frontend is a rendering layer only. All business logic, enums, validation, defaults, and state belong on the backend. The frontend should NOT hardcode status values, role lists, priority mappings, color schemes tied to business state, or default field values. Instead, the backend provides metadata endpoints and includes display hints (variant, label, icon) in resource responses. This ensures multiple clients (web, mobile, CLI) share the same logic without duplication.
 - **Data:** SSR fetch → hydrate → read store. Never fetch in components
 - **UI Components:**
   - Import shadcn components from `@kandev/ui`, NOT `@/components/ui/*`
