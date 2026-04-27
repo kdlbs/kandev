@@ -31,32 +31,10 @@ function persistFilters(workspaceId: string | null, filters: Record<string, unkn
   }
 }
 
-export function IssuesList() {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const issues = useAppStore((s) => s.orchestrate.issues.items);
-  const filters = useAppStore((s) => s.orchestrate.issues.filters);
-  const viewMode = useAppStore((s) => s.orchestrate.issues.viewMode);
-  const sortField = useAppStore((s) => s.orchestrate.issues.sortField);
-  const sortDir = useAppStore((s) => s.orchestrate.issues.sortDir);
-  const groupBy = useAppStore((s) => s.orchestrate.issues.groupBy);
-  const nestingEnabled = useAppStore((s) => s.orchestrate.issues.nestingEnabled);
-  const isLoading = useAppStore((s) => s.orchestrate.issues.isLoading);
-  const agents = useAppStore((s) => s.orchestrate.agentInstances);
-
+function useIssuesData(workspaceId: string | null) {
   const setIssues = useAppStore((s) => s.setIssues);
   const setIssueFilters = useAppStore((s) => s.setIssueFilters);
-  const setIssueViewMode = useAppStore((s) => s.setIssueViewMode);
-  const setIssueSortField = useAppStore((s) => s.setIssueSortField);
-  const setIssueSortDir = useAppStore((s) => s.setIssueSortDir);
-  const setIssueGroupBy = useAppStore((s) => s.setIssueGroupBy);
-  const toggleNesting = useAppStore((s) => s.toggleNesting);
   const setIssuesLoading = useAppStore((s) => s.setIssuesLoading);
-
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [newIssueOpen, setNewIssueOpen] = useState(false);
-  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
-
-  const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
   useEffect(() => {
     const persisted = loadPersistedFilters(workspaceId);
@@ -81,6 +59,34 @@ export function IssuesList() {
       cancelled = true;
     };
   }, [workspaceId, setIssues, setIssuesLoading]);
+}
+
+export function IssuesList() {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const issues = useAppStore((s) => s.orchestrate.issues.items);
+  const filters = useAppStore((s) => s.orchestrate.issues.filters);
+  const viewMode = useAppStore((s) => s.orchestrate.issues.viewMode);
+  const sortField = useAppStore((s) => s.orchestrate.issues.sortField);
+  const sortDir = useAppStore((s) => s.orchestrate.issues.sortDir);
+  const groupBy = useAppStore((s) => s.orchestrate.issues.groupBy);
+  const nestingEnabled = useAppStore((s) => s.orchestrate.issues.nestingEnabled);
+  const isLoading = useAppStore((s) => s.orchestrate.issues.isLoading);
+  const agents = useAppStore((s) => s.orchestrate.agentInstances);
+
+  const setIssueFilters = useAppStore((s) => s.setIssueFilters);
+  const setIssueViewMode = useAppStore((s) => s.setIssueViewMode);
+  const setIssueSortField = useAppStore((s) => s.setIssueSortField);
+  const setIssueSortDir = useAppStore((s) => s.setIssueSortDir);
+  const setIssueGroupBy = useAppStore((s) => s.setIssueGroupBy);
+  const toggleNesting = useAppStore((s) => s.toggleNesting);
+
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+
+  const agentMap = new Map(agents.map((a) => [a.id, a.name]));
+
+  useIssuesData(workspaceId);
 
   const handleFilterChange = useCallback(
     (patch: Record<string, unknown>) => {

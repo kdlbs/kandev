@@ -56,9 +56,11 @@ function PriorityDisplay({ priority }: { priority: Issue["priority"] }) {
   return <span className={config.className}>{config.label}</span>;
 }
 
-export function TaskProperties({ task }: TaskPropertiesProps) {
+const NONE_LABEL = <span className="text-muted-foreground">None</span>;
+
+function IdentitySection({ task }: { task: Issue }) {
   return (
-    <div className="space-y-0">
+    <>
       <PropertyRow label="Status">
         <StatusDisplay status={task.status} />
       </PropertyRow>
@@ -75,7 +77,7 @@ export function TaskProperties({ task }: TaskPropertiesProps) {
             ))}
           </div>
         ) : (
-          <span className="text-muted-foreground">None</span>
+          NONE_LABEL
         )}
       </PropertyRow>
       <PropertyRow label="Assignee">
@@ -93,7 +95,7 @@ export function TaskProperties({ task }: TaskPropertiesProps) {
             {task.projectName}
           </span>
         ) : (
-          <span className="text-muted-foreground">None</span>
+          NONE_LABEL
         )}
       </PropertyRow>
       <PropertyRow label="Parent">
@@ -102,70 +104,66 @@ export function TaskProperties({ task }: TaskPropertiesProps) {
             {task.parentIdentifier} {task.parentTitle}
           </span>
         ) : (
-          <span className="text-muted-foreground">None</span>
+          NONE_LABEL
         )}
       </PropertyRow>
+    </>
+  );
+}
 
-      <Separator className="my-2" />
-
+function DependenciesSection({ task }: { task: Issue }) {
+  return (
+    <>
       <PropertyRow label="Blocked by">
-        {task.blockedBy.length > 0 ? (
-          task.blockedBy.join(", ")
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
+        {task.blockedBy.length > 0 ? task.blockedBy.join(", ") : NONE_LABEL}
       </PropertyRow>
       <PropertyRow label="Blocking">
-        {task.blocking.length > 0 ? (
-          task.blocking.join(", ")
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
+        {task.blocking.length > 0 ? task.blocking.join(", ") : NONE_LABEL}
       </PropertyRow>
       <PropertyRow label="Sub-issues">
-        {task.children.length > 0 ? (
-          <span>{task.children.length} sub-issues</span>
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
+        {task.children.length > 0 ? <span>{task.children.length} sub-issues</span> : NONE_LABEL}
       </PropertyRow>
+    </>
+  );
+}
 
-      <Separator className="my-2" />
-
+function ReviewSection({ task }: { task: Issue }) {
+  return (
+    <>
       <PropertyRow label="Reviewers">
-        {task.reviewers.length > 0 ? (
-          task.reviewers.join(", ")
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
+        {task.reviewers.length > 0 ? task.reviewers.join(", ") : NONE_LABEL}
       </PropertyRow>
       <PropertyRow label="Approvers">
-        {task.approvers.length > 0 ? (
-          task.approvers.join(", ")
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
+        {task.approvers.length > 0 ? task.approvers.join(", ") : NONE_LABEL}
       </PropertyRow>
+    </>
+  );
+}
 
-      <Separator className="my-2" />
-
+function TimelineSection({ task }: { task: Issue }) {
+  const dateOrDash = (d?: string | null) =>
+    d ? formatDate(d) : <span className="text-muted-foreground">--</span>;
+  return (
+    <>
       <PropertyRow label="Created by">{task.createdBy}</PropertyRow>
-      <PropertyRow label="Started">
-        {task.startedAt ? (
-          formatDate(task.startedAt)
-        ) : (
-          <span className="text-muted-foreground">--</span>
-        )}
-      </PropertyRow>
-      <PropertyRow label="Completed">
-        {task.completedAt ? (
-          formatDate(task.completedAt)
-        ) : (
-          <span className="text-muted-foreground">--</span>
-        )}
-      </PropertyRow>
+      <PropertyRow label="Started">{dateOrDash(task.startedAt)}</PropertyRow>
+      <PropertyRow label="Completed">{dateOrDash(task.completedAt)}</PropertyRow>
       <PropertyRow label="Created">{formatDate(task.createdAt)}</PropertyRow>
       <PropertyRow label="Updated">{formatRelativeTime(task.updatedAt)}</PropertyRow>
+    </>
+  );
+}
+
+export function TaskProperties({ task }: TaskPropertiesProps) {
+  return (
+    <div className="space-y-0">
+      <IdentitySection task={task} />
+      <Separator className="my-2" />
+      <DependenciesSection task={task} />
+      <Separator className="my-2" />
+      <ReviewSection task={task} />
+      <Separator className="my-2" />
+      <TimelineSection task={task} />
     </div>
   );
 }

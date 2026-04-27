@@ -30,12 +30,8 @@ type AgentMemoryTabProps = {
   agent: AgentInstance;
 };
 
-export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
+function useMemoryActions(agent: AgentInstance) {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
-  const [search, setSearch] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [collapsedLayers, setCollapsedLayers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -54,23 +50,6 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
     };
   }, [agent.id]);
 
-  const filtered = useMemo(() => {
-    if (!search) return entries;
-    const q = search.toLowerCase();
-    return entries.filter(
-      (e) => e.key.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
-    );
-  }, [entries, search]);
-
-  const grouped = useMemo(() => {
-    const groups: Record<string, MemoryEntry[]> = { operating: [], knowledge: [], session: [] };
-    for (const e of filtered) {
-      const layer = e.layer in groups ? e.layer : "knowledge";
-      groups[layer].push(e);
-    }
-    return groups;
-  }, [filtered]);
-
   const handleDelete = useCallback(
     async (entryId: string) => {
       try {
@@ -88,7 +67,6 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
     try {
       await orchestrateApi.deleteAllMemory(agent.id);
       setEntries([]);
-      setClearDialogOpen(false);
       toast.success("All memory cleared");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to clear memory");
@@ -106,6 +84,77 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
     a.click();
     URL.revokeObjectURL(url);
   }, [agent.id, agent.name]);
+
+  return { entries, handleDelete, handleClearAll, handleExport };
+}
+
+function MemoryGroupsList({
+  grouped,
+  collapsedLayers,
+  expandedId,
+  onToggleLayer,
+  onToggleEntry,
+  onDelete,
+}: {
+  grouped: Record<string, MemoryEntry[]>;
+  collapsedLayers: Set<string>;
+  expandedId: string | null;
+  onToggleLayer: (layer: string) => void;
+  onToggleEntry: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {(["operating", "knowledge", "session"] as const).map((layer) => (
+        <MemoryLayerGroup
+          key={layer}
+          layer={layer}
+          entries={grouped[layer] ?? []}
+          collapsed={collapsedLayers.has(layer)}
+          expandedId={expandedId}
+          onToggleLayer={() => onToggleLayer(layer)}
+          onToggleEntry={onToggleEntry}
+          onDelete={onDelete}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmptyMemoryState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <p className="text-sm text-muted-foreground">No memory entries yet.</p>
+      <p className="text-xs text-muted-foreground mt-1">
+        Memory is accumulated as the agent works on tasks.
+      </p>
+    </div>
+  );
+}
+
+export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
+  const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [collapsedLayers, setCollapsedLayers] = useState<Set<string>>(new Set());
+  const { entries, handleDelete, handleClearAll, handleExport } = useMemoryActions(agent);
+
+  const filtered = useMemo(() => {
+    if (!search) return entries;
+    const q = search.toLowerCase();
+    return entries.filter(
+      (e) => e.key.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
+    );
+  }, [entries, search]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<string, MemoryEntry[]> = { operating: [], knowledge: [], session: [] };
+    for (const e of filtered) {
+      const layer = e.layer in groups ? e.layer : "knowledge";
+      groups[layer].push(e);
+    }
+    return groups;
+  }, [filtered]);
 
   const toggleLayer = useCallback((layer: string) => {
     setCollapsedLayers((prev) => {
@@ -125,35 +174,25 @@ export function AgentMemoryTab({ agent }: AgentMemoryTabProps) {
         onExport={handleExport}
         isEmpty={entries.length === 0}
       />
-
       {entries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <p className="text-sm text-muted-foreground">No memory entries yet.</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Memory is accumulated as the agent works on tasks.
-          </p>
-        </div>
+        <EmptyMemoryState />
       ) : (
-        <div className="space-y-4">
-          {(["operating", "knowledge", "session"] as const).map((layer) => (
-            <MemoryLayerGroup
-              key={layer}
-              layer={layer}
-              entries={grouped[layer] ?? []}
-              collapsed={collapsedLayers.has(layer)}
-              expandedId={expandedId}
-              onToggleLayer={() => toggleLayer(layer)}
-              onToggleEntry={(id) => setExpandedId(expandedId === id ? null : id)}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
+        <MemoryGroupsList
+          grouped={grouped}
+          collapsedLayers={collapsedLayers}
+          expandedId={expandedId}
+          onToggleLayer={toggleLayer}
+          onToggleEntry={(id) => setExpandedId(expandedId === id ? null : id)}
+          onDelete={handleDelete}
+        />
       )}
-
       <ClearAllDialog
         open={clearDialogOpen}
         onOpenChange={setClearDialogOpen}
-        onConfirm={handleClearAll}
+        onConfirm={() => {
+          handleClearAll();
+          setClearDialogOpen(false);
+        }}
       />
     </div>
   );

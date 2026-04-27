@@ -17,21 +17,13 @@ type InboxPageClientProps = {
   initialCount: number;
 };
 
-export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+function useInboxData(workspaceId: string | null, initialItems: InboxItem[], initialCount: number) {
   const setInboxItems = useAppStore((s) => s.setInboxItems);
   const setInboxCount = useAppStore((s) => s.setInboxCount);
-  const inboxItems = useAppStore((s) => s.orchestrate.inboxItems);
-  const [tab, setTab] = useState<TabValue>("mine");
-  const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (initialItems.length > 0) {
-      setInboxItems(initialItems);
-    }
-    if (initialCount > 0) {
-      setInboxCount(initialCount);
-    }
+    if (initialItems.length > 0) setInboxItems(initialItems);
+    if (initialCount > 0) setInboxCount(initialCount);
   }, [initialItems, initialCount, setInboxItems, setInboxCount]);
 
   const fetchInbox = useCallback(async () => {
@@ -48,26 +40,10 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
     void fetchInbox();
   }, [fetchInbox]);
 
-  const filteredItems = useMemo(() => {
-    let items: InboxItem[] = inboxItems;
+  return fetchInbox;
+}
 
-    if (tab === "mine") {
-      items = items.filter((i) => i.type === "approval" && i.status === "pending");
-    } else if (tab === "recent") {
-      items = items.slice(0, 20);
-    }
-
-    if (search) {
-      const lower = search.toLowerCase();
-      items = items.filter(
-        (i) =>
-          i.title.toLowerCase().includes(lower) ||
-          (i.description?.toLowerCase().includes(lower) ?? false),
-      );
-    }
-    return items;
-  }, [inboxItems, tab, search]);
-
+function useApprovalActions(fetchInbox: () => Promise<void>) {
   const handleApprove = useCallback(
     async (id: string) => {
       try {
@@ -94,33 +70,78 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
     [fetchInbox],
   );
 
+  return { handleApprove, handleReject };
+}
+
+function InboxToolbar({
+  tab,
+  search,
+  onTabChange,
+  onSearchChange,
+}: {
+  tab: TabValue;
+  search: string;
+  onTabChange: (v: TabValue) => void;
+  onSearchChange: (v: string) => void;
+}) {
+  return (
+    <Tabs value={tab} onValueChange={(v) => onTabChange(v as TabValue)}>
+      <div className="flex items-center justify-between">
+        <TabsList>
+          <TabsTrigger value="mine" className="cursor-pointer">
+            Mine
+          </TabsTrigger>
+          <TabsTrigger value="recent" className="cursor-pointer">
+            Recent
+          </TabsTrigger>
+          <TabsTrigger value="all" className="cursor-pointer">
+            All
+          </TabsTrigger>
+        </TabsList>
+        <div className="relative">
+          <IconSearch className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search..."
+            className="w-[220px] h-8 pl-8 text-xs"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+        </div>
+      </div>
+    </Tabs>
+  );
+}
+
+export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const inboxItems = useAppStore((s) => s.orchestrate.inboxItems);
+  const [tab, setTab] = useState<TabValue>("mine");
+  const [search, setSearch] = useState("");
+
+  const fetchInbox = useInboxData(workspaceId, initialItems, initialCount);
+  const { handleApprove, handleReject } = useApprovalActions(fetchInbox);
+
+  const filteredItems = useMemo(() => {
+    let items: InboxItem[] = inboxItems;
+    if (tab === "mine") {
+      items = items.filter((i) => i.type === "approval" && i.status === "pending");
+    } else if (tab === "recent") {
+      items = items.slice(0, 20);
+    }
+    if (search) {
+      const lower = search.toLowerCase();
+      items = items.filter(
+        (i) =>
+          i.title.toLowerCase().includes(lower) ||
+          (i.description?.toLowerCase().includes(lower) ?? false),
+      );
+    }
+    return items;
+  }, [inboxItems, tab, search]);
+
   return (
     <div className="space-y-4 p-6">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="mine" className="cursor-pointer">
-              Mine
-            </TabsTrigger>
-            <TabsTrigger value="recent" className="cursor-pointer">
-              Recent
-            </TabsTrigger>
-            <TabsTrigger value="all" className="cursor-pointer">
-              All
-            </TabsTrigger>
-          </TabsList>
-          <div className="relative">
-            <IconSearch className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Search..."
-              className="w-[220px] h-8 pl-8 text-xs"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
-      </Tabs>
-
+      <InboxToolbar tab={tab} search={search} onTabChange={setTab} onSearchChange={setSearch} />
       <div className="border border-border rounded-lg divide-y divide-border">
         {filteredItems.length === 0 ? (
           <div className="px-4 py-8 text-center">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { IconPlus, IconX, IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -17,7 +17,7 @@ type ProjectReposSectionProps = {
 export function ProjectReposSection({ project }: ProjectReposSectionProps) {
   const updateProjectStore = useAppStore((s) => s.updateProject);
   const [repoInput, setRepoInput] = useState("");
-  const repos = project.repositories ?? [];
+  const repos = useMemo(() => project.repositories ?? [], [project.repositories]);
 
   const handleAdd = useCallback(async () => {
     const trimmed = repoInput.trim();

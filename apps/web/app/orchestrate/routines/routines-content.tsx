@@ -22,32 +22,19 @@ import { CreateRoutineDialog } from "./create-routine-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 import { PageHeader } from "../components/shared/page-header";
 
-export function RoutinesContent() {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const routines = useAppStore((s) => s.orchestrate.routines);
-  const agents = useAppStore((s) => s.orchestrate.agentInstances);
-  const setRoutines = useAppStore((s) => s.setRoutines);
+type RoutineFormData = {
+  name: string;
+  description: string;
+  taskTitle: string;
+  taskDescription: string;
+  assigneeAgentInstanceId: string;
+  concurrencyPolicy: string;
+  triggerKind: string;
+  cronExpression: string;
+  timezone: string;
+};
 
-  const [runs, setRuns] = useState<RoutineRun[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-
-  const fetchRoutines = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listRoutines(workspaceId);
-    setRoutines(res.routines ?? []);
-  }, [workspaceId, setRoutines]);
-
-  const fetchRuns = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAllRoutineRuns(workspaceId);
-    setRuns(res.runs ?? []);
-  }, [workspaceId]);
-
-  useEffect(() => {
-    fetchRoutines();
-    fetchRuns();
-  }, [fetchRoutines, fetchRuns]);
-
+function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Promise<void>) {
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
       try {
@@ -64,19 +51,6 @@ export function RoutinesContent() {
     [fetchRoutines],
   );
 
-  const handleRunNow = useCallback(
-    async (id: string) => {
-      try {
-        await runRoutine(id);
-        await fetchRuns();
-        toast.success("Routine started");
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to run routine");
-      }
-    },
-    [fetchRuns],
-  );
-
   const handleDelete = useCallback(
     async (id: string) => {
       try {
@@ -91,17 +65,7 @@ export function RoutinesContent() {
   );
 
   const handleCreate = useCallback(
-    async (data: {
-      name: string;
-      description: string;
-      taskTitle: string;
-      taskDescription: string;
-      assigneeAgentInstanceId: string;
-      concurrencyPolicy: string;
-      triggerKind: string;
-      cronExpression: string;
-      timezone: string;
-    }) => {
+    async (data: RoutineFormData, onDone: () => void) => {
       if (!workspaceId) return;
       try {
         const template = JSON.stringify({
@@ -126,7 +90,7 @@ export function RoutinesContent() {
             });
           }
         }
-        setShowCreate(false);
+        onDone();
         await fetchRoutines();
         toast.success("Routine created");
       } catch (err) {
@@ -134,6 +98,59 @@ export function RoutinesContent() {
       }
     },
     [workspaceId, fetchRoutines],
+  );
+
+  return { handleToggle, handleDelete, handleCreate };
+}
+
+export function RoutinesContent() {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const routines = useAppStore((s) => s.orchestrate.routines);
+  const agents = useAppStore((s) => s.orchestrate.agentInstances);
+  const setRoutines = useAppStore((s) => s.setRoutines);
+
+  const [runs, setRuns] = useState<RoutineRun[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const fetchRoutines = useCallback(async () => {
+    if (!workspaceId) return;
+    const res = await listRoutines(workspaceId);
+    setRoutines(res.routines ?? []);
+  }, [workspaceId, setRoutines]);
+
+  const fetchRuns = useCallback(async () => {
+    if (!workspaceId) return [] as RoutineRun[];
+    const res = await listAllRoutineRuns(workspaceId);
+    return res.runs ?? [];
+  }, [workspaceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRoutines();
+    fetchRuns().then((runs) => {
+      if (!cancelled) setRuns(runs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchRoutines, fetchRuns]);
+
+  const { handleToggle, handleDelete, handleCreate } = useRoutineActions(
+    workspaceId,
+    fetchRoutines,
+  );
+
+  const handleRunNow = useCallback(
+    async (id: string) => {
+      try {
+        await runRoutine(id);
+        setRuns(await fetchRuns());
+        toast.success("Routine started");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to run routine");
+      }
+    },
+    [fetchRuns],
   );
 
   return (
@@ -176,7 +193,7 @@ export function RoutinesContent() {
         open={showCreate}
         onOpenChange={setShowCreate}
         agents={agents}
-        onSubmit={handleCreate}
+        onSubmit={(data) => handleCreate(data, () => setShowCreate(false))}
       />
     </div>
   );

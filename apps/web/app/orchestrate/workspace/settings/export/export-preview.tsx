@@ -8,7 +8,7 @@ import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 import { ExportFileTree } from "./export-file-tree";
 import { ExportFilePreview } from "./export-file-preview";
 import { buildFileTree, bundleToExportFiles, countSelectedFiles } from "./export-utils";
-import type { ExportFile, FileTreeNode } from "./export-types";
+import type { ExportFile } from "./export-types";
 
 export function ExportPreview() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
@@ -24,17 +24,25 @@ export function ExportPreview() {
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
-    setLoading(true);
+    let cancelled = false;
     orchestrateApi
       .exportConfig(activeWorkspaceId)
       .then((res) => {
+        if (cancelled) return;
         const exported = bundleToExportFiles(res.bundle);
         setFiles(exported);
         setSelectedPaths(new Set(exported.map((f) => f.path)));
         if (exported.length > 0) setPreviewPath(exported[0].path);
       })
-      .catch(() => setError("Failed to load export bundle"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setError("Failed to load export bundle");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeWorkspaceId]);
 
   const tree = useMemo(() => buildFileTree(files), [files]);

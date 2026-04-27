@@ -16,44 +16,216 @@ type CreateAgentDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
+type FormState = {
+  name: string;
+  role: AgentRole;
+  reportsTo: string;
+  budgetCents: number;
+  maxConcurrent: number;
+  executorPref: string;
+};
+
+const INITIAL_STATE: FormState = {
+  name: "",
+  role: "worker",
+  reportsTo: "",
+  budgetCents: 0,
+  maxConcurrent: 1,
+  executorPref: "",
+};
+
+function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <Label>Name</Label>
+      <Input
+        placeholder="e.g. Frontend Worker"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1"
+        autoFocus
+      />
+      <p className="text-xs text-muted-foreground mt-1">
+        A unique name for this agent (e.g. CEO, Frontend Worker)
+      </p>
+    </div>
+  );
+}
+
+function RoleAndReports({
+  role,
+  reportsTo,
+  agents,
+  onChange,
+}: {
+  role: AgentRole;
+  reportsTo: string;
+  agents: AgentInstance[];
+  onChange: (patch: Partial<FormState>) => void;
+}) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex-1">
+        <Label>Role</Label>
+        <Select value={role} onValueChange={(v) => onChange({ role: v as AgentRole })}>
+          <SelectTrigger className="mt-1 cursor-pointer">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ceo" className="cursor-pointer">
+              CEO
+            </SelectItem>
+            <SelectItem value="worker" className="cursor-pointer">
+              Worker
+            </SelectItem>
+            <SelectItem value="specialist" className="cursor-pointer">
+              Specialist
+            </SelectItem>
+            <SelectItem value="assistant" className="cursor-pointer">
+              Assistant
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground mt-1">
+          CEO manages other agents, workers execute tasks
+        </p>
+      </div>
+      <div className="flex-1">
+        <Label>Reports to</Label>
+        <Select
+          value={reportsTo || "__none__"}
+          onValueChange={(v) => onChange({ reportsTo: v === "__none__" ? "" : v })}
+        >
+          <SelectTrigger className="mt-1 cursor-pointer">
+            <SelectValue placeholder="None (top-level)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__" className="cursor-pointer">
+              None
+            </SelectItem>
+            {agents.map((a) => (
+              <SelectItem key={a.id} value={a.id} className="cursor-pointer">
+                {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground mt-1">Which agent manages this one</p>
+      </div>
+    </div>
+  );
+}
+
+function BudgetAndConcurrency({
+  budgetCents,
+  maxConcurrent,
+  onChange,
+}: {
+  budgetCents: number;
+  maxConcurrent: number;
+  onChange: (patch: Partial<FormState>) => void;
+}) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex-1">
+        <Label>Monthly budget ($)</Label>
+        <Input
+          type="number"
+          min={0}
+          value={budgetCents / 100}
+          onChange={(e) => onChange({ budgetCents: Math.round(Number(e.target.value) * 100) })}
+          className="mt-1"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Monthly spending limit ($0 = unlimited)
+        </p>
+      </div>
+      <div className="flex-1">
+        <Label>Max concurrent</Label>
+        <Input
+          type="number"
+          min={1}
+          max={10}
+          value={maxConcurrent}
+          onChange={(e) => onChange({ maxConcurrent: Number(e.target.value) })}
+          className="mt-1"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          How many tasks this agent can run at once
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ExecutorPreferenceField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <Label>Executor preference</Label>
+      <Select
+        value={value || "__inherit__"}
+        onValueChange={(v) => onChange(v === "__inherit__" ? "" : v)}
+      >
+        <SelectTrigger className="mt-1 cursor-pointer">
+          <SelectValue placeholder="Inherit from project/workspace" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__inherit__" className="cursor-pointer">
+            Inherit
+          </SelectItem>
+          <SelectItem value="local_pc" className="cursor-pointer">
+            Local (standalone)
+          </SelectItem>
+          <SelectItem value="local_docker" className="cursor-pointer">
+            Local Docker
+          </SelectItem>
+          <SelectItem value="sprites" className="cursor-pointer">
+            Sprites (remote sandbox)
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground mt-1">
+        How agent sessions run (inherit uses project/workspace default)
+      </p>
+    </div>
+  );
+}
+
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const agents = useAppStore((s) => s.orchestrate.agentInstances);
   const addAgentInstance = useAppStore((s) => s.addAgentInstance);
 
-  const [name, setName] = useState("");
-  const [role, setRole] = useState<AgentRole>("worker");
-  const [reportsTo, setReportsTo] = useState("");
-  const [budgetCents, setBudgetCents] = useState(0);
-  const [maxConcurrent, setMaxConcurrent] = useState(1);
-  const [executorPref, setExecutorPref] = useState("");
+  const [state, setState] = useState<FormState>(INITIAL_STATE);
   const [submitting, setSubmitting] = useState(false);
 
-  const resetForm = useCallback(() => {
-    setName("");
-    setRole("worker");
-    setReportsTo("");
-    setBudgetCents(0);
-    setMaxConcurrent(1);
-    setExecutorPref("");
-  }, []);
+  const handleChange = useCallback(
+    (patch: Partial<FormState>) => setState((prev) => ({ ...prev, ...patch })),
+    [],
+  );
 
   const handleCreate = useCallback(async () => {
-    if (!name.trim() || !workspaceId) return;
+    if (!state.name.trim() || !workspaceId) return;
     setSubmitting(true);
     try {
       const result = await createAgentInstance(workspaceId, {
-        name: name.trim(),
-        role,
-        reportsTo: reportsTo || undefined,
-        budgetMonthlyCents: budgetCents,
-        maxConcurrentSessions: maxConcurrent,
-        executorPreference: executorPref ? { type: executorPref } : undefined,
+        name: state.name.trim(),
+        role: state.role,
+        reportsTo: state.reportsTo || undefined,
+        budgetMonthlyCents: state.budgetCents,
+        maxConcurrentSessions: state.maxConcurrent,
+        executorPreference: state.executorPref ? { type: state.executorPref } : undefined,
       } as Partial<AgentInstance>);
       if (result) {
         addAgentInstance(result as unknown as AgentInstance);
       }
-      resetForm();
+      setState(INITIAL_STATE);
       onOpenChange(false);
       toast.success("Agent created");
     } catch (err) {
@@ -61,18 +233,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
     } finally {
       setSubmitting(false);
     }
-  }, [
-    name,
-    role,
-    reportsTo,
-    budgetCents,
-    maxConcurrent,
-    executorPref,
-    workspaceId,
-    addAgentInstance,
-    onOpenChange,
-    resetForm,
-  ]);
+  }, [state, workspaceId, addAgentInstance, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -80,139 +241,31 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
         <DialogHeader>
           <DialogTitle>Create Agent</DialogTitle>
         </DialogHeader>
-
         <div className="space-y-4">
-          <div>
-            <Label>Name</Label>
-            <Input
-              placeholder="e.g. Frontend Worker"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1"
-              autoFocus
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              A unique name for this agent (e.g. CEO, Frontend Worker)
-            </p>
-          </div>
-
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Label>Role</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as AgentRole)}>
-                <SelectTrigger className="mt-1 cursor-pointer">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ceo" className="cursor-pointer">
-                    CEO
-                  </SelectItem>
-                  <SelectItem value="worker" className="cursor-pointer">
-                    Worker
-                  </SelectItem>
-                  <SelectItem value="specialist" className="cursor-pointer">
-                    Specialist
-                  </SelectItem>
-                  <SelectItem value="assistant" className="cursor-pointer">
-                    Assistant
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                CEO manages other agents, workers execute tasks
-              </p>
-            </div>
-            <div className="flex-1">
-              <Label>Reports to</Label>
-              <Select
-                value={reportsTo || "__none__"}
-                onValueChange={(v) => setReportsTo(v === "__none__" ? "" : v)}
-              >
-                <SelectTrigger className="mt-1 cursor-pointer">
-                  <SelectValue placeholder="None (top-level)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__" className="cursor-pointer">
-                    None
-                  </SelectItem>
-                  {agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id} className="cursor-pointer">
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">Which agent manages this one</p>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Label>Monthly budget ($)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={budgetCents / 100}
-                onChange={(e) => setBudgetCents(Math.round(Number(e.target.value) * 100))}
-                className="mt-1"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Monthly spending limit ($0 = unlimited)
-              </p>
-            </div>
-            <div className="flex-1">
-              <Label>Max concurrent</Label>
-              <Input
-                type="number"
-                min={1}
-                max={10}
-                value={maxConcurrent}
-                onChange={(e) => setMaxConcurrent(Number(e.target.value))}
-                className="mt-1"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                How many tasks this agent can run at once
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <Label>Executor preference</Label>
-            <Select
-              value={executorPref || "__inherit__"}
-              onValueChange={(v) => setExecutorPref(v === "__inherit__" ? "" : v)}
-            >
-              <SelectTrigger className="mt-1 cursor-pointer">
-                <SelectValue placeholder="Inherit from project/workspace" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__inherit__" className="cursor-pointer">
-                  Inherit
-                </SelectItem>
-                <SelectItem value="local_pc" className="cursor-pointer">
-                  Local (standalone)
-                </SelectItem>
-                <SelectItem value="local_docker" className="cursor-pointer">
-                  Local Docker
-                </SelectItem>
-                <SelectItem value="sprites" className="cursor-pointer">
-                  Sprites (remote sandbox)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              How agent sessions run (inherit uses project/workspace default)
-            </p>
-          </div>
+          <NameField value={state.name} onChange={(v) => handleChange({ name: v })} />
+          <RoleAndReports
+            role={state.role}
+            reportsTo={state.reportsTo}
+            agents={agents}
+            onChange={handleChange}
+          />
+          <BudgetAndConcurrency
+            budgetCents={state.budgetCents}
+            maxConcurrent={state.maxConcurrent}
+            onChange={handleChange}
+          />
+          <ExecutorPreferenceField
+            value={state.executorPref}
+            onChange={(v) => handleChange({ executorPref: v })}
+          />
         </div>
-
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Cancel
           </Button>
           <Button
             onClick={handleCreate}
-            disabled={!name.trim() || submitting}
+            disabled={!state.name.trim() || submitting}
             className="cursor-pointer"
           >
             {submitting ? "Creating..." : "Create Agent"}

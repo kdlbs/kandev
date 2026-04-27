@@ -13,6 +13,12 @@ const typeConfig: Record<string, { icon: typeof IconShieldCheck; label: string }
   task_review: { icon: IconEye, label: "Task Review" },
 };
 
+const statusBadgeClass: Record<string, string> = {
+  pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300",
+  approved: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+};
+const defaultStatusBadge = "bg-muted text-muted-foreground";
+
 type Props = {
   item: InboxItem;
   onApprove?: (id: string) => void;
@@ -35,17 +41,7 @@ export function InboxItemRow({ item, onApprove, onReject }: Props) {
         )}
         <p className="text-xs text-muted-foreground">{timeAgo(item.createdAt)}</p>
       </div>
-      <Badge
-        className={
-          item.status === "pending"
-            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300"
-            : item.status === "approved"
-              ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
-              : "bg-muted text-muted-foreground"
-        }
-      >
-        {item.status}
-      </Badge>
+      <Badge className={statusBadgeClass[item.status] ?? defaultStatusBadge}>{item.status}</Badge>
       {item.type === "approval" && item.status === "pending" && (
         <div className="flex gap-2 shrink-0">
           <Button

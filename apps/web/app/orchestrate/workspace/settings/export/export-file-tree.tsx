@@ -151,9 +151,15 @@ function TreeRow({
     }
   };
 
-  const ChevronIcon = node.isDir ? (isExpanded ? IconChevronDown : IconChevronRight) : null;
+  let ChevronIcon: typeof IconChevronDown | null = null;
+  if (node.isDir) ChevronIcon = isExpanded ? IconChevronDown : IconChevronRight;
 
-  const FileIcon = node.isDir ? (isExpanded ? IconFolderOpen : IconFolder) : IconFile;
+  let FileIcon = IconFile;
+  if (node.isDir) FileIcon = isExpanded ? IconFolderOpen : IconFolder;
+
+  let checkedState: boolean | "indeterminate" = false;
+  if (allSelected) checkedState = true;
+  else if (someSelected) checkedState = "indeterminate";
 
   return (
     <>
@@ -166,7 +172,7 @@ function TreeRow({
         onClick={handleClick}
       >
         <Checkbox
-          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+          checked={checkedState}
           onCheckedChange={() => onToggleSelection(node)}
           onClick={(e) => e.stopPropagation()}
           className="cursor-pointer shrink-0"

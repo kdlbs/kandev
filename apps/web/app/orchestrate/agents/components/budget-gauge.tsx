@@ -12,7 +12,9 @@ export function BudgetGauge({ budgetCents, spentCents = 0, className }: BudgetGa
   }
 
   const pct = Math.min(100, Math.round((spentCents / budgetCents) * 100));
-  const barColor = pct > 90 ? "bg-red-500" : pct > 70 ? "bg-yellow-500" : "bg-green-500";
+  let barColor = "bg-green-500";
+  if (pct > 90) barColor = "bg-red-500";
+  else if (pct > 70) barColor = "bg-yellow-500";
 
   return (
     <div className={cn("flex items-center gap-2", className)}>

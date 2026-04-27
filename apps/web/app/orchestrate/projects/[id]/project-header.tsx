@@ -2,7 +2,6 @@
 
 import { useState, useCallback } from "react";
 import { IconDeviceFloppy } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";

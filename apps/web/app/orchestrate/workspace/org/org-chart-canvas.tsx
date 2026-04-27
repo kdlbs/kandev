@@ -22,6 +22,31 @@ const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 2.0;
 const PADDING = 40;
 
+function EmptyOrgState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <p className="text-sm text-muted-foreground">No agents to display.</p>
+      <p className="text-xs text-muted-foreground mt-1">
+        Create agents and set their reporting structure to see the org chart.
+      </p>
+    </div>
+  );
+}
+
+function exportSvg(svg: SVGSVGElement) {
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(svg);
+  const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "org-chart.svg";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {
   const [zoom, setZoom] = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -58,30 +83,10 @@ export function OrgChartCanvas({ agents }: OrgChartCanvasProps) {
   const handleFit = useCallback(() => setZoom(1), []);
 
   const handleExport = useCallback(() => {
-    if (!svgRef.current) return;
-    const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgRef.current);
-    const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "org-chart.svg";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (svgRef.current) exportSvg(svgRef.current);
   }, []);
 
-  if (agents.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm text-muted-foreground">No agents to display.</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Create agents and set their reporting structure to see the org chart.
-        </p>
-      </div>
-    );
-  }
+  if (agents.length === 0) return <EmptyOrgState />;
 
   return (
     <div className="relative flex-1 min-h-0 overflow-auto">

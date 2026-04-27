@@ -15,6 +15,85 @@ type ProjectExecutorSectionProps = {
   project: Project;
 };
 
+function ExecutorTypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">Type</Label>
+      <Select value={value || "inherit"} onValueChange={(v) => onChange(v === "inherit" ? "" : v)}>
+        <SelectTrigger className="cursor-pointer">
+          <SelectValue placeholder="Inherit from workspace" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="inherit" className="cursor-pointer">
+            Inherit from workspace
+          </SelectItem>
+          <SelectItem value="local_pc" className="cursor-pointer">
+            Local (standalone)
+          </SelectItem>
+          <SelectItem value="local_docker" className="cursor-pointer">
+            Local Docker
+          </SelectItem>
+          <SelectItem value="sprites" className="cursor-pointer">
+            Sprites (remote sandbox)
+          </SelectItem>
+          <SelectItem value="remote_docker" className="cursor-pointer">
+            Remote Docker
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function ContainerFields({
+  image,
+  memoryMb,
+  cpuCores,
+  onImageChange,
+  onMemoryChange,
+  onCpuChange,
+}: {
+  image: string;
+  memoryMb: string;
+  cpuCores: string;
+  onImageChange: (v: string) => void;
+  onMemoryChange: (v: string) => void;
+  onCpuChange: (v: string) => void;
+}) {
+  return (
+    <>
+      <div className="space-y-1">
+        <Label className="text-xs">Docker Image</Label>
+        <Input
+          placeholder="e.g. node:20-slim"
+          value={image}
+          onChange={(e) => onImageChange(e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Memory (MB)</Label>
+          <Input
+            type="number"
+            placeholder="4096"
+            value={memoryMb}
+            onChange={(e) => onMemoryChange(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">CPU Cores</Label>
+          <Input
+            type="number"
+            placeholder="2"
+            value={cpuCores}
+            onChange={(e) => onCpuChange(e.target.value)}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps) {
   const updateProjectStore = useAppStore((s) => s.updateProject);
   const config = project.executorConfig ?? {};
@@ -79,78 +158,31 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
       </div>
 
       <div className="space-y-3">
-        <div className="space-y-1">
-          <Label className="text-xs">Type</Label>
-          <Select
-            value={executorType || "inherit"}
-            onValueChange={(v) => {
-              setExecutorType(v === "inherit" ? "" : v);
+        <ExecutorTypeSelect
+          value={executorType}
+          onChange={(v) => {
+            setExecutorType(v);
+            setDirty(true);
+          }}
+        />
+        {isContainer && (
+          <ContainerFields
+            image={image}
+            memoryMb={memoryMb}
+            cpuCores={cpuCores}
+            onImageChange={(v) => {
+              setImage(v);
               setDirty(true);
             }}
-          >
-            <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder="Inherit from workspace" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="inherit" className="cursor-pointer">
-                Inherit from workspace
-              </SelectItem>
-              <SelectItem value="local_pc" className="cursor-pointer">
-                Local (standalone)
-              </SelectItem>
-              <SelectItem value="local_docker" className="cursor-pointer">
-                Local Docker
-              </SelectItem>
-              <SelectItem value="sprites" className="cursor-pointer">
-                Sprites (remote sandbox)
-              </SelectItem>
-              <SelectItem value="remote_docker" className="cursor-pointer">
-                Remote Docker
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {isContainer && (
-          <>
-            <div className="space-y-1">
-              <Label className="text-xs">Docker Image</Label>
-              <Input
-                placeholder="e.g. node:20-slim"
-                value={image}
-                onChange={(e) => {
-                  setImage(e.target.value);
-                  setDirty(true);
-                }}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Memory (MB)</Label>
-                <Input
-                  type="number"
-                  placeholder="4096"
-                  value={memoryMb}
-                  onChange={(e) => {
-                    setMemoryMb(e.target.value);
-                    setDirty(true);
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">CPU Cores</Label>
-                <Input
-                  type="number"
-                  placeholder="2"
-                  value={cpuCores}
-                  onChange={(e) => {
-                    setCpuCores(e.target.value);
-                    setDirty(true);
-                  }}
-                />
-              </div>
-            </div>
-          </>
+            onMemoryChange={(v) => {
+              setMemoryMb(v);
+              setDirty(true);
+            }}
+            onCpuChange={(v) => {
+              setCpuCores(v);
+              setDirty(true);
+            }}
+          />
         )}
       </div>
     </div>

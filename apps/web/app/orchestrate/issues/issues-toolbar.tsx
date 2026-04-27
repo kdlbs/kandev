@@ -34,6 +34,65 @@ type IssuesToolbarProps = {
   onNewIssue?: () => void;
 };
 
+function ViewModeToggles({
+  viewMode,
+  nestingEnabled,
+  onViewModeChange,
+  onToggleNesting,
+}: {
+  viewMode: IssueViewMode;
+  nestingEnabled: boolean;
+  onViewModeChange: (mode: IssueViewMode) => void;
+  onToggleNesting: () => void;
+}) {
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={viewMode === "list" ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="cursor-pointer"
+            onClick={() => onViewModeChange("list")}
+          >
+            <IconList className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>List view</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={viewMode === "board" ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="cursor-pointer"
+            onClick={() => onViewModeChange("board")}
+          >
+            <IconColumns3 className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Board view</TooltipContent>
+      </Tooltip>
+      <Separator orientation="vertical" className="h-6 mx-1" />
+      {viewMode === "list" && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={nestingEnabled ? "secondary" : "ghost"}
+              size="icon-sm"
+              className="cursor-pointer"
+              onClick={onToggleNesting}
+            >
+              <IconListTree className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Toggle nesting</TooltipContent>
+        </Tooltip>
+      )}
+    </>
+  );
+}
+
 export function IssuesToolbar({
   viewMode,
   nestingEnabled,
@@ -85,48 +144,12 @@ export function IssuesToolbar({
         />
       </div>
       <div className="ml-auto flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={viewMode === "list" ? "secondary" : "ghost"}
-              size="icon-sm"
-              className="cursor-pointer"
-              onClick={() => onViewModeChange("list")}
-            >
-              <IconList className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>List view</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={viewMode === "board" ? "secondary" : "ghost"}
-              size="icon-sm"
-              className="cursor-pointer"
-              onClick={() => onViewModeChange("board")}
-            >
-              <IconColumns3 className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Board view</TooltipContent>
-        </Tooltip>
-        <Separator orientation="vertical" className="h-6 mx-1" />
-        {viewMode === "list" && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={nestingEnabled ? "secondary" : "ghost"}
-                size="icon-sm"
-                className="cursor-pointer"
-                onClick={onToggleNesting}
-              >
-                <IconListTree className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Toggle nesting</TooltipContent>
-          </Tooltip>
-        )}
+        <ViewModeToggles
+          viewMode={viewMode}
+          nestingEnabled={nestingEnabled}
+          onViewModeChange={onViewModeChange}
+          onToggleNesting={onToggleNesting}
+        />
         <IssueFilters filters={filters} onFilterChange={onFilterChange} />
         <IssueSort
           field={sortField}

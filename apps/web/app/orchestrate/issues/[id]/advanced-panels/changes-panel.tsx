@@ -3,14 +3,10 @@
 import { IconGitBranch } from "@tabler/icons-react";
 
 type AdvancedChangesPanelProps = {
-  taskId: string;
   hasActiveSession: boolean;
 };
 
-export function AdvancedChangesPanel({
-  taskId: _taskId,
-  hasActiveSession,
-}: AdvancedChangesPanelProps) {
+export function AdvancedChangesPanel({ hasActiveSession }: AdvancedChangesPanelProps) {
   if (!hasActiveSession) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[200px] p-4">

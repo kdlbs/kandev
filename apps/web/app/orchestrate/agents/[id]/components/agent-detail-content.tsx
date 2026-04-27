@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { IconArrowLeft, IconRobot } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { useAppStore } from "@/components/state-provider";

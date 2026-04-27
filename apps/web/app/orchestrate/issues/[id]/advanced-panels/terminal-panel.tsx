@@ -3,14 +3,10 @@
 import { IconTerminal2 } from "@tabler/icons-react";
 
 type AdvancedTerminalPanelProps = {
-  taskId: string;
   hasActiveSession: boolean;
 };
 
-export function AdvancedTerminalPanel({
-  taskId: _taskId,
-  hasActiveSession,
-}: AdvancedTerminalPanelProps) {
+export function AdvancedTerminalPanel({ hasActiveSession }: AdvancedTerminalPanelProps) {
   if (!hasActiveSession) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-muted/20">

@@ -17,12 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import * as orchestrateApi from "@/lib/api/domains/orchestrate-api";
 import type { GitStatusData } from "@/lib/api/domains/orchestrate-api";
 
-export function GitSection() {
-  const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
-
-  const [repoUrl, setRepoUrl] = useState("");
-  const [branch, setBranch] = useState("main");
-  const [commitMessage, setCommitMessage] = useState("");
+function useGitOperations(activeWorkspaceId: string) {
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,63 +37,71 @@ export function GitSection() {
     fetchStatus();
   }, [fetchStatus]);
 
-  const handleClone = useCallback(async () => {
-    if (!activeWorkspaceId || !repoUrl) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await orchestrateApi.gitClone(activeWorkspaceId, {
-        repoUrl,
-        branch,
-        workspaceName: activeWorkspaceId,
-      });
-      toast.success("Repository cloned");
-      await fetchStatus();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Clone failed";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeWorkspaceId, repoUrl, branch, fetchStatus]);
+  const runOp = useCallback(
+    async (op: () => Promise<unknown>, successMsg: string, failPrefix: string) => {
+      if (!activeWorkspaceId) return;
+      setLoading(true);
+      setError(null);
+      try {
+        await op();
+        toast.success(successMsg);
+        await fetchStatus();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : `${failPrefix} failed`;
+        setError(msg);
+        toast.error(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeWorkspaceId, fetchStatus],
+  );
 
-  const handlePull = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await orchestrateApi.gitPull(activeWorkspaceId);
-      toast.success("Pulled latest changes");
-      await fetchStatus();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Pull failed";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeWorkspaceId, fetchStatus]);
+  return { gitStatus, loading, error, fetchStatus, runOp };
+}
 
-  const handlePush = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await orchestrateApi.gitPush(activeWorkspaceId, {
-        message: commitMessage || "Update workspace configuration",
-      });
-      setCommitMessage("");
-      toast.success("Changes pushed");
-      await fetchStatus();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Push failed";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeWorkspaceId, commitMessage, fetchStatus]);
+export function GitSection() {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [branch, setBranch] = useState("main");
+  const [commitMessage, setCommitMessage] = useState("");
+  const { gitStatus, loading, error, fetchStatus, runOp } = useGitOperations(activeWorkspaceId);
+
+  const handleClone = useCallback(
+    () =>
+      runOp(
+        async () => {
+          await orchestrateApi.gitClone(activeWorkspaceId, {
+            repoUrl,
+            branch,
+            workspaceName: activeWorkspaceId,
+          });
+        },
+        "Repository cloned",
+        "Clone",
+      ),
+    [activeWorkspaceId, repoUrl, branch, runOp],
+  );
+
+  const handlePull = useCallback(
+    () => runOp(() => orchestrateApi.gitPull(activeWorkspaceId), "Pulled latest changes", "Pull"),
+    [activeWorkspaceId, runOp],
+  );
+
+  const handlePush = useCallback(
+    () =>
+      runOp(
+        async () => {
+          await orchestrateApi.gitPush(activeWorkspaceId, {
+            message: commitMessage || "Update workspace configuration",
+          });
+          setCommitMessage("");
+        },
+        "Changes pushed",
+        "Push",
+      ),
+    [activeWorkspaceId, commitMessage, runOp],
+  );
 
   const isGit = gitStatus?.is_git ?? false;
 

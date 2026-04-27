@@ -24,20 +24,24 @@ export default function ProjectDetailPage({ params }: PageProps) {
   const router = useRouter();
   const removeProject = useAppStore((s) => s.removeProject);
   const storeProject = useAppStore((s) => s.orchestrate.projects.find((p) => p.id === id));
-  const [project, setProject] = useState<Project | null>(storeProject ?? null);
+  const [fetchedProject, setFetchedProject] = useState<Project | null>(null);
+  const project = storeProject ?? fetchedProject;
 
   useEffect(() => {
-    if (storeProject) {
-      setProject(storeProject);
-      return;
-    }
+    if (storeProject) return;
+    let cancelled = false;
     getProject(id)
       .then((res) => {
-        if (res) setProject(res as unknown as Project);
+        if (!cancelled && res) setFetchedProject(res as unknown as Project);
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load project");
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : "Failed to load project");
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [id, storeProject]);
 
   const handleDelete = async () => {

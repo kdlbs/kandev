@@ -43,142 +43,170 @@ export const defaultOrchestrateState: OrchestrateSliceState = {
   },
 };
 
-export const createOrchestrateSlice: StateCreator<
-  OrchestrateSlice,
-  [["zustand/immer", never]],
-  [],
-  OrchestrateSlice
-> = (set) => ({
+type ImmerSet = StateCreator<OrchestrateSlice, [["zustand/immer", never]], [], OrchestrateSlice>;
+type SetFn = Parameters<ImmerSet>[0];
+
+function createAgentActions(set: SetFn) {
+  return {
+    setAgentInstances: (agents: OrchestrateSlice["orchestrate"]["agentInstances"]) =>
+      set((draft) => {
+        draft.orchestrate.agentInstances = agents;
+      }),
+    addAgentInstance: (agent: OrchestrateSlice["orchestrate"]["agentInstances"][number]) =>
+      set((draft) => {
+        draft.orchestrate.agentInstances.push(agent);
+      }),
+    updateAgentInstance: (
+      id: string,
+      patch: Partial<OrchestrateSlice["orchestrate"]["agentInstances"][number]>,
+    ) =>
+      set((draft) => {
+        const idx = draft.orchestrate.agentInstances.findIndex((a) => a.id === id);
+        if (idx >= 0) Object.assign(draft.orchestrate.agentInstances[idx], patch);
+      }),
+    removeAgentInstance: (id: string) =>
+      set((draft) => {
+        draft.orchestrate.agentInstances = draft.orchestrate.agentInstances.filter(
+          (a) => a.id !== id,
+        );
+      }),
+  };
+}
+
+function createSkillActions(set: SetFn) {
+  return {
+    setSkills: (skills: OrchestrateSlice["orchestrate"]["skills"]) =>
+      set((draft) => {
+        draft.orchestrate.skills = skills;
+      }),
+    addSkill: (skill: OrchestrateSlice["orchestrate"]["skills"][number]) =>
+      set((draft) => {
+        draft.orchestrate.skills.push(skill);
+      }),
+    updateSkill: (id: string, patch: Partial<OrchestrateSlice["orchestrate"]["skills"][number]>) =>
+      set((draft) => {
+        const idx = draft.orchestrate.skills.findIndex((s) => s.id === id);
+        if (idx >= 0) Object.assign(draft.orchestrate.skills[idx], patch);
+      }),
+    removeSkill: (id: string) =>
+      set((draft) => {
+        draft.orchestrate.skills = draft.orchestrate.skills.filter((s) => s.id !== id);
+      }),
+  };
+}
+
+function createProjectActions(set: SetFn) {
+  return {
+    setProjects: (projects: OrchestrateSlice["orchestrate"]["projects"]) =>
+      set((draft) => {
+        draft.orchestrate.projects = projects;
+      }),
+    addProject: (project: OrchestrateSlice["orchestrate"]["projects"][number]) =>
+      set((draft) => {
+        draft.orchestrate.projects.push(project);
+      }),
+    updateProject: (
+      id: string,
+      patch: Partial<OrchestrateSlice["orchestrate"]["projects"][number]>,
+    ) =>
+      set((draft) => {
+        const idx = draft.orchestrate.projects.findIndex((p) => p.id === id);
+        if (idx >= 0) Object.assign(draft.orchestrate.projects[idx], patch);
+      }),
+    removeProject: (id: string) =>
+      set((draft) => {
+        draft.orchestrate.projects = draft.orchestrate.projects.filter((p) => p.id !== id);
+      }),
+  };
+}
+
+function createIssueActions(set: SetFn) {
+  return {
+    setIssues: (issues: OrchestrateSlice["orchestrate"]["issues"]["items"]) =>
+      set((draft) => {
+        draft.orchestrate.issues.items = issues;
+      }),
+    setIssueFilters: (filters: Partial<OrchestrateSlice["orchestrate"]["issues"]["filters"]>) =>
+      set((draft) => {
+        Object.assign(draft.orchestrate.issues.filters, filters);
+      }),
+    setIssueViewMode: (mode: OrchestrateSlice["orchestrate"]["issues"]["viewMode"]) =>
+      set((draft) => {
+        draft.orchestrate.issues.viewMode = mode;
+      }),
+    setIssueSortField: (field: OrchestrateSlice["orchestrate"]["issues"]["sortField"]) =>
+      set((draft) => {
+        draft.orchestrate.issues.sortField = field;
+      }),
+    setIssueSortDir: (dir: OrchestrateSlice["orchestrate"]["issues"]["sortDir"]) =>
+      set((draft) => {
+        draft.orchestrate.issues.sortDir = dir;
+      }),
+    setIssueGroupBy: (groupBy: OrchestrateSlice["orchestrate"]["issues"]["groupBy"]) =>
+      set((draft) => {
+        draft.orchestrate.issues.groupBy = groupBy;
+      }),
+    toggleNesting: () =>
+      set((draft) => {
+        draft.orchestrate.issues.nestingEnabled = !draft.orchestrate.issues.nestingEnabled;
+      }),
+    setIssuesLoading: (loading: boolean) =>
+      set((draft) => {
+        draft.orchestrate.issues.isLoading = loading;
+      }),
+  };
+}
+
+function createMiscActions(set: SetFn) {
+  return {
+    setApprovals: (approvals: OrchestrateSlice["orchestrate"]["approvals"]) =>
+      set((draft) => {
+        draft.orchestrate.approvals = approvals;
+      }),
+    setActivity: (entries: OrchestrateSlice["orchestrate"]["activity"]) =>
+      set((draft) => {
+        draft.orchestrate.activity = entries;
+      }),
+    setCostSummary: (summary: OrchestrateSlice["orchestrate"]["costSummary"]) =>
+      set((draft) => {
+        draft.orchestrate.costSummary = summary;
+      }),
+    setBudgetPolicies: (policies: OrchestrateSlice["orchestrate"]["budgetPolicies"]) =>
+      set((draft) => {
+        draft.orchestrate.budgetPolicies = policies;
+      }),
+    setRoutines: (routines: OrchestrateSlice["orchestrate"]["routines"]) =>
+      set((draft) => {
+        draft.orchestrate.routines = routines;
+      }),
+    setInboxItems: (items: OrchestrateSlice["orchestrate"]["inboxItems"]) =>
+      set((draft) => {
+        draft.orchestrate.inboxItems = items;
+      }),
+    setInboxCount: (count: number) =>
+      set((draft) => {
+        draft.orchestrate.inboxCount = count;
+      }),
+    setWakeups: (wakeups: OrchestrateSlice["orchestrate"]["wakeups"]) =>
+      set((draft) => {
+        draft.orchestrate.wakeups = wakeups;
+      }),
+    setDashboard: (data: OrchestrateSlice["orchestrate"]["dashboard"]) =>
+      set((draft) => {
+        draft.orchestrate.dashboard = data;
+      }),
+    setOrchestrateLoading: (loading: boolean) =>
+      set((draft) => {
+        draft.orchestrate.isLoading = loading;
+      }),
+  };
+}
+
+export const createOrchestrateSlice: ImmerSet = (set) => ({
   ...defaultOrchestrateState,
-  setAgentInstances: (agents) =>
-    set((draft) => {
-      draft.orchestrate.agentInstances = agents;
-    }),
-  addAgentInstance: (agent) =>
-    set((draft) => {
-      draft.orchestrate.agentInstances.push(agent);
-    }),
-  updateAgentInstance: (id, patch) =>
-    set((draft) => {
-      const idx = draft.orchestrate.agentInstances.findIndex((a) => a.id === id);
-      if (idx >= 0) {
-        Object.assign(draft.orchestrate.agentInstances[idx], patch);
-      }
-    }),
-  removeAgentInstance: (id) =>
-    set((draft) => {
-      draft.orchestrate.agentInstances = draft.orchestrate.agentInstances.filter(
-        (a) => a.id !== id,
-      );
-    }),
-  setSkills: (skills) =>
-    set((draft) => {
-      draft.orchestrate.skills = skills;
-    }),
-  addSkill: (skill) =>
-    set((draft) => {
-      draft.orchestrate.skills.push(skill);
-    }),
-  updateSkill: (id, patch) =>
-    set((draft) => {
-      const idx = draft.orchestrate.skills.findIndex((s) => s.id === id);
-      if (idx >= 0) {
-        Object.assign(draft.orchestrate.skills[idx], patch);
-      }
-    }),
-  removeSkill: (id) =>
-    set((draft) => {
-      draft.orchestrate.skills = draft.orchestrate.skills.filter((s) => s.id !== id);
-    }),
-  setProjects: (projects) =>
-    set((draft) => {
-      draft.orchestrate.projects = projects;
-    }),
-  addProject: (project) =>
-    set((draft) => {
-      draft.orchestrate.projects.push(project);
-    }),
-  updateProject: (id, patch) =>
-    set((draft) => {
-      const idx = draft.orchestrate.projects.findIndex((p) => p.id === id);
-      if (idx >= 0) {
-        Object.assign(draft.orchestrate.projects[idx], patch);
-      }
-    }),
-  removeProject: (id) =>
-    set((draft) => {
-      draft.orchestrate.projects = draft.orchestrate.projects.filter((p) => p.id !== id);
-    }),
-  setApprovals: (approvals) =>
-    set((draft) => {
-      draft.orchestrate.approvals = approvals;
-    }),
-  setActivity: (entries) =>
-    set((draft) => {
-      draft.orchestrate.activity = entries;
-    }),
-  setCostSummary: (summary) =>
-    set((draft) => {
-      draft.orchestrate.costSummary = summary;
-    }),
-  setBudgetPolicies: (policies) =>
-    set((draft) => {
-      draft.orchestrate.budgetPolicies = policies;
-    }),
-  setRoutines: (routines) =>
-    set((draft) => {
-      draft.orchestrate.routines = routines;
-    }),
-  setInboxItems: (items) =>
-    set((draft) => {
-      draft.orchestrate.inboxItems = items;
-    }),
-  setInboxCount: (count) =>
-    set((draft) => {
-      draft.orchestrate.inboxCount = count;
-    }),
-  setWakeups: (wakeups) =>
-    set((draft) => {
-      draft.orchestrate.wakeups = wakeups;
-    }),
-  setDashboard: (data) =>
-    set((draft) => {
-      draft.orchestrate.dashboard = data;
-    }),
-  setIssues: (issues) =>
-    set((draft) => {
-      draft.orchestrate.issues.items = issues;
-    }),
-  setIssueFilters: (filters) =>
-    set((draft) => {
-      Object.assign(draft.orchestrate.issues.filters, filters);
-    }),
-  setIssueViewMode: (mode) =>
-    set((draft) => {
-      draft.orchestrate.issues.viewMode = mode;
-    }),
-  setIssueSortField: (field) =>
-    set((draft) => {
-      draft.orchestrate.issues.sortField = field;
-    }),
-  setIssueSortDir: (dir) =>
-    set((draft) => {
-      draft.orchestrate.issues.sortDir = dir;
-    }),
-  setIssueGroupBy: (groupBy) =>
-    set((draft) => {
-      draft.orchestrate.issues.groupBy = groupBy;
-    }),
-  toggleNesting: () =>
-    set((draft) => {
-      draft.orchestrate.issues.nestingEnabled = !draft.orchestrate.issues.nestingEnabled;
-    }),
-  setIssuesLoading: (loading) =>
-    set((draft) => {
-      draft.orchestrate.issues.isLoading = loading;
-    }),
-  setOrchestrateLoading: (loading) =>
-    set((draft) => {
-      draft.orchestrate.isLoading = loading;
-    }),
+  ...createAgentActions(set),
+  ...createSkillActions(set),
+  ...createProjectActions(set),
+  ...createIssueActions(set),
+  ...createMiscActions(set),
 });

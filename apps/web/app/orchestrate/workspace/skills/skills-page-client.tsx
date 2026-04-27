@@ -16,12 +16,78 @@ type SkillsPageClientProps = {
   initialSkills: Skill[];
 };
 
-export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
-  const skills = useAppStore((s) => s.orchestrate.skills);
-  const setSkills = useAppStore((s) => s.setSkills);
+function useSkillActions(
+  activeWorkspaceId: string | null,
+  selectedId: string | null,
+  setSelectedId: (id: string | null) => void,
+  setViewMode: (mode: ViewMode) => void,
+  skills: Skill[],
+) {
   const addSkill = useAppStore((s) => s.addSkill);
   const updateSkillInStore = useAppStore((s) => s.updateSkill);
   const removeSkillFromStore = useAppStore((s) => s.removeSkill);
+
+  const handleCreate = useCallback(
+    async (data: Partial<Skill>) => {
+      if (!activeWorkspaceId) return;
+      try {
+        const res = await orchestrateApi.createSkill(activeWorkspaceId, data);
+        addSkill(res.skill);
+        setSelectedId(res.skill.id);
+        setViewMode("view");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("already exists") || msg.includes("duplicate") || msg.includes("unique")) {
+          toast.error("A skill with this name already exists");
+        } else {
+          toast.error("Failed to create skill");
+        }
+      }
+    },
+    [activeWorkspaceId, addSkill, setSelectedId, setViewMode],
+  );
+
+  const handleSave = useCallback(
+    async (id: string, patch: Partial<Skill>) => {
+      await orchestrateApi.updateSkill(id, patch);
+      updateSkillInStore(id, patch);
+    },
+    [updateSkillInStore],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await orchestrateApi.deleteSkill(id);
+      removeSkillFromStore(id);
+      if (selectedId === id) {
+        const remaining = skills.filter((s) => s.id !== id);
+        setSelectedId(remaining[0]?.id ?? null);
+      }
+    },
+    [removeSkillFromStore, selectedId, skills, setSelectedId],
+  );
+
+  const handleImport = useCallback(
+    async (source: string) => {
+      if (!activeWorkspaceId) return;
+      const res = await orchestrateApi.importSkill(activeWorkspaceId, source);
+      for (const skill of res.skills) {
+        addSkill(skill);
+      }
+      if (res.skills.length > 0) {
+        setSelectedId(res.skills[0].id);
+        setViewMode("view");
+      }
+    },
+    [activeWorkspaceId, addSkill, setSelectedId, setViewMode],
+  );
+
+  return { handleCreate, handleSave, handleDelete, handleImport };
+}
+
+export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
+  const skills = useAppStore((s) => s.orchestrate.skills);
+  const setSkills = useAppStore((s) => s.setSkills);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -46,60 +112,12 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
   }, [activeWorkspaceId, setSkills]);
 
   const selectedSkill = skills.find((s) => s.id === selectedId) ?? null;
-
-  const handleCreate = useCallback(
-    async (data: Partial<Skill>) => {
-      if (!activeWorkspaceId) return;
-      try {
-        const res = await orchestrateApi.createSkill(activeWorkspaceId, data);
-        addSkill(res.skill);
-        setSelectedId(res.skill.id);
-        setViewMode("view");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "";
-        if (msg.includes("already exists") || msg.includes("duplicate") || msg.includes("unique")) {
-          toast.error("A skill with this name already exists");
-        } else {
-          toast.error("Failed to create skill");
-        }
-      }
-    },
-    [activeWorkspaceId, addSkill],
-  );
-
-  const handleSave = useCallback(
-    async (id: string, patch: Partial<Skill>) => {
-      await orchestrateApi.updateSkill(id, patch);
-      updateSkillInStore(id, patch);
-    },
-    [updateSkillInStore],
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      await orchestrateApi.deleteSkill(id);
-      removeSkillFromStore(id);
-      if (selectedId === id) {
-        const remaining = skills.filter((s) => s.id !== id);
-        setSelectedId(remaining[0]?.id ?? null);
-      }
-    },
-    [removeSkillFromStore, selectedId, skills],
-  );
-
-  const handleImport = useCallback(
-    async (source: string) => {
-      if (!activeWorkspaceId) return;
-      const res = await orchestrateApi.importSkill(activeWorkspaceId, source);
-      for (const skill of res.skills) {
-        addSkill(skill);
-      }
-      if (res.skills.length > 0) {
-        setSelectedId(res.skills[0].id);
-        setViewMode("view");
-      }
-    },
-    [activeWorkspaceId, addSkill],
+  const { handleCreate, handleSave, handleDelete, handleImport } = useSkillActions(
+    activeWorkspaceId,
+    selectedId,
+    setSelectedId,
+    setViewMode,
+    skills,
   );
 
   return (
