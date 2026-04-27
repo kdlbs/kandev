@@ -4,240 +4,114 @@
 **Status:** proposed
 **Spec:** `docs/specs/orchestrate-agent-context/spec.md`
 
-## Phase 1: Environment Variables (4h)
+## Phase 1: Instruction bundle storage + UI (backend + frontend)
 
-### 1A: Build env var map in scheduler
+### Backend
 
-**File:** `internal/orchestrate/service/scheduler_integration.go`
-
-In `processWakeup()`, after resolving executor and building prompt, construct the env var map:
-
-```go
-func (si *SchedulerIntegration) buildEnvVars(
-    wakeup *models.WakeupRequest,
-    agent *models.AgentInstance,
-    workspaceID string,
-) map[string]string {
-    env := map[string]string{
-        "KANDEV_API_URL":        si.svc.apiBaseURL,
-        "KANDEV_API_KEY":        jwt,  // already minted via agent_auth.go
-        "KANDEV_AGENT_ID":       agent.ID,
-        "KANDEV_AGENT_NAME":     agent.Name,
-        "KANDEV_WORKSPACE_ID":   workspaceID,
-        "KANDEV_RUN_ID":         wakeup.ID,
-        "KANDEV_WAKE_REASON":    wakeup.Reason,
-    }
-    // Task-specific vars
-    taskID := extractTaskID(wakeup.Payload)
-    if taskID != "" {
-        env["KANDEV_TASK_ID"] = taskID
-    }
-    commentID := extractCommentID(wakeup.Payload)
-    if commentID != "" {
-        env["KANDEV_WAKE_COMMENT_ID"] = commentID
-    }
-    return env
-}
+**DB schema** -- add `orchestrate_agent_instructions` table:
+```sql
+CREATE TABLE IF NOT EXISTS orchestrate_agent_instructions (
+    id TEXT PRIMARY KEY,
+    agent_instance_id TEXT NOT NULL,
+    filename TEXT NOT NULL,       -- "AGENTS.md", "HEARTBEAT.md", etc.
+    content TEXT NOT NULL DEFAULT '',
+    is_entry INTEGER DEFAULT 0,   -- 1 for AGENTS.md (the injected file)
+    created_at DATETIME,
+    updated_at DATETIME,
+    UNIQUE(agent_instance_id, filename)
+);
 ```
 
-### 1B: Pass env vars to task starter
+**Repository** (`repository/sqlite/instructions.go`):
+- `ListInstructions(ctx, agentInstanceID) -> []*InstructionFile`
+- `GetInstruction(ctx, agentInstanceID, filename) -> *InstructionFile`
+- `UpsertInstruction(ctx, agentInstanceID, filename, content, isEntry) error`
+- `DeleteInstruction(ctx, agentInstanceID, filename) error`
 
-The `TaskStarter` interface needs to accept env vars. Update the interface:
+**Service** (`service/instructions.go`):
+- `CreateDefaultInstructions(ctx, agentInstanceID, role string) error` -- create AGENTS.md, HEARTBEAT.md from role templates
+- `ExportInstructionsToDir(ctx, agentInstanceID, targetDir string) error` -- write all files to disk
+- Role templates embedded in binary (like bundled skills)
 
-```go
-type TaskStarter interface {
-    StartTask(ctx context.Context, taskID, agentProfileID, executorID,
-        executorProfileID string, priority int, prompt, workflowStepID string,
-        planMode bool, attachments []v1.MessageAttachment,
-        env map[string]string,  // NEW
-    ) error
-}
+**Handlers** (`handlers/instructions.go`):
+- `GET /api/v1/orchestrate/agents/:id/instructions` -> list files
+- `GET /api/v1/orchestrate/agents/:id/instructions/:filename` -> get content
+- `PUT /api/v1/orchestrate/agents/:id/instructions/:filename` -> create/update
+- `DELETE /api/v1/orchestrate/agents/:id/instructions/:filename` -> delete
+
+**On agent creation** (`service/agents.go`):
+- After creating agent instance, call `CreateDefaultInstructions(ctx, agentID, role)`
+- CEO gets AGENTS.md + HEARTBEAT.md with delegation/checklist content
+- Worker gets AGENTS.md with implementation guide
+- Reviewer gets AGENTS.md with review checklist
+
+### Frontend
+
+**Agent detail Instructions tab** (`agents/[id]/components/agent-instructions-tab.tsx`):
+- Left panel: file list (AGENTS.md marked ENTRY, HEARTBEAT.md, SOUL.md, TOOLS.md)
+- Right panel: markdown editor for selected file
+- "+" button to add new instruction file
+- Save/delete buttons
+- Fetch from `GET /agents/:id/instructions`
+
+### Role templates
+
+Embed in binary at `configloader/instructions/`:
 ```
-
-The orchestrator's `StartTask` already supports env vars via the agent lifecycle manager. The adapter just needs to pass them through.
-
-### 1C: Add apiBaseURL to service
-
-The service needs to know the backend's URL. Add it as a config field:
-
-```go
-func (s *Service) SetAPIBaseURL(url string) { s.apiBaseURL = url }
+configloader/instructions/
+  ceo/
+    AGENTS.md       -- delegation rules, routing table
+    HEARTBEAT.md    -- 8-step wakeup checklist
+  worker/
+    AGENTS.md       -- implementation guide
+  reviewer/
+    AGENTS.md       -- review checklist
+  assistant/
+    AGENTS.md       -- conversation + channel handling
 ```
-
-Wire in `main.go` from `cfg.Server.Port`.
-
-### Tests
-- Build env vars: all vars populated correctly
-- Task ID extracted from payload
-- Comment ID extracted from payload
 
 ---
 
-## Phase 2: Wake Payload (6h)
+## Phase 2: Session preparation -- export + inject (backend)
 
-### 2A: Build wake payload JSON
+### Export instructions to disk
 
-**File:** `internal/orchestrate/service/prompt_builder.go` (extend)
+**File:** `service/scheduler_integration.go`
 
+Before launching agent, export instruction files from DB to disk:
 ```go
-func (s *Service) BuildWakePayload(ctx context.Context, wakeup *models.WakeupRequest) (string, error) {
-    taskID := extractTaskID(wakeup.Payload)
-    if taskID == "" {
-        return "", nil  // non-task wakeup (heartbeat)
-    }
-
-    // Fetch task details
-    task, err := s.repo.GetTaskBasicInfo(ctx, taskID)
-
-    // Fetch recent comments (last N since last run, or all if fresh)
-    comments, err := s.repo.ListRecentComments(ctx, taskID, lastRunAt, limit)
-
-    // Build payload struct
-    payload := WakePayload{
-        Task: WakePayloadTask{
-            ID: task.ID, Identifier: task.Identifier,
-            Title: task.Title, Description: task.Description,
-            Status: task.Status, Priority: task.Priority,
-            // ... project, assignee, blockedBy, childTasks
-        },
-        NewComments: mapComments(comments),
-        CommentWindow: CommentWindow{
-            Total: totalCount, Included: len(comments),
-            FetchMore: totalCount > len(comments),
-        },
-    }
-
-    return json.Marshal(payload)
+func (si *SchedulerIntegration) exportInstructions(ctx context.Context, agent *models.AgentInstance) (string, error) {
+    // Target dir: ~/.kandev/agent-instructions/<agentId>/
+    dir := filepath.Join(si.svc.kandevBasePath(), "agent-instructions", agent.ID)
+    return dir, si.svc.ExportInstructionsToDir(ctx, agent.ID, dir)
 }
 ```
 
-### 2B: Set KANDEV_WAKE_PAYLOAD_JSON env var
+### Export skills to disk
 
-In `buildEnvVars()`:
-```go
-payloadJSON, err := si.svc.BuildWakePayload(ctx, wakeup)
-if err == nil && payloadJSON != "" {
-    env["KANDEV_WAKE_PAYLOAD_JSON"] = payloadJSON
-}
-```
+Already implemented in `skill_materialization.go` -- `MaterializeSkills` writes to cache dir. Verify it's called in the session prep flow.
 
-### 2C: Add repo methods for comment fetching
+### Build prompt with AGENTS.md + path directive
 
-**File:** `repository/sqlite/comments.go` (extend)
-
-- `ListRecentComments(ctx, taskID string, since time.Time, limit int) -> []*models.TaskComment`
-- `CountComments(ctx, taskID string) -> int`
-
-### Tests
-- Wake payload includes task details
-- Wake payload includes only new comments (since last run)
-- Comment window metadata correct
-- Non-task wakeup returns empty payload
-
----
-
-## Phase 3: Instruction Bundles (8h)
-
-### 3A: Write role-specific instruction skills
-
-Create skill directories embedded in the binary:
-
-```
-configloader/skills/
-  kandev-protocol/SKILL.md    # exists, needs expansion
-  memory/SKILL.md             # exists
-  kandev-ceo/SKILL.md         # NEW
-  kandev-worker/SKILL.md      # NEW
-  kandev-reviewer/SKILL.md    # NEW
-```
-
-Each is a SKILL.md following the content in the spec.
-
-### 3B: Auto-assign role skills to agents
-
-When a CEO agent is created, auto-add `kandev-ceo` to its `desired_skills`.
-When a worker is created, auto-add `kandev-worker`.
-
-In `agents.go` `CreateAgentInstance()`:
-```go
-// Auto-assign role instruction skill
-roleSkill := "kandev-" + agent.Role  // "kandev-ceo", "kandev-worker"
-if !containsSkill(agent.DesiredSkills, roleSkill) {
-    agent.DesiredSkills = appendSkill(agent.DesiredSkills, roleSkill)
-}
-// Always include protocol + memory
-for _, required := range []string{"kandev-protocol", "memory"} {
-    if !containsSkill(agent.DesiredSkills, required) {
-        agent.DesiredSkills = appendSkill(agent.DesiredSkills, required)
-    }
-}
-```
-
-### 3C: Update bundled.go to include new skills
-
-The `embed.FS` in `bundled.go` already picks up all dirs under `configloader/skills/`. Just adding the new directories is enough.
-
-### Tests
-- CEO agent created -> has kandev-ceo, kandev-protocol, memory in desired_skills
-- Worker agent -> has kandev-worker, kandev-protocol, memory
-- Bundled skills include all role skills
-
----
-
-## Phase 4: Enhanced Protocol Skill (10h)
-
-### 4A: Rewrite kandev-protocol SKILL.md
-
-Expand from 43 lines to ~200 lines covering:
-- Authentication (env vars, JWT, run ID header)
-- 8-step heartbeat procedure
-- API reference (tasks CRUD, comments, agents, memory)
-- Critical rules (no 409 retry, always comment before status change)
-- Resume delta fast path (use KANDEV_WAKE_PAYLOAD_JSON)
-
-Content is fully specified in the spec.
-
-### 4B: Add comment endpoints to handlers
-
-Check that these endpoints exist and work:
-- `GET /api/v1/orchestrate/tasks/:id/comments`
-- `POST /api/v1/orchestrate/tasks/:id/comments`
-
-If they route to the existing `task_comments` repo, verify the DTO format matches what the protocol skill documents.
-
-### 4C: Add task status update endpoint
-
-Check that `PATCH /api/v1/orchestrate/tasks/:id` accepts `{"status": "done"}` and moves the task to the correct orchestrate workflow step.
-
-### Tests
-- Protocol skill content is valid markdown
-- Comment endpoints return expected format
-- Task status update moves workflow step
-
----
-
-## Phase 5: Prompt Structure (4h)
-
-### 5A: Multi-section prompt builder
-
-Refactor `prompt_builder.go` to build a sectioned prompt:
+**File:** `service/prompt_builder.go` (rewrite)
 
 ```go
-func (s *Service) BuildSessionPrompt(ctx context.Context, wakeup *models.WakeupRequest, isResume bool) string {
+func (s *Service) BuildAgentPrompt(ctx context.Context, wakeup *WakeupRequest, agent *AgentInstance, instructionsDir string, isResume bool) string {
     var sections []string
 
     // Section 1: Instructions (skip on resume)
     if !isResume {
-        // Instructions come via skills (symlinked), not inline in prompt
-        // But we can add a brief "You are [agent name], a [role] agent" header
-        sections = append(sections, buildIdentityHeader(agent))
+        agentsMd := readFile(filepath.Join(instructionsDir, "AGENTS.md"))
+        // Append path directive
+        agentsMd += fmt.Sprintf("\n\nThe above instructions were loaded from %s/AGENTS.md.\nResolve relative file references from %s.\nThis directory contains: ./HEARTBEAT.md, ./SOUL.md, ./TOOLS.md.\n", instructionsDir, instructionsDir)
+        sections = append(sections, agentsMd)
     }
 
     // Section 2: Wake context (always)
     sections = append(sections, buildWakeContext(wakeup))
 
     // Section 3: Workspace status (CEO heartbeat only)
-    if wakeup.Reason == WakeupReasonHeartbeat && agent.Role == "ceo" {
+    if wakeup.Reason == "heartbeat" && agent.Role == "ceo" {
         sections = append(sections, buildWorkspaceStatus(ctx))
     }
 
@@ -245,26 +119,101 @@ func (s *Service) BuildSessionPrompt(ctx context.Context, wakeup *models.WakeupR
 }
 ```
 
-### 5B: Resume detection
+### Set env vars
 
-In `scheduler_integration.go`, check if this is a resume:
+**File:** `service/scheduler_integration.go`
+
 ```go
-isResume := existingSessionID != "" && canResumeSession(agent, task)
-prompt := si.svc.BuildSessionPrompt(ctx, wakeup, isResume)
+func (si *SchedulerIntegration) buildEnvVars(wakeup *WakeupRequest, agent *AgentInstance, jwt, workspaceID string) map[string]string {
+    env := map[string]string{
+        "KANDEV_API_URL":      si.svc.apiBaseURL,
+        "KANDEV_API_KEY":      jwt,
+        "KANDEV_AGENT_ID":     agent.ID,
+        "KANDEV_AGENT_NAME":   agent.Name,
+        "KANDEV_WORKSPACE_ID": workspaceID,
+        "KANDEV_RUN_ID":       wakeup.ID,
+        "KANDEV_WAKE_REASON":  wakeup.Reason,
+    }
+    if taskID := extractTaskID(wakeup.Payload); taskID != "" {
+        env["KANDEV_TASK_ID"] = taskID
+    }
+    if commentID := extractCommentID(wakeup.Payload); commentID != "" {
+        env["KANDEV_WAKE_COMMENT_ID"] = commentID
+    }
+    return env
+}
 ```
 
-### Tests
-- Fresh session: includes identity header + wake context
-- Resume session: only wake context (no identity)
-- CEO heartbeat: includes workspace status section
+### Build wake payload
+
+```go
+func (s *Service) BuildWakePayload(ctx context.Context, wakeup *WakeupRequest) (string, error) {
+    taskID := extractTaskID(wakeup.Payload)
+    if taskID == "" { return "", nil }
+
+    task, _ := s.repo.GetTaskBasicInfo(ctx, taskID)
+    comments, _ := s.repo.ListRecentComments(ctx, taskID, limit)
+
+    payload := WakePayload{Task: mapTask(task), NewComments: mapComments(comments)}
+    data, _ := json.Marshal(payload)
+    return string(data), nil
+}
+```
+
+Set as env var:
+```go
+if payload, err := si.svc.BuildWakePayload(ctx, wakeup); err == nil && payload != "" {
+    env["KANDEV_WAKE_PAYLOAD_JSON"] = payload
+}
+```
+
+### Pass env + instructions dir to task starter
+
+Update `TaskStarter` interface to accept env vars and instructions dir path. The lifecycle manager uses:
+- `--add-dir <instructionsDir>` for Claude (agent can read sibling files)
+- `--append-system-prompt-file <instructionsDir>/AGENTS.md` for Claude
+- Prepend AGENTS.md content to prompt for other agents
 
 ---
 
-## Verification
+## Phase 3: Enhanced kandev-protocol skill (content only)
 
-1. `make -C apps/backend fmt && make -C apps/backend test` -- all pass
-2. Scheduler wakes agent -> env vars set correctly in process
-3. Wake payload JSON parseable by agent
-4. Agent can call kandev API with JWT from env
-5. Role-specific skills are symlinked for each agent type
-6. Resume wakeup sends only new comments (not full context)
+Rewrite `configloader/skills/kandev-protocol/SKILL.md` from 43 lines to ~200 lines:
+
+- Authentication section (env vars, JWT, run ID header)
+- 8-step heartbeat procedure
+- API reference (tasks, comments, agents, memory endpoints)
+- Critical rules (no 409 retry, comment before status change, check blockers)
+- Resume fast path (use KANDEV_WAKE_PAYLOAD_JSON)
+
+---
+
+## Tests
+
+- Instruction CRUD: create, read, update, delete
+- Default templates: CEO agent gets AGENTS.md + HEARTBEAT.md on creation
+- Export to dir: files written to correct paths
+- Prompt builder: includes AGENTS.md content + path directive on fresh, skips on resume
+- Env vars: all 10 vars populated correctly
+- Wake payload: includes task details + recent comments
+- Protocol skill: valid markdown, references correct endpoints
+
+## Files to create/modify
+
+| File | Action |
+|------|--------|
+| `repository/sqlite/instructions.go` | NEW: instruction CRUD |
+| `repository/sqlite/base.go` | ADD: orchestrate_agent_instructions table |
+| `service/instructions.go` | NEW: defaults, export |
+| `service/agents.go` | MODIFY: create defaults on agent creation |
+| `service/scheduler_integration.go` | MODIFY: export + env vars + wake payload |
+| `service/prompt_builder.go` | MODIFY: multi-section prompt with path directive |
+| `handlers/instructions.go` | NEW: REST endpoints |
+| `handlers/handlers.go` | MODIFY: register routes |
+| `configloader/instructions/ceo/AGENTS.md` | NEW: CEO template |
+| `configloader/instructions/ceo/HEARTBEAT.md` | NEW: CEO checklist |
+| `configloader/instructions/worker/AGENTS.md` | NEW: worker template |
+| `configloader/instructions/reviewer/AGENTS.md` | NEW: reviewer template |
+| `configloader/skills/kandev-protocol/SKILL.md` | REWRITE: 200+ lines |
+| `agents/[id]/components/agent-instructions-tab.tsx` | NEW: frontend tab |
+| `orchestrate-api.ts` | ADD: instruction API functions |
