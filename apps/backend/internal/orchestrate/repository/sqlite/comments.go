@@ -58,3 +58,41 @@ func (r *Repository) DeleteTaskComment(ctx context.Context, id string) error {
 		`DELETE FROM task_comments WHERE id = ?`), id)
 	return err
 }
+
+// RecentComment holds the fields returned by ListRecentTaskComments.
+type RecentComment struct {
+	AuthorID   string `db:"author_id"`
+	AuthorType string `db:"author_type"`
+	Body       string `db:"body"`
+	CreatedAt  string `db:"created_at"`
+}
+
+// ListRecentTaskComments returns the most recent comments for a task,
+// ordered newest-first, limited to the given count.
+func (r *Repository) ListRecentTaskComments(
+	ctx context.Context, taskID string, limit int,
+) ([]*RecentComment, error) {
+	var comments []*RecentComment
+	err := r.ro.SelectContext(ctx, &comments, r.ro.Rebind(`
+		SELECT author_id, author_type, body, created_at
+		FROM task_comments
+		WHERE task_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?
+	`), taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	if comments == nil {
+		comments = []*RecentComment{}
+	}
+	return comments, nil
+}
+
+// CountTaskComments returns the total number of comments on a task.
+func (r *Repository) CountTaskComments(ctx context.Context, taskID string) (int, error) {
+	var count int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COUNT(*) FROM task_comments WHERE task_id = ?`), taskID).Scan(&count)
+	return count, err
+}

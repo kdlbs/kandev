@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+
+	"go.uber.org/zap"
 )
 
 // Orchestrate event types (local to service; events/types.go is not modified).
@@ -112,6 +114,9 @@ func (s *Service) CreateAgentInstance(ctx context.Context, agent *models.AgentIn
 	}
 	if err := s.repo.CreateAgentInstance(ctx, agent); err != nil {
 		return fmt.Errorf("create agent: %w", err)
+	}
+	if err := s.CreateDefaultInstructions(ctx, agent.ID, string(agent.Role)); err != nil {
+		s.logger.Warn("failed to create default instructions", zap.Error(err))
 	}
 	return nil
 }

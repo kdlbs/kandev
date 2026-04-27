@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
-func TestGenerateSlug(t *testing.T) {
+func TestGenerateSkillSlug(t *testing.T) {
 	tests := []struct {
 		name string
 		want string

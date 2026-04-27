@@ -4,6 +4,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
+import { useAppStore } from "@/components/state-provider";
 
 type AgentProfile = {
   id: string;
@@ -23,15 +24,12 @@ type StepAgentProps = {
   }) => void;
 };
 
-const EXECUTOR_OPTIONS = [
-  { value: "local_pc", label: "Local", description: "Runs on your machine as a standalone process" },
-  {
-    value: "local_docker",
-    label: "Docker",
-    description: "Runs in a Docker container on your machine",
-  },
-  { value: "sprites", label: "Sprites", description: "Runs in a remote cloud sandbox" },
-] as const;
+// Fallback used only when meta has not been hydrated yet (graceful degradation).
+const FALLBACK_EXECUTOR_OPTIONS = [
+  { id: "local_pc", label: "Local (standalone)", description: "Run on host machine" },
+  { id: "local_docker", label: "Local Docker", description: "Run in a local Docker container" },
+  { id: "sprites", label: "Sprites (remote sandbox)", description: "Run in a Sprites cloud environment" },
+];
 
 export function StepAgent({
   agentName,
@@ -40,6 +38,9 @@ export function StepAgent({
   agentProfiles,
   onChange,
 }: StepAgentProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+  const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
+
   return (
     <div className="space-y-6">
       <div>
@@ -67,6 +68,7 @@ export function StepAgent({
         />
         <ExecutorSelector
           value={executorPreference}
+          options={executorOptions}
           onChange={(v) => onChange({ executorPreference: v })}
         />
       </div>
@@ -110,9 +112,11 @@ function ProfileSelector({
 
 function ExecutorSelector({
   value,
+  options,
   onChange,
 }: {
   value: string;
+  options: { id: string; label: string; description: string }[];
   onChange: (v: string) => void;
 }) {
   return (
@@ -123,12 +127,12 @@ function ExecutorSelector({
         onValueChange={onChange}
         className="mt-2 space-y-2"
       >
-        {EXECUTOR_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <label
-            key={opt.value}
+            key={opt.id}
             className="flex items-start gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
           >
-            <RadioGroupItem value={opt.value} className="mt-0.5" />
+            <RadioGroupItem value={opt.id} className="mt-0.5" />
             <div>
               <span className="text-sm font-medium">{opt.label}</span>
               <p className="text-xs text-muted-foreground">{opt.description}</p>

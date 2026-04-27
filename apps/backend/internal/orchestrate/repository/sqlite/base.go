@@ -68,6 +68,9 @@ func (r *Repository) initSchema() error {
 	if err := r.createOnboardingTable(); err != nil {
 		return err
 	}
+	if err := r.createInstructionTable(); err != nil {
+		return err
+	}
 	r.migrateSchedulerColumns()
 	r.migrateTaskFTS()
 	return nil
@@ -406,6 +409,22 @@ func (r *Repository) createOnboardingTable() error {
 		first_task_id TEXT DEFAULT '',
 		completed_at DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	`)
+	return err
+}
+
+func (r *Repository) createInstructionTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS orchestrate_agent_instructions (
+		id TEXT PRIMARY KEY,
+		agent_instance_id TEXT NOT NULL,
+		filename TEXT NOT NULL,
+		content TEXT NOT NULL DEFAULT '',
+		is_entry INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(agent_instance_id, filename)
 	);
 	`)
 	return err

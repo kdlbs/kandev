@@ -16,6 +16,7 @@ import (
 // WorkspaceSettings represents the kandev.yml workspace configuration.
 type WorkspaceSettings struct {
 	Name                string `yaml:"name"`
+	Slug                string `yaml:"slug,omitempty"`
 	Description         string `yaml:"description,omitempty"`
 	ApprovalDefault     string `yaml:"approval_default,omitempty"`
 	BudgetDefault       int    `yaml:"budget_default,omitempty"`

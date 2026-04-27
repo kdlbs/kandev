@@ -105,6 +105,13 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
+	// Export instructions and skills to runtime directory (best-effort).
+	instructionsDir, rtErr := si.prepareRuntime(ctx, agent, defaultWorkspaceName)
+	if rtErr != nil {
+		si.logger.Warn("runtime export failed",
+			zap.String("wakeup_id", wakeupID), zap.Error(rtErr))
+	}
+
 	// Inject desired skills into the agent's config directory (best-effort).
 	if err := si.svc.InjectSkillsForAgent(ctx, agentInstanceID, defaultWorkspaceName); err != nil {
 		si.logger.Warn("failed to inject skills",
@@ -121,9 +128,26 @@ func (si *SchedulerIntegration) processWakeup(ctx context.Context, wakeup *model
 		return
 	}
 
-	// Build prompt.
+	// Build env vars.
+	env := si.buildEnvVars(wakeup, agent, "", agent.WorkspaceID)
+
+	// Attach wake payload to env.
+	if payload, pErr := si.svc.BuildWakePayload(ctx, &WakeupPayloadInput{
+		Payload: wakeup.Payload,
+	}); pErr == nil && payload != "" {
+		env["KANDEV_WAKE_PAYLOAD_JSON"] = payload
+	}
+
+	// Build wake context prompt (reason-specific).
 	pc := si.buildPromptContext(ctx, wakeup.Reason, wakeup.Payload)
-	prompt := BuildPrompt(pc)
+	wakeContext := BuildPrompt(pc)
+
+	// Build full agent prompt with instructions + wake context.
+	prompt := si.svc.BuildAgentPrompt(wakeup, agent, instructionsDir, false, wakeContext)
+
+	si.logger.Debug("session env vars prepared",
+		zap.String("wakeup_id", wakeupID),
+		zap.Int("env_count", len(env)))
 
 	if !si.launchOrLog(ctx, wakeup, agent, taskID, execCfg.Type, prompt) {
 		return

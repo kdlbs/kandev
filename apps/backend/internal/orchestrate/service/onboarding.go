@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
@@ -101,25 +103,15 @@ func (s *Service) CompleteOnboarding(ctx context.Context, req OnboardingComplete
 
 // createOnboardingWorkspace writes the workspace config and DB row.
 func (s *Service) createOnboardingWorkspace(ctx context.Context, name, taskPrefix string) error {
+	slug := generateSlug(name)
 	if s.cfgWriter != nil {
 		settings := &configloader.WorkspaceSettings{
 			Name:       name,
+			Slug:       slug,
 			TaskPrefix: taskPrefix,
 		}
-		data, err := configloader.MarshalSettings(*settings)
-		if err != nil {
-			return fmt.Errorf("marshal settings: %w", err)
-		}
-		wsDir := filepath.Join(s.cfgLoader.BasePath(), "workspaces", name)
-		if mkErr := os.MkdirAll(wsDir, 0o755); mkErr != nil {
-			return fmt.Errorf("create dir: %w", mkErr)
-		}
-		settingsPath := filepath.Join(wsDir, "kandev.yml")
-		if writeErr := os.WriteFile(settingsPath, data, 0o644); writeErr != nil {
-			return fmt.Errorf("write settings: %w", writeErr)
-		}
-		if reloadErr := s.cfgLoader.Reload(name); reloadErr != nil {
-			return fmt.Errorf("reload config: %w", reloadErr)
+		if err := s.writeWorkspaceConfig(name, settings); err != nil {
+			return err
 		}
 	}
 	if s.workspaceCreator != nil {
@@ -129,6 +121,46 @@ func (s *Service) createOnboardingWorkspace(ctx context.Context, name, taskPrefi
 		}
 	}
 	return nil
+}
+
+// writeWorkspaceConfig marshals settings and writes them to the workspace directory.
+func (s *Service) writeWorkspaceConfig(name string, settings *configloader.WorkspaceSettings) error {
+	data, err := configloader.MarshalSettings(*settings)
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
+	}
+	wsDir := filepath.Join(s.cfgLoader.BasePath(), "workspaces", name)
+	if mkErr := os.MkdirAll(wsDir, 0o755); mkErr != nil {
+		return fmt.Errorf("create dir: %w", mkErr)
+	}
+	settingsPath := filepath.Join(wsDir, "kandev.yml")
+	if writeErr := os.WriteFile(settingsPath, data, 0o644); writeErr != nil {
+		return fmt.Errorf("write settings: %w", writeErr)
+	}
+	if reloadErr := s.cfgLoader.Reload(name); reloadErr != nil {
+		return fmt.Errorf("reload config: %w", reloadErr)
+	}
+	return nil
+}
+
+var (
+	slugNonAlphanumRe = regexp.MustCompile(`[^a-z0-9-]`)
+	slugMultiDashRe   = regexp.MustCompile(`-+`)
+)
+
+// generateSlug creates a URL-safe slug from a workspace name.
+func generateSlug(name string) string {
+	slug := strings.ToLower(name)
+	slug = slugNonAlphanumRe.ReplaceAllString(slug, "-")
+	slug = slugMultiDashRe.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "workspace"
+	}
+	if len(slug) > 50 {
+		slug = slug[:50]
+	}
+	return slug
 }
 
 // resolveKanbanWorkspaceID looks up the kanban workspace UUID by name.

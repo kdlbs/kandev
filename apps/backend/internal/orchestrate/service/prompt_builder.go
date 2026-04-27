@@ -3,7 +3,11 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/kandev/kandev/internal/orchestrate/models"
 )
 
 // PromptContext holds the data needed to build a wakeup prompt.
@@ -172,4 +176,50 @@ func ParseWakeupPayload(payloadJSON string) map[string]string {
 	}
 	_ = json.Unmarshal([]byte(payloadJSON), &result)
 	return result
+}
+
+// BuildAgentPrompt constructs the full prompt for an agent session.
+// On fresh sessions, the agent's AGENTS.md content (with a path directive)
+// is prepended. On resume, only the wake context is included because the
+// agent CLI retains instructions from the previous session.
+func (s *Service) BuildAgentPrompt(
+	wakeup *models.WakeupRequest,
+	_ *models.AgentInstance,
+	instructionsDir string,
+	isResume bool,
+	wakeContext string,
+) string {
+	var sections []string
+
+	if !isResume && instructionsDir != "" {
+		content := readInstructionFile(
+			filepath.Join(instructionsDir, "AGENTS.md"),
+		)
+		if content != "" {
+			content += fmt.Sprintf(
+				"\n\nThe above agent instructions were loaded from %s/AGENTS.md.\n"+
+					"Resolve any relative file references from %s.\n"+
+					"This directory contains sibling instruction files: "+
+					"./HEARTBEAT.md, ./SOUL.md, ./TOOLS.md.\n"+
+					"Read them when referenced in these instructions.",
+				instructionsDir, instructionsDir,
+			)
+			sections = append(sections, content)
+		}
+	}
+
+	if wakeContext != "" {
+		sections = append(sections, wakeContext)
+	}
+
+	return strings.Join(sections, "\n\n---\n\n")
+}
+
+// readInstructionFile reads a file from disk, returning empty string on error.
+func readInstructionFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

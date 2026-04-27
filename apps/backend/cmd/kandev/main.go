@@ -467,6 +467,11 @@ func startGatewayAndServe(
 		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
 		services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
 		services.Orchestrate.SetWorkspaceCreator(&taskWorkspaceCreatorAdapter{taskSvc: services.Task})
+		apiPort := cfg.Server.Port
+		if apiPort == 0 {
+			apiPort = ports.Backend
+		}
+		services.Orchestrate.SetAPIBaseURL(fmt.Sprintf("http://localhost:%d/api/v1", apiPort))
 		log.Info("Orchestrate service wired to ConfigLoader (manual-sync only)")
 
 		// Reconcile derived DB state (drop dead runtime/budget/channel rows,

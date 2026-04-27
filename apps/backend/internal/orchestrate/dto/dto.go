@@ -393,6 +393,23 @@ type OnboardingCompleteResponse struct {
 	TaskID      string `json:"taskId,omitempty"`
 }
 
+// -- Instructions --
+
+// InstructionFileResponse wraps a single instruction file.
+type InstructionFileResponse struct {
+	File *models.InstructionFile `json:"file"`
+}
+
+// InstructionListResponse wraps a list of instruction files.
+type InstructionListResponse struct {
+	Files []*models.InstructionFile `json:"files"`
+}
+
+// UpsertInstructionRequest is the request body for creating/updating an instruction file.
+type UpsertInstructionRequest struct {
+	Content string `json:"content"`
+}
+
 // -- Git --
 
 // GitCloneRequest is the request body for cloning a workspace from a git repo.

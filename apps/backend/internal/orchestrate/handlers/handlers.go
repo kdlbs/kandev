@@ -25,6 +25,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 
 	registerOnboardingRoutes(api, h)
 	registerAgentRoutes(api, h)
+	registerInstructionRoutes(api, h)
 	registerSkillRoutes(api, h)
 	registerProjectRoutes(api, h)
 	registerCostRoutes(api, h)
@@ -53,6 +54,13 @@ func registerAgentRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.PATCH("/agents/:id", h.updateAgent)
 	api.PATCH("/agents/:id/status", h.updateAgentStatus)
 	api.DELETE("/agents/:id", h.deleteAgent)
+}
+
+func registerInstructionRoutes(api *gin.RouterGroup, h *Handlers) {
+	api.GET("/agents/:id/instructions", h.listInstructions)
+	api.GET("/agents/:id/instructions/:filename", h.getInstruction)
+	api.PUT("/agents/:id/instructions/:filename", h.upsertInstruction)
+	api.DELETE("/agents/:id/instructions/:filename", h.deleteInstruction)
 }
 
 func registerSkillRoutes(api *gin.RouterGroup, h *Handlers) {

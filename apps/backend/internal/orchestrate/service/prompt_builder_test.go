@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -143,4 +144,68 @@ func TestBuildPrompt_TaskIDFallback(t *testing.T) {
 	if !strings.Contains(prompt, "[abc-123]") {
 		t.Errorf("should fallback to task ID when no identifier:\n%s", prompt)
 	}
+}
+
+func TestBuildAgentPrompt_FreshSession(t *testing.T) {
+	svc := newTestService(t)
+
+	// Write AGENTS.md to a temp dir.
+	dir := t.TempDir()
+	if err := writeTestFile(t, dir, "AGENTS.md", "# You are the CEO."); err != nil {
+		t.Fatal(err)
+	}
+
+	wakeContext := "You have been assigned task [KAN-1]: Build it."
+	prompt := svc.BuildAgentPrompt(nil, nil, dir, false, wakeContext)
+
+	if !strings.Contains(prompt, "# You are the CEO.") {
+		t.Errorf("prompt should contain AGENTS.md content:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, dir+"/AGENTS.md") {
+		t.Errorf("prompt should contain path directive:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "./HEARTBEAT.md") {
+		t.Errorf("prompt should reference sibling files:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Build it") {
+		t.Errorf("prompt should contain wake context:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "---") {
+		t.Errorf("prompt should have section separator:\n%s", prompt)
+	}
+}
+
+func TestBuildAgentPrompt_ResumeSkipsInstructions(t *testing.T) {
+	svc := newTestService(t)
+
+	dir := t.TempDir()
+	if err := writeTestFile(t, dir, "AGENTS.md", "# Instructions"); err != nil {
+		t.Fatal(err)
+	}
+
+	wakeContext := "New comment on your task."
+	prompt := svc.BuildAgentPrompt(nil, nil, dir, true, wakeContext)
+
+	if strings.Contains(prompt, "# Instructions") {
+		t.Errorf("resume should NOT include AGENTS.md:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "New comment") {
+		t.Errorf("resume should include wake context:\n%s", prompt)
+	}
+}
+
+func TestBuildAgentPrompt_NoInstructionsDir(t *testing.T) {
+	svc := newTestService(t)
+
+	wakeContext := "Heartbeat check."
+	prompt := svc.BuildAgentPrompt(nil, nil, "", false, wakeContext)
+
+	if !strings.Contains(prompt, "Heartbeat check") {
+		t.Errorf("prompt should contain wake context even without instructions dir:\n%s", prompt)
+	}
+}
+
+func writeTestFile(t *testing.T, dir, name, content string) error {
+	t.Helper()
+	return os.WriteFile(dir+"/"+name, []byte(content), 0o644)
 }

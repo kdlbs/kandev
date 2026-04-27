@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -64,6 +62,7 @@ type Service struct {
 	agentTypeResolver AgentTypeResolver
 	taskStarter       TaskStarter
 	workspaceCreator  WorkspaceCreator
+	apiBaseURL        string
 }
 
 // NewService creates a new orchestrate service.
@@ -466,23 +465,12 @@ func (s *Service) CreateOrchestrateWorkspace(ctx context.Context, name, descript
 	if s.cfgWriter != nil {
 		settings := &configloader.WorkspaceSettings{
 			Name:        name,
+			Slug:        generateSlug(name),
 			Description: description,
 			TaskPrefix:  "KAN",
 		}
-		data, err := configloader.MarshalSettings(*settings)
-		if err != nil {
-			return fmt.Errorf("marshal workspace settings: %w", err)
-		}
-		wsDir := filepath.Join(s.cfgLoader.BasePath(), "workspaces", name)
-		if mkErr := os.MkdirAll(wsDir, 0o755); mkErr != nil {
-			return fmt.Errorf("create workspace dir: %w", mkErr)
-		}
-		settingsPath := filepath.Join(wsDir, "kandev.yml")
-		if writeErr := os.WriteFile(settingsPath, data, 0o644); writeErr != nil {
-			return fmt.Errorf("write workspace settings: %w", writeErr)
-		}
-		if reloadErr := s.cfgLoader.Reload(name); reloadErr != nil {
-			return fmt.Errorf("reload workspace config: %w", reloadErr)
+		if err := s.writeWorkspaceConfig(name, settings); err != nil {
+			return err
 		}
 	}
 

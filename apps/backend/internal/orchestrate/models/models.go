@@ -316,6 +316,17 @@ type DashboardData struct {
 	RecentIssues     []interface{}    `json:"recent_issues,omitempty"`
 }
 
+// InstructionFile represents an instruction file for an agent instance.
+type InstructionFile struct {
+	ID              string `json:"id" db:"id"`
+	AgentInstanceID string `json:"agent_instance_id" db:"agent_instance_id"`
+	Filename        string `json:"filename" db:"filename"`
+	Content         string `json:"content" db:"content"`
+	IsEntry         bool   `json:"is_entry" db:"is_entry"`
+	CreatedAt       string `json:"created_at" db:"created_at"`
+	UpdatedAt       string `json:"updated_at" db:"updated_at"`
+}
+
 // CostBreakdown represents an aggregated cost entry.
 type CostBreakdown struct {
 	GroupKey   string `json:"group_key" db:"group_key"`

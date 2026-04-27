@@ -26,6 +26,8 @@ type WizardData = {
   taskDescription: string;
 };
 
+// Initial form values -- these are UI-only placeholder defaults for the wizard fields.
+// The backend validates and may override these during onboarding completion.
 const INITIAL_DATA: WizardData = {
   workspaceName: "default",
   taskPrefix: "KAN",

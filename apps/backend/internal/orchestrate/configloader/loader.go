@@ -376,6 +376,7 @@ func (cl *ConfigLoader) EnsureDefaultWorkspace() error {
 	}
 	defaults := WorkspaceSettings{
 		Name:        "default",
+		Slug:        "default",
 		Description: "Default workspace",
 	}
 	data, err := MarshalSettings(defaults)

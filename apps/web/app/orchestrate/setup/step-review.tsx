@@ -2,6 +2,7 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { Card } from "@kandev/ui/card";
+import { useAppStore } from "@/components/state-provider";
 
 type StepReviewProps = {
   workspaceName: string;
@@ -12,10 +13,11 @@ type StepReviewProps = {
   taskTitle: string;
 };
 
-const EXECUTOR_LABELS: Record<string, string> = {
+// Fallback used only when meta has not been hydrated yet (graceful degradation).
+const FALLBACK_EXECUTOR_LABELS: Record<string, string> = {
   local_pc: "Local (standalone)",
-  local_docker: "Docker",
-  sprites: "Sprites (remote)",
+  local_docker: "Local Docker",
+  sprites: "Sprites (remote sandbox)",
 };
 
 export function StepReview({
@@ -26,6 +28,13 @@ export function StepReview({
   executorPreference,
   taskTitle,
 }: StepReviewProps) {
+  const meta = useAppStore((s) => s.orchestrate.meta);
+
+  const executorLabel =
+    meta?.executorTypes.find((e) => e.id === executorPreference)?.label ??
+    FALLBACK_EXECUTOR_LABELS[executorPreference] ??
+    executorPreference;
+
   return (
     <div className="space-y-6">
       <div>
@@ -45,7 +54,7 @@ export function StepReview({
             <span className="text-xs text-muted-foreground ml-2">({agentProfileLabel})</span>
           )}
         </ReviewRow>
-        <ReviewRow label="Executor" value={EXECUTOR_LABELS[executorPreference] || "Local"} />
+        <ReviewRow label="Executor" value={executorLabel} />
         <ReviewRow label="First task" value={taskTitle || "No initial task"} />
       </Card>
     </div>

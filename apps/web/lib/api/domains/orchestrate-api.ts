@@ -607,6 +607,65 @@ export function searchTasks(
   );
 }
 
+// --- Instructions ---
+
+export function listInstructions(agentId: string, options?: ApiRequestOptions) {
+  return fetchJson<{
+    files: Array<{
+      id: string;
+      filename: string;
+      content: string;
+      is_entry: boolean;
+      created_at: string;
+      updated_at: string;
+    }>;
+  }>(`${BASE}/agents/${agentId}/instructions`, options);
+}
+
+export function getInstruction(agentId: string, filename: string, options?: ApiRequestOptions) {
+  return fetchJson<{
+    file: {
+      id: string;
+      filename: string;
+      content: string;
+      is_entry: boolean;
+      created_at: string;
+      updated_at: string;
+    };
+  }>(`${BASE}/agents/${agentId}/instructions/${encodeURIComponent(filename)}`, options);
+}
+
+export function upsertInstruction(
+  agentId: string,
+  filename: string,
+  content: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{
+    file: {
+      id: string;
+      filename: string;
+      content: string;
+      is_entry: boolean;
+      created_at: string;
+      updated_at: string;
+    };
+  }>(`${BASE}/agents/${agentId}/instructions/${encodeURIComponent(filename)}`, {
+    ...options,
+    init: { method: "PUT", body: JSON.stringify({ content }), ...options?.init },
+  });
+}
+
+export function deleteInstruction(agentId: string, filename: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(
+    `${BASE}/agents/${agentId}/instructions/${encodeURIComponent(filename)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...options?.init },
+    },
+  );
+}
+
 // --- Onboarding ---
 
 export type OnboardingStateData = {

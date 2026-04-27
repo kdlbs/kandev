@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"testing"
+
+	"github.com/kandev/kandev/internal/orchestrate/models"
 )
 
 // BuildPromptContextForTest builds a PromptContext for testing.
@@ -25,4 +27,29 @@ func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 func RunSchedulerTick(svc *Service, ctx context.Context) {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	si.tick(ctx)
+}
+
+// BuildEnvVarsForTest exposes buildEnvVars for external test packages.
+func BuildEnvVarsForTest(
+	si *SchedulerIntegration,
+	wakeup *models.WakeupRequest,
+	agent *models.AgentInstance,
+	jwt, workspaceID string,
+) map[string]string {
+	return si.buildEnvVars(wakeup, agent, jwt, workspaceID)
+}
+
+// GenerateSlugForTest exposes generateSlug for external test packages.
+func GenerateSlugForTest(name string) string {
+	return generateSlug(name)
+}
+
+// PrepareRuntimeForTest exposes prepareRuntime for external test packages.
+func PrepareRuntimeForTest(
+	si *SchedulerIntegration,
+	ctx context.Context,
+	agent *models.AgentInstance,
+	workspaceSlug string,
+) (string, error) {
+	return si.prepareRuntime(ctx, agent, workspaceSlug)
 }

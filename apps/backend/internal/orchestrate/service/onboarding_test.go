@@ -60,6 +60,30 @@ func TestCompleteOnboarding_CreatesEntities(t *testing.T) {
 	}
 }
 
+func TestGenerateWorkspaceSlug(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"default", "default"},
+		{"My Workspace", "my-workspace"},
+		{"Hello  World!!", "hello-world"},
+		{"---trimmed---", "trimmed"},
+		{"", "workspace"},
+		{"UPPER_case MiXed", "upper-case-mixed"},
+		{
+			"a-very-long-workspace-name-that-exceeds-fifty-characters-limit-here",
+			"a-very-long-workspace-name-that-exceeds-fifty-char",
+		},
+	}
+	for _, tt := range tests {
+		got := service.GenerateSlugForTest(tt.input)
+		if got != tt.want {
+			t.Errorf("generateSlug(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestCompleteOnboarding_RequiresWorkspaceName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
