@@ -6,6 +6,7 @@ export type FilterDimension =
   | "executorType"
   | "repository"
   | "hasDiff"
+  | "hasPR"
   | "isPRReview"
   | "isIssueWatch"
   | "titleMatch";
