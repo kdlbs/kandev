@@ -659,12 +659,20 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		exitCode = *status.ExitCode
 	}
 
+	// Use the exit timestamp from the status event (set when the child
+	// actually exited), not time.Now() — the cleanupDelay sleep and goroutine
+	// hops above would otherwise inflate the measured uptime by ~100 ms.
+	exitedAt := status.Timestamp
+	if exitedAt.IsZero() {
+		exitedAt = time.Now()
+	}
+
 	// Fast-fail short-circuit: a non-zero exit shortly after start almost
 	// always means the launch itself was wrong (bad CLI flag, missing binary,
 	// auth failure). Restarting just thrashes — the next run hits the same
 	// failure at the same speed. Surface the failure to the user instead.
-	if isFastFailExit(startedAt, exitCode, fastFailWindow) {
-		m.notifyFastFailExit(interactiveRunner, sessionID, startedAt, exitCode, fastFailWindow)
+	if isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow) {
+		m.notifyFastFailExit(interactiveRunner, sessionID, exitedAt.Sub(startedAt), exitCode, fastFailWindow)
 		return
 	}
 
@@ -729,11 +737,13 @@ func (m *Manager) attemptPassthroughRestart(execution *AgentExecution, runner *p
 
 // notifyFastFailExit logs the fast-fail decision and writes a one-shot
 // banner to the terminal explaining why the auto-restart was skipped.
-func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionID string, startedAt time.Time, exitCode int, window time.Duration) {
+// uptime is the measured process lifetime (status timestamp minus start
+// time), pre-computed by the caller so the log reflects true child uptime.
+func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionID string, uptime time.Duration, exitCode int, window time.Duration) {
 	m.logger.Warn("passthrough process exited fast with non-zero code, skipping auto-restart",
 		zap.String("session_id", sessionID),
 		zap.Int("exit_code", exitCode),
-		zap.Duration("uptime", time.Since(startedAt)))
+		zap.Duration("uptime", uptime))
 	failMsg := fmt.Sprintf("\r\n\x1b[31m[Agent exited (code %d) within %s. Likely cause: bad CLI flag, missing binary, or auth failure. Edit your profile and reconnect to retry.]\x1b[0m\r\n",
 		exitCode, window)
 	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); err != nil {
@@ -746,12 +756,15 @@ func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionI
 // isFastFailExit reports whether a passthrough process exit looks like a
 // launch failure rather than a runtime exit worth restarting. A zero start
 // time disables the check (e.g. recovered executions where the start time
-// is unknown), so the legacy restart path remains the default.
-func isFastFailExit(startedAt time.Time, exitCode int, window time.Duration) bool {
+// is unknown), so the legacy restart path remains the default. exitedAt is
+// the wall-clock time the process actually exited (status.Timestamp), kept
+// distinct from time.Now() so the cleanupDelay sleep above the call site
+// doesn't shrink the effective window.
+func isFastFailExit(startedAt, exitedAt time.Time, exitCode int, window time.Duration) bool {
 	if exitCode == 0 || startedAt.IsZero() {
 		return false
 	}
-	return time.Since(startedAt) < window
+	return exitedAt.Sub(startedAt) < window
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.

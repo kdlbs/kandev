@@ -293,38 +293,53 @@ func TestIsFastFailExit(t *testing.T) {
 	tests := []struct {
 		name      string
 		startedAt time.Time
+		exitedAt  time.Time
 		exitCode  int
 		want      bool
 	}{
 		{
 			name:      "fast exit with non-zero code → fast-fail",
-			startedAt: now.Add(-100 * time.Millisecond),
+			startedAt: now,
+			exitedAt:  now.Add(100 * time.Millisecond),
 			exitCode:  1,
 			want:      true,
 		},
 		{
 			name:      "slow exit with non-zero code → restart",
-			startedAt: now.Add(-5 * time.Second),
+			startedAt: now,
+			exitedAt:  now.Add(5 * time.Second),
 			exitCode:  1,
 			want:      false,
 		},
 		{
 			name:      "fast exit with zero code → not fast-fail (clean exit)",
-			startedAt: now.Add(-100 * time.Millisecond),
+			startedAt: now,
+			exitedAt:  now.Add(100 * time.Millisecond),
 			exitCode:  0,
 			want:      false,
 		},
 		{
 			name:      "zero start time → check disabled (recovered execution)",
 			startedAt: time.Time{},
+			exitedAt:  now,
 			exitCode:  1,
 			want:      false,
+		},
+		{
+			name: "exit-time-based measurement is independent of caller delays",
+			// Process actually ran 50ms; caller's wall-clock-since-start would
+			// be much larger (e.g. after the cleanupDelay sleep), but the
+			// status.Timestamp pins true uptime to 50ms → fast-fail.
+			startedAt: now,
+			exitedAt:  now.Add(50 * time.Millisecond),
+			exitCode:  127,
+			want:      true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isFastFailExit(tt.startedAt, tt.exitCode, window); got != tt.want {
+			if got := isFastFailExit(tt.startedAt, tt.exitedAt, tt.exitCode, window); got != tt.want {
 				t.Errorf("isFastFailExit() = %v, want %v", got, tt.want)
 			}
 		})
