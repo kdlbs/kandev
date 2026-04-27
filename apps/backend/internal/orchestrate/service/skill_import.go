@@ -190,6 +190,10 @@ func (s *Service) importLocal(ctx context.Context, wsID, localPath string) (*Ski
 	if err != nil {
 		return nil, fmt.Errorf("invalid local path: %w", err)
 	}
+	allowedRoot := filepath.Clean(s.cfgLoader.BasePath()) + string(os.PathSeparator)
+	if !strings.HasPrefix(abs+string(os.PathSeparator), allowedRoot) {
+		return nil, fmt.Errorf("local path is outside workspace root")
+	}
 	skillMD := filepath.Join(abs, "SKILL.md")
 	content, err := os.ReadFile(skillMD)
 	if err != nil {

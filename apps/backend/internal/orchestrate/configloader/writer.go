@@ -22,6 +22,10 @@ type FileWriter struct {
 	loader   *ConfigLoader
 }
 
+func isValidPathComponent(s string) bool {
+	return s != "" && !strings.Contains(s, "/") && !strings.Contains(s, "\\") && !strings.Contains(s, "..")
+}
+
 // NewFileWriter creates a writer backed by the given config loader.
 func NewFileWriter(basePath string, loader *ConfigLoader) *FileWriter {
 	return &FileWriter{basePath: basePath, loader: loader}
@@ -29,6 +33,9 @@ func NewFileWriter(basePath string, loader *ConfigLoader) *FileWriter {
 
 // WriteAgent marshals an agent to YAML and writes it to disk.
 func (w *FileWriter) WriteAgent(workspaceName string, agent *models.AgentInstance) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(agent.Name) {
+		return fmt.Errorf("invalid workspace or agent name")
+	}
 	dir := filepath.Join(w.basePath, "workspaces", workspaceName, "agents")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create agents dir: %w", err)
@@ -46,6 +53,9 @@ func (w *FileWriter) WriteAgent(workspaceName string, agent *models.AgentInstanc
 
 // DeleteAgent removes an agent YAML file from disk.
 func (w *FileWriter) DeleteAgent(workspaceName, agentName string) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(agentName) {
+		return fmt.Errorf("invalid workspace or agent name")
+	}
 	filePath := filepath.Join(w.basePath, "workspaces", workspaceName, "agents", agentName+".yml")
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete agent file: %w", err)
@@ -55,6 +65,9 @@ func (w *FileWriter) DeleteAgent(workspaceName, agentName string) error {
 
 // WriteSkill writes a SKILL.md file to the skill directory.
 func (w *FileWriter) WriteSkill(workspaceName, slug, content string) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(slug) {
+		return fmt.Errorf("invalid workspace name or skill slug")
+	}
 	dir := filepath.Join(w.basePath, "workspaces", workspaceName, "skills", slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create skill dir: %w", err)
@@ -68,6 +81,9 @@ func (w *FileWriter) WriteSkill(workspaceName, slug, content string) error {
 
 // DeleteSkill removes a skill directory from disk.
 func (w *FileWriter) DeleteSkill(workspaceName, slug string) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(slug) {
+		return fmt.Errorf("invalid workspace name or skill slug")
+	}
 	dir := filepath.Join(w.basePath, "workspaces", workspaceName, "skills", slug)
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("delete skill dir: %w", err)
@@ -77,6 +93,9 @@ func (w *FileWriter) DeleteSkill(workspaceName, slug string) error {
 
 // WriteProject marshals a project to YAML and writes it to disk.
 func (w *FileWriter) WriteProject(workspaceName string, project *models.Project) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(project.Name) {
+		return fmt.Errorf("invalid workspace or project name")
+	}
 	dir := filepath.Join(w.basePath, "workspaces", workspaceName, "projects")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create projects dir: %w", err)
@@ -94,6 +113,9 @@ func (w *FileWriter) WriteProject(workspaceName string, project *models.Project)
 
 // DeleteProject removes a project YAML file from disk.
 func (w *FileWriter) DeleteProject(workspaceName, projectName string) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(projectName) {
+		return fmt.Errorf("invalid workspace or project name")
+	}
 	filePath := filepath.Join(w.basePath, "workspaces", workspaceName, "projects", projectName+".yml")
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete project file: %w", err)
@@ -103,6 +125,9 @@ func (w *FileWriter) DeleteProject(workspaceName, projectName string) error {
 
 // WriteRoutine marshals a routine to YAML and writes it to disk.
 func (w *FileWriter) WriteRoutine(workspaceName string, routine *models.Routine) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(routine.Name) {
+		return fmt.Errorf("invalid workspace or routine name")
+	}
 	dir := filepath.Join(w.basePath, "workspaces", workspaceName, "routines")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create routines dir: %w", err)
@@ -120,6 +145,9 @@ func (w *FileWriter) WriteRoutine(workspaceName string, routine *models.Routine)
 
 // DeleteRoutine removes a routine YAML file from disk.
 func (w *FileWriter) DeleteRoutine(workspaceName, routineName string) error {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(routineName) {
+		return fmt.Errorf("invalid workspace or routine name")
+	}
 	filePath := filepath.Join(w.basePath, "workspaces", workspaceName, "routines", routineName+".yml")
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete routine file: %w", err)
@@ -128,16 +156,23 @@ func (w *FileWriter) DeleteRoutine(workspaceName, routineName string) error {
 }
 
 // memoryPath computes the filesystem path for a memory entry.
-func (w *FileWriter) memoryPath(workspaceName, agentName, layer, key string) string {
+func (w *FileWriter) memoryPath(workspaceName, agentName, layer, key string) (string, error) {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(agentName) ||
+		!isValidPathComponent(layer) || !isValidPathComponent(key) {
+		return "", fmt.Errorf("invalid memory path component")
+	}
 	return filepath.Join(
 		w.basePath, "workspaces", workspaceName,
 		"agents", agentName, "memory", layer, key+".md",
-	)
+	), nil
 }
 
 // WriteMemoryEntry writes a markdown memory file to disk.
 func (w *FileWriter) WriteMemoryEntry(workspaceName, agentName, layer, key, content string) error {
-	filePath := w.memoryPath(workspaceName, agentName, layer, key)
+	filePath, err := w.memoryPath(workspaceName, agentName, layer, key)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create memory dir: %w", err)
@@ -150,7 +185,10 @@ func (w *FileWriter) WriteMemoryEntry(workspaceName, agentName, layer, key, cont
 
 // ReadMemoryEntry reads a markdown memory file from disk.
 func (w *FileWriter) ReadMemoryEntry(workspaceName, agentName, layer, key string) (string, error) {
-	filePath := w.memoryPath(workspaceName, agentName, layer, key)
+	filePath, err := w.memoryPath(workspaceName, agentName, layer, key)
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read memory file: %w", err)
@@ -160,6 +198,9 @@ func (w *FileWriter) ReadMemoryEntry(workspaceName, agentName, layer, key string
 
 // ListMemoryEntries lists all memory files for an agent within a given layer.
 func (w *FileWriter) ListMemoryEntries(workspaceName, agentName, layer string) ([]MemoryEntry, error) {
+	if !isValidPathComponent(workspaceName) || !isValidPathComponent(agentName) || !isValidPathComponent(layer) {
+		return nil, fmt.Errorf("invalid memory path component")
+	}
 	dir := filepath.Join(
 		w.basePath, "workspaces", workspaceName,
 		"agents", agentName, "memory", layer,
@@ -192,7 +233,10 @@ func (w *FileWriter) ListMemoryEntries(workspaceName, agentName, layer string) (
 
 // DeleteMemoryEntry removes a markdown memory file from disk.
 func (w *FileWriter) DeleteMemoryEntry(workspaceName, agentName, layer, key string) error {
-	filePath := w.memoryPath(workspaceName, agentName, layer, key)
+	filePath, err := w.memoryPath(workspaceName, agentName, layer, key)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete memory file: %w", err)
 	}

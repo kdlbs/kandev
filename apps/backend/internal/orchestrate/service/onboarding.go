@@ -125,6 +125,9 @@ func (s *Service) createOnboardingWorkspace(ctx context.Context, name, taskPrefi
 
 // writeWorkspaceConfig marshals settings and writes them to the workspace directory.
 func (s *Service) writeWorkspaceConfig(name string, settings *configloader.WorkspaceSettings) error {
+	if !isValidPathComponent(name) {
+		return fmt.Errorf("invalid workspace name")
+	}
 	data, err := configloader.MarshalSettings(*settings)
 	if err != nil {
 		return fmt.Errorf("marshal settings: %w", err)

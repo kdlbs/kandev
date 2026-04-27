@@ -90,7 +90,6 @@ func (r *Reconciler) reconcileRoutineTriggers(ctx context.Context) error {
 	}
 
 	r.createTriggersForNewRoutines(ctx, routines, triggerIDSet)
-	r.updateChangedTriggers(ctx, routines, triggerIDSet)
 	r.deleteOrphanRoutineData(ctx, dbRoutineIDs, idSet)
 	return nil
 }
@@ -116,18 +115,6 @@ func (r *Reconciler) createTriggersForNewRoutines(
 				zap.String("routine", rt.Name), zap.Error(createErr))
 		}
 	}
-}
-
-func (r *Reconciler) updateChangedTriggers(
-	ctx context.Context, routines []*models.Routine, dbIDs map[string]struct{},
-) {
-	// For routines that exist both in config and DB, compare trigger config.
-	// Currently routineYAML triggers are not round-tripped into models.Routine
-	// (the Triggers field is YAML-only), so this is a no-op placeholder that
-	// will be populated when trigger config is added to the model.
-	_ = ctx
-	_ = routines
-	_ = dbIDs
 }
 
 func (r *Reconciler) deleteOrphanRoutineData(

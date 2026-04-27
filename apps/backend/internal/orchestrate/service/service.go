@@ -17,6 +17,10 @@ import (
 	"go.uber.org/zap"
 )
 
+func isValidPathComponent(s string) bool {
+	return s != "" && !strings.Contains(s, "/") && !strings.Contains(s, "\\") && !strings.Contains(s, "..")
+}
+
 // TaskStarter launches agent sessions on behalf of the orchestrate scheduler.
 // Implemented by the orchestrator service; the orchestrate package depends only
 // on this interface to avoid a direct import of the orchestrator package.
@@ -461,6 +465,10 @@ func (s *Service) GetDashboard(ctx context.Context, wsID string) (int, int, int,
 // if a WorkspaceCreator is configured, also creates a DB workspace row for
 // kanban board compatibility.
 func (s *Service) CreateOrchestrateWorkspace(ctx context.Context, name, description string) error {
+	if !isValidPathComponent(name) {
+		return fmt.Errorf("invalid workspace name")
+	}
+
 	// 1. Write kandev.yml to filesystem.
 	if s.cfgWriter != nil {
 		settings := &configloader.WorkspaceSettings{

@@ -74,7 +74,7 @@ func verifySignature(mode, secret string, r *http.Request, body []byte) bool {
 
 func verifyBearer(r *http.Request, secret string) bool {
 	auth := r.Header.Get("Authorization")
-	return strings.TrimPrefix(auth, "Bearer ") == secret
+	return hmac.Equal([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(secret))
 }
 
 func verifyHMAC(r *http.Request, body []byte, secret string) bool {

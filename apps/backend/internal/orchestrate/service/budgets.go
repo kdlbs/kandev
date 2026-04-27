@@ -156,7 +156,7 @@ func (s *Service) logBudgetAlert(
 ) {
 	s.LogActivity(ctx, workspaceID, "system", "budget_checker",
 		"budget.alert", policy.ScopeType, policy.ScopeID,
-		fmt.Sprintf(`{"spent_cents":%d,"limit_cents":%d,"policy_id":"%s"}`,
+		fmt.Sprintf(`{"spent_cents":%d,"limit_cents":%d,"policy_id":%q}`,
 			spentCents, policy.LimitCents, policy.ID))
 }
 
@@ -168,7 +168,7 @@ func (s *Service) logBudgetExceeded(
 ) {
 	s.LogActivity(ctx, workspaceID, "system", "budget_checker",
 		"budget.exceeded", policy.ScopeType, policy.ScopeID,
-		fmt.Sprintf(`{"spent_cents":%d,"limit_cents":%d,"action":"%s","policy_id":"%s"}`,
+		fmt.Sprintf(`{"spent_cents":%d,"limit_cents":%d,"action":%q,"policy_id":%q}`,
 			spentCents, policy.LimitCents, policy.ActionOnExceed, policy.ID))
 }
 
@@ -183,7 +183,7 @@ func (s *Service) CheckPreExecutionBudget(
 		return false, "", fmt.Errorf("budget check: %w", err)
 	}
 	for _, r := range results {
-		if r.LimitExceed && r.AgentPaused {
+		if r.LimitExceed {
 			reason := fmt.Sprintf(
 				"budget exceeded: spent %d cents of %d limit (policy %s)",
 				r.SpentCents, r.LimitCents, r.PolicyID)

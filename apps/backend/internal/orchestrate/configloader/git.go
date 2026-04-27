@@ -70,11 +70,15 @@ func (g *GitManager) CloneWorkspace(ctx context.Context, repoURL, branch, worksp
 		return g.PullWorkspace(ctx, workspaceName)
 	}
 
+	if !isAllowedRepoURL(repoURL) {
+		return fmt.Errorf("git clone: disallowed repository URL scheme: %s", repoURL)
+	}
+
 	args := []string{"clone"}
 	if branch != "" {
 		args = append(args, "--branch", branch)
 	}
-	args = append(args, repoURL, wsPath)
+	args = append(args, "--", repoURL, wsPath)
 
 	if _, err := g.runGit(ctx, "", args...); err != nil {
 		return fmt.Errorf("git clone: %w", err)
@@ -225,6 +229,17 @@ func (g *GitManager) readCommitCount(ctx context.Context, wsPath string) int {
 	}
 	count, _ := strconv.Atoi(strings.TrimSpace(out))
 	return count
+}
+
+// isAllowedRepoURL validates that the repository URL uses a known safe scheme,
+// preventing argument injection via URLs that start with "--".
+func isAllowedRepoURL(u string) bool {
+	for _, prefix := range []string{"https://", "git://", "ssh://", "git@"} {
+		if strings.HasPrefix(u, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // runGit executes a git command and returns combined stdout. If dir is empty,

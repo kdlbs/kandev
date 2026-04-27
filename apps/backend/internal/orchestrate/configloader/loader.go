@@ -103,8 +103,6 @@ func (cl *ConfigLoader) loadWorkspaceLocked(name string) {
 		cfg.Settings = settings
 	}
 
-	// Track whether new errors were recorded during this load.
-	prevErr := cl.errors[name]
 	delete(cl.errors, name)
 
 	cl.loadAgentsLocked(cfg, wsPath, name)
@@ -112,9 +110,6 @@ func (cl *ConfigLoader) loadWorkspaceLocked(name string) {
 	cl.loadProjectsLocked(cfg, wsPath, name)
 	cl.loadRoutinesLocked(cfg, wsPath, name)
 
-	// If no new error was recorded but we had a previous one, it is cleared.
-	// If a new error was recorded during sub-loads, it persists.
-	_ = prevErr
 	cl.workspaces[name] = cfg
 }
 
