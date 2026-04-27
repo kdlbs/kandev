@@ -74,8 +74,10 @@ export function CLIFlagsField({
       onChange(flags.map((f, i) => (i === existingIdx ? { ...f, enabled } : f)));
       return;
     }
-    if (!enabled) return; // nothing to turn off
-    onChange([...flags, { flag: setting.flag, description: setting.description, enabled: true }]);
+    // No existing entry: append an explicit record. The displayed switch
+    // state derives from setting.default when absent, so we must persist
+    // the user's choice (even when turning off) to actually flip it.
+    onChange([...flags, { flag: setting.flag, description: setting.description, enabled }]);
   };
 
   const toggleAt = (index: number, enabled: boolean) => {
