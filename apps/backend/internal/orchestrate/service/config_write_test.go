@@ -2,42 +2,13 @@ package service_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	"github.com/kandev/kandev/internal/orchestrate/models"
-	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
-// newTestServiceWithWriter creates a service backed by an in-memory DB
-// and a real filesystem config writer rooted at a temp directory.
-func newTestServiceWithWriter(t *testing.T) (*service.Service, string) {
-	t.Helper()
+func TestCreateAgent_WritesToDB(t *testing.T) {
 	svc := newTestService(t)
-
-	base := t.TempDir()
-	wsDir := filepath.Join(base, "workspaces", "default")
-	if err := os.MkdirAll(wsDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(wsDir, "kandev.yml"), []byte("name: default\n"), 0o644); err != nil {
-		t.Fatalf("write kandev.yml: %v", err)
-	}
-
-	loader := configloader.NewConfigLoader(base)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	writer := configloader.NewFileWriter(base, loader)
-	svc.SetConfigLoader(loader, writer)
-
-	return svc, base
-}
-
-func TestCreateAgent_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
 	ctx := context.Background()
 
 	agent := &models.AgentInstance{
@@ -49,14 +20,17 @@ func TestCreateAgent_WritesToFilesystem(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	filePath := filepath.Join(base, "workspaces", "default", "agents", "fs-agent.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("agent file not created: %v", err)
+	got, err := svc.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Name != "fs-agent" {
+		t.Errorf("name = %q, want fs-agent", got.Name)
 	}
 }
 
-func TestUpdateAgent_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestUpdateAgent_WritesToDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
 
 	agent := &models.AgentInstance{
@@ -73,18 +47,17 @@ func TestUpdateAgent_WritesToFilesystem(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 
-	filePath := filepath.Join(base, "workspaces", "default", "agents", "updatable.yml")
-	data, err := os.ReadFile(filePath)
+	got, err := svc.GetAgentInstance(ctx, agent.ID)
 	if err != nil {
-		t.Fatalf("read agent file: %v", err)
+		t.Fatalf("get: %v", err)
 	}
-	if len(data) == 0 {
-		t.Fatal("agent file is empty after update")
+	if got.BudgetMonthlyCents != 9999 {
+		t.Errorf("budget = %d, want 9999", got.BudgetMonthlyCents)
 	}
 }
 
-func TestDeleteAgent_RemovesFromFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestDeleteAgent_RemovesFromDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
 
 	agent := &models.AgentInstance{
@@ -95,25 +68,17 @@ func TestDeleteAgent_RemovesFromFilesystem(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "agents", "deletable.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("file should exist before delete: %v", err)
-	}
-
 	if err := svc.DeleteAgentInstance(ctx, agent.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-
-	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		t.Fatal("agent file should have been deleted")
+	if _, err := svc.GetAgentInstance(ctx, agent.ID); err == nil {
+		t.Fatal("agent should have been deleted")
 	}
 }
 
-func TestCreateProject_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestCreateProject_WritesToDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	project := &models.Project{
 		WorkspaceID: "ws-1",
 		Name:        "fs-project",
@@ -122,17 +87,18 @@ func TestCreateProject_WritesToFilesystem(t *testing.T) {
 	if err := svc.CreateProject(ctx, project); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "projects", "fs-project.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("project file not created: %v", err)
+	got, err := svc.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Description != "test project" {
+		t.Errorf("description = %q, want test project", got.Description)
 	}
 }
 
-func TestUpdateProject_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestUpdateProject_WritesToDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	project := &models.Project{
 		WorkspaceID: "ws-1",
 		Name:        "updatable-proj",
@@ -141,26 +107,22 @@ func TestUpdateProject_WritesToFilesystem(t *testing.T) {
 	if err := svc.CreateProject(ctx, project); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
 	project.Description = "updated description"
 	if err := svc.UpdateProject(ctx, project); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "projects", "updatable-proj.yml")
-	data, err := os.ReadFile(filePath)
+	got, err := svc.GetProject(ctx, project.ID)
 	if err != nil {
-		t.Fatalf("read project file: %v", err)
+		t.Fatalf("get: %v", err)
 	}
-	if len(data) == 0 {
-		t.Fatal("project file is empty after update")
+	if got.Description != "updated description" {
+		t.Errorf("description = %q, want updated description", got.Description)
 	}
 }
 
-func TestDeleteProject_RemovesFromFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestDeleteProject_RemovesFromDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	project := &models.Project{
 		WorkspaceID: "ws-1",
 		Name:        "deletable-proj",
@@ -168,25 +130,17 @@ func TestDeleteProject_RemovesFromFilesystem(t *testing.T) {
 	if err := svc.CreateProject(ctx, project); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "projects", "deletable-proj.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("file should exist before delete: %v", err)
-	}
-
 	if err := svc.DeleteProject(ctx, project.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-
-	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		t.Fatal("project file should have been deleted")
+	if _, err := svc.GetProject(ctx, project.ID); err == nil {
+		t.Fatal("project should have been deleted")
 	}
 }
 
-func TestCreateRoutine_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestCreateRoutine_WritesToDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	routine := &models.Routine{
 		WorkspaceID: "ws-1",
 		Name:        "fs-routine",
@@ -196,17 +150,18 @@ func TestCreateRoutine_WritesToFilesystem(t *testing.T) {
 	if err := svc.CreateRoutine(ctx, routine); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "routines", "fs-routine.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("routine file not created: %v", err)
+	got, err := svc.GetRoutine(ctx, routine.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Description != "test routine" {
+		t.Errorf("description = %q, want test routine", got.Description)
 	}
 }
 
-func TestDeleteRoutine_RemovesFromFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestDeleteRoutine_RemovesFromDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	routine := &models.Routine{
 		WorkspaceID: "ws-1",
 		Name:        "deletable-routine",
@@ -215,25 +170,17 @@ func TestDeleteRoutine_RemovesFromFilesystem(t *testing.T) {
 	if err := svc.CreateRoutine(ctx, routine); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "routines", "deletable-routine.yml")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Fatalf("file should exist before delete: %v", err)
-	}
-
 	if err := svc.DeleteRoutine(ctx, routine.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-
-	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		t.Fatal("routine file should have been deleted")
+	if _, err := svc.GetRoutine(ctx, routine.ID); err == nil {
+		t.Fatal("routine should have been deleted")
 	}
 }
 
-func TestUpdateSkill_WritesToFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestUpdateSkill_WritesToDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	skill := &models.Skill{
 		WorkspaceID: "ws-1",
 		Name:        "My Skill",
@@ -244,26 +191,22 @@ func TestUpdateSkill_WritesToFilesystem(t *testing.T) {
 	if err := svc.CreateSkill(ctx, skill); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
 	skill.Content = "# Updated content"
 	if err := svc.UpdateSkill(ctx, skill); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-
-	filePath := filepath.Join(base, "workspaces", "default", "skills", "my-skill", "SKILL.md")
-	data, err := os.ReadFile(filePath)
+	got, err := svc.GetSkill(ctx, skill.ID)
 	if err != nil {
-		t.Fatalf("read skill file: %v", err)
+		t.Fatalf("get: %v", err)
 	}
-	if string(data) != "# Updated content" {
-		t.Errorf("content = %q, want %q", string(data), "# Updated content")
+	if got.Content != "# Updated content" {
+		t.Errorf("content = %q, want # Updated content", got.Content)
 	}
 }
 
-func TestDeleteSkill_RemovesFromFilesystem(t *testing.T) {
-	svc, base := newTestServiceWithWriter(t)
+func TestDeleteSkill_RemovesFromDB(t *testing.T) {
+	svc := newTestService(t)
 	ctx := context.Background()
-
 	skill := &models.Skill{
 		WorkspaceID: "ws-1",
 		Name:        "Removable",
@@ -274,17 +217,10 @@ func TestDeleteSkill_RemovesFromFilesystem(t *testing.T) {
 	if err := svc.CreateSkill(ctx, skill); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
-	dirPath := filepath.Join(base, "workspaces", "default", "skills", "removable")
-	if _, err := os.Stat(dirPath); err != nil {
-		t.Fatalf("skill dir should exist before delete: %v", err)
-	}
-
 	if err := svc.DeleteSkill(ctx, skill.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-
-	if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
-		t.Fatal("skill directory should have been deleted")
+	if _, err := svc.GetSkill(ctx, skill.ID); err == nil {
+		t.Fatal("skill should have been deleted")
 	}
 }

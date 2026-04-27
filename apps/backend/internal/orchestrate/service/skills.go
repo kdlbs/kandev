@@ -29,13 +29,12 @@ func GenerateSlug(name string) string {
 }
 
 // ListSkillsWithUsage returns all skills for a workspace with used-by-agent counts.
-func (s *Service) ListSkillsWithUsage(ctx context.Context, _ string) ([]*SkillWithUsage, error) {
-	skills, err := s.ListSkillsFromConfig(ctx, "")
+func (s *Service) ListSkillsWithUsage(ctx context.Context, wsID string) ([]*SkillWithUsage, error) {
+	skills, err := s.ListSkillsFromConfig(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	// Count usage by scanning agent desired_skills from ConfigLoader.
-	counts := s.countSkillUsageFromConfig()
+	counts := s.countSkillUsage(ctx)
 	result := make([]*SkillWithUsage, len(skills))
 	for i, sk := range skills {
 		result[i] = &SkillWithUsage{Skill: *sk, UsedByCount: counts[sk.Slug]}
@@ -43,13 +42,14 @@ func (s *Service) ListSkillsWithUsage(ctx context.Context, _ string) ([]*SkillWi
 	return result, nil
 }
 
-// countSkillUsageFromConfig counts how many agents reference each skill slug.
-func (s *Service) countSkillUsageFromConfig() map[string]int {
+// countSkillUsage counts how many agents reference each skill slug.
+func (s *Service) countSkillUsage(ctx context.Context) map[string]int {
 	counts := make(map[string]int)
-	if s.cfgLoader == nil {
+	agents, err := s.repo.ListAgentInstances(ctx, "")
+	if err != nil {
 		return counts
 	}
-	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
+	for _, a := range agents {
 		for _, slug := range ParseDesiredSlugs(a.DesiredSkills) {
 			counts[slug]++
 		}
@@ -59,32 +59,33 @@ func (s *Service) countSkillUsageFromConfig() map[string]int {
 
 // ValidateAndPrepareSkill validates and prepares a skill for creation.
 // Call this before CreateSkill to auto-generate slug and validate uniqueness.
-func (s *Service) ValidateAndPrepareSkill(_ context.Context, skill *models.Skill) error {
+func (s *Service) ValidateAndPrepareSkill(ctx context.Context, skill *models.Skill) error {
 	if skill.Name == "" {
 		return fmt.Errorf("skill name is required")
 	}
 	if skill.Slug == "" {
 		skill.Slug = GenerateSlug(skill.Name)
 	}
-	if err := s.validateSlugUnique(skill.Slug, ""); err != nil {
+	if err := s.validateSlugUnique(ctx, skill.Slug, ""); err != nil {
 		return err
 	}
 	return s.validateSourceType(skill.SourceType)
 }
 
 // ValidateSkillUpdate validates a skill update for slug uniqueness.
-func (s *Service) ValidateSkillUpdate(_ context.Context, skill *models.Skill) error {
+func (s *Service) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
 	if skill.Slug != "" {
-		return s.validateSlugUnique(skill.Slug, skill.ID)
+		return s.validateSlugUnique(ctx, skill.Slug, skill.ID)
 	}
 	return nil
 }
 
-func (s *Service) validateSlugUnique(slug, excludeID string) error {
-	if s.cfgLoader == nil {
+func (s *Service) validateSlugUnique(ctx context.Context, slug, excludeID string) error {
+	skills, err := s.repo.ListSkills(ctx, "")
+	if err != nil {
 		return nil
 	}
-	for _, si := range s.cfgLoader.GetSkills(defaultWorkspaceName) {
+	for _, si := range skills {
 		if si.Slug == slug && si.ID != excludeID {
 			return fmt.Errorf("skill slug %q already exists in this workspace", slug)
 		}
@@ -92,9 +93,13 @@ func (s *Service) validateSlugUnique(slug, excludeID string) error {
 	return nil
 }
 
+// SkillSourceTypeInline is the default skill source type for content stored
+// directly in the DB.
+const SkillSourceTypeInline = "inline"
+
 func (s *Service) validateSourceType(sourceType string) error {
 	switch sourceType {
-	case "inline", "local_path", "git", "skills_sh", "":
+	case SkillSourceTypeInline, "local_path", "git", "skills_sh", "":
 		return nil
 	default:
 		return fmt.Errorf("invalid source type: %q", sourceType)

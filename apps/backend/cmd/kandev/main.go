@@ -460,33 +460,20 @@ func startGatewayAndServe(
 			return nil
 		})
 
-		// Wire ConfigLoader + FileWriter into the orchestrate service so
-		// list/get handlers read from the filesystem-backed config.
+		// Wire ConfigLoader + FileWriter into the orchestrate service. The
+		// service treats the database as the source of truth for config
+		// (agents/skills/projects/routines); the loader/writer are only
+		// retained for the manual sync UI and bundled-skill discovery.
 		cfgWriter := configloader.NewFileWriter(configBasePath, cfgLoader)
 		services.Orchestrate.SetConfigLoader(cfgLoader, cfgWriter)
 		services.Orchestrate.SetWorkspaceCreator(&taskWorkspaceCreatorAdapter{taskSvc: services.Task})
-		log.Info("Orchestrate service wired to ConfigLoader")
+		log.Info("Orchestrate service wired to ConfigLoader (manual-sync only)")
 
-		// Run initial reconciliation (best-effort, warns on errors)
+		// Reconcile derived DB state (drop dead runtime/budget/channel rows,
+		// seed default routine triggers). No FS↔DB sync is performed here.
 		reconciler := orchestrateservice.NewReconciler(services.Orchestrate)
 		reconciler.ReconcileAll(ctx)
 		log.Info("Orchestrate reconciliation complete")
-
-		// Start fsnotify watcher
-		cfgWatcher, err := configloader.NewWatcher(cfgLoader)
-		if err != nil {
-			log.Error("Failed to create config watcher", zap.Error(err))
-		} else {
-			cfgWatcher.SetOnReload(func(_ string) {
-				reconciler.ReconcileAll(context.Background())
-			})
-			go func() {
-				if watchErr := cfgWatcher.Start(ctx); watchErr != nil {
-					log.Error("Config watcher error", zap.Error(watchErr))
-				}
-			}()
-			log.Info("Orchestrate config watcher started")
-		}
 
 		// Register event subscribers and start scheduler
 		if err := services.Orchestrate.RegisterEventSubscribers(eventBus); err != nil {

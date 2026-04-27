@@ -6,41 +6,20 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
-
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrate/configloader"
-	"github.com/kandev/kandev/internal/orchestrate/repository/sqlite"
+	"github.com/kandev/kandev/internal/orchestrate/models"
 	"github.com/kandev/kandev/internal/orchestrate/service"
 )
 
-func newTestServiceWithConfig(t *testing.T) (*service.Service, string) {
-	t.Helper()
-	svc := newTestService(t)
-	tmpDir := t.TempDir()
-	loader := configloader.NewConfigLoader(tmpDir)
-	if err := loader.EnsureDefaultWorkspace(); err != nil {
-		t.Fatalf("ensure default workspace: %v", err)
-	}
-	writer := configloader.NewFileWriter(tmpDir, loader)
-	svc.SetConfigLoader(loader, writer)
-	return svc, tmpDir
-}
-
 func TestListAgentsFromConfig(t *testing.T) {
-	svc, tmpDir := newTestServiceWithConfig(t)
-	agentsDir := filepath.Join(tmpDir, "workspaces", "default", "agents")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	svc := newTestService(t)
+	ctx := context.Background()
+	if err := svc.CreateAgentInstance(ctx, &models.AgentInstance{
+		Name: "test-agent", Role: models.AgentRoleWorker, WorkspaceID: "default",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(agentsDir, "test-agent.yml"), []byte("name: test-agent\nrole: worker\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := svc.ConfigLoader().Reload("default"); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	agents, err := svc.ListAgentsFromConfig(context.Background(), "any")
+	agents, err := svc.ListAgentsFromConfig(ctx, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -49,38 +28,15 @@ func TestListAgentsFromConfig(t *testing.T) {
 	}
 }
 
-func TestListAgentsFromConfig_NoLoader(t *testing.T) {
-	// Build a minimal service without a config loader to test the error path.
-	db, err := sqlx.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	repo, err := sqlite.NewWithDB(db, db)
-	if err != nil {
-		t.Fatalf("new repo: %v", err)
-	}
-	svc := service.NewService(repo, logger.Default())
-	// Deliberately do NOT set ConfigLoader.
-	_, listErr := svc.ListAgentsFromConfig(context.Background(), "any")
-	if listErr == nil {
-		t.Error("expected error when config loader not initialized")
-	}
-}
-
 func TestListSkillsFromConfig(t *testing.T) {
-	svc, tmpDir := newTestServiceWithConfig(t)
-	skillDir := filepath.Join(tmpDir, "workspaces", "default", "skills", "my-skill")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	svc := newTestService(t)
+	ctx := context.Background()
+	if err := svc.CreateSkill(ctx, &models.Skill{
+		Name: "My Skill", Slug: "my-skill", WorkspaceID: "default", Content: "# My Skill",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# My Skill"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := svc.ConfigLoader().Reload("default"); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	skills, err := svc.ListSkillsFromConfig(context.Background(), "any")
+	skills, err := svc.ListSkillsFromConfig(ctx, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -90,18 +46,14 @@ func TestListSkillsFromConfig(t *testing.T) {
 }
 
 func TestListRoutinesFromConfig(t *testing.T) {
-	svc, tmpDir := newTestServiceWithConfig(t)
-	routinesDir := filepath.Join(tmpDir, "workspaces", "default", "routines")
-	if err := os.MkdirAll(routinesDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	svc := newTestService(t)
+	ctx := context.Background()
+	if err := svc.CreateRoutine(ctx, &models.Routine{
+		ID: "routine-daily", Name: "daily", WorkspaceID: "default",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(routinesDir, "daily.yml"), []byte("name: daily\ndescription: daily\ntask_template: run\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := svc.ConfigLoader().Reload("default"); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	routines, err := svc.ListRoutinesFromConfig(context.Background(), "any")
+	routines, err := svc.ListRoutinesFromConfig(ctx, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -111,18 +63,14 @@ func TestListRoutinesFromConfig(t *testing.T) {
 }
 
 func TestGetAgentFromConfig_ByName(t *testing.T) {
-	svc, tmpDir := newTestServiceWithConfig(t)
-	agentsDir := filepath.Join(tmpDir, "workspaces", "default", "agents")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	svc := newTestService(t)
+	ctx := context.Background()
+	if err := svc.CreateAgentInstance(ctx, &models.AgentInstance{
+		Name: "lookup", Role: models.AgentRoleWorker, WorkspaceID: "default",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(agentsDir, "lookup.yml"), []byte("name: lookup\nrole: worker\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := svc.ConfigLoader().Reload("default"); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	agent, err := svc.GetAgentFromConfig(context.Background(), "lookup")
+	agent, err := svc.GetAgentFromConfig(ctx, "lookup")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -161,4 +109,19 @@ func TestMemoryFilesystem(t *testing.T) {
 	if _, err := os.Stat(memPath); !os.IsNotExist(err) {
 		t.Error("file should be deleted")
 	}
+}
+
+// newTestServiceWithConfig wires a service with a filesystem ConfigLoader+FileWriter.
+// Only used by tests that exercise the memory-on-FS path.
+func newTestServiceWithConfig(t *testing.T) (*service.Service, string) {
+	t.Helper()
+	s := newTestService(t)
+	tmpDir := t.TempDir()
+	loader := configloader.NewConfigLoader(tmpDir)
+	if err := loader.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("ensure default workspace: %v", err)
+	}
+	writer := configloader.NewFileWriter(tmpDir, loader)
+	s.SetConfigLoader(loader, writer)
+	return s, tmpDir
 }

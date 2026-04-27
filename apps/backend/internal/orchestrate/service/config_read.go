@@ -4,120 +4,104 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kandev/kandev/internal/orchestrate/configloader"
 	"github.com/kandev/kandev/internal/orchestrate/models"
 )
 
-// ListAgentsFromConfig returns agents from the filesystem ConfigLoader.
-func (s *Service) ListAgentsFromConfig(_ context.Context, _ string) ([]*models.AgentInstance, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
-	}
-	return s.cfgLoader.GetAgents(defaultWorkspaceName), nil
+// ListAgentsFromConfig returns all agent instances for a workspace.
+// An empty workspaceID returns rows across all workspaces.
+func (s *Service) ListAgentsFromConfig(ctx context.Context, workspaceID string) ([]*models.AgentInstance, error) {
+	return s.repo.ListAgentInstances(ctx, workspaceID)
 }
 
-// GetAgentFromConfig looks up an agent by ID or name from the ConfigLoader.
-func (s *Service) GetAgentFromConfig(_ context.Context, id string) (*models.AgentInstance, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
+// GetAgentFromConfig looks up an agent by ID or name.
+func (s *Service) GetAgentFromConfig(ctx context.Context, idOrName string) (*models.AgentInstance, error) {
+	if agent, err := s.repo.GetAgentInstance(ctx, idOrName); err == nil {
+		return agent, nil
 	}
-	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
-		if a.ID == id || a.Name == id {
+	agents, err := s.repo.ListAgentInstances(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range agents {
+		if a.Name == idOrName {
 			return a, nil
 		}
 	}
-	return nil, fmt.Errorf("agent not found: %s", id)
+	return nil, fmt.Errorf("agent not found: %s", idOrName)
 }
 
-// ListSkillsFromConfig returns skills from the filesystem ConfigLoader.
-func (s *Service) ListSkillsFromConfig(_ context.Context, _ string) ([]*models.Skill, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
-	}
-	return skillInfosToModels(s.cfgLoader.GetSkills(defaultWorkspaceName)), nil
+// ListSkillsFromConfig returns all skills for a workspace.
+// An empty workspaceID returns rows across all workspaces.
+func (s *Service) ListSkillsFromConfig(ctx context.Context, workspaceID string) ([]*models.Skill, error) {
+	return s.repo.ListSkills(ctx, workspaceID)
 }
 
-// GetSkillFromConfig looks up a skill by ID or slug from the ConfigLoader.
-func (s *Service) GetSkillFromConfig(_ context.Context, id string) (*models.Skill, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
+// GetSkillFromConfig looks up a skill by ID or slug.
+func (s *Service) GetSkillFromConfig(ctx context.Context, idOrSlug string) (*models.Skill, error) {
+	if skill, err := s.repo.GetSkill(ctx, idOrSlug); err == nil {
+		return skill, nil
 	}
-	for _, si := range s.cfgLoader.GetSkills(defaultWorkspaceName) {
-		if si.ID == id || si.Slug == id {
-			sk := si.Skill
-			return &sk, nil
+	skills, err := s.repo.ListSkills(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, sk := range skills {
+		if sk.Slug == idOrSlug {
+			return sk, nil
 		}
 	}
-	return nil, fmt.Errorf("skill not found: %s", id)
+	return nil, fmt.Errorf("skill not found: %s", idOrSlug)
 }
 
-// ListProjectsFromConfig returns projects from the filesystem ConfigLoader.
-func (s *Service) ListProjectsFromConfig(_ context.Context, _ string) ([]*models.Project, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
-	}
-	return s.cfgLoader.GetProjects(defaultWorkspaceName), nil
+// ListProjectsFromConfig returns all projects for a workspace.
+// An empty workspaceID returns rows across all workspaces.
+func (s *Service) ListProjectsFromConfig(ctx context.Context, workspaceID string) ([]*models.Project, error) {
+	return s.repo.ListProjects(ctx, workspaceID)
 }
 
-// ListProjectsWithCountsFromConfig returns projects with task counts (counts still from DB).
+// ListProjectsWithCountsFromConfig returns projects with task counts.
 func (s *Service) ListProjectsWithCountsFromConfig(
-	ctx context.Context, _ string,
+	ctx context.Context, workspaceID string,
 ) ([]*models.ProjectWithCounts, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
-	}
-	projects := s.cfgLoader.GetProjects(defaultWorkspaceName)
-	result := make([]*models.ProjectWithCounts, len(projects))
-	for i, p := range projects {
-		pc := &models.ProjectWithCounts{Project: *p}
-		if counts, err := s.repo.GetTaskCounts(ctx, p.ID); err == nil && counts != nil {
-			pc.TaskCounts = *counts
-		}
-		result[i] = pc
-	}
-	return result, nil
+	return s.repo.ListProjectsWithCounts(ctx, workspaceID)
 }
 
-// GetProjectFromConfig looks up a project by ID or name from the ConfigLoader.
-func (s *Service) GetProjectFromConfig(_ context.Context, id string) (*models.Project, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
+// GetProjectFromConfig looks up a project by ID or name.
+func (s *Service) GetProjectFromConfig(ctx context.Context, idOrName string) (*models.Project, error) {
+	if project, err := s.repo.GetProject(ctx, idOrName); err == nil {
+		return project, nil
 	}
-	for _, p := range s.cfgLoader.GetProjects(defaultWorkspaceName) {
-		if p.ID == id || p.Name == id {
+	projects, err := s.repo.ListProjects(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range projects {
+		if p.Name == idOrName {
 			return p, nil
 		}
 	}
-	return nil, fmt.Errorf("project not found: %s", id)
+	return nil, fmt.Errorf("project not found: %s", idOrName)
 }
 
-// ListRoutinesFromConfig returns routines from the filesystem ConfigLoader.
-func (s *Service) ListRoutinesFromConfig(_ context.Context, _ string) ([]*models.Routine, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
-	}
-	return s.cfgLoader.GetRoutines(defaultWorkspaceName), nil
+// ListRoutinesFromConfig returns all routines for a workspace.
+// An empty workspaceID returns rows across all workspaces.
+func (s *Service) ListRoutinesFromConfig(ctx context.Context, workspaceID string) ([]*models.Routine, error) {
+	return s.repo.ListRoutines(ctx, workspaceID)
 }
 
-// GetRoutineFromConfig looks up a routine by ID or name from the ConfigLoader.
-func (s *Service) GetRoutineFromConfig(_ context.Context, id string) (*models.Routine, error) {
-	if s.cfgLoader == nil {
-		return nil, fmt.Errorf("config loader not initialized")
+// GetRoutineFromConfig looks up a routine by ID or name.
+func (s *Service) GetRoutineFromConfig(ctx context.Context, idOrName string) (*models.Routine, error) {
+	if routine, err := s.repo.GetRoutine(ctx, idOrName); err == nil {
+		return routine, nil
 	}
-	for _, r := range s.cfgLoader.GetRoutines(defaultWorkspaceName) {
-		if r.ID == id || r.Name == id {
+	routines, err := s.repo.ListRoutines(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range routines {
+		if r.Name == idOrName {
 			return r, nil
 		}
 	}
-	return nil, fmt.Errorf("routine not found: %s", id)
-}
-
-// skillInfosToModels extracts models.Skill from configloader.SkillInfo slices.
-func skillInfosToModels(infos []*configloader.SkillInfo) []*models.Skill {
-	result := make([]*models.Skill, len(infos))
-	for i, si := range infos {
-		sk := si.Skill
-		result[i] = &sk
-	}
-	return result
+	return nil, fmt.Errorf("routine not found: %s", idOrName)
 }

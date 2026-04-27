@@ -9,9 +9,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// Reconciler synchronises DB operational state with the filesystem config.
-// It is safe to call ReconcileAll multiple times; each sub-step is best-effort
-// and logs warnings instead of failing the caller.
+// Reconciler synchronises derived DB state with the canonical config tables.
+// It creates default routine triggers, drops budget policies and channels for
+// removed agents/projects, and reconciles legacy agent runtime rows. It is
+// safe to call ReconcileAll multiple times; each sub-step is best-effort and
+// logs warnings instead of failing the caller.
 type Reconciler struct {
 	svc *Service
 }
@@ -38,45 +40,24 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) {
 	}
 }
 
-// reconcileAgentRuntime ensures every agent in the config has a runtime row
-// and removes rows for agents no longer in config.
+// reconcileAgentRuntime drops legacy runtime rows for agents that no longer
+// exist in the canonical agent table. Status now lives directly on
+// orchestrate_agent_instances; this step keeps the legacy table tidy.
 func (r *Reconciler) reconcileAgentRuntime(ctx context.Context) error {
-	if r.svc.cfgLoader == nil {
-		return nil
+	agents, err := r.svc.repo.ListAgentInstances(ctx, "")
+	if err != nil {
+		return err
 	}
-	agents := r.svc.cfgLoader.GetAgents(defaultWorkspaceName)
 	runtimes, err := r.svc.repo.ListAgentRuntimes(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Build a set of config agent IDs for fast lookup.
-	configIDs := make(map[string]struct{}, len(agents))
+	agentIDs := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
-		configIDs[a.ID] = struct{}{}
+		agentIDs[a.ID] = struct{}{}
 	}
-
-	// Create runtime rows for new agents; merge status for existing ones.
-	for _, a := range agents {
-		rt, exists := runtimes[a.ID]
-		if !exists {
-			if upsertErr := r.svc.repo.UpsertAgentRuntime(
-				ctx, a.ID, string(models.AgentStatusIdle), "",
-			); upsertErr != nil {
-				r.svc.logger.Warn("create runtime row",
-					zap.String("agent", a.Name), zap.Error(upsertErr))
-			}
-			continue
-		}
-		// Merge persisted runtime status into in-memory cache.
-		a.Status = models.AgentStatus(rt.Status)
-		a.PauseReason = rt.PauseReason
-		a.LastWakeupFinishedAt = rt.LastWakeupFinishedAt
-	}
-
-	// Delete rows for agents removed from config.
 	for id := range runtimes {
-		if _, ok := configIDs[id]; ok {
+		if _, ok := agentIDs[id]; ok {
 			continue
 		}
 		if delErr := r.svc.repo.DeleteAgentRuntime(ctx, id); delErr != nil {
@@ -90,27 +71,27 @@ func (r *Reconciler) reconcileAgentRuntime(ctx context.Context) error {
 // reconcileRoutineTriggers creates triggers for new routines, updates changed
 // triggers, and removes triggers/runs for deleted routines.
 func (r *Reconciler) reconcileRoutineTriggers(ctx context.Context) error {
-	if r.svc.cfgLoader == nil {
-		return nil
+	routines, err := r.svc.repo.ListRoutines(ctx, "")
+	if err != nil {
+		return err
 	}
-	fsRoutines := r.svc.cfgLoader.GetRoutines(defaultWorkspaceName)
 	dbRoutineIDs, err := r.svc.repo.ListDistinctTriggerRoutineIDs(ctx)
 	if err != nil {
 		return err
 	}
 
-	fsIDSet := make(map[string]*models.Routine, len(fsRoutines))
-	for _, rt := range fsRoutines {
-		fsIDSet[rt.ID] = rt
+	idSet := make(map[string]*models.Routine, len(routines))
+	for _, rt := range routines {
+		idSet[rt.ID] = rt
 	}
-	dbIDSet := make(map[string]struct{}, len(dbRoutineIDs))
+	triggerIDSet := make(map[string]struct{}, len(dbRoutineIDs))
 	for _, id := range dbRoutineIDs {
-		dbIDSet[id] = struct{}{}
+		triggerIDSet[id] = struct{}{}
 	}
 
-	r.createTriggersForNewRoutines(ctx, fsRoutines, dbIDSet)
-	r.updateChangedTriggers(ctx, fsRoutines, dbIDSet)
-	r.deleteOrphanRoutineData(ctx, dbRoutineIDs, fsIDSet)
+	r.createTriggersForNewRoutines(ctx, routines, triggerIDSet)
+	r.updateChangedTriggers(ctx, routines, triggerIDSet)
+	r.deleteOrphanRoutineData(ctx, dbRoutineIDs, idSet)
 	return nil
 }
 
@@ -168,21 +149,23 @@ func (r *Reconciler) deleteOrphanRoutineData(
 }
 
 // reconcileBudgetPolicies removes budget policies that reference agents or
-// projects no longer present in the filesystem config.
+// projects no longer present in the canonical config tables.
 func (r *Reconciler) reconcileBudgetPolicies(ctx context.Context) error {
-	if r.svc.cfgLoader == nil {
-		return nil
+	agents, err := r.svc.repo.ListAgentInstances(ctx, "")
+	if err != nil {
+		return err
 	}
-	agentIDs := collectAgentIDs(r.svc.cfgLoader.GetAgents(defaultWorkspaceName))
-	projectIDs := collectProjectIDs(r.svc.cfgLoader.GetProjects(defaultWorkspaceName))
-
+	projects, err := r.svc.repo.ListProjects(ctx, "")
+	if err != nil {
+		return err
+	}
 	if _, err := r.svc.repo.DeleteBudgetPoliciesForRemovedScopes(
-		ctx, "agent", agentIDs,
+		ctx, "agent", collectAgentIDs(agents),
 	); err != nil {
 		return err
 	}
 	if _, err := r.svc.repo.DeleteBudgetPoliciesForRemovedScopes(
-		ctx, "project", projectIDs,
+		ctx, "project", collectProjectIDs(projects),
 	); err != nil {
 		return err
 	}
@@ -190,13 +173,13 @@ func (r *Reconciler) reconcileBudgetPolicies(ctx context.Context) error {
 }
 
 // reconcileChannels removes channels that reference agent instances no longer
-// present in the filesystem config.
+// present in the canonical agent table.
 func (r *Reconciler) reconcileChannels(ctx context.Context) error {
-	if r.svc.cfgLoader == nil {
-		return nil
+	agents, err := r.svc.repo.ListAgentInstances(ctx, "")
+	if err != nil {
+		return err
 	}
-	agentIDs := collectAgentIDs(r.svc.cfgLoader.GetAgents(defaultWorkspaceName))
-	_, err := r.svc.repo.DeleteChannelsForRemovedAgents(ctx, agentIDs)
+	_, err = r.svc.repo.DeleteChannelsForRemovedAgents(ctx, collectAgentIDs(agents))
 	return err
 }
 

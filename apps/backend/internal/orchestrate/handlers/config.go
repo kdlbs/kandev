@@ -57,3 +57,38 @@ func (h *Handlers) applyImport(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"result": result})
 }
+
+func (h *Handlers) syncIncomingDiff(c *gin.Context) {
+	diff, err := h.ctrl.Svc.IncomingDiff(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"diff": diff})
+}
+
+func (h *Handlers) syncOutgoingDiff(c *gin.Context) {
+	diff, err := h.ctrl.Svc.OutgoingDiff(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"diff": diff})
+}
+
+func (h *Handlers) syncApplyIncoming(c *gin.Context) {
+	result, err := h.ctrl.Svc.ApplyIncoming(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": result})
+}
+
+func (h *Handlers) syncApplyOutgoing(c *gin.Context) {
+	if err := h.ctrl.Svc.ApplyOutgoing(c.Request.Context(), c.Param("wsId")); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}

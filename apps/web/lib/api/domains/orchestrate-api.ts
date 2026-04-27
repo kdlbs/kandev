@@ -95,11 +95,7 @@ export function deleteSkill(id: string, options?: ApiRequestOptions) {
   });
 }
 
-export function importSkill(
-  workspaceId: string,
-  source: string,
-  options?: ApiRequestOptions,
-) {
+export function importSkill(workspaceId: string, source: string, options?: ApiRequestOptions) {
   return fetchJson<{ skills: Skill[]; warnings: string[] }>(
     `${BASE}/workspaces/${workspaceId}/skills/import`,
     {
@@ -119,10 +115,7 @@ export function getSkillFile(skillId: string, path: string, options?: ApiRequest
 // --- Projects ---
 
 export function listProjects(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ projects: Project[] }>(
-    `${BASE}/workspaces/${workspaceId}/projects`,
-    options,
-  );
+  return fetchJson<{ projects: Project[] }>(`${BASE}/workspaces/${workspaceId}/projects`, options);
 }
 
 export function createProject(
@@ -225,10 +218,7 @@ export function deleteBudget(id: string, options?: ApiRequestOptions) {
 // --- Routines ---
 
 export function listRoutines(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ routines: Routine[] }>(
-    `${BASE}/workspaces/${workspaceId}/routines`,
-    options,
-  );
+  return fetchJson<{ routines: Routine[] }>(`${BASE}/workspaces/${workspaceId}/routines`, options);
 }
 
 export function createRoutine(
@@ -361,10 +351,16 @@ export function getInboxCount(workspaceId: string, options?: ApiRequestOptions) 
 // --- Agent Memory ---
 
 export function getMemory(agentId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ memory: Array<{ id: string; layer: string; key: string; content: string; metadata: string; updated_at: string }> }>(
-    `${BASE}/agents/${agentId}/memory`,
-    options,
-  );
+  return fetchJson<{
+    memory: Array<{
+      id: string;
+      layer: string;
+      key: string;
+      content: string;
+      metadata: string;
+      updated_at: string;
+    }>;
+  }>(`${BASE}/agents/${agentId}/memory`, options);
 }
 
 export function putMemory(
@@ -393,10 +389,16 @@ export function deleteAllMemory(agentId: string, options?: ApiRequestOptions) {
 }
 
 export function exportMemory(agentId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ memory: Array<{ id: string; layer: string; key: string; content: string; metadata: string; updated_at: string }> }>(
-    `${BASE}/agents/${agentId}/memory/export`,
-    options,
-  );
+  return fetchJson<{
+    memory: Array<{
+      id: string;
+      layer: string;
+      key: string;
+      content: string;
+      metadata: string;
+      updated_at: string;
+    }>;
+  }>(`${BASE}/agents/${agentId}/memory/export`, options);
 }
 
 export function getMemorySummary(agentId: string, options?: ApiRequestOptions) {
@@ -406,10 +408,16 @@ export function getMemorySummary(agentId: string, options?: ApiRequestOptions) {
 // --- Channels ---
 
 export function listChannels(agentId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ channels: Array<{ id: string; platform: string; config: string; status: string; task_id: string; created_at: string }> }>(
-    `${BASE}/agents/${agentId}/channels`,
-    options,
-  );
+  return fetchJson<{
+    channels: Array<{
+      id: string;
+      platform: string;
+      config: string;
+      status: string;
+      task_id: string;
+      created_at: string;
+    }>;
+  }>(`${BASE}/agents/${agentId}/channels`, options);
 }
 
 export function setupChannel(
@@ -417,13 +425,19 @@ export function setupChannel(
   data: { workspace_id: string; platform: string; config: string; status: string },
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ channel: { id: string; platform: string; config: string; status: string; task_id: string; created_at: string } }>(
-    `${BASE}/agents/${agentId}/channels`,
-    {
-      ...options,
-      init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-    },
-  );
+  return fetchJson<{
+    channel: {
+      id: string;
+      platform: string;
+      config: string;
+      status: string;
+      task_id: string;
+      created_at: string;
+    };
+  }>(`${BASE}/agents/${agentId}/channels`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+  });
 }
 
 export function deleteChannel(agentId: string, channelId: string, options?: ApiRequestOptions) {
@@ -451,13 +465,17 @@ export function previewImport(
   bundle: Record<string, unknown>,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ preview: { agents: { created: string[]; updated: string[]; deleted: string[] }; skills: { created: string[]; updated: string[]; deleted: string[] }; routines: { created: string[]; updated: string[]; deleted: string[] }; projects: { created: string[]; updated: string[]; deleted: string[] } } }>(
-    `${BASE}/workspaces/${workspaceId}/config/preview`,
-    {
-      ...options,
-      init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
-    },
-  );
+  return fetchJson<{
+    preview: {
+      agents: { created: string[]; updated: string[]; deleted: string[] };
+      skills: { created: string[]; updated: string[]; deleted: string[] };
+      routines: { created: string[]; updated: string[]; deleted: string[] };
+      projects: { created: string[]; updated: string[]; deleted: string[] };
+    };
+  }>(`${BASE}/workspaces/${workspaceId}/config/preview`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
+  });
 }
 
 export function applyImport(
@@ -472,6 +490,61 @@ export function applyImport(
       init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
     },
   );
+}
+
+// --- Config Sync (FS <-> DB) ---
+
+export type ImportDiff = {
+  created: string[];
+  updated: string[];
+  deleted: string[];
+};
+
+export type ImportPreview = {
+  agents: ImportDiff;
+  skills: ImportDiff;
+  routines: ImportDiff;
+  projects: ImportDiff;
+};
+
+export type ParseError = {
+  workspace_id: string;
+  file_path: string;
+  error: string;
+};
+
+export type SyncDiff = {
+  direction: "incoming" | "outgoing";
+  preview: ImportPreview;
+  errors?: ParseError[];
+};
+
+export function getIncomingDiff(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ diff: SyncDiff }>(
+    `${BASE}/workspaces/${workspaceId}/config/sync/incoming`,
+    options,
+  );
+}
+
+export function getOutgoingDiff(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ diff: SyncDiff }>(
+    `${BASE}/workspaces/${workspaceId}/config/sync/outgoing`,
+    options,
+  );
+}
+
+export function applyIncomingSync(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
+    `${BASE}/workspaces/${workspaceId}/config/sync/import-fs`,
+    { ...options, init: { method: "POST", ...options?.init } },
+  );
+}
+
+export function applyOutgoingSync(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ status: string }>(`${BASE}/workspaces/${workspaceId}/config/sync/export-fs`, {
+    ...options,
+    init: { method: "POST", ...options?.init },
+  });
 }
 
 // --- Issues ---

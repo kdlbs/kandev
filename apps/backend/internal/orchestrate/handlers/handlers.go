@@ -134,6 +134,10 @@ func registerConfigRoutes(api *gin.RouterGroup, h *Handlers) {
 	api.GET("/workspaces/:wsId/config/export/zip", h.exportConfigZip)
 	api.POST("/workspaces/:wsId/config/preview", h.previewImport)
 	api.POST("/workspaces/:wsId/config/import", h.applyImport)
+	api.GET("/workspaces/:wsId/config/sync/incoming", h.syncIncomingDiff)
+	api.GET("/workspaces/:wsId/config/sync/outgoing", h.syncOutgoingDiff)
+	api.POST("/workspaces/:wsId/config/sync/import-fs", h.syncApplyIncoming)
+	api.POST("/workspaces/:wsId/config/sync/export-fs", h.syncApplyOutgoing)
 }
 
 func registerDashboardRoutes(api *gin.RouterGroup, h *Handlers) {

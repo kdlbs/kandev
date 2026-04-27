@@ -142,10 +142,19 @@ func (r *Repository) GetRoutine(ctx context.Context, id string) (*models.Routine
 }
 
 // ListRoutines returns all routines for a workspace.
+// An empty workspaceID returns rows from all workspaces.
 func (r *Repository) ListRoutines(ctx context.Context, workspaceID string) ([]*models.Routine, error) {
-	var routines []*models.Routine
-	err := r.ro.SelectContext(ctx, &routines, r.ro.Rebind(
-		`SELECT * FROM orchestrate_routines WHERE workspace_id = ? ORDER BY name`), workspaceID)
+	var (
+		routines []*models.Routine
+		err      error
+	)
+	if workspaceID == "" {
+		err = r.ro.SelectContext(ctx, &routines,
+			`SELECT * FROM orchestrate_routines ORDER BY name`)
+	} else {
+		err = r.ro.SelectContext(ctx, &routines, r.ro.Rebind(
+			`SELECT * FROM orchestrate_routines WHERE workspace_id = ? ORDER BY name`), workspaceID)
+	}
 	if err != nil {
 		return nil, err
 	}

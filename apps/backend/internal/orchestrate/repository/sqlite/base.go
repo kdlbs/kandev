@@ -32,6 +32,12 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 
 // initSchema creates all orchestrate tables if they don't exist.
 func (r *Repository) initSchema() error {
+	if err := r.createAgentTables(); err != nil {
+		return err
+	}
+	if err := r.createProjectTables(); err != nil {
+		return err
+	}
 	if err := r.createAgentRuntimeTable(); err != nil {
 		return err
 	}
@@ -129,6 +135,69 @@ func (r *Repository) backfillFTS() {
 		INSERT OR IGNORE INTO tasks_fts(rowid, title, description, identifier)
 		SELECT rowid, title, COALESCE(description,''), COALESCE(identifier,'') FROM tasks
 	`)
+}
+
+func (r *Repository) createAgentTables() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS orchestrate_agent_instances (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		agent_profile_id TEXT DEFAULT '',
+		role TEXT NOT NULL DEFAULT 'worker',
+		icon TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'idle',
+		reports_to TEXT DEFAULT '',
+		permissions TEXT DEFAULT '{}',
+		budget_monthly_cents INTEGER DEFAULT 0,
+		max_concurrent_sessions INTEGER DEFAULT 1,
+		cooldown_sec INTEGER DEFAULT 10,
+		last_wakeup_finished_at DATETIME,
+		desired_skills TEXT DEFAULT '[]',
+		executor_preference TEXT DEFAULT '{}',
+		pause_reason TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(workspace_id, name)
+	);
+
+	CREATE TABLE IF NOT EXISTS orchestrate_skills (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		slug TEXT NOT NULL,
+		description TEXT DEFAULT '',
+		source_type TEXT NOT NULL DEFAULT 'inline',
+		source_locator TEXT DEFAULT '',
+		content TEXT DEFAULT '',
+		file_inventory TEXT DEFAULT '[]',
+		created_by_agent_instance_id TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(workspace_id, slug)
+	);
+	`)
+	return err
+}
+
+func (r *Repository) createProjectTables() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS orchestrate_projects (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'active',
+		lead_agent_instance_id TEXT DEFAULT '',
+		color TEXT DEFAULT '',
+		budget_cents INTEGER DEFAULT 0,
+		repositories TEXT DEFAULT '[]',
+		executor_config TEXT DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	`)
+	return err
 }
 
 func (r *Repository) createAgentRuntimeTable() error {

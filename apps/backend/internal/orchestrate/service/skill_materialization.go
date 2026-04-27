@@ -39,7 +39,7 @@ func (s *Service) MaterializeSkills(ctx context.Context, skillIDs []string, cach
 
 func (s *Service) materializeSkill(skill *models.Skill, cacheDir string) (SkillDir, error) {
 	switch skill.SourceType {
-	case "inline", "filesystem":
+	case SkillSourceTypeInline, "filesystem":
 		return materializeInline(skill, cacheDir)
 	case "local_path":
 		return materializeLocalPath(skill)
