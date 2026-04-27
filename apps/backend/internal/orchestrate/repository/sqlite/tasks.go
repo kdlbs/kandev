@@ -264,6 +264,21 @@ func scanSearchResults(rows *sqlx.Rows) ([]*TaskSearchResult, error) {
 	return results, rows.Err()
 }
 
+// GetCheckoutAgentBySession returns the checkout_agent_id for the task
+// associated with a given session. Returns "" if not found.
+func (r *Repository) GetCheckoutAgentBySession(ctx context.Context, sessionID string) (string, error) {
+	var agentID string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(t.checkout_agent_id, '') FROM tasks t
+		JOIN task_sessions ts ON ts.task_id = t.id
+		WHERE ts.id = ?
+	`), sessionID).Scan(&agentID)
+	if err != nil {
+		return "", err
+	}
+	return agentID, nil
+}
+
 // CheckoutTask atomically acquires an exclusive lock on a task for an agent.
 // Returns true if the lock was acquired, false if another agent holds it.
 func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {

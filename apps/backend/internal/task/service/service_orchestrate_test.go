@@ -390,6 +390,66 @@ func TestBlocker_SelfReference(t *testing.T) {
 	}
 }
 
+func TestCreateTask_WithBlockedBy(t *testing.T) {
+	svc, _ := setupOrchestrateTest(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+
+	// Create two blocker tasks first.
+	blocker1, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Blocker 1", ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create blocker1: %v", err)
+	}
+	blocker2, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Blocker 2", ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create blocker2: %v", err)
+	}
+
+	// Create a task blocked by both.
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Blocked Task",
+		ProjectID:   "proj-1",
+		BlockedBy:   []string{blocker1.ID, blocker2.ID},
+	})
+	if err != nil {
+		t.Fatalf("create blocked task: %v", err)
+	}
+
+	blockers, err := svc.GetBlockers(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetBlockers: %v", err)
+	}
+	if len(blockers) != 2 {
+		t.Errorf("expected 2 blockers, got %d", len(blockers))
+	}
+}
+
+func TestCreateTask_WithBlockedBy_Empty(t *testing.T) {
+	svc, _ := setupOrchestrateTest(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "No Blockers",
+		ProjectID:   "proj-1",
+		BlockedBy:   []string{},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	blockers, _ := svc.GetBlockers(ctx, task.ID)
+	if len(blockers) != 0 {
+		t.Errorf("expected 0 blockers, got %d", len(blockers))
+	}
+	_ = task
+}
+
 // mockCommentRepo implements CommentRepository for testing.
 type mockCommentRepo struct {
 	comments []*orchmodels.TaskComment

@@ -91,8 +91,7 @@ export function SetupWizard({ agentProfiles }: SetupWizardProps) {
     }
   }, [data, router]);
 
-  const profileLabel =
-    agentProfiles.find((p) => p.id === data.agentProfileId)?.label || "";
+  const profileLabel = agentProfiles.find((p) => p.id === data.agentProfileId)?.label || "";
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
@@ -156,4 +155,3 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
     </div>
   );
 }
-

@@ -36,12 +36,13 @@ type CreateTaskRequest struct {
 	ParentID       string                 `json:"parent_id,omitempty"`
 
 	// Orchestrate extensions
-	AssigneeAgentInstanceID string `json:"assignee_agent_instance_id,omitempty"`
-	Origin                  string `json:"origin,omitempty"`
-	ProjectID               string `json:"project_id,omitempty"`
-	RequiresApproval        bool   `json:"requires_approval,omitempty"`
-	ExecutionPolicy         string `json:"execution_policy,omitempty"`
-	Labels                  string `json:"labels,omitempty"`
+	AssigneeAgentInstanceID string   `json:"assignee_agent_instance_id,omitempty"`
+	Origin                  string   `json:"origin,omitempty"`
+	ProjectID               string   `json:"project_id,omitempty"`
+	RequiresApproval        bool     `json:"requires_approval,omitempty"`
+	ExecutionPolicy         string   `json:"execution_policy,omitempty"`
+	Labels                  string   `json:"labels,omitempty"`
+	BlockedBy               []string `json:"blocked_by,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task

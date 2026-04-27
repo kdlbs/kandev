@@ -159,5 +159,14 @@ export function useIssuesTree(opts: UseIssuesTreeOptions): FlatIssueNode[] {
     }
 
     return result;
-  }, [issues, filters, sortField, sortDir, nestingEnabled, expandedIds, STATUS_ORDER, PRIORITY_ORDER]);
+  }, [
+    issues,
+    filters,
+    sortField,
+    sortDir,
+    nestingEnabled,
+    expandedIds,
+    STATUS_ORDER,
+    PRIORITY_ORDER,
+  ]);
 }

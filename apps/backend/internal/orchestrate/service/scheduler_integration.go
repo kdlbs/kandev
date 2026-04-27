@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"go.uber.org/zap"
@@ -346,7 +347,36 @@ func (si *SchedulerIntegration) buildPromptContext(
 		pc.ApprovalNote = parsed["decision_note"]
 	}
 
+	if reason == WakeupReasonTaskChildrenCompleted {
+		si.enrichChildrenContext(pc, payload)
+	}
+
 	return pc
+}
+
+// enrichChildrenContext parses child summaries from the wakeup payload.
+func (si *SchedulerIntegration) enrichChildrenContext(pc *PromptContext, payload string) {
+	var data struct {
+		Children []struct {
+			Identifier  string `json:"identifier"`
+			Title       string `json:"title"`
+			State       string `json:"state"`
+			LastComment string `json:"last_comment"`
+		} `json:"children"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		return
+	}
+	for _, c := range data.Children {
+		pc.ChildSummaries = append(pc.ChildSummaries, ChildSummaryPrompt{
+			Identifier:  c.Identifier,
+			Title:       c.Title,
+			State:       c.State,
+			LastComment: c.LastComment,
+		})
+	}
+	pc.ChildSummariesTruncated = data.Truncated
 }
 
 // enrichTaskContext populates task-related fields on the PromptContext.

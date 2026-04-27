@@ -138,12 +138,15 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		return
 	}
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"from_step_id":     fromStepID,
-		"to_step_id":       toStepID,
-		"session_id":       sessionID,
-		"workflow_id":      task.WorkflowID,
-		"task_description": task.Description,
+		"task_id":                    task.ID,
+		"from_step_id":               fromStepID,
+		"to_step_id":                 toStepID,
+		"session_id":                 sessionID,
+		"workflow_id":                task.WorkflowID,
+		"task_description":           task.Description,
+		"parent_id":                  task.ParentID,
+		"assignee_agent_instance_id": task.AssigneeAgentInstanceID,
+		"execution_policy":           task.ExecutionPolicy,
 	}
 	event := bus.NewEvent(events.TaskMoved, "task-service", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {

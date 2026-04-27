@@ -30,6 +30,10 @@ type PromptContext struct {
 	// Blocker fields
 	ResolvedBlockerTitles []string
 
+	// Children completed fields
+	ChildSummaries          []ChildSummaryPrompt
+	ChildSummariesTruncated bool
+
 	// Approval fields
 	ApprovalType      string
 	ApprovalStatus    string
@@ -112,11 +116,50 @@ func buildBlockersResolvedPrompt(pc *PromptContext) string {
 	return b.String()
 }
 
+// ChildSummaryPrompt holds display data for a completed child task.
+type ChildSummaryPrompt struct {
+	Identifier  string
+	Title       string
+	State       string
+	LastComment string
+}
+
 func buildChildrenCompletedPrompt(pc *PromptContext) string {
-	return fmt.Sprintf(
-		"All child tasks for your task %s: %s have completed.\nReview their output and determine next steps.",
-		taskRef(pc), pc.TaskTitle,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "All child tasks for your task %s: %s have completed.\n", taskRef(pc), pc.TaskTitle)
+
+	if len(pc.ChildSummaries) > 0 {
+		b.WriteString("\nCompleted children:\n")
+		for _, c := range pc.ChildSummaries {
+			writeChildSummaryLine(&b, &c)
+		}
+		if pc.ChildSummariesTruncated {
+			b.WriteString("(showing first 20 children — fetch the full list via API)\n")
+		}
+	}
+
+	b.WriteString("\nReview their output and determine next steps.")
+	return b.String()
+}
+
+func writeChildSummaryLine(b *strings.Builder, c *ChildSummaryPrompt) {
+	ref := c.Identifier
+	if ref == "" {
+		ref = "?"
+	}
+	fmt.Fprintf(b, "- %s (%s) [%s]", ref, c.Title, c.State)
+	if c.LastComment != "" {
+		summary := truncateComment(c.LastComment)
+		fmt.Fprintf(b, " — %q", summary)
+	}
+	b.WriteString("\n")
+}
+
+func truncateComment(s string) string {
+	if len(s) > 500 {
+		return s[:485] + " [truncated]"
+	}
+	return s
 }
 
 func buildApprovalResolvedPrompt(pc *PromptContext) string {

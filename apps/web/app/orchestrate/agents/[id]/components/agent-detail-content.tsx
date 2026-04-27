@@ -109,4 +109,3 @@ export function AgentDetailContent({ agentId }: AgentDetailContentProps) {
     </div>
   );
 }
-

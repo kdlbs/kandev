@@ -4,13 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { IconDeviceFloppy, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import type { InstructionFile } from "./agent-instructions-tab";
 
 type InstructionEditorProps = {

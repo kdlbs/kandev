@@ -126,6 +126,69 @@ func TestBuildPrompt_Heartbeat(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_ChildrenCompleted_WithSummaries(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:         service.WakeupReasonTaskChildrenCompleted,
+		TaskIdentifier: "KAN-1",
+		TaskTitle:      "Add OAuth2",
+		ChildSummaries: []service.ChildSummaryPrompt{
+			{Identifier: "KAN-2", Title: "Auth service", State: "COMPLETED", LastComment: "Implemented JWT generation"},
+			{Identifier: "KAN-3", Title: "API gateway", State: "COMPLETED", LastComment: "Added rate limiting"},
+			{Identifier: "KAN-4", Title: "QA", State: "CANCELLED", LastComment: ""},
+		},
+	}
+	prompt := service.BuildPrompt(pc)
+
+	checks := []string{
+		"All child tasks",
+		"[KAN-1]",
+		"KAN-2 (Auth service) [COMPLETED]",
+		"JWT generation",
+		"KAN-3 (API gateway) [COMPLETED]",
+		"KAN-4 (QA) [CANCELLED]",
+		"determine next steps",
+	}
+	for _, c := range checks {
+		if !strings.Contains(prompt, c) {
+			t.Errorf("children completed prompt missing %q:\n%s", c, prompt)
+		}
+	}
+
+	// KAN-4 has no comment — should not have a quote.
+	if strings.Contains(prompt, `KAN-4 (QA) [CANCELLED] —`) {
+		t.Errorf("child with no comment should not have quote separator:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_ChildrenCompleted_Truncated(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:                  service.WakeupReasonTaskChildrenCompleted,
+		TaskIdentifier:          "KAN-1",
+		TaskTitle:               "Big task",
+		ChildSummaries:          []service.ChildSummaryPrompt{{Identifier: "KAN-2", Title: "Child", State: "COMPLETED"}},
+		ChildSummariesTruncated: true,
+	}
+	prompt := service.BuildPrompt(pc)
+	if !strings.Contains(prompt, "showing first 20") {
+		t.Errorf("truncated prompt should mention limit:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_ChildrenCompleted_NoSummaries(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:         service.WakeupReasonTaskChildrenCompleted,
+		TaskIdentifier: "KAN-1",
+		TaskTitle:      "Simple task",
+	}
+	prompt := service.BuildPrompt(pc)
+	if !strings.Contains(prompt, "All child tasks") {
+		t.Errorf("prompt missing header:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Completed children:") {
+		t.Errorf("no summaries section when children are empty:\n%s", prompt)
+	}
+}
+
 func TestBuildPrompt_UnknownReason(t *testing.T) {
 	pc := &service.PromptContext{Reason: "custom_reason"}
 	prompt := service.BuildPrompt(pc)

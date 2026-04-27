@@ -69,26 +69,19 @@ export function RoutineRow({
           onClick={(e) => e.stopPropagation()}
           className="cursor-pointer"
         />
-        <RoutineActions onRunNow={() => onRunNow(routine.id)} onDelete={() => onDelete(routine.id)} />
+        <RoutineActions
+          onRunNow={() => onRunNow(routine.id)}
+          onDelete={() => onDelete(routine.id)}
+        />
       </div>
       {expanded && (
-        <RoutineExpandedDetail
-          routine={routine}
-          assignee={assignee}
-          template={template}
-        />
+        <RoutineExpandedDetail routine={routine} assignee={assignee} template={template} />
       )}
     </div>
   );
 }
 
-function RoutineActions({
-  onRunNow,
-  onDelete,
-}: {
-  onRunNow: () => void;
-  onDelete: () => void;
-}) {
+function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
       <Tooltip>
@@ -144,12 +137,8 @@ function RoutineExpandedDetail({
 }) {
   return (
     <div className="px-4 pb-3 pt-1 ml-7 border-t border-border/50 space-y-2 text-sm">
-      {routine.description && (
-        <DetailField label="Description" value={routine.description} />
-      )}
-      {template?.title && (
-        <DetailField label="Task title" value={template.title} />
-      )}
+      {routine.description && <DetailField label="Description" value={routine.description} />}
+      {template?.title && <DetailField label="Task title" value={template.title} />}
       {template?.description && (
         <DetailField label="Task description" value={template.description} />
       )}
@@ -158,10 +147,7 @@ function RoutineExpandedDetail({
         label="Last run"
         value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never"}
       />
-      <DetailField
-        label="Concurrency"
-        value={routine.concurrencyPolicy.replace(/_/g, " ")}
-      />
+      <DetailField label="Concurrency" value={routine.concurrencyPolicy.replace(/_/g, " ")} />
       {routine.variables && Object.keys(routine.variables).length > 0 && (
         <div>
           <span className="text-xs font-medium text-muted-foreground">Variables</span>

@@ -189,6 +189,96 @@ func TestMovedToDone_WithExecutionPolicy_EntersReview(t *testing.T) {
 	}
 }
 
+func TestMovedToInReview_WithExecutionPolicy_EntersReviewStage(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "reviewer-1")
+	createTestAgent(t, svc, "ws-1", "worker-1")
+
+	taskID := createOrchestrateTask(t, svc, "ws-1", "worker-1")
+
+	// Set an execution policy with a review stage.
+	policy := service.ExecutionPolicy{
+		Stages: []service.ExecutionStage{{
+			ID:   "review",
+			Type: "review",
+			Participants: []service.ExecutionParticipant{
+				{Type: "agent", AgentID: "reviewer-1"},
+			},
+			ApprovalsNeeded: 1,
+		}},
+	}
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatalf("marshal policy: %v", err)
+	}
+	if err := svc.SetTaskExecutionPolicy(ctx, taskID, string(raw)); err != nil {
+		t.Fatalf("set execution policy: %v", err)
+	}
+
+	// Simulate a manual move to In Review (kanban drag-drop).
+	moveEvent := bus.NewEvent("task.moved", "test", map[string]string{
+		"task_id":                    taskID,
+		"workspace_id":               "ws-1",
+		"from_step_id":               "step-ip",
+		"to_step_id":                 "step-review",
+		"to_step_name":               "In Review",
+		"from_step_name":             "In Progress",
+		"assignee_agent_instance_id": "worker-1",
+		"parent_id":                  "",
+		"execution_policy":           "",
+	})
+	if err := eb.Publish(ctx, "task.moved", moveEvent); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	wakeups, _ := svc.ListWakeupRequests(ctx, "ws-1")
+	found := false
+	for _, w := range wakeups {
+		if w.AgentInstanceID == "reviewer-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected reviewer-1 wakeup when manually moved to In Review with execution policy")
+	}
+}
+
+func TestMovedToInReview_WithoutExecutionPolicy_NoWakeups(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-nopol")
+	taskID := createOrchestrateTask(t, svc, "ws-1", "worker-nopol")
+
+	// No execution policy — move to In Review should not wake anyone.
+	moveEvent := bus.NewEvent("task.moved", "test", map[string]string{
+		"task_id":                    taskID,
+		"workspace_id":               "ws-1",
+		"from_step_id":               "step-ip",
+		"to_step_id":                 "step-review",
+		"to_step_name":               "In Review",
+		"from_step_name":             "In Progress",
+		"assignee_agent_instance_id": "worker-nopol",
+		"parent_id":                  "",
+		"execution_policy":           "",
+	})
+	if err := eb.Publish(ctx, "task.moved", moveEvent); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	wakeups, _ := svc.ListWakeupRequests(ctx, "ws-1")
+	for _, w := range wakeups {
+		var payload map[string]string
+		if json.Unmarshal([]byte(w.Payload), &payload) == nil {
+			if payload["stage_type"] == "review" {
+				t.Error("no review wakeups should exist without execution policy")
+			}
+		}
+	}
+}
+
 func TestMovedToDone_WithoutExecutionPolicy_NormalCompletion(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

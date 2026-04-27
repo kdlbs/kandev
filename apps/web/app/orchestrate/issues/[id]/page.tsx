@@ -3,7 +3,11 @@
 import { use, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppStore } from "@/components/state-provider";
-import { getIssue, listComments, type TaskCommentResponse } from "@/lib/api/domains/orchestrate-api";
+import {
+  getIssue,
+  listComments,
+  type TaskCommentResponse,
+} from "@/lib/api/domains/orchestrate-api";
 import { TaskSimpleMode } from "./task-simple-mode";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./issue-detail-skeleton";

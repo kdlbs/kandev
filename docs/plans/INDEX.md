@@ -16,4 +16,5 @@ Create new plans via `/record plan` or manually following the format below.
 | [Orchestrate Wave 5: Costs, Budgets, Inbox & Dashboard](2026-04-orchestrate-wave5-governance.md) | proposed | 2026-04-26 | TBD |
 | [Orchestrate Wave 6: Routines, Org Chart & Notifications](2026-04-orchestrate-wave6-automation.md) | proposed | 2026-04-26 | TBD |
 | [Orchestrate Wave 7: Assistant, Channels, Memory & Config](2026-04-orchestrate-wave7-extended.md) | proposed | 2026-04-26 | TBD |
+| [Orchestrate: Subtask Wakeup & Review Flow Fixes](2026-04-orchestrate-subtask-wakeup-fixes.md) | proposed | 2026-04-27 | TBD |
 | [Orchestrate UI Reference](2026-04-orchestrate-ui-reference.md) | proposed | 2026-04-26 | — |

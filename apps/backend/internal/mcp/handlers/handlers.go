@@ -310,6 +310,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileID string               `json:"executor_profile_id"`
 		StartAgent        *bool                `json:"start_agent"`  // nil means default to true for backward compatibility
 		Repositories      []mcpRepositoryInput `json:"repositories"` // explicit repositories for top-level tasks
+		BlockedBy         []string             `json:"blocked_by"`   // task IDs that must complete before this task
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -354,6 +355,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title:          req.Title,
 		Description:    req.Description,
 		Repositories:   repos,
+		BlockedBy:      req.BlockedBy,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

@@ -89,6 +89,20 @@ func (r *Repository) ListRecentTaskComments(
 	return comments, nil
 }
 
+// GetLatestCommentBody returns the most recent comment body by a specific author on a task.
+func (r *Repository) GetLatestCommentBody(ctx context.Context, taskID, authorID string) (string, error) {
+	var body string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT body FROM task_comments
+		WHERE task_id = ? AND author_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), taskID, authorID).Scan(&body)
+	if err != nil {
+		return "", err
+	}
+	return body, nil
+}
+
 // CountTaskComments returns the total number of comments on a task.
 func (r *Repository) CountTaskComments(ctx context.Context, taskID string) (int, error) {
 	var count int

@@ -28,9 +28,7 @@ export function AgentRunsTab({ agent }: AgentRunsTabProps) {
     if (!workspaceId) return;
     try {
       const res = await listWakeups(workspaceId);
-      const agentRuns = (res.wakeups ?? []).filter(
-        (w) => w.agentInstanceId === agent.id,
-      );
+      const agentRuns = (res.wakeups ?? []).filter((w) => w.agentInstanceId === agent.id);
       setRuns(agentRuns);
     } catch {
       // Silently handle - empty state will show
@@ -71,14 +69,9 @@ export function AgentRunsTab({ agent }: AgentRunsTabProps) {
         <span>Requested</span>
       </div>
       {runs.map((run) => (
-        <div
-          key={run.id}
-          className="grid grid-cols-[1fr_100px_140px] gap-4 px-4 py-2.5 text-sm"
-        >
+        <div key={run.id} className="grid grid-cols-[1fr_100px_140px] gap-4 px-4 py-2.5 text-sm">
           <span className="truncate">{run.reason}</span>
-          <Badge variant={STATUS_VARIANT[run.status] ?? "secondary"}>
-            {run.status}
-          </Badge>
+          <Badge variant={STATUS_VARIANT[run.status] ?? "secondary"}>{run.status}</Badge>
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <IconClock className="h-3.5 w-3.5" />
             {timeAgo(run.requestedAt)}

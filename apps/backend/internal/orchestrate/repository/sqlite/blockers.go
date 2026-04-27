@@ -83,3 +83,55 @@ func (r *Repository) AreAllChildrenTerminal(ctx context.Context, parentID string
 	}
 	return nonTerminal == 0, nil
 }
+
+// ChildSummary holds summary data for a completed child task.
+type ChildSummary struct {
+	TaskID                  string `db:"id" json:"id"`
+	Identifier              string `db:"identifier" json:"identifier"`
+	Title                   string `db:"title" json:"title"`
+	State                   string `db:"state" json:"state"`
+	AssigneeAgentInstanceID string `db:"assignee_agent_instance_id" json:"assignee_agent_instance_id"`
+	LastComment             string `db:"last_comment" json:"last_comment,omitempty"`
+}
+
+// maxChildSummaries is the maximum number of child summaries returned.
+const maxChildSummaries = 20
+
+// maxCommentChars is the maximum length of a last-comment summary.
+const maxCommentChars = 500
+
+// GetChildSummaries returns summary data for all children of a parent task.
+// Each child includes its last comment (truncated to 500 chars). Returns at
+// most 20 rows and a truncated flag indicating whether more exist.
+func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]ChildSummary, bool, error) {
+	// Count total children first to determine truncation.
+	var total int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COUNT(*) FROM tasks WHERE parent_id = ?`), parentID).Scan(&total)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var summaries []ChildSummary
+	err = r.ro.SelectContext(ctx, &summaries, r.ro.Rebind(`
+		SELECT
+			t.id,
+			COALESCE(t.identifier, '') AS identifier,
+			COALESCE(t.title, '') AS title,
+			COALESCE(t.state, '') AS state,
+			COALESCE(t.assignee_agent_instance_id, '') AS assignee_agent_instance_id,
+			COALESCE((
+				SELECT SUBSTR(c.body, 1, ?) FROM task_comments c
+				WHERE c.task_id = t.id ORDER BY c.created_at DESC LIMIT 1
+			), '') AS last_comment
+		FROM tasks t
+		WHERE t.parent_id = ?
+		ORDER BY t.created_at
+		LIMIT ?
+	`), maxCommentChars, parentID, maxChildSummaries)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return summaries, total > maxChildSummaries, nil
+}

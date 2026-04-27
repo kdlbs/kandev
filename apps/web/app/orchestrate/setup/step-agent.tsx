@@ -28,7 +28,11 @@ type StepAgentProps = {
 const FALLBACK_EXECUTOR_OPTIONS = [
   { id: "local_pc", label: "Local (standalone)", description: "Run on host machine" },
   { id: "local_docker", label: "Local Docker", description: "Run in a local Docker container" },
-  { id: "sprites", label: "Sprites (remote sandbox)", description: "Run in a Sprites cloud environment" },
+  {
+    id: "sprites",
+    label: "Sprites (remote sandbox)",
+    description: "Run in a Sprites cloud environment",
+  },
 ];
 
 export function StepAgent({
@@ -88,7 +92,10 @@ function ProfileSelector({
   return (
     <div>
       <Label>Agent profile</Label>
-      <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
+      <Select
+        value={value || "__none__"}
+        onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
+      >
         <SelectTrigger className="mt-1 cursor-pointer">
           <SelectValue placeholder="Select a profile" />
         </SelectTrigger>
@@ -122,11 +129,7 @@ function ExecutorSelector({
   return (
     <div>
       <Label>Executor preference</Label>
-      <RadioGroup
-        value={value || "local_pc"}
-        onValueChange={onChange}
-        className="mt-2 space-y-2"
-      >
+      <RadioGroup value={value || "local_pc"} onValueChange={onChange} className="mt-2 space-y-2">
         {options.map((opt) => (
           <label
             key={opt.id}

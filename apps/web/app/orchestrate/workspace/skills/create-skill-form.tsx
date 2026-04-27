@@ -29,9 +29,7 @@ export function CreateSkillForm({ onCreate, onCancel }: CreateSkillFormProps) {
   const meta = useAppStore((s) => s.orchestrate.meta);
   // Only show creatable (non-read-only) source types, plus exclude skills_sh from creation
   const sourceTypes = meta
-    ? meta.skillSourceTypes
-        .filter((s) => !s.readOnly)
-        .map((s) => ({ id: s.id, label: s.label }))
+    ? meta.skillSourceTypes.filter((s) => !s.readOnly).map((s) => ({ id: s.id, label: s.label }))
     : FALLBACK_SOURCE_TYPES;
 
   const [name, setName] = useState("");

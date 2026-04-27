@@ -260,9 +260,10 @@ function SkillMetadataRow({
   readOnly: boolean;
   usedByCount: number;
 }) {
-  const usedByLabel = usedByCount === 0
-    ? "No agents attached"
-    : `${usedByCount} agent${usedByCount !== 1 ? "s" : ""}`;
+  const usedByLabel =
+    usedByCount === 0
+      ? "No agents attached"
+      : `${usedByCount} agent${usedByCount !== 1 ? "s" : ""}`;
 
   return (
     <div className="grid grid-cols-4 gap-4 text-sm">

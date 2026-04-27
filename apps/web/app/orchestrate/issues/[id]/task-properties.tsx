@@ -62,7 +62,7 @@ function PriorityDisplay({ priority }: { priority: Issue["priority"] }) {
   const metaPriority = meta?.priorities.find((p) => p.id === priority);
   const config = metaPriority
     ? { label: metaPriority.label, className: metaPriority.color }
-    : FALLBACK_PRIORITY_CONFIG[priority] ?? { label: priority, className: "" };
+    : (FALLBACK_PRIORITY_CONFIG[priority] ?? { label: priority, className: "" });
   return <span className={config.className}>{config.label}</span>;
 }
 

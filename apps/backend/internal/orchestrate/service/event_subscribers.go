@@ -22,6 +22,7 @@ type TaskMovedData struct {
 	AssigneeAgentInstanceID string `json:"assignee_agent_instance_id"`
 	ParentID                string `json:"parent_id"`
 	ExecutionPolicy         string `json:"execution_policy"`
+	SessionID               string `json:"session_id"`
 }
 
 // TaskUpdatedData represents the payload of a task.updated event.
@@ -88,7 +89,19 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 		return nil
 	}
 
-	switch categorizeStep(data.ToStepName) {
+	fromCategory := categorizeStep(data.FromStepName)
+	toCategory := categorizeStep(data.ToStepName)
+
+	// Reviewer verdict interception: when a task is in review and a
+	// reviewer agent moves it, record the verdict via the execution policy
+	// instead of performing the normal move action.
+	if fromCategory == stepCategoryInReview {
+		if handled, hErr := s.tryRecordReviewerVerdict(ctx, data, toCategory); handled || hErr != nil {
+			return hErr
+		}
+	}
+
+	switch toCategory {
 	case stepCategoryInProgress:
 		return s.onMovedToInProgress(ctx, data)
 	case stepCategoryDone:
@@ -137,17 +150,103 @@ func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	return nil
 }
 
+// onMovedToInReview handles manual moves to In Review (e.g. kanban drag-drop).
+// If an execution policy exists, the staged review flow is started.
+// Without a policy, no automatic reviewer wakeups occur.
 func (s *Service) onMovedToInReview(ctx context.Context, data *TaskMovedData) error {
-	reviewers := extractReviewers(data.ExecutionPolicy)
-	for _, reviewerID := range reviewers {
-		payload := mustJSON(map[string]string{"task_id": data.TaskID})
-		key := fmt.Sprintf("review_request:%s:%s", data.TaskID, reviewerID)
-		if err := s.QueueWakeup(ctx, reviewerID, WakeupReasonTaskAssigned, payload, key); err != nil {
-			s.logger.Error("review wakeup failed",
-				zap.String("reviewer", reviewerID), zap.Error(err))
+	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Error("get task execution fields for in_review", zap.Error(err))
+		return nil
+	}
+	if fields.ExecutionPolicy == "" || fields.ExecutionPolicy == "{}" {
+		return nil // no policy — just a status indicator
+	}
+	policy, pErr := ParseExecutionPolicy(fields.ExecutionPolicy)
+	if pErr != nil || policy == nil || len(policy.Stages) == 0 {
+		return nil
+	}
+	return s.EnterReviewStage(ctx, data.TaskID, *policy)
+}
+
+// tryRecordReviewerVerdict checks whether the mover is a participant in the
+// current execution policy stage. If so, it records the verdict and returns
+// (true, nil). If the mover is not a participant, returns (false, nil) so the
+// caller falls through to normal move handling.
+func (s *Service) tryRecordReviewerVerdict(ctx context.Context, data *TaskMovedData, toCategory stepCategory) (bool, error) {
+	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+	if err != nil {
+		return false, nil
+	}
+
+	policy, err := ParseExecutionPolicy(fields.ExecutionPolicy)
+	if err != nil || policy == nil || len(policy.Stages) == 0 {
+		return false, nil
+	}
+	state, err := parseExecutionState(fields.ExecutionState)
+	if err != nil || state == nil {
+		return false, nil
+	}
+	if state.CurrentStageIndex >= len(policy.Stages) {
+		return false, nil
+	}
+
+	// Resolve the mover's agent instance ID from the session.
+	moverAgentID := s.resolveAgentFromSession(ctx, data.SessionID)
+	if moverAgentID == "" {
+		// No session (manual/user move) — don't intercept.
+		return false, nil
+	}
+
+	// Check if the mover is a participant in the current stage.
+	stage := &policy.Stages[state.CurrentStageIndex]
+	if !isStageParticipant(stage, moverAgentID) {
+		return false, nil
+	}
+
+	verdict := "reject"
+	if toCategory == stepCategoryDone {
+		verdict = "approve"
+	}
+
+	// Use the last comment on this task by this agent as the review comment.
+	comment := s.getLatestCommentByAuthor(ctx, data.TaskID, moverAgentID)
+
+	err = s.RecordParticipantResponse(ctx, data.TaskID, moverAgentID, verdict, comment)
+	return true, err
+}
+
+// resolveAgentFromSession resolves the agent instance that is currently
+// working on a task by checking the task's checkout_agent_id.
+func (s *Service) resolveAgentFromSession(ctx context.Context, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	// Look up which task this session belongs to, then get the checkout agent.
+	agentID, err := s.repo.GetCheckoutAgentBySession(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return agentID
+}
+
+// getLatestCommentByAuthor returns the most recent comment body by an author on a task.
+func (s *Service) getLatestCommentByAuthor(ctx context.Context, taskID, authorID string) string {
+	body, err := s.repo.GetLatestCommentBody(ctx, taskID, authorID)
+	if err != nil {
+		return ""
+	}
+	return body
+}
+
+// isStageParticipant checks if an agent ID is a participant in a stage.
+func isStageParticipant(stage *ExecutionStage, agentID string) bool {
+	for _, p := range stage.Participants {
+		if p.Type == participantTypeAgent && p.AgentID == agentID {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // queueBlockersResolvedWakeups checks tasks blocked by the completed task and
@@ -192,7 +291,8 @@ func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, 
 	return s.QueueWakeup(ctx, assignee, WakeupReasonTaskBlockersResolved, payload, key)
 }
 
-// queueChildrenCompletedWakeup checks if all children of a parent are terminal.
+// queueChildrenCompletedWakeup checks if all children of a parent are terminal
+// and, if so, queues a wakeup with child summaries.
 func (s *Service) queueChildrenCompletedWakeup(ctx context.Context, parentID string) error {
 	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
 	if err != nil || !allDone {
@@ -202,7 +302,18 @@ func (s *Service) queueChildrenCompletedWakeup(ctx context.Context, parentID str
 	if err != nil || assignee == "" {
 		return err
 	}
-	payload := mustJSON(map[string]string{"task_id": parentID})
+
+	children, truncated, err := s.repo.GetChildSummaries(ctx, parentID)
+	if err != nil {
+		s.logger.Error("get child summaries failed", zap.Error(err))
+		children = nil
+	}
+
+	payload := mustJSON(map[string]interface{}{
+		"task_id":   parentID,
+		"children":  children,
+		"truncated": truncated,
+	})
 	key := fmt.Sprintf("children_completed:%s", parentID)
 	return s.QueueWakeup(ctx, assignee, WakeupReasonTaskChildrenCompleted, payload, key)
 }
@@ -263,20 +374,6 @@ func categorizeStep(name string) stepCategory {
 	default:
 		return stepCategoryUnknown
 	}
-}
-
-// extractReviewers parses reviewer agent IDs from execution policy JSON.
-func extractReviewers(policyJSON string) []string {
-	if policyJSON == "" || policyJSON == "{}" {
-		return nil
-	}
-	var policy struct {
-		Reviewers []string `json:"reviewers"`
-	}
-	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
-		return nil
-	}
-	return policy.Reviewers
 }
 
 // decodeEventData extracts typed data from an event.

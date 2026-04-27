@@ -274,6 +274,7 @@ type CreateTaskRequest struct {
 	ExecutionPolicy         string
 	Labels                  string
 	ParentID                string
+	BlockedBy               []string
 }
 
 type UpdateTaskRequest struct {

@@ -64,6 +64,13 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		return nil, err
 	}
 
+	// Create blocker relationships if specified.
+	for _, blockerID := range req.BlockedBy {
+		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
+			return nil, fmt.Errorf("add blocker %s: %w", blockerID, err)
+		}
+	}
+
 	if err := s.createTaskRepositories(ctx, task.ID, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
