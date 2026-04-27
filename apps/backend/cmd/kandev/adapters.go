@@ -550,6 +550,18 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+	// Idempotent on pending_id: some agents (OpenCode) re-emit
+	// session/request_permission for an already-resolved pending_id, which
+	// would otherwise spawn a second card whose backend pending was already
+	// consumed (issue #717).
+	if existing, err := a.svc.GetPermissionMessageByPendingID(ctx, sessionID, pendingID); err == nil && existing != nil {
+		a.logger.Debug("permission_request message already exists, skipping duplicate",
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.String("existing_message_id", existing.ID))
+		return existing.ID, nil
+	}
+
 	metadata := map[string]interface{}{
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,

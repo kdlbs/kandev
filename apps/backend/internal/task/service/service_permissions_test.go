@@ -110,6 +110,41 @@ func TestService_UpdatePermissionMessage_ExpiredCannotDemoteApproved(t *testing.
 	}
 }
 
+// TestService_GetPermissionMessageByPendingID guards the lookup the
+// CreatePermissionRequestMessage adapter uses for idempotency. Returns the
+// matching message when present, (nil, nil) when not — and (nil, nil) for a
+// message with the same pending_id but a non-permission type, so the
+// adapter doesn't accidentally treat e.g. a tool_call message as a
+// duplicate.
+func TestService_GetPermissionMessageByPendingID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-perm-lookup")
+
+	mustCreatePermMsg(t, repo, sessionID, turnID, "msg-perm", "pend-find", map[string]any{
+		"pending_id": "pend-find",
+	})
+
+	got, err := svc.GetPermissionMessageByPendingID(ctx, sessionID, "pend-find")
+	if err != nil {
+		t.Fatalf("GetPermissionMessageByPendingID: %v", err)
+	}
+	if got == nil || got.ID != "msg-perm" {
+		t.Fatalf("expected msg-perm, got %+v", got)
+	}
+
+	got, err = svc.GetPermissionMessageByPendingID(ctx, sessionID, "no-such-pending")
+	if err != nil {
+		t.Fatalf("absent lookup returned error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil for absent pending_id, got %+v", got)
+	}
+}
+
 // TestService_ExpirePendingPermissionsForSession_NoPending is a no-op
 // fast-path: when nothing is pending, the sweep must return zero and not
 // fail.

@@ -586,6 +586,20 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
+// GetPermissionMessageByPendingID looks up an existing permission_request
+// message by session and pending_id. Returns (nil, nil) if not found —
+// callers use this for idempotency (de-dupe re-emitted permission frames).
+func (s *Service) GetPermissionMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
+	msg, err := s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+	if err != nil {
+		return nil, nil //nolint:nilerr // not found is the common case; treat as absence
+	}
+	if msg == nil || msg.Type != models.MessageTypePermissionRequest {
+		return nil, nil
+	}
+	return msg, nil
+}
+
 // ExpirePendingPermissionsForSession marks all permission_request messages
 // for the session that are still pending (no terminal status set) as
 // "expired", reusing UpdatePermissionMessage so each message also publishes
