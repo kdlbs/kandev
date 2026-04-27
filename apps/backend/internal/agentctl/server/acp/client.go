@@ -195,9 +195,22 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 
 	c.logger.Info("forwarding permission request to handler",
 		zap.String("session_id", req.SessionID),
-		zap.String("tool_call_id", req.ToolCallID))
+		zap.String("tool_call_id", req.ToolCallID),
+		zap.String("title", title),
+		zap.String("action_type", actionType))
 
 	resp, err := handler(ctx, req)
+	c.logger.Info("permission handler returned",
+		zap.String("session_id", req.SessionID),
+		zap.String("tool_call_id", req.ToolCallID),
+		zap.Bool("cancelled", resp != nil && resp.Cancelled),
+		zap.String("option_id", func() string {
+			if resp == nil {
+				return ""
+			}
+			return resp.OptionID
+		}()),
+		zap.Error(err))
 	if err != nil {
 		c.logger.Error("permission handler failed", zap.Error(err))
 		// On error, cancel the permission request

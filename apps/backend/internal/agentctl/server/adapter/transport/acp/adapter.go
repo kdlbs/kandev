@@ -1803,6 +1803,12 @@ func extractPathFromTitle(title string) string {
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
 func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
+	a.logger.Info("acp adapter received permission request",
+		zap.String("session_id", req.SessionID),
+		zap.String("tool_call_id", req.ToolCallID),
+		zap.String("title", req.Title),
+		zap.String("action_type", req.ActionType))
+
 	a.mu.RLock()
 	handler := a.permissionHandler
 	fallbackSessionID := a.sessionID

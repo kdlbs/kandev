@@ -316,9 +316,11 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 
 // handlePermissionRequest handles permission request events and saves as message
 func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.PermissionRequestData) {
-	s.logger.Debug("handling permission request",
+	s.logger.Info("orchestrator handling permission request event",
 		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.TaskSessionID),
 		zap.String("pending_id", data.PendingID),
+		zap.String("tool_call_id", data.ToolCallID),
 		zap.String("title", data.Title))
 
 	if data.TaskSessionID == "" {

@@ -550,16 +550,39 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+	a.logger.Info("creating permission_request message",
+		zap.String("session_id", sessionID),
+		zap.String("pending_id", pendingID),
+		zap.String("tool_call_id", toolCallID),
+		zap.String("title", title))
+
 	// Idempotent on pending_id: some agents (OpenCode) re-emit
 	// session/request_permission for an already-resolved pending_id, which
 	// would otherwise spawn a second card whose backend pending was already
 	// consumed (issue #717).
 	if existing, err := a.svc.GetPermissionMessageByPendingID(ctx, sessionID, pendingID); err == nil && existing != nil {
-		a.logger.Debug("permission_request message already exists, skipping duplicate",
+		a.logger.Warn("permission_request message already exists with same pending_id, skipping duplicate",
 			zap.String("session_id", sessionID),
 			zap.String("pending_id", pendingID),
 			zap.String("existing_message_id", existing.ID))
 		return existing.ID, nil
+	}
+
+	// Stronger dedupe by tool_call_id. process.Manager generates a fresh
+	// nanos-suffixed pending_id on every permission forward, so a re-emit
+	// from the same ACP frame produces a different pending_id but the same
+	// tool_call_id. Without this guard the user sees a phantom card at
+	// turn end whose first click hits "pending permission not found"
+	// because agentctl already consumed the original.
+	if toolCallID != "" {
+		if existing, err := a.svc.FindPermissionMessageByToolCallID(ctx, sessionID, toolCallID); err == nil && existing != nil {
+			a.logger.Warn("permission_request message already exists for tool_call_id, skipping duplicate",
+				zap.String("session_id", sessionID),
+				zap.String("tool_call_id", toolCallID),
+				zap.String("incoming_pending_id", pendingID),
+				zap.String("existing_message_id", existing.ID))
+			return existing.ID, nil
+		}
 	}
 
 	metadata := map[string]interface{}{

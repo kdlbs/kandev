@@ -600,6 +600,36 @@ func (s *Service) GetPermissionMessageByPendingID(ctx context.Context, sessionID
 	return msg, nil
 }
 
+// FindPermissionMessageByToolCallID returns the most recent
+// permission_request message for the session+tool_call_id, or (nil, nil)
+// if none exists. Used as a stronger dedupe key than pending_id when the
+// upstream layer (process.Manager) generates a fresh nanos-suffixed
+// pending_id on every forward — re-emitted permission frames for the
+// same tool_call would otherwise each get their own DB row.
+func (s *Service) FindPermissionMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
+	if toolCallID == "" {
+		return nil, nil
+	}
+	msgs, err := s.messages.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var latest *models.Message
+	for _, msg := range msgs {
+		if msg.Type != models.MessageTypePermissionRequest {
+			continue
+		}
+		tcID, _ := msg.Metadata["tool_call_id"].(string)
+		if tcID != toolCallID {
+			continue
+		}
+		if latest == nil || msg.CreatedAt.After(latest.CreatedAt) {
+			latest = msg
+		}
+	}
+	return latest, nil
+}
+
 // ExpirePendingPermissionsForSession marks all permission_request messages
 // for the session that are still pending (no terminal status set) as
 // "expired", reusing UpdatePermissionMessage so each message also publishes
