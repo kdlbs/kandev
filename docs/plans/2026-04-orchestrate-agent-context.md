@@ -81,8 +81,8 @@ configloader/instructions/
 Before launching agent, export instruction files from DB to disk:
 ```go
 func (si *SchedulerIntegration) exportInstructions(ctx context.Context, agent *models.AgentInstance) (string, error) {
-    // Target dir: ~/.kandev/agent-instructions/<agentId>/
-    dir := filepath.Join(si.svc.kandevBasePath(), "agent-instructions", agent.ID)
+    // Target dir: ~/.kandev/runtime/<workspace-slug>/instructions/<agentId>/
+    dir := filepath.Join(si.svc.kandevBasePath(), "runtime", workspaceSlug, "instructions", agent.ID)
     return dir, si.svc.ExportInstructionsToDir(ctx, agent.ID, dir)
 }
 ```

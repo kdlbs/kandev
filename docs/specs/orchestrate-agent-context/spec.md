@@ -31,31 +31,35 @@ When the scheduler wakes an agent to work on a task, the agent needs identity, c
 
 ### Storage and export flow
 
-Both instructions and skills are stored in the **database** (source of truth). Before each agent session, they are exported to the filesystem for the agent CLI to discover:
+Both instructions and skills are stored in the **database** (source of truth). Before each agent session, they are exported to the `runtime/` filesystem cache for the agent CLI to discover:
 
 ```
 DB (source of truth)
   ├── Agent instructions (per-agent)
   └── Skills (shared)
        │
-       ▼  export to filesystem before session
+       ▼  export to runtime/ before session
        │
   ~/.kandev/
-  ├── agent-instructions/<agentId>/     # exported per-agent
-  │   ├── AGENTS.md
-  │   ├── HEARTBEAT.md
-  │   ├── SOUL.md
-  │   └── TOOLS.md
-  ├── skill-cache/<slug>/               # exported per-skill
-  │   └── SKILL.md (+ scripts, references)
-  └── skills/<slug>/                    # bundled system skills
+  ├── runtime/<workspace-slug>/
+  │   ├── instructions/<agentId>/       # exported per-agent
+  │   │   ├── AGENTS.md
+  │   │   ├── HEARTBEAT.md
+  │   │   └── SOUL.md
+  │   └── skills/<slug>/               # exported per-skill from DB
+  │       └── SKILL.md (+ scripts, references)
+  │
+  └── system/skills/<slug>/            # bundled system skills (read-only)
       └── SKILL.md
        │
        ▼  symlink into agent CLI dirs
        │
-  ~/.claude/skills/<slug> -> ~/.kandev/skill-cache/<slug>
-  ~/.agents/skills/<slug> -> ~/.kandev/skill-cache/<slug>
+  ~/.claude/skills/<slug> -> ~/.kandev/runtime/<ws>/skills/<slug>
+  ~/.agents/skills/<slug> -> ~/.kandev/runtime/<ws>/skills/<slug>
+  (system skills also symlinked)
 ```
+
+The `runtime/` directory is ephemeral -- can be deleted anytime, rebuilt from DB on next session.
 
 ### Environment variables
 
@@ -76,21 +80,22 @@ Injected before each agent session:
 
 ### Instruction bundle delivery
 
-**AGENTS.md** is the main instructions file. It's delivered differently per agent CLI:
+**Same strategy for all agent CLIs** -- no adapter-specific delivery:
 
-| Agent CLI | AGENTS.md delivery | Sibling files (HEARTBEAT.md etc.) |
-|-----------|-------------------|----------------------------------|
-| Claude Code | `--append-system-prompt-file` (system prompt slot) + `--add-dir` on bundle dir | On disk in `--add-dir` dir, agent reads them |
-| Codex, Gemini, OpenCode, Cursor | Prepended as text to user-turn stdin/prompt | On disk in bundle dir, agent reads via path directive |
+1. Read AGENTS.md content from `runtime/<ws>/instructions/<agentId>/AGENTS.md`
+2. Append a **path directive** telling the agent where to find sibling files
+3. Prepend the combined text to the user-turn prompt
+4. Agent reads HEARTBEAT.md, SOUL.md from disk during the session (via cat, Read tool, etc.)
 
 **Path directive** appended to AGENTS.md content:
 ```
 The above agent instructions were loaded from {instructionsDir}/AGENTS.md.
 Resolve any relative file references from {instructionsDir}.
 This directory contains sibling instruction files: ./HEARTBEAT.md, ./SOUL.md, ./TOOLS.md.
+Read them when referenced in these instructions.
 ```
 
-This tells the agent where to find HEARTBEAT.md etc. on disk. The agent reads them itself during the session.
+This is universal -- every agent CLI can read files from disk. No need for `--append-system-prompt-file` or `--add-dir` or any adapter-specific flags.
 
 **On session resume**: instructions are NOT re-injected (agent CLI retains them from previous session). Only the wake context is sent.
 
@@ -173,22 +178,23 @@ When the scheduler processes a wakeup:
 ```
 1. Resolve agent instance (from wakeup payload)
 2. Check guard conditions (status, cooldown, checkout, budget)
-3. Export agent instructions from DB to disk:
-   ~/.kandev/agent-instructions/<agentId>/AGENTS.md
-   ~/.kandev/agent-instructions/<agentId>/HEARTBEAT.md (if exists)
-   ~/.kandev/agent-instructions/<agentId>/SOUL.md (if exists)
-   ~/.kandev/agent-instructions/<agentId>/TOOLS.md (if exists)
-4. Export skills from DB to disk cache:
-   ~/.kandev/skill-cache/<slug>/SKILL.md (for each desired skill)
+3. Export agent instructions from DB to runtime dir:
+   ~/.kandev/runtime/<ws>/instructions/<agentId>/AGENTS.md
+   ~/.kandev/runtime/<ws>/instructions/<agentId>/HEARTBEAT.md (if exists)
+   ~/.kandev/runtime/<ws>/instructions/<agentId>/SOUL.md (if exists)
+4. Export skills from DB to runtime dir:
+   ~/.kandev/runtime/<ws>/skills/<slug>/SKILL.md (for each desired skill)
 5. Symlink skills into agent CLI dirs:
-   ~/.claude/skills/<slug> -> ~/.kandev/skill-cache/<slug>
-6. Build prompt:
-   - Read AGENTS.md content from exported file
+   ~/.claude/skills/<slug> -> ~/.kandev/runtime/<ws>/skills/<slug>
+   (also system skills from ~/.kandev/system/skills/)
+6. Build prompt (same for ALL agent CLIs):
+   - Read AGENTS.md content from runtime dir
    - Append path directive (pointing to instructions dir)
+   - Prepend combined text to user-turn prompt
    - Add wake context (reason, task summary, new comments)
    - For CEO heartbeat: add workspace status section
 7. Set env vars (KANDEV_API_KEY, KANDEV_TASK_ID, etc.)
-8. Set KANDEV_WAKE_PAYLOAD_JSON with pre-computed context
+8. Set KANDEV_WAKE_PAYLOAD_JSON with pre-computed task context
 9. Launch agent via task starter (pass prompt + env)
 ```
 

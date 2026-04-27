@@ -47,34 +47,80 @@ DB (source of truth)  <--- user approves --->  Filesystem (portable copy)
 
 ### Filesystem directory structure
 
+Three top-level areas with clear purposes:
+
 ```
 ~/.kandev/
-├── config.yml                      # global kandev settings
-└── workspaces/
-    ├── default/
-    │   ├── kandev.yml              # workspace settings
-    │   ├── agents/
-    │   │   ├── ceo.yml
-    │   │   └── frontend-worker.yml
-    │   ├── skills/
-    │   │   ├── code-review/
-    │   │   │   └── SKILL.md
-    │   │   └── deploy-runbook/
-    │   │       ├── SKILL.md
-    │   │       └── scripts/
-    │   │           └── deploy.sh
-    │   ├── routines/
-    │   │   └── daily-digest.yml
-    │   └── projects/
-    │       └── api-migration.yml
-    │
-    └── my-team/                    # repo-backed workspace
-        ├── .git/
-        ├── kandev.yml
-        ├── agents/
-        ├── skills/
+├── workspaces/                              # user config (git-syncable)
+│   ├── default/                             # first workspace (slug: "default")
+│   │   ├── kandev.yml                       # workspace settings
+│   │   ├── agents/
+│   │   │   ├── ceo.yml
+│   │   │   └── frontend-worker.yml
+│   │   ├── skills/
+│   │   │   ├── code-review/
+│   │   │   │   └── SKILL.md
+│   │   │   └── deploy-runbook/
+│   │   │       ├── SKILL.md
+│   │   │       └── scripts/deploy.sh
+│   │   ├── routines/
+│   │   │   └── daily-digest.yml
+│   │   └── projects/
+│   │       └── api-migration.yml
+│   │
+│   └── my-team/                             # repo-backed workspace (slug: "my-team")
+│       ├── .git/
+│       ├── kandev.yml
+│       ├── agents/
+│       ├── skills/
+│       └── ...
+│
+├── system/                                  # bundled with kandev binary, read-only
+│   └── skills/
+│       ├── kandev-protocol/SKILL.md
+│       └── memory/SKILL.md
+│
+└── runtime/                                 # generated at session time, ephemeral
+    ├── default/                             # per-workspace runtime cache
+    │   ├── instructions/                    # exported agent instructions
+    │   │   └── <agentId>/
+    │   │       ├── AGENTS.md
+    │   │       └── HEARTBEAT.md
+    │   └── skills/                          # exported skill content from DB
+    │       └── code-review/
+    │           └── SKILL.md
+    └── my-team/
         └── ...
 ```
+
+- **`workspaces/`**: user config, git-syncable. Each workspace is a directory named by its immutable slug.
+- **`system/`**: bundled with kandev binary, read-only, updated on upgrade.
+- **`runtime/`**: generated from DB before agent sessions, ephemeral. Can be deleted anytime -- rebuilt from DB on next session. Per-workspace subdirectories.
+
+### Workspace slugs
+
+Workspace directories use an **immutable slug** generated at creation time, not the display name:
+
+- User input: "My Team Workspace" -> slug: `my-team-workspace`
+- Display name can be renamed freely without moving directories or breaking paths
+- The slug is set once and never changes
+
+**Sanitization rules:**
+- Lowercase
+- Replace spaces and underscores with hyphens
+- Strip non-alphanumeric characters (except hyphens)
+- Collapse multiple consecutive hyphens
+- Trim leading/trailing hyphens
+- Max 50 characters
+- If empty after sanitization: `workspace-<shortId>`
+- If duplicate slug: append `-2`, `-3`, etc.
+
+**Storage:**
+- DB `workspaces` table: `id` (UUID), `name` (display name, editable), `slug` (filesystem name, immutable)
+- Filesystem: `~/.kandev/workspaces/<slug>/`
+- Runtime: `~/.kandev/runtime/<slug>/`
+
+The first workspace created during onboarding gets slug `default`.
 
 Files use the same YAML/markdown format as before. The structure is identical -- only the direction of truth changes (DB -> FS on export, FS -> DB on import).
 
