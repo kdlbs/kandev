@@ -79,6 +79,12 @@ export const defaultSessionState: SessionSliceState = {
     loadingByTaskId: {},
     loadedByTaskId: {},
     savingByTaskId: {},
+    revisionsByTaskId: {},
+    revisionsLoadingByTaskId: {},
+    revisionsLoadedByTaskId: {},
+    revisionContentCache: {},
+    previewRevisionIdByTaskId: {},
+    comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
   queue: { bySessionId: {}, isLoading: {} },
@@ -178,10 +184,23 @@ function buildTaskPlanActions(set: ImmerSet) {
       }),
     clearTaskPlan: (taskId: string) =>
       set((draft) => {
+        // revisionContentCache is keyed by revisionId, so pick the IDs for this
+        // task before deleting the revisions list and drop their cache entries.
+        const revs = draft.taskPlans.revisionsByTaskId[taskId];
+        if (revs) {
+          for (const r of revs) {
+            delete draft.taskPlans.revisionContentCache[r.id];
+          }
+        }
         delete draft.taskPlans.byTaskId[taskId];
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
+        delete draft.taskPlans.revisionsByTaskId[taskId];
+        delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
+        delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
+        delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
+        delete draft.taskPlans.comparePairByTaskId[taskId];
         delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
       }),
     markTaskPlanSeen: (taskId: string) =>
@@ -189,7 +208,84 @@ function buildTaskPlanActions(set: ImmerSet) {
         const plan = draft.taskPlans.byTaskId[taskId];
         draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
       }),
+    setPlanRevisions: (
+      taskId: string,
+      revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
+    ) =>
+      set((draft) => {
+        draft.taskPlans.revisionsByTaskId[taskId] = [...revisions].sort(
+          (a, b) => b.revision_number - a.revision_number,
+        );
+        draft.taskPlans.revisionsLoadedByTaskId[taskId] = true;
+        draft.taskPlans.revisionsLoadingByTaskId[taskId] = false;
+      }),
+    upsertPlanRevision: (
+      taskId: string,
+      revision: Parameters<SessionSlice["upsertPlanRevision"]>[1],
+    ) =>
+      set((draft) => {
+        const list = draft.taskPlans.revisionsByTaskId[taskId] ?? [];
+        const idx = list.findIndex((r) => r.id === revision.id);
+        if (idx === -1) {
+          list.unshift(revision);
+        } else {
+          list[idx] = { ...list[idx], ...revision };
+          // Coalesced writes update an existing revision's content on the
+          // backend, but the WS payload carries metadata only — drop any
+          // cached content so the next preview refetches.
+          delete draft.taskPlans.revisionContentCache[revision.id];
+        }
+        list.sort((a, b) => b.revision_number - a.revision_number);
+        draft.taskPlans.revisionsByTaskId[taskId] = list;
+      }),
+    setPlanRevisionsLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskPlans.revisionsLoadingByTaskId[taskId] = loading;
+      }),
+    cachePlanRevisionContent: (revisionId: string, content: string) =>
+      set((draft) => {
+        draft.taskPlans.revisionContentCache[revisionId] = content;
+      }),
+    ...buildPreviewCompareActions(set),
   };
+}
+
+function buildPreviewCompareActions(set: ImmerSet) {
+  return {
+    setPreviewRevision: (taskId: string, revisionId: string | null) =>
+      set((draft) => {
+        if (revisionId === null) {
+          delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
+        } else {
+          draft.taskPlans.previewRevisionIdByTaskId[taskId] = revisionId;
+        }
+      }),
+    toggleComparePair: (taskId: string, revisionId: string) =>
+      set((draft) => {
+        draft.taskPlans.comparePairByTaskId[taskId] = nextPair(
+          draft.taskPlans.comparePairByTaskId[taskId] ?? [null, null],
+          revisionId,
+        );
+      }),
+    clearComparePair: (taskId: string) =>
+      set((draft) => {
+        delete draft.taskPlans.comparePairByTaskId[taskId];
+      }),
+  };
+}
+
+/** Compute the next compare-pair after a toggle. Already-selected ids unselect;
+ * empty slots fill in order (slot 0 first); a full pair drops slot 0 and shifts
+ * slot 1 → 0, putting the new pick in slot 1 (FIFO of length 2). */
+function nextPair(
+  current: readonly [string | null, string | null],
+  revisionId: string,
+): [string | null, string | null] {
+  if (current[0] === revisionId) return [current[1], null];
+  if (current[1] === revisionId) return [current[0], null];
+  if (current[0] === null) return [revisionId, current[1]];
+  if (current[1] === null) return [current[0], revisionId];
+  return [current[1], revisionId];
 }
 
 export const createSessionSlice: StateCreator<

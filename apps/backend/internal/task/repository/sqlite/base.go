@@ -581,7 +581,7 @@ func (r *Repository) initCoreIndexes() error {
 }
 
 func (r *Repository) initPlansSchema() error {
-	_, err := r.db.Exec(`
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_plans (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL UNIQUE,
@@ -593,8 +593,85 @@ func (r *Repository) initPlansSchema() error {
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_plan_revisions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		revision_number INTEGER NOT NULL,
+		title TEXT NOT NULL DEFAULT 'Plan',
+		content TEXT NOT NULL DEFAULT '',
+		author_kind TEXT NOT NULL DEFAULT 'agent',
+		author_name TEXT NOT NULL DEFAULT '',
+		revert_of_revision_id TEXT,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		UNIQUE (task_id, revision_number)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_revisions_task_created
+		ON task_plan_revisions(task_id, created_at DESC);
+	-- Hot-path index: GetLatestTaskPlanRevision (called on every plan write
+	-- as part of the coalesce check), ListTaskPlanRevisions, and the
+	-- MAX(revision_number) lookup in WritePlanRevision all order/scan by
+	-- (task_id, revision_number DESC). With this index the latest-row lookup
+	-- is O(1) instead of an O(N) scan + sort per task.
+	CREATE INDEX IF NOT EXISTS idx_task_plan_revisions_task_number
+		ON task_plan_revisions(task_id, revision_number DESC);
+	`); err != nil {
+		return err
+	}
+	return r.backfillInitialPlanRevisions()
+}
+
+// backfillInitialPlanRevisions ensures every existing task_plans row has at least
+// one corresponding revision. Runs once at startup and is idempotent.
+func (r *Repository) backfillInitialPlanRevisions() error {
+	rows, err := r.db.Query(`
+	SELECT p.id, p.task_id, p.title, p.content, p.created_by, p.created_at, p.updated_at
+	FROM task_plans p
+	WHERE NOT EXISTS (
+		SELECT 1 FROM task_plan_revisions r WHERE r.task_id = p.task_id
+	)`)
+	if err != nil {
+		return fmt.Errorf("query plans missing revisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type row struct {
+		id, taskID, title, content, createdBy string
+		createdAt, updatedAt                  interface{}
+	}
+	var pending []row
+	for rows.Next() {
+		var x row
+		if err := rows.Scan(&x.id, &x.taskID, &x.title, &x.content, &x.createdBy, &x.createdAt, &x.updatedAt); err != nil {
+			return fmt.Errorf("scan plan for backfill: %w", err)
+		}
+		pending = append(pending, x)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate plans for backfill: %w", err)
+	}
+
+	for _, x := range pending {
+		authorKind := x.createdBy
+		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
+		if authorKind != "user" && authorKind != "agent" {
+			authorKind = "agent"
+		}
+		_, err := r.db.Exec(r.db.Rebind(`
+			INSERT INTO task_plan_revisions
+			  (id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
+			VALUES (?, ?, 1, ?, ?, ?, 'legacy', NULL, ?, ?)
+		`), uuid.New().String(), x.taskID, x.title, x.content, authorKind, x.createdAt, x.updatedAt)
+		if err != nil {
+			return fmt.Errorf("backfill revision for task %s: %w", x.taskID, err)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) initSessionSchema() error {

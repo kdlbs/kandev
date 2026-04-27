@@ -198,10 +198,22 @@ type ReviewRepository interface {
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
 }
 
-// PlanRepository handles task plan CRUD.
+// PlanRepository handles task plan CRUD and its revision history.
 type PlanRepository interface {
 	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+
+	// Revision history
+	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error
+	UpdateTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error
+	GetTaskPlanRevision(ctx context.Context, id string) (*models.TaskPlanRevision, error)
+	GetLatestTaskPlanRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, error)
+	ListTaskPlanRevisions(ctx context.Context, taskID string, limit int) ([]*models.TaskPlanRevision, error)
+	NextTaskPlanRevisionNumber(ctx context.Context, taskID string) (int, error)
+	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
+	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
+	// otherwise a new revision is appended with revision_number computed inside the tx.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
 }

@@ -696,6 +696,136 @@ export class SessionPage {
     return this.changes.getByTestId(`bulk-discard-${variant}`);
   }
 
+  // --- Plan revisions / rewind ---
+
+  /** Rewind button in the plan panel header (opens revision history popover). */
+  rewindButton(): Locator {
+    return this.planPanel.getByTestId("plan-rewind-button");
+  }
+
+  /** Plan revisions popover (opens after clicking rewind). */
+  revisionsPopover(): Locator {
+    return this.page.getByTestId("plan-revisions-popover");
+  }
+
+  /** All revision rows inside the popover, newest-first. */
+  revisionRows(): Locator {
+    return this.revisionsPopover().getByTestId("plan-revision-row");
+  }
+
+  /** Specific revision row by number. */
+  revisionRow(n: number): Locator {
+    return this.revisionsPopover().locator(`[data-revision-number="${n}"]`);
+  }
+
+  /** Revert button scoped to a given revision row. */
+  revertButton(row: Locator): Locator {
+    return row.getByTestId("plan-revision-revert-button");
+  }
+
+  /** Revert-confirm dialog. */
+  revertConfirmDialog(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-dialog");
+  }
+
+  revertConfirmOk(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-ok");
+  }
+
+  revertConfirmCancel(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-cancel");
+  }
+
+  /** TipTap editor inside the plan panel (for typing user edits). */
+  planEditor(): Locator {
+    return this.planPanel.locator(".ProseMirror");
+  }
+
+  /** Open the rewind popover and wait for it to render. No-op when already open. */
+  async openRewind(): Promise<void> {
+    if (await this.revisionsPopover().isVisible()) return;
+    await this.rewindButton().click();
+    await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
+  }
+
+  /** Open rewind, click revert on the row with the given revision number, and confirm. */
+  async revertToRevision(n: number): Promise<void> {
+    await this.openRewind();
+    await this.revertButton(this.revisionRow(n)).click();
+    await expect(this.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await this.revertConfirmOk().click();
+  }
+
+  // --- Plan revision preview & compare (Phase 6) ---
+
+  /** Click the row body (not the Revert/Compare buttons) to open the preview dialog. */
+  revisionRowBody(row: Locator): Locator {
+    return row.getByTestId("plan-revision-row-body");
+  }
+
+  previewDialog(): Locator {
+    return this.page.getByTestId("plan-revision-preview-dialog");
+  }
+
+  previewBody(): Locator {
+    return this.page.getByTestId("plan-revision-preview-body");
+  }
+
+  previewRestoreButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-restore");
+  }
+
+  previewCompareWithCurrentButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-compare-with-current");
+  }
+
+  previewCompareWithPreviousButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-compare-with-previous");
+  }
+
+  previewCloseButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-close");
+  }
+
+  diffDialog(): Locator {
+    return this.page.getByTestId("plan-revision-diff-dialog");
+  }
+
+  diffSummary(): Locator {
+    return this.page.getByTestId("plan-revision-diff-summary");
+  }
+
+  diffLines(kind?: "add" | "remove" | "context"): Locator {
+    const root = this.diffDialog();
+    if (!kind) return root.getByTestId("plan-revision-diff-line");
+    return root.locator(`[data-testid="plan-revision-diff-line"][data-line-kind="${kind}"]`);
+  }
+
+  diffSplitCells(kind?: "add" | "remove" | "context" | "empty"): Locator {
+    const root = this.diffDialog();
+    if (!kind) return root.getByTestId("plan-revision-diff-split-cell");
+    return root.locator(`[data-testid="plan-revision-diff-split-cell"][data-line-kind="${kind}"]`);
+  }
+
+  diffModeToggle(mode: "unified" | "split"): Locator {
+    return this.page.getByTestId(`plan-revision-diff-mode-${mode}`);
+  }
+
+  diffRestoreButton(): Locator {
+    return this.page.getByTestId("plan-revision-diff-restore");
+  }
+
+  diffCloseButton(): Locator {
+    return this.page.getByTestId("plan-revision-diff-close");
+  }
+
+  /** Open rewind and click into the row body to bring up the preview dialog. */
+  async openRevisionPreview(n: number): Promise<void> {
+    await this.openRewind();
+    await this.revisionRowBody(this.revisionRow(n)).click();
+    await expect(this.previewDialog()).toBeVisible({ timeout: 5_000 });
+  }
+
   // --- Panel search helpers (Ctrl+F feature) ---
 
   /** Any currently-mounted panel search bar. */

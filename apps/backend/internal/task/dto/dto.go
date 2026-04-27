@@ -697,6 +697,49 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 	}
 }
 
+// TaskPlanRevisionDTO represents a plan revision for API responses.
+// Content is optional so list responses can omit it (fetched on demand).
+type TaskPlanRevisionDTO struct {
+	ID                 string    `json:"id"`
+	TaskID             string    `json:"task_id"`
+	RevisionNumber     int       `json:"revision_number"`
+	Title              string    `json:"title"`
+	Content            string    `json:"content,omitempty"`
+	AuthorKind         string    `json:"author_kind"`
+	AuthorName         string    `json:"author_name"`
+	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// TaskPlanRevisionFromModel converts a TaskPlanRevision model with content.
+func TaskPlanRevisionFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDTO {
+	if rev == nil {
+		return nil
+	}
+	return &TaskPlanRevisionDTO{
+		ID:                 rev.ID,
+		TaskID:             rev.TaskID,
+		RevisionNumber:     rev.RevisionNumber,
+		Title:              rev.Title,
+		Content:            rev.Content,
+		AuthorKind:         rev.AuthorKind,
+		AuthorName:         rev.AuthorName,
+		RevertOfRevisionID: rev.RevertOfRevisionID,
+		CreatedAt:          rev.CreatedAt,
+		UpdatedAt:          rev.UpdatedAt,
+	}
+}
+
+// TaskPlanRevisionMetaFromModel converts without content (for list payloads/WS broadcasts).
+func TaskPlanRevisionMetaFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDTO {
+	meta := TaskPlanRevisionFromModel(rev)
+	if meta != nil {
+		meta.Content = ""
+	}
+	return meta
+}
+
 // FromTurn converts a Turn model to a TurnDTO.
 func FromTurn(turn *models.Turn) TurnDTO {
 	var completedAt *string

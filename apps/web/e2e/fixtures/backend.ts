@@ -243,6 +243,8 @@ exec git "$@"
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
+        // Short window makes coalesce-boundary tests practical without wall-clock waits.
+        KANDEV_PLAN_COALESCE_WINDOW_MS: process.env.KANDEV_PLAN_COALESCE_WINDOW_MS ?? "2000",
         GIT_AUTHOR_NAME: "E2E Test",
         GIT_AUTHOR_EMAIL: "e2e@test.local",
         GIT_COMMITTER_NAME: "E2E Test",

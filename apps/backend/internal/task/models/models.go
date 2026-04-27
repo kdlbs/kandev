@@ -611,6 +611,21 @@ type TaskPlan struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
+// Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
+type TaskPlanRevision struct {
+	ID                 string    `json:"id"`
+	TaskID             string    `json:"task_id"`
+	RevisionNumber     int       `json:"revision_number"`
+	Title              string    `json:"title"`
+	Content            string    `json:"content"`
+	AuthorKind         string    `json:"author_kind"` // "agent" | "user"
+	AuthorName         string    `json:"author_name"` // display snapshot (agent profile name or user identifier)
+	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+}
+
 // SessionFileReview tracks per-file review state within a session
 type SessionFileReview struct {
 	ID         string     `json:"id"`

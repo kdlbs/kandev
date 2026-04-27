@@ -396,6 +396,21 @@ export type AppState = {
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
+  // Plan revision actions
+  setPlanRevisions: (
+    taskId: string,
+    revisions: import("@/lib/types/http").TaskPlanRevision[],
+  ) => void;
+  upsertPlanRevision: (
+    taskId: string,
+    revision: import("@/lib/types/http").TaskPlanRevision,
+  ) => void;
+  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
+  cachePlanRevisionContent: (revisionId: string, content: string) => void;
+  // Plan revision preview + compare actions
+  setPreviewRevision: (taskId: string, revisionId: string | null) => void;
+  toggleComparePair: (taskId: string, revisionId: string) => void;
+  clearComparePair: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
