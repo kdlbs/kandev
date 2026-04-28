@@ -14,13 +14,14 @@ const JIRA_STATUS_REFRESH_MS = 90_000;
 export function useJiraAuthed(workspaceId: string | undefined): boolean {
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    // The return-value branch below covers the no-workspace case; calling
-    // setAuthed here would trip the no-setState-in-effect lint rule.
-    if (!workspaceId) return;
     let cancelled = false;
     async function refresh() {
+      // Reset before the first probe so the previous workspace's auth state
+      // can't briefly leak into the new one before the first probe lands.
+      if (!cancelled) setAuthed(false);
+      if (!workspaceId) return;
       try {
-        const cfg = await getJiraConfig(workspaceId!);
+        const cfg = await getJiraConfig(workspaceId);
         if (cancelled) return;
         setAuthed(!!cfg?.hasSecret && !!cfg.lastOk);
       } catch {
@@ -28,21 +29,23 @@ export function useJiraAuthed(workspaceId: string | undefined): boolean {
       }
     }
     void refresh();
+    if (!workspaceId) return () => { cancelled = true; };
     const id = setInterval(() => void refresh(), JIRA_STATUS_REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, [workspaceId]);
-  return workspaceId ? authed : false;
+  return authed;
 }
 
 // Combined check for showing Jira UI: the workspace toggle is on AND the
 // backend reports a configured, healthy connection.
 export function useJiraAvailable(workspaceId: string | null | undefined): boolean {
   const ws = workspaceId ?? undefined;
-  const { enabled } = useJiraEnabled(ws);
-  // Skip the keep-alive probe entirely when Jira is disabled.
-  const authed = useJiraAuthed(enabled ? ws : undefined);
+  // `loaded` flips true after the localStorage read settles; gating the probe
+  // on it avoids a wasted fetch on the first render when the toggle is off.
+  const { enabled, loaded } = useJiraEnabled(ws);
+  const authed = useJiraAuthed(enabled && loaded ? ws : undefined);
   return enabled && authed;
 }

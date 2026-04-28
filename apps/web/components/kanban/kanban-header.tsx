@@ -16,8 +16,7 @@ import {
   IconBrandGithub,
   IconTicket,
 } from "@tabler/icons-react";
-import { useJiraEnabled } from "@/components/jira/my-jira/use-jira-enabled";
-import { useJiraAuthed } from "@/components/jira/my-jira/use-jira-availability";
+import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -73,11 +72,8 @@ function GitHubTopbarButton() {
 }
 
 function JiraTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
-  const { enabled } = useJiraEnabled(workspaceId);
-  // Skip the keep-alive probe entirely when Jira is disabled — passing
-  // undefined short-circuits the hook's effect.
-  const authed = useJiraAuthed(enabled ? workspaceId : undefined);
-  if (!enabled || !authed) return null;
+  const available = useJiraAvailable(workspaceId);
+  if (!available) return null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>

@@ -47,15 +47,34 @@ describe("useJiraAvailable", () => {
     await waitFor(() => expect(result.current).toBe(true));
   });
 
-  it("returns false when the workspace toggle is disabled", async () => {
+  it("returns false when the workspace toggle is disabled and never probes", async () => {
     window.localStorage.setItem("kandev:jira:enabled:ws-1:v1", "false");
     getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
     const { result } = renderHook(() => useJiraAvailable("ws-1"));
-    // Even with a healthy backend config, the disabled toggle keeps the UI hidden.
+    // Disabled toggle should short-circuit the auth probe entirely. The
+    // `loaded` guard inside the hook keeps the fetch from racing on first render.
     await waitFor(() => expect(result.current).toBe(false));
-    // Give the effect a microtask to confirm it stays false.
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getJiraConfigMock).not.toHaveBeenCalled();
     expect(result.current).toBe(false);
+  });
+
+  it("clears stale auth when the workspace switches", async () => {
+    getJiraConfigMock.mockImplementation(async (id: string) =>
+      id === "ws-1"
+        ? makeConfig({ workspaceId: "ws-1", hasSecret: true, lastOk: true })
+        : makeConfig({ workspaceId: "ws-2", hasSecret: false, lastOk: false }),
+    );
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | undefined }) => useJiraAvailable(id),
+      { initialProps: { id: "ws-1" as string | undefined } },
+    );
+    await waitFor(() => expect(result.current).toBe(true));
+    rerender({ id: "ws-2" });
+    // The previous workspace's `true` must not leak into the new one even
+    // for the brief window before the new probe lands.
+    expect(result.current).toBe(false);
+    await waitFor(() => expect(result.current).toBe(false));
   });
 
   it("returns false when no secret is configured", async () => {
