@@ -38,9 +38,7 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
     // Bug: when the panel is narrow, a long file name renders past its container
     // and overlaps the diff counts (+/-) on the right. Fix: file name span must be
     // truncatable (truncate + min-w-0), not whitespace-nowrap+shrink-0.
-    const { container } = renderRow(
-      "deeply/nested/folder/render_text_to_image_controller_test.go",
-    );
+    const { container } = renderRow("deeply/nested/folder/render_text_to_image_controller_test.go");
     const fileNameSpan = container.querySelector(
       "span.font-medium.text-foreground",
     ) as HTMLElement | null;
@@ -54,9 +52,7 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
 
   it("folder span keeps truncate so the folder portion is shortened first", () => {
     const { container } = renderRow("a/b/c/d/file.go");
-    const folderSpan = container.querySelector(
-      "span.text-foreground\\/60",
-    ) as HTMLElement | null;
+    const folderSpan = container.querySelector("span.text-foreground\\/60") as HTMLElement | null;
 
     expect(folderSpan).not.toBeNull();
     expect(folderSpan!.className).toContain("truncate");

@@ -87,7 +87,12 @@ function MaximizeButton({
   );
 }
 
-function InlineSplitClose({ isChatGroup, onSplitRight, onSplitDown, onCloseGroup }: SplitCloseHandlers) {
+function InlineSplitClose({
+  isChatGroup,
+  onSplitRight,
+  onSplitDown,
+  onCloseGroup,
+}: SplitCloseHandlers) {
   return (
     <>
       <Tooltip>
@@ -135,16 +140,16 @@ function InlineSplitClose({ isChatGroup, onSplitRight, onSplitDown, onCloseGroup
   );
 }
 
-
-function SplitCloseDropdown({ isChatGroup, onSplitRight, onSplitDown, onCloseGroup }: SplitCloseHandlers) {
+function SplitCloseDropdown({
+  isChatGroup,
+  onSplitRight,
+  onSplitDown,
+  onCloseGroup,
+}: SplitCloseHandlers) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={ACTION_BTN}
-          data-testid="dockview-group-actions-menu"
-        >
+        <button type="button" className={ACTION_BTN} data-testid="dockview-group-actions-menu">
           <IconDots className="h-3 w-3" />
         </button>
       </DropdownMenuTrigger>

@@ -38,10 +38,7 @@ import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
-import {
-  GroupSplitCloseActionsView,
-  useDockviewGroupWidth,
-} from "./dockview-group-actions";
+import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
