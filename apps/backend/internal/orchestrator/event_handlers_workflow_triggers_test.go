@@ -372,7 +372,7 @@ func TestProcessOnEnter(t *testing.T) {
 		session.AgentExecutionID = "exec-1"
 		_ = repo.UpdateTaskSession(ctx, session)
 
-		agentMgr := &mockAgentManager{isAgentRunning: true}
+		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -388,19 +388,10 @@ func TestProcessOnEnter(t *testing.T) {
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description")
 
-		// executeQueuedMessage runs in a goroutine; wait for it to call PromptAgent.
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			agentMgr.mu.Lock()
-			n := len(agentMgr.capturedPrompts)
-			agentMgr.mu.Unlock()
-			if n > 0 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("timed out waiting for queued message to be sent to agent")
-			}
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-agentMgr.promptDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for queued message to be sent to agent")
 		}
 
 		agentMgr.mu.Lock()

@@ -128,6 +128,9 @@ type mockAgentManager struct {
 
 	// Prompt tracking
 	capturedPrompts []string // tracks prompts passed to PromptAgent
+	// Optional: closed once on the first PromptAgent call so tests can wait
+	// deterministically without polling. Tests opt in by initializing the channel.
+	promptDone chan struct{}
 
 	// Passthrough stdin tracking
 	passthroughStdinCalls []passthroughStdinCall
@@ -169,12 +172,21 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	return nil
 }
 func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
-	if m.promptErr != nil {
-		return nil, m.promptErr
+	promptErr := m.promptErr
+	promptResult := m.promptResult
+	doneCh := m.promptDone
+	m.mu.Unlock()
+	if first && doneCh != nil {
+		close(doneCh)
 	}
-	if m.promptResult != nil {
-		return m.promptResult, nil
+	if promptErr != nil {
+		return nil, promptErr
+	}
+	if promptResult != nil {
+		return promptResult, nil
 	}
 	return &executor.PromptResult{}, nil
 }

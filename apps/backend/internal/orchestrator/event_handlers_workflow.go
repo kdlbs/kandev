@@ -697,6 +697,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						zap.Error(err))
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
+					s.drainQueuedMessageAfterTransition(asyncCtx, sessionID)
 				}
 			}()
 			return
@@ -726,6 +727,9 @@ func (s *Service) drainQueuedMessageAfterTransition(ctx context.Context, session
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+		s.logger.Warn("skipping empty queued message after transition",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queuedMsg.ID))
 		return
 	}
 	go s.executeQueuedMessage(sessionID, queuedMsg)
