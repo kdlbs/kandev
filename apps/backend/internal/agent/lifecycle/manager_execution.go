@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -88,6 +89,9 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		return nil, err
 	}
 
+	// Notify subscribers that agentctl is starting (mirrors Launch path in manager_launch.go)
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
+
 	// For workspace-only executions (no agent), wait for agentctl to be ready
 	// then connect the workspace stream so process output can be received
 	go func() {
@@ -99,8 +103,13 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 			m.logger.Error("agentctl not ready for workspace stream connection",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
+			m.updateExecutionError(execution.ID, "agentctl not ready: "+err.Error())
+			m.eventPublisher.PublishAgentctlEvent(waitCtx, events.AgentctlError, execution, err.Error())
 			return
 		}
+
+		m.flushCachedPollMode(execution.SessionID)
+		m.eventPublisher.PublishAgentctlEvent(waitCtx, events.AgentctlReady, execution, "")
 
 		// Connect workspace stream for process output (agent stream not needed for workspace-only)
 		if m.streamManager != nil {
