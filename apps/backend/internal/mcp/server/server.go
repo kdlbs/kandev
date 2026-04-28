@@ -30,14 +30,20 @@ const (
 	ModeTask = "task"
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
 	ModeConfig = "config"
+	// ModeExternal registers config tools plus create_task_kandev for external coding agents
+	// (Claude Code, Cursor, etc.) that connect to the backend's MCP endpoint.
+	// No session-scoped tools (plan, ask_user_question) since there is no live session.
+	ModeExternal = "external"
 )
 
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
-	if mode == ModeConfig {
-		return ModeConfig
+	switch mode {
+	case ModeConfig, ModeExternal:
+		return mode
+	default:
+		return ModeTask
 	}
-	return ModeTask
 }
 
 // Server wraps the MCP server with backend client for communication.
@@ -60,6 +66,52 @@ type Server struct {
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
 func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
+	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode)
+
+	// Create SSE server for Claude Desktop, Cursor, etc.
+	// WithBaseURL ensures the SSE endpoint event includes the full message URL
+	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
+	s.sseServer = server.NewSSEServer(s.mcpServer,
+		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+	)
+
+	// Create Streamable HTTP server for Codex
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
+		server.WithEndpointPath("/mcp"),
+	)
+
+	return s
+}
+
+// NewExternal creates an MCP server for the Kandev backend's external endpoint.
+// External coding agents (Claude Code, Cursor, etc.) connect here to manage Kandev
+// configuration and create tasks. Routes are mounted under /mcp on the backend.
+//
+// baseURL is the publicly reachable backend URL (e.g. "http://localhost:38429").
+// It is used to build the message endpoint URL emitted in SSE events.
+func NewExternal(backend BackendClient, baseURL string, log *logger.Logger, mcpLogFile string) *Server {
+	// External mode has no live session, so disable ask-question and use empty IDs.
+	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal)
+
+	// SSE handlers are mounted at /mcp/sse and /mcp/message — the static base path
+	// makes the SSE endpoint event emit the correct full message URL.
+	s.sseServer = server.NewSSEServer(s.mcpServer,
+		server.WithBaseURL(baseURL),
+		server.WithStaticBasePath("/mcp"),
+	)
+
+	// Streamable HTTP transport handler — mounted at /mcp on the backend.
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
+		server.WithEndpointPath("/mcp"),
+	)
+
+	return s
+}
+
+// newServer builds the shared parts of a Server (logger, mcp-go server, tools).
+// Callers are responsible for constructing sseServer and httpServer with the
+// transport configuration appropriate for their hosting environment.
+func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
 	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
@@ -84,41 +136,37 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 		}
 	}
 
-	// Create MCP server
 	s.mcpServer = server.NewMCPServer(
 		"kandev-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
 	)
-
-	// Register tools
 	s.registerTools()
-
-	// Create SSE server for Claude Desktop, Cursor, etc.
-	// WithBaseURL ensures the SSE endpoint event includes the full message URL
-	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
-	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
-	)
-
-	// Create Streamable HTTP server for Codex
-	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath("/mcp"),
-	)
-
 	return s
 }
 
-// RegisterRoutes adds MCP routes to the gin router.
+// RegisterRoutes adds MCP routes to the gin router at the root.
+// Used by agentctl which serves the MCP transport at /sse, /message, /mcp.
 func (s *Server) RegisterRoutes(router gin.IRouter) {
-	// SSE transport routes
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-
-	// Streamable HTTP transport route
 	router.Any("/mcp", gin.WrapH(s.httpServer))
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
+}
+
+// RegisterBackendRoutes adds MCP routes namespaced under /mcp to the gin router.
+// Used by the Kandev backend so that all MCP endpoints (/mcp, /mcp/sse, /mcp/message)
+// share a clean URL prefix on the multi-purpose backend HTTP server.
+func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
+	router.GET("/mcp/sse", gin.WrapH(s.sseServer.SSEHandler()))
+	router.POST("/mcp/message", gin.WrapH(s.sseServer.MessageHandler()))
+	router.Any("/mcp", gin.WrapH(s.httpServer))
+
+	s.logger.Info("registered MCP backend routes",
+		zap.String("sse", "/mcp/sse"),
+		zap.String("message", "/mcp/message"),
+		zap.String("http", "/mcp"))
 }
 
 // Close shuts down the MCP server.
@@ -240,6 +288,22 @@ func (s *Server) registerTools() {
 			s.registerInteractionTools()
 			count++
 		}
+	case ModeExternal:
+		// External coding agents get config tools plus create_task_kandev so
+		// they can both manage Kandev configuration and spawn new tasks.
+		// No interaction or plan tools (no live session to attach them to).
+		s.registerConfigWorkflowTools()
+		count += 10
+		s.registerConfigAgentTools()
+		count += 4
+		s.registerConfigMcpTools()
+		count += 4
+		s.registerConfigExecutorTools()
+		count += 5
+		s.registerConfigTaskTools()
+		count += 5
+		s.registerCreateTaskTool()
+		count++
 	default: // ModeTask
 		s.registerKanbanTools()
 		count += 8
@@ -289,6 +353,36 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
 	)
+	s.registerCreateTaskTool()
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("list_agents_kandev",
+			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_executor_profiles_kandev",
+			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task_kandev. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
+		),
+		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_kandev",
+			mcp.WithDescription("Update an existing task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("title", mcp.Description("New title")),
+			mcp.WithString("description", mcp.Description("New description")),
+			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+		),
+		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
+	)
+}
+
+// registerCreateTaskTool registers the create_task_kandev tool. Shared between
+// kanban (task) mode and external mode.
+func (s *Server) registerCreateTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_kandev",
 			mcp.WithDescription(`Create a new task or subtask and auto-start an agent on it.
@@ -321,30 +415,6 @@ IMPORTANT:
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional, defaults to repository's default branch.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_agents_kandev",
-			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_executor_profiles_kandev",
-			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task_kandev. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
-		),
-		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_kandev",
-			mcp.WithDescription("Update an existing task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("title", mcp.Description("New title")),
-			mcp.WithString("description", mcp.Description("New description")),
-			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
-		),
-		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
 	)
 }
 

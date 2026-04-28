@@ -473,6 +473,11 @@ func buildHTTPServer(
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
+	port := cfg.Server.Port
+	if port == 0 {
+		port = ports.Backend
+	}
+
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
@@ -497,13 +502,10 @@ func buildHTTPServer(
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
+		httpPort:                port,
 		log:                     log,
 	})
 
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
-	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      router,

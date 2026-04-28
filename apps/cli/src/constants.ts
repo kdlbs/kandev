@@ -7,7 +7,6 @@ import path from "node:path";
 export const DEFAULT_BACKEND_PORT = 38429;
 export const DEFAULT_WEB_PORT = 37429;
 export const DEFAULT_AGENTCTL_PORT = 39429;
-export const DEFAULT_MCP_PORT = 40429;
 
 // Random fallback range for port selection.
 export const RANDOM_PORT_MIN = 10000;

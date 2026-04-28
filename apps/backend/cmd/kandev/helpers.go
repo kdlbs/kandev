@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -26,6 +27,7 @@ import (
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ports"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
@@ -35,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/jira"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -335,6 +338,7 @@ type routeParams struct {
 	mcpConfigSvc            *mcpconfig.Service
 	webInternalURL          string
 	pprofEnabled            bool
+	httpPort                int
 	log                     *logger.Logger
 }
 
@@ -518,6 +522,10 @@ func registerMCPAndDebugRoutes(
 	p.lifecycleMgr.SetMCPHandler(p.gateway.Dispatcher)
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
+	// External MCP endpoint — exposes config tools + create_task to external coding
+	// agents (Claude Code, Cursor, etc.) at /mcp on the backend HTTP server.
+	registerExternalMCP(p)
+
 	debughandlers.RegisterRoutes(p.router, p.log)
 	p.log.Debug("Registered Debug handlers (HTTP)")
 
@@ -525,6 +533,24 @@ func registerMCPAndDebugRoutes(
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
 	}
+}
+
+// registerExternalMCP mounts an MCP server on the backend HTTP router so external
+// coding agents can connect to Kandev at /mcp, /mcp/sse, /mcp/message.
+func registerExternalMCP(p routeParams) {
+	port := p.httpPort
+	if port == 0 {
+		port = ports.Backend
+	}
+	baseURL := fmt.Sprintf("http://localhost:%d", port)
+
+	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	srv := mcpserver.NewExternal(backendClient, baseURL, p.log, "")
+	srv.RegisterBackendRoutes(p.router)
+	p.log.Info("Registered external MCP endpoint",
+		zap.String("base_url", baseURL),
+		zap.String("streamable_http", baseURL+"/mcp"),
+		zap.String("sse", baseURL+"/mcp/sse"))
 }
 
 // runGracefulShutdown gracefully stops all services and runs cleanups.
