@@ -342,7 +342,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
 	if req.WorkspaceID == "" && h.taskSvc != nil {
-		if workspaces, wsErr := h.taskSvc.ListWorkspaces(ctx); wsErr == nil && len(workspaces) == 1 {
+		if workspaces, wsErr := h.taskSvc.ListWorkspaces(ctx); wsErr != nil {
+			h.logger.Warn("failed to auto-resolve workspace", zap.Error(wsErr))
+		} else if len(workspaces) == 1 {
 			req.WorkspaceID = workspaces[0].ID
 		}
 	}
@@ -351,7 +353,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	if req.WorkflowID == "" && h.taskSvc != nil {
-		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID); wfErr == nil && len(workflows) == 1 {
+		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID); wfErr != nil {
+			h.logger.Warn("failed to auto-resolve workflow", zap.String("workspace_id", req.WorkspaceID), zap.Error(wfErr))
+		} else if len(workflows) == 1 {
 			req.WorkflowID = workflows[0].ID
 		}
 	}

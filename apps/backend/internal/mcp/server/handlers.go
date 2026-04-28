@@ -92,10 +92,6 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		workflowID := req.GetString("workflow_id", "")
 		workflowStepID := req.GetString("workflow_step_id", "")
 
-		if parentID == "" && (workspaceID == "" || workflowID == "") {
-			return mcp.NewToolResultError("workspace_id and workflow_id are required when creating a top-level task (no parent_id)"), nil
-		}
-
 		// Default start_agent to true if not provided
 		startAgent := true
 		if args := req.GetArguments(); args["start_agent"] != nil {

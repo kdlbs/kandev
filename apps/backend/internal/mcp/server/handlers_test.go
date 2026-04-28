@@ -100,18 +100,6 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 	assert.Equal(t, "task-abc", payload["parent_id"])
 }
 
-func TestCreateTask_NoParentID_RequiresWorkspaceAndWorkflow(t *testing.T) {
-	backend := &testBackend{}
-	s := newTaskModeServer(t, backend, "task-current")
-
-	// No parent_id and no workspace/workflow -> error
-	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
-		"title": "Standalone task",
-	})
-
-	assert.True(t, result.IsError)
-}
-
 func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "task-new", "title": "Standalone"},
