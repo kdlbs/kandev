@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraTicket } from "@/lib/types/jira";
 import { JIRA_KEY_RE } from "./jira-ticket-common";
+import { useJiraAvailable } from "./my-jira/use-jira-availability";
 
 function extractKey(input: string): string | null {
   const match = input.toUpperCase().match(JIRA_KEY_RE);
@@ -22,6 +23,7 @@ type JiraImportBarProps = {
 };
 
 export function JiraImportBar({ workspaceId, disabled, onImport }: JiraImportBarProps) {
+  const available = useJiraAvailable(workspaceId);
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,6 +52,8 @@ export function JiraImportBar({ workspaceId, disabled, onImport }: JiraImportBar
       setLoading(false);
     }
   }, [workspaceId, value, onImport]);
+
+  if (!available) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

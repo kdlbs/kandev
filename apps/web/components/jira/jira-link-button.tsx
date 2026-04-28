@@ -1,34 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { IconLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
-import { getJiraConfig, getJiraTicket } from "@/lib/api/domains/jira-api";
+import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import { updateTask } from "@/lib/api/domains/kanban-api";
 import { JIRA_KEY_RE } from "./jira-ticket-common";
-
-function useJiraConfigured(workspaceId: string | null | undefined): boolean {
-  const [configured, setConfigured] = useState(false);
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    void getJiraConfig(workspaceId)
-      .then((cfg) => {
-        if (!cancelled) setConfigured(!!cfg && cfg.hasSecret);
-      })
-      .catch(() => {
-        if (!cancelled) setConfigured(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-  return workspaceId ? configured : false;
-}
+import { useJiraAvailable } from "./my-jira/use-jira-availability";
 
 type JiraLinkButtonProps = {
   taskId: string | null | undefined;
@@ -40,7 +22,7 @@ type JiraLinkButtonProps = {
 // prepending the ticket key to its title ("PROJ-123: ..."). The existing
 // JiraTicketButton picks up the key automatically once the title is updated.
 export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButtonProps) {
-  const configured = useJiraConfigured(workspaceId);
+  const available = useJiraAvailable(workspaceId);
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,7 +56,7 @@ export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButto
     }
   }, [taskId, workspaceId, value, taskTitle]);
 
-  if (!configured || !taskId || !workspaceId) return null;
+  if (!available || !taskId || !workspaceId) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

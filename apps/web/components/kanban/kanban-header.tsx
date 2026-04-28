@@ -16,9 +16,8 @@ import {
   IconBrandGithub,
   IconTicket,
 } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
-import { getJiraConfig } from "@/lib/api/domains/jira-api";
 import { useJiraEnabled } from "@/components/jira/my-jira/use-jira-enabled";
+import { useJiraAuthed } from "@/components/jira/my-jira/use-jira-availability";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -55,41 +54,6 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
   { value: "list", icon: IconList, label: "List" },
 ];
-
-// How often to refresh the cached config so the indicator picks up new probe
-// results from the backend poller. The backend probes every 90s; refreshing at
-// the same cadence keeps the indicator no more than ~one cycle stale.
-const JIRA_STATUS_REFRESH_MS = 90_000;
-
-// Reads the backend-recorded auth health for a workspace. The actual probing
-// happens server-side (jira.Poller); this hook just polls getJiraConfig to
-// pick up the latest result. Returns false until a config has been loaded so
-// we don't briefly flash a green check on first mount.
-function useJiraAuthed(workspaceId: string | undefined): boolean {
-  const [authed, setAuthed] = useState(false);
-  useEffect(() => {
-    // The return-value branch below covers the no-workspace case; calling
-    // setAuthed here would trip the no-setState-in-effect lint rule.
-    if (!workspaceId) return;
-    let cancelled = false;
-    async function refresh() {
-      try {
-        const cfg = await getJiraConfig(workspaceId!);
-        if (cancelled) return;
-        setAuthed(!!cfg?.hasSecret && !!cfg.lastOk);
-      } catch {
-        if (!cancelled) setAuthed(false);
-      }
-    }
-    void refresh();
-    const id = setInterval(() => void refresh(), JIRA_STATUS_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [workspaceId]);
-  return workspaceId ? authed : false;
-}
 
 function GitHubTopbarButton() {
   const { status } = useGitHubStatus();
