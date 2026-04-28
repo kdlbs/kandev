@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconArrowsMaximize,
@@ -27,14 +27,17 @@ const EXPAND_WIDTH = 340;
 
 /** Subscribe to a dockview group's width via its panel api. */
 export function useDockviewGroupWidth(group: IDockviewHeaderActionsProps["group"]): number {
-  return useSyncExternalStore(
-    (cb) => {
+  // Stable subscribe/getSnapshot tied to the group identity so useSyncExternalStore
+  // does not resubscribe on every render.
+  const subscribe = useCallback(
+    (cb: () => void) => {
       const d = group.api.onDidDimensionsChange(cb);
       return () => d.dispose();
     },
-    () => group.api.width,
-    () => group.api.width,
+    [group],
   );
+  const getSnapshot = useCallback(() => group.api.width, [group]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /**

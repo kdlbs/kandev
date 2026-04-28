@@ -33,17 +33,17 @@ function renderView(width: number, override: Partial<typeof baseProps> = {}) {
 describe("GroupSplitCloseActionsView", () => {
   it("wide width: renders 4 inline buttons and no overflow dropdown", () => {
     renderView(600);
-    expect(screen.getByTestId(TID.maximize)).toBeDefined();
-    expect(screen.getByTestId(TID.splitRight)).toBeDefined();
-    expect(screen.getByTestId(TID.splitDown)).toBeDefined();
-    expect(screen.getByTestId(TID.close)).toBeDefined();
+    expect(screen.queryByTestId(TID.maximize)).not.toBeNull();
+    expect(screen.queryByTestId(TID.splitRight)).not.toBeNull();
+    expect(screen.queryByTestId(TID.splitDown)).not.toBeNull();
+    expect(screen.queryByTestId(TID.close)).not.toBeNull();
     expect(screen.queryByTestId(TID.menu)).toBeNull();
   });
 
   it("narrow width: keeps Maximize inline, collapses split/close into dropdown", () => {
     renderView(200);
-    expect(screen.getByTestId(TID.maximize)).toBeDefined();
-    expect(screen.getByTestId(TID.menu)).toBeDefined();
+    expect(screen.queryByTestId(TID.maximize)).not.toBeNull();
+    expect(screen.queryByTestId(TID.menu)).not.toBeNull();
     expect(screen.queryByTestId(TID.splitRight)).toBeNull();
     expect(screen.queryByTestId(TID.splitDown)).toBeNull();
     expect(screen.queryByTestId(TID.close)).toBeNull();
@@ -51,30 +51,30 @@ describe("GroupSplitCloseActionsView", () => {
 
   it("narrow + chat group: no Close anywhere, dropdown still present for splits", () => {
     renderView(200, { isChatGroup: true });
-    expect(screen.getByTestId(TID.maximize)).toBeDefined();
-    expect(screen.getByTestId(TID.menu)).toBeDefined();
+    expect(screen.queryByTestId(TID.maximize)).not.toBeNull();
+    expect(screen.queryByTestId(TID.menu)).not.toBeNull();
     expect(screen.queryByTestId(TID.close)).toBeNull();
   });
 
   it("wide + chat group: 3 inline buttons, no Close button", () => {
     renderView(600, { isChatGroup: true });
-    expect(screen.getByTestId(TID.maximize)).toBeDefined();
-    expect(screen.getByTestId(TID.splitRight)).toBeDefined();
-    expect(screen.getByTestId(TID.splitDown)).toBeDefined();
+    expect(screen.queryByTestId(TID.maximize)).not.toBeNull();
+    expect(screen.queryByTestId(TID.splitRight)).not.toBeNull();
+    expect(screen.queryByTestId(TID.splitDown)).not.toBeNull();
     expect(screen.queryByTestId(TID.close)).toBeNull();
     expect(screen.queryByTestId(TID.menu)).toBeNull();
   });
 
   it("hysteresis: stays collapsed between 320 and 340 once collapsed", () => {
     const { rerender } = renderView(200);
-    expect(screen.getByTestId(TID.menu)).toBeDefined();
+    expect(screen.queryByTestId(TID.menu)).not.toBeNull();
     // Resize up to 330 — still inside hysteresis band, should remain collapsed
     rerender(
       <TooltipProvider>
         <GroupSplitCloseActionsView width={330} {...baseProps} />
       </TooltipProvider>,
     );
-    expect(screen.getByTestId(TID.menu)).toBeDefined();
+    expect(screen.queryByTestId(TID.menu)).not.toBeNull();
     expect(screen.queryByTestId(TID.splitRight)).toBeNull();
     // Resize up to 360 — past expand threshold, switches back to inline
     rerender(
@@ -83,7 +83,7 @@ describe("GroupSplitCloseActionsView", () => {
       </TooltipProvider>,
     );
     expect(screen.queryByTestId(TID.menu)).toBeNull();
-    expect(screen.getByTestId(TID.splitRight)).toBeDefined();
+    expect(screen.queryByTestId(TID.splitRight)).not.toBeNull();
   });
 
   it("Maximize button click fires onMaximize handler in both modes", () => {
