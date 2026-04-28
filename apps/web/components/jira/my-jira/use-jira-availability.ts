@@ -29,7 +29,10 @@ export function useJiraAuthed(workspaceId: string | undefined): boolean {
       }
     }
     void refresh();
-    if (!workspaceId) return () => { cancelled = true; };
+    if (!workspaceId)
+      return () => {
+        cancelled = true;
+      };
     const id = setInterval(() => void refresh(), JIRA_STATUS_REFRESH_MS);
     return () => {
       cancelled = true;
