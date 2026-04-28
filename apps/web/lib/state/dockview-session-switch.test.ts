@@ -83,9 +83,7 @@ describe("performSessionSwitch", () => {
   });
 
   it("calls api.layout on the fast path when saved layout matches", () => {
-    vi.mocked(getSessionLayout).mockReturnValueOnce({ grid: {} } as unknown as ReturnType<
-      typeof getSessionLayout
-    >);
+    vi.mocked(getSessionLayout).mockReturnValueOnce(makeHealthyLayoutWith({}));
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
 
