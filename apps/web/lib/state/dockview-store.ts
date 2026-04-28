@@ -498,6 +498,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         get().exitMaximizedLayout();
         return;
       }
+      preserveChatScrollDuringLayout();
       const liveWidths = captureLiveWidths(api, set);
       const current = fromDockviewApi(api);
       let targetGroup: {
@@ -541,6 +542,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
     exitMaximizedLayout: () => {
       const { api, preMaximizeLayout, currentLayoutSessionId } = get();
       if (!api || !preMaximizeLayout) return;
+      preserveChatScrollDuringLayout();
       const safeWidth = api.width;
       const safeHeight = api.height;
       const liveWidths = get().pinnedWidths;
