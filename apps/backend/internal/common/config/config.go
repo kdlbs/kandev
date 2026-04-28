@@ -151,7 +151,6 @@ type RepositoryDiscoveryConfig struct {
 // WorktreeConfig holds Git worktree configuration for concurrent agent execution.
 type WorktreeConfig struct {
 	Enabled             bool   `mapstructure:"enabled"`             // Enable worktree mode
-	BasePath            string `mapstructure:"basePath"`            // Base directory for worktrees (default: ~/.kandev/worktrees)
 	DefaultBranch       string `mapstructure:"defaultBranch"`       // Default base branch (default: main)
 	CleanupOnRemove     bool   `mapstructure:"cleanupOnRemove"`     // Remove worktree directory on task deletion
 	FetchTimeoutSeconds int    `mapstructure:"fetchTimeoutSeconds"` // Git fetch timeout before worktree creation
@@ -295,7 +294,6 @@ func setDefaults(v *viper.Viper) {
 
 	// Worktree defaults
 	v.SetDefault("worktree.enabled", true)
-	v.SetDefault("worktree.basePath", "")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
 	v.SetDefault("worktree.fetchTimeoutSeconds", 60)

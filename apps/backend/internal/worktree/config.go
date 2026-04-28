@@ -15,11 +15,6 @@ type Config struct {
 	// Enabled controls whether worktree mode is active.
 	Enabled bool `mapstructure:"enabled"`
 
-	// BasePath is the base directory for worktree storage.
-	// Supports ~ expansion for home directory.
-	// Default: ~/.kandev/worktrees
-	BasePath string `mapstructure:"base_path"`
-
 	// TasksBasePath is the base directory for per-task worktree storage.
 	// Each task gets a subdirectory containing one repo worktree (future: multiple).
 	// Supports ~ expansion for home directory.
@@ -50,40 +45,11 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// SetDataDirFallback sets the BasePath from the data directory if not already configured.
-func (c *Config) SetDataDirFallback(dataDir string) {
-	if c.BasePath == "" && dataDir != "" {
-		c.BasePath = filepath.Join(dataDir, "worktrees")
-	}
-}
-
 // SetTasksBasePathFallback sets the TasksBasePath from the data directory if not already configured.
 func (c *Config) SetTasksBasePathFallback(dataDir string) {
 	if c.TasksBasePath == "" && dataDir != "" {
 		c.TasksBasePath = filepath.Join(dataDir, "tasks")
 	}
-}
-
-// ExpandedBasePath returns the base path with ~ expanded to the user's home directory.
-func (c *Config) ExpandedBasePath() (string, error) {
-	path := c.BasePath
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = filepath.Join(home, path[2:])
-	}
-	return path, nil
-}
-
-// WorktreePath returns the full path for a worktree given a unique worktree ID.
-func (c *Config) WorktreePath(worktreeID string) (string, error) {
-	basePath, err := c.ExpandedBasePath()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(basePath, worktreeID), nil
 }
 
 // ExpandedTasksBasePath returns the tasks base path with ~ expanded to the user's home directory.

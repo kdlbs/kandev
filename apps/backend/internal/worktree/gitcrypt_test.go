@@ -272,6 +272,8 @@ func TestCreateWorktree_GitCryptNewBranch(t *testing.T) {
 		RepositoryID:   "repo-gc",
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
+		TaskDirName:    "gc-task-1",
+		RepoName:       "repo-gc",
 	})
 	if err != nil {
 		t.Fatalf("Create() failed: %v", err)
@@ -333,6 +335,8 @@ func TestCreateWorktree_GitCryptExistingBranch(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/encrypted-branch",
+		TaskDirName:    "gc-task-2",
+		RepoName:       "repo-gc",
 	})
 	if err != nil {
 		t.Fatalf("Create() failed: %v", err)
@@ -472,6 +476,8 @@ func TestCreateWorktree_GitCryptLockedRepo(t *testing.T) {
 		RepositoryID:   "repo-gc-locked",
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
+		TaskDirName:    "gc-locked-1",
+		RepoName:       "repo-gc-locked",
 	})
 	if err != nil {
 		t.Fatalf("Create() with locked repo should succeed, got: %v", err)
@@ -561,6 +567,8 @@ func TestCreateWorktree_GitCryptWithSubmodules(t *testing.T) {
 		RepositoryID:   "repo-gc-sub",
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
+		TaskDirName:    "gc-sub-task-1",
+		RepoName:       "repo-gc-sub",
 	})
 	if err != nil {
 		t.Fatalf("Create() failed: %v", err)

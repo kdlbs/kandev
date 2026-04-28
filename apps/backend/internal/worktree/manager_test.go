@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,9 +24,9 @@ func newTestLogger() *logger.Logger {
 func newTestConfig(t *testing.T) Config {
 	tmpDir := t.TempDir()
 	return Config{
-		Enabled:      true,
-		BasePath:     tmpDir,
-		BranchPrefix: "kandev/",
+		Enabled:       true,
+		TasksBasePath: tmpDir,
+		BranchPrefix:  "kandev/",
 	}
 }
 
@@ -147,8 +148,8 @@ func TestNewManager_CustomSyncTimeouts(t *testing.T) {
 func TestNewManager_DisabledConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Enabled:  false,
-		BasePath: tmpDir,
+		Enabled:       false,
+		TasksBasePath: tmpDir,
 	}
 	log := newTestLogger()
 	store := newMockStore()
@@ -178,7 +179,7 @@ func TestManager_IsValid(t *testing.T) {
 	}
 
 	// Create a mock worktree directory
-	worktreePath := filepath.Join(cfg.BasePath, "test-worktree")
+	worktreePath := filepath.Join(cfg.TasksBasePath, "test-worktree")
 	if err := os.MkdirAll(worktreePath, 0755); err != nil {
 		t.Fatalf("failed to create test dir: %v", err)
 	}
@@ -934,6 +935,57 @@ esac
 	}
 	if !strings.Contains(err.Error(), "couldn't find remote ref") {
 		t.Fatalf("expected error to contain git output, got: %v", err)
+	}
+}
+
+// TestCreate_MissingTaskDirFields_ReturnsErrTaskDirRequired locks in the guard
+// added when the legacy flat layout was removed. Worktrees must be placed
+// inside the per-task directory; a request without TaskDirName or RepoName
+// is a programming error and must surface loudly rather than fall back.
+func TestCreate_MissingTaskDirFields_ReturnsErrTaskDirRequired(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+
+	cases := []struct {
+		name string
+		req  CreateRequest
+	}{
+		{
+			name: "missing RepoName",
+			req: CreateRequest{
+				TaskID: "t1", SessionID: "s1",
+				RepositoryPath: repoPath, BaseBranch: "main",
+				TaskDirName: "task-1", RepoName: "",
+			},
+		},
+		{
+			name: "missing TaskDirName",
+			req: CreateRequest{
+				TaskID: "t2", SessionID: "s2",
+				RepositoryPath: repoPath, BaseBranch: "main",
+				TaskDirName: "", RepoName: "repo-1",
+			},
+		},
+		{
+			name: "both missing",
+			req: CreateRequest{
+				TaskID: "t3", SessionID: "s3",
+				RepositoryPath: repoPath, BaseBranch: "main",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := mgr.Create(context.Background(), tc.req)
+			if !errors.Is(err, ErrTaskDirRequired) {
+				t.Fatalf("Create() err = %v, want ErrTaskDirRequired", err)
+			}
+		})
 	}
 }
 

@@ -136,6 +136,8 @@ func TestCreate_HangingRevParseReleasesRepoLock(t *testing.T) {
 		RepositoryPath:     repoPath,
 		BaseBranch:         "main",
 		PullBeforeWorktree: true,
+		TaskDirName:        "task-a",
+		RepoName:           "repo-a",
 	}
 
 	// Short caller deadline exercises ctx propagation through branchExists

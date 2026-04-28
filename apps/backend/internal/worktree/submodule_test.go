@@ -201,6 +201,8 @@ func TestCreateWorktree_WithSubmodules(t *testing.T) {
 		RepositoryID:   "repo-sub",
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
+		TaskDirName:    "sub-task-1",
+		RepoName:       "repo-sub",
 	})
 	if err != nil {
 		t.Fatalf("Create() failed: %v", err)

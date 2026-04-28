@@ -30,6 +30,8 @@ func TestCreateWorktree_CheckoutBranchDirectCheckout(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-1",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() unexpected error: %v", err)
@@ -74,6 +76,8 @@ func TestCreateWorktree_CheckoutBranchFallsBackToSuffix(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-1",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() first worktree: %v", err)
@@ -91,6 +95,8 @@ func TestCreateWorktree_CheckoutBranchFallsBackToSuffix(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-2",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() second worktree: %v", err)
@@ -135,6 +141,8 @@ func TestCreateWorktree_CheckoutBranchNoFetchWarningWithRemote(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-1",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() first worktree: %v", err)
@@ -157,6 +165,8 @@ func TestCreateWorktree_CheckoutBranchNoFetchWarningWithRemote(t *testing.T) {
 		RepositoryPath: repoPath,
 		BaseBranch:     "main",
 		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-2",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() second worktree: %v", err)
@@ -218,6 +228,8 @@ func TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream(t *testing.T) {
 		RepositoryID:   "repo-1",
 		RepositoryPath: repoPath,
 		BaseBranch:     "origin/feature/pr-branch",
+		TaskDirName:    "task-1",
+		RepoName:       "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() unexpected error: %v", err)

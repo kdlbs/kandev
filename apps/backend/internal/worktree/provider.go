@@ -15,12 +15,10 @@ func Provide(writer, reader *sqlx.DB, cfg *config.Config, log *logger.Logger) (*
 	}
 	wtCfg := Config{
 		Enabled:             cfg.Worktree.Enabled,
-		BasePath:            cfg.Worktree.BasePath,
 		BranchPrefix:        "kandev/",
 		FetchTimeoutSeconds: cfg.Worktree.FetchTimeoutSeconds,
 		PullTimeoutSeconds:  cfg.Worktree.PullTimeoutSeconds,
 	}
-	wtCfg.SetDataDirFallback(cfg.ResolvedHomeDir())
 	wtCfg.SetTasksBasePathFallback(cfg.ResolvedHomeDir())
 	manager, err := NewManager(wtCfg, store, log)
 	if err != nil {
