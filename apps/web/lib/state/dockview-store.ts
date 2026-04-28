@@ -498,8 +498,8 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         get().exitMaximizedLayout();
         return;
       }
-      preserveChatScrollDuringLayout();
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       const current = fromDockviewApi(api);
       let targetGroup: {
         panels: LayoutState["columns"][0]["groups"][0]["panels"];

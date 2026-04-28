@@ -212,11 +212,14 @@ test.describe("Session layout", () => {
     // Bug invariant: after maximize, scrollTop must NOT snap back to 0.
     // The fix preserves the user's vertical position so they remain anchored
     // somewhere mid/bottom of the conversation, not jumped to the top.
-    // We wait for the layout to settle (rAF + restore happens within ~1 frame
-    // of clearing isRestoringLayout) before sampling the final scroll value.
-    await testPage.waitForTimeout(500);
-    const restoredScrollTop = await chatListAfter.evaluate((el) => el.scrollTop);
-    expect(restoredScrollTop).toBeGreaterThan(50);
+    // Poll instead of a fixed sleep — the rAF restore lands within ~1 frame
+    // after isRestoringLayout clears.
+    await expect
+      .poll(async () => chatListAfter.evaluate((el) => el.scrollTop), {
+        timeout: 2_000,
+        message: "scroll position should be restored after maximize",
+      })
+      .toBeGreaterThan(50);
   });
 });
 

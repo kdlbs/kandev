@@ -109,4 +109,32 @@ describe("preserveChatScrollDuringLayout", () => {
 
     expect(replacement.scrollTop).toBe(180);
   });
+
+  it("does not fire prematurely when set() runs before isRestoringLayout becomes true", async () => {
+    // Mirrors the maximizeGroup() call sequence: caller invokes the helper while
+    // isRestoringLayout is still false, then a non-layout set() (e.g.
+    // captureLiveWidths → syncPinnedWidthsFromApi) emits to subscribers BEFORE
+    // isRestoringLayout flips to true. The helper must wait for the real
+    // false→true→false transition rather than firing on this premature emit.
+    const el = makeChatList(250);
+    preserveChatScrollDuringLayout();
+
+    // Premature emit while isRestoringLayout is still false. Must not restore.
+    fakeStore.emit();
+    expect(fakeStore.listeners.size).toBe(1);
+    expect(fakeStore.pendingChatScrollTop).toBe(250);
+
+    // Real maximize sequence: flip to true, then back to false.
+    fakeStore.isRestoringLayout = true;
+    fakeStore.emit();
+    el.scrollTop = 0; // simulate dockview wiping scroll during rebuild
+    fakeStore.isRestoringLayout = false;
+    fakeStore.emit();
+
+    await flushRaf();
+
+    expect(el.scrollTop).toBe(250);
+    expect(fakeStore.setPendingChatScrollTop).toHaveBeenLastCalledWith(null);
+    expect(fakeStore.listeners.size).toBe(0);
+  });
 });
