@@ -100,6 +100,31 @@ describe("useJiraAvailable", () => {
     expect(result.current).toBe(false);
   });
 
+  it("does not flicker between poll ticks while auth stays healthy", async () => {
+    vi.useFakeTimers();
+    try {
+      getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
+      const seen: boolean[] = [];
+      const { result } = renderHook(() => {
+        const v = useJiraAvailable("ws-1");
+        seen.push(v);
+        return v;
+      });
+      // Wait for the first probe to resolve and flip the value to true.
+      await vi.waitFor(() => expect(result.current).toBe(true));
+      const beforeTick = [...seen];
+      // Advance past one 90s poll. If the hook reset auth at the start of
+      // every tick, we'd observe a false in `seen` between this tick and
+      // the next probe response.
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(result.current).toBe(true);
+      const newRenders = seen.slice(beforeTick.length);
+      expect(newRenders).not.toContain(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns false when no config exists yet (backend 204)", async () => {
     getJiraConfigMock.mockResolvedValue(null);
     const { result } = renderHook(() => useJiraAvailable("ws-1"));
