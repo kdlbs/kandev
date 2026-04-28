@@ -13,12 +13,7 @@ import {
   IconGitPullRequest,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
-  IconLayoutColumns,
-  IconLayoutRows,
-  IconX,
   IconBrandVscode,
-  IconArrowsMaximize,
-  IconArrowsMinimize,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -43,6 +38,7 @@ import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
+import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
@@ -258,9 +254,6 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-const ACTION_BTN =
-  "h-5 w-5 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer";
-
 /** Faded maximize, split, and close buttons for any non-sidebar group. */
 function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsProps) {
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
@@ -268,6 +261,7 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
   const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
   const storeMaximize = useDockviewStore((s) => s.maximizeGroup);
   const storeExitMaximize = useDockviewStore((s) => s.exitMaximizedLayout);
+  const width = useDockviewGroupWidth(group);
 
   const handleMaximize = useCallback(() => {
     if (isMaximized) {
@@ -305,56 +299,15 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
   }, [group, containerApi]);
 
   return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className={ACTION_BTN}
-            onClick={handleMaximize}
-            data-testid="dockview-maximize-btn"
-          >
-            {isMaximized ? (
-              <IconArrowsMinimize className="h-3 w-3" />
-            ) : (
-              <IconArrowsMaximize className="h-3 w-3" />
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{isMaximized ? "Restore" : "Maximize"}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" className={ACTION_BTN} onClick={handleSplitRight}>
-            <IconLayoutColumns className="h-3 w-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Split right</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" className={ACTION_BTN} onClick={handleSplitDown}>
-            <IconLayoutRows className="h-3 w-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Split down</TooltipContent>
-      </Tooltip>
-      {!isChatGroup && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className={ACTION_BTN}
-              onClick={handleCloseGroup}
-              data-testid="dockview-close-group-btn"
-            >
-              <IconX className="h-3 w-3" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Close group</TooltipContent>
-        </Tooltip>
-      )}
-    </>
+    <GroupSplitCloseActionsView
+      width={width}
+      isChatGroup={isChatGroup}
+      isMaximized={isMaximized}
+      onMaximize={handleMaximize}
+      onSplitRight={handleSplitRight}
+      onSplitDown={handleSplitDown}
+      onCloseGroup={handleCloseGroup}
+    />
   );
 }
 
