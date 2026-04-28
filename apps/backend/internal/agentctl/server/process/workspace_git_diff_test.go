@@ -233,6 +233,8 @@ func TestResolveNumstatPath(t *testing.T) {
 		{"directory rename", "pkg/{old => new}/main.go", "pkg/new/main.go"},
 		{"path with spaces", "my dir/file.txt", "my dir/file.txt"},
 		{"rename with spaces", "old file.txt => new file.txt", "new file.txt"},
+		// LastIndex on `{` ensures git's own brace is picked, not the filename's leading `{`.
+		{"filename starts with brace", "{{page => layout}}.svelte", "{layout}.svelte"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
