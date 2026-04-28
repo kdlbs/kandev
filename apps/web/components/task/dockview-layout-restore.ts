@@ -1,13 +1,14 @@
 import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
+import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { getSessionLayout, getSessionMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
-  if (!layout?.panels || !layout?.grid?.root) return null;
+  if (!isLayoutShapeHealthy(layout)) return null;
 
   const invalidIds = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

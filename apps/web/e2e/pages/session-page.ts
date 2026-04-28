@@ -493,6 +493,41 @@ export class SessionPage {
   }
 
   /**
+   * Assert the live dockview groups all have positive widths and that the sum
+   * of the root-level column widths is approximately equal to the api width.
+   * Catches "central group has zero/wrong width" corruption that persists
+   * across task switches when a corrupted layout is saved to per-session storage.
+   */
+  async expectLayoutHealthy(): Promise<void> {
+    const result = await this.page.evaluate(() => {
+      type Group = { id: string; width: number; height: number };
+      type Api = { width: number; height: number; groups: Group[] };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const bad = api.groups.filter((g) => !(g.width > 1));
+      const totalWidth = api.groups.reduce((s, g) => s + (g.width > 0 ? g.width : 0), 0);
+      return {
+        apiWidth: api.width,
+        groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
+        badCount: bad.length,
+        totalWidth,
+      };
+    });
+    expect(result.error, result.error).toBeUndefined();
+    expect(
+      result.badCount,
+      `Found ${result.badCount} dockview groups with width <= 1: ${JSON.stringify(result.groups)}`,
+    ).toBe(0);
+    // Sum of group widths should match api width within a small rounding tolerance.
+    // Note: groups can be stacked vertically so totalWidth may exceed apiWidth (one column,
+    // multiple groups) — only flag if totalWidth is much smaller than apiWidth (squished).
+    expect(
+      result.totalWidth! >= (result.apiWidth ?? 0) - 4,
+      `Total group widths (${result.totalWidth}) much smaller than api width (${result.apiWidth}): ${JSON.stringify(result.groups)}`,
+    ).toBe(true);
+  }
+
+  /**
    * Assert the dockview layout columns fill the container with no large empty gap.
    * Catches bugs where columns don't expand after api.fromJSON() + setConstraints
    * (e.g. missing api.layout() call).

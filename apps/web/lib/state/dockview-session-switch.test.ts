@@ -34,6 +34,27 @@ function makeMockApi() {
   } as unknown as SessionSwitchParams["api"];
 }
 
+/** Build a SerializedDockview-shaped fixture that passes isLayoutShapeHealthy. */
+function makeHealthyLayoutWith(extraPanels: Record<string, { contentComponent: string }>) {
+  return {
+    grid: {
+      root: {
+        type: "leaf" as const,
+        size: 800,
+        data: { id: "g1", views: ["chat"], activeView: "chat" },
+      },
+      height: 600,
+      width: 800,
+      orientation: "HORIZONTAL" as const,
+    },
+    panels: {
+      chat: { contentComponent: "chat" },
+      ...extraPanels,
+    },
+    activeGroup: "g1",
+  } as unknown as ReturnType<typeof getSessionLayout>;
+}
+
 function makeParams(overrides?: Partial<SessionSwitchParams>): SessionSwitchParams {
   return {
     api: makeMockApi(),
@@ -105,10 +126,9 @@ describe("performSessionSwitch", () => {
   });
 
   it("skips fast path when saved layout has ephemeral panels (file-editor)", () => {
-    const savedLayout = {
-      grid: {},
-      panels: { "preview:file-editor": { contentComponent: "file-editor" } },
-    } as unknown as ReturnType<typeof getSessionLayout>;
+    const savedLayout = makeHealthyLayoutWith({
+      "preview:file-editor": { contentComponent: "file-editor" },
+    });
     vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
@@ -120,10 +140,9 @@ describe("performSessionSwitch", () => {
   });
 
   it("skips fast path when saved layout has ephemeral panels (diff-viewer)", () => {
-    const savedLayout = {
-      grid: {},
-      panels: { "preview:file-diff": { contentComponent: "diff-viewer" } },
-    } as unknown as ReturnType<typeof getSessionLayout>;
+    const savedLayout = makeHealthyLayoutWith({
+      "preview:file-diff": { contentComponent: "diff-viewer" },
+    });
     vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();

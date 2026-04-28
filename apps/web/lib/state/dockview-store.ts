@@ -679,3 +679,23 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
 export function performLayoutSwitch(oldSessionId: string | null, newSessionId: string): void {
   useDockviewStore.getState().switchSessionLayout(oldSessionId, newSessionId);
 }
+
+/**
+ * Release the dockview to a clean default layout — used when selecting a task
+ * that has no session (and prepare failed to launch one). Without this the
+ * dockview keeps the outgoing session's panels live but disconnected from any
+ * active session, and the corrupted state can be persisted on the next save.
+ */
+export function releaseLayoutToDefault(oldSessionId: string | null): void {
+  const { api, currentLayoutSessionId, preMaximizeLayout, buildDefaultLayout } =
+    useDockviewStore.getState();
+  if (!api) return;
+  const effectiveOld = oldSessionId ?? currentLayoutSessionId;
+  saveOutgoingSession(api, effectiveOld, preMaximizeLayout);
+  useDockviewStore.setState({
+    preMaximizeLayout: null,
+    maximizedGroupId: null,
+    currentLayoutSessionId: null,
+  });
+  buildDefaultLayout(api);
+}

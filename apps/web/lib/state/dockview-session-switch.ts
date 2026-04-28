@@ -7,10 +7,18 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { getSessionLayout } from "@/lib/local-storage";
 import { applyLayoutFixups } from "./dockview-layout-builders";
+import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 
 const EPHEMERAL_COMPONENTS = new Set(["file-editor", "diff-viewer", "commit-detail"]);
+
+/** Fetch the saved layout for a session, dropping it if its shape is corrupted. */
+function getHealthySessionLayout(sessionId: string): object | null {
+  const saved = getSessionLayout(sessionId);
+  if (!saved) return null;
+  return isLayoutShapeHealthy(saved) ? saved : null;
+}
 
 /** Check whether a serialized dockview layout contains ephemeral panels. */
 function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean {
@@ -77,7 +85,7 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
 function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | null {
   const { api, newSessionId, getDefaultLayout } = params;
   const currentLayout = fromDockviewApi(api);
-  const saved = getSessionLayout(newSessionId);
+  const saved = getHealthySessionLayout(newSessionId);
 
   let structuresMatch = false;
   if (saved) {
@@ -153,8 +161,10 @@ export function performSessionSwitch(params: SessionSwitchParams): LayoutGroupId
   const fastResult = tryFastSessionSwitch(params);
   if (fastResult) return fastResult;
 
-  // Slow path: full layout rebuild via fromJSON
-  const saved = getSessionLayout(newSessionId);
+  // Slow path: full layout rebuild via fromJSON. Use the validating loader
+  // so a corrupted blob from a previous failed switch is dropped instead of
+  // applied verbatim (which would collapse the central group).
+  const saved = getHealthySessionLayout(newSessionId);
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);

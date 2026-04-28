@@ -17,7 +17,12 @@ import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { performLayoutSwitch, useDockviewStore } from "@/lib/state/dockview-store";
+import {
+  performLayoutSwitch,
+  releaseLayoutToDefault,
+  useDockviewStore,
+} from "@/lib/state/dockview-store";
+import { finalizeNoSessionSelect } from "./task-select-helpers";
 import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
@@ -461,15 +466,24 @@ function useSidebarActions(store: StoreApi) {
           replaceTaskUrl(taskId);
           return;
         }
-        // No session — prepare workspace and switch to it
+        // No session — prepare workspace and switch to it. If preparation
+        // fails to launch a session, fall back to a clean default layout
+        // instead of leaving the dockview pointing at the outgoing session.
         const switched = await prepareAndSwitchTask(
           taskId,
           store,
           switchToSession,
           setPreparingTaskId,
         );
-        if (!switched) setActiveTask(taskId);
-        replaceTaskUrl(taskId);
+        if (switched) {
+          replaceTaskUrl(taskId);
+        } else {
+          finalizeNoSessionSelect(taskId, currentOldSessionId, {
+            setActiveTask,
+            releaseLayoutToDefault,
+            replaceTaskUrl,
+          });
+        }
       });
     },
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
