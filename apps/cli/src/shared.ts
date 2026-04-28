@@ -7,11 +7,7 @@
 
 import type { ChildProcess } from "node:child_process";
 
-import {
-  DEFAULT_AGENTCTL_PORT,
-  DEFAULT_BACKEND_PORT,
-  DEFAULT_WEB_PORT,
-} from "./constants";
+import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 
