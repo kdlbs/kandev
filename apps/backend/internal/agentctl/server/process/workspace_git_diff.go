@@ -129,6 +129,29 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 	return string(data), truncated
 }
 
+// resolveNumstatPath resolves a numstat path that may contain rename notation
+// (e.g. "old.txt => new.txt" or "{old => new}/file.txt") to the new file path.
+// For non-rename paths, returns the input unchanged.
+func resolveNumstatPath(numstatPath string) string {
+	arrowIdx := strings.Index(numstatPath, " => ")
+	if arrowIdx == -1 {
+		return numstatPath
+	}
+
+	// Check for brace-style rename: {old => new}/suffix or prefix/{old => new}/suffix
+	braceOpen := strings.LastIndex(numstatPath[:arrowIdx], "{")
+	braceClose := strings.Index(numstatPath[arrowIdx:], "}")
+	if braceOpen != -1 && braceClose != -1 {
+		prefix := numstatPath[:braceOpen]
+		newPart := numstatPath[arrowIdx+4 : arrowIdx+braceClose]
+		suffix := numstatPath[arrowIdx+braceClose+1:]
+		return prefix + newPart + suffix
+	}
+
+	// Simple rename: "old.txt => new.txt"
+	return numstatPath[arrowIdx+4:]
+}
+
 // enrichWithUnstagedDiff populates additions/deletions and diff content for files
 // with unstaged changes by comparing the worktree against baseRef.
 func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
@@ -154,7 +177,11 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *
 		}
 		additions, _ := strconv.Atoi(parts[0])
 		deletions, _ := strconv.Atoi(parts[1])
-		filePath := parts[2]
+		numstatPath := parts[2]
+
+		// Resolve rename notation (e.g. "old => new") to the new path,
+		// which is the key used in the Files map.
+		filePath := resolveNumstatPath(numstatPath)
 
 		// Only update file info if it exists in status (uncommitted changes).
 		// Files that appear in diff but not in status are committed changes - we don't
@@ -210,7 +237,11 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 		}
 		additions, _ := strconv.Atoi(parts[0])
 		deletions, _ := strconv.Atoi(parts[1])
-		filePath := parts[2]
+		numstatPath := parts[2]
+
+		// Resolve rename notation (e.g. "old => new") to the new path,
+		// which is the key used in the Files map.
+		filePath := resolveNumstatPath(numstatPath)
 
 		fileInfo, exists := update.Files[filePath]
 		if !exists {

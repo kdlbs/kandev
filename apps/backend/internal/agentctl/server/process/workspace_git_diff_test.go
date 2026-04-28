@@ -217,3 +217,69 @@ func TestEnrichUntrackedFileDiffs_SmallTextFile(t *testing.T) {
 		t.Errorf("Additions = %d, want 1", fi.Additions)
 	}
 }
+
+func TestResolveNumstatPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain path", "src/main.go", "src/main.go"},
+		{"simple rename", "old.txt => new.txt", "new.txt"},
+		{"brace rename same dir", "{old.txt => new.txt}", "new.txt"},
+		{"brace rename with prefix", "src/{old.go => new.go}", "src/new.go"},
+		{"brace rename with suffix", "{old => new}/file.go", "new/file.go"},
+		{"brace rename with prefix and suffix", "src/{v1 => v2}/handler.go", "src/v2/handler.go"},
+		{"directory rename", "pkg/{old => new}/main.go", "pkg/new/main.go"},
+		{"path with spaces", "my dir/file.txt", "my dir/file.txt"},
+		{"rename with spaces", "old file.txt => new file.txt", "new file.txt"},
+		// LastIndex on `{` ensures git's own brace is picked, not the filename's leading `{`.
+		{"filename starts with brace", "{{page => layout}}.svelte", "{layout}.svelte"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveNumstatPath(tt.input)
+			if got != tt.expected {
+				t.Errorf("resolveNumstatPath(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEnrichStagedDiff_RenamedFile(t *testing.T) {
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	// Create and commit a file, then rename + modify it
+	writeFile(t, repoDir, "original.txt", "line1\nline2\nline3\n")
+	runGit(t, repoDir, "add", "original.txt")
+	runGit(t, repoDir, "commit", "-m", "add original")
+
+	runGit(t, repoDir, "mv", "original.txt", "renamed.txt")
+	writeFile(t, repoDir, "renamed.txt", "line1\nline2 modified\nline3\nline4\n")
+	runGit(t, repoDir, "add", "renamed.txt")
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	update := &streams.GitStatusUpdate{
+		Files: map[string]streams.FileInfo{
+			"renamed.txt": {
+				Path:    "renamed.txt",
+				Status:  "renamed",
+				Staged:  true,
+				OldPath: "original.txt",
+			},
+		},
+	}
+
+	wt.enrichWithStagedDiff(context.Background(), update, "HEAD")
+
+	fi := update.Files["renamed.txt"]
+	if fi.Diff == "" {
+		t.Error("expected non-empty Diff for renamed+modified file")
+	}
+	if fi.Additions == 0 && fi.Deletions == 0 {
+		t.Error("expected non-zero additions or deletions for renamed+modified file")
+	}
+}
