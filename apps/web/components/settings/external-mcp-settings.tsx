@@ -47,7 +47,7 @@ export function ExternalMcpSettings() {
       <SettingsSection
         icon={<IconPlugConnected className="h-5 w-5" />}
         title="Endpoints"
-        description="Bind to localhost only. No authentication is required because the endpoint is reachable solely from your machine."
+        description="Loopback-only: requests from anything other than 127.0.0.1 / ::1 are rejected. No authentication is required because the endpoint is only reachable from this machine."
       >
         <Card>
           <CardHeader>

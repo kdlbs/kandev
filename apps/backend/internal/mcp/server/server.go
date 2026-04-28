@@ -142,6 +142,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		server.WithToolCapabilities(true),
 	)
 	s.registerTools()
+	s.running = true
 	return s
 }
 
@@ -381,11 +382,11 @@ func (s *Server) registerKanbanTools() {
 }
 
 // registerCreateTaskTool registers the create_task_kandev tool. Shared between
-// kanban (task) mode and external mode.
+// kanban (task) mode and external mode. The tool description and parent_id
+// guidance differ by mode: in external mode there is no current task, so the
+// 'self' shorthand is omitted.
 func (s *Server) registerCreateTaskTool() {
-	s.mcpServer.AddTool(
-		mcp.NewTool("create_task_kandev",
-			mcp.WithDescription(`Create a new task or subtask and auto-start an agent on it.
+	toolDesc := `Create a new task or subtask and auto-start an agent on it.
 
 WHEN TO USE parent_id='self':
 - Breaking down your current task into phases/steps → use parent_id='self'
@@ -400,8 +401,24 @@ IMPORTANT:
 - Subtasks inherit repositories, workspace, workflow, agent profile, and executor from parent
 - Top-level tasks need explicit repository via repository_id or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
-- Set start_agent=false to create without starting an agent`),
-			mcp.WithString("parent_id", mcp.Description("Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks.")),
+- Set start_agent=false to create without starting an agent`
+	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
+
+	if s.mode == ModeExternal {
+		toolDesc = `Create a new top-level task and auto-start an agent on it.
+
+IMPORTANT:
+- Requires workspace_id, workflow_id, and repository (use repository_id or local_path)
+- 'description' is the agent's initial prompt — be specific and detailed
+- Set start_agent=false to create without starting an agent
+- Use parent_id only when delegating to a known existing task by its ID`
+		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
+	}
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_task_kandev",
+			mcp.WithDescription(toolDesc),
+			mcp.WithString("parent_id", mcp.Description(parentDesc)),
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID (required for top-level tasks, inherited from parent for subtasks)")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID (required for top-level tasks, inherited from parent for subtasks)")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),

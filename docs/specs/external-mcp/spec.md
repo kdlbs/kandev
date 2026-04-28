@@ -12,7 +12,7 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 
 ## What
 
-- The Kandev backend exposes an MCP server on its existing HTTP port (default `38429`) bound to `127.0.0.1`.
+- The Kandev backend exposes an MCP server on its existing HTTP port (default `38429`). The MCP routes are protected by a loopback-only middleware that rejects any request whose source IP is not `127.0.0.1` / `::1`, regardless of the listen address the backend is bound to.
 - Users register Kandev as an MCP server in their external coding agent using one of:
   - Streamable HTTP: `http://localhost:38429/mcp`
   - SSE: `http://localhost:38429/mcp/sse`
