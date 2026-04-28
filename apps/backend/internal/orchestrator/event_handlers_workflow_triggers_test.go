@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -352,6 +353,65 @@ func TestProcessOnEnter(t *testing.T) {
 		pm, _ := updated.Metadata["plan_mode"].(bool)
 		if !pm {
 			t.Error("expected plan_mode to persist in session metadata")
+		}
+	})
+
+	// Regression: a workflow transition to a step without auto_start_agent
+	// (e.g. Review) must still drain a user-queued message. Pre-#677 the drain
+	// happened in handleAgentReady after inline processOnEnter returned;
+	// #677 made handleAgentReady early-return on transition, which orphaned
+	// the queue for any step that didn't auto-start.
+	t.Run("drains user-queued message when entering step without auto_start_agent", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Mirror applyEngineTransition's pre-flip so processOnEnter sees the
+		// session in the same state it would in production.
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateWaitingForInput
+		session.AgentExecutionID = "exec-1"
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{isAgentRunning: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "user queued msg", "", "user", false, nil); err != nil {
+			t.Fatalf("failed to seed queued message: %v", err)
+		}
+
+		reviewStep := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,
+			// No on_enter actions — this is the broken case before the fix.
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description")
+
+		// executeQueuedMessage runs in a goroutine; wait for it to call PromptAgent.
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			agentMgr.mu.Lock()
+			n := len(agentMgr.capturedPrompts)
+			agentMgr.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("timed out waiting for queued message to be sent to agent")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		agentMgr.mu.Lock()
+		got := agentMgr.capturedPrompts[0]
+		agentMgr.mu.Unlock()
+		if got != "user queued msg" {
+			t.Fatalf("agent received %q, want %q", got, "user queued msg")
+		}
+
+		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.IsQueued {
+			t.Fatalf("expected queue to be drained, still queued: %+v", status.Message)
 		}
 	})
 

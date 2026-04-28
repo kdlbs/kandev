@@ -610,6 +610,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		s.drainQueuedMessageAfterTransition(ctx, sessionID)
 		return
 	}
 
@@ -702,7 +703,32 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		// handleAgentReady early-returns when a workflow transition occurs (#677),
+		// so user-queued messages would otherwise stick forever on transitions to
+		// steps without auto_start_agent (e.g. Review). Drain here to match the
+		// pre-#677 behavior where handleAgentReady always drained after returning
+		// from inline processOnEnter.
+		s.drainQueuedMessageAfterTransition(ctx, sessionID)
 	}
+}
+
+// drainQueuedMessageAfterTransition takes any user-queued message and dispatches
+// it for execution. Used by processOnEnter branches that don't auto-start the
+// agent — without this, the message is orphaned because handleAgentReady skips
+// the queue when a workflow transition occurred.
+func (s *Service) drainQueuedMessageAfterTransition(ctx context.Context, sessionID string) {
+	if s.messageQueue == nil {
+		return
+	}
+	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	if !ok || queuedMsg == nil {
+		return
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+		return
+	}
+	go s.executeQueuedMessage(sessionID, queuedMsg)
 }
 
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
