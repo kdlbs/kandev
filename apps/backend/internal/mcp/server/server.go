@@ -395,11 +395,11 @@ WHEN TO USE parent_id='self':
 
 WHEN TO OMIT parent_id (top-level task):
 - Creating an unrelated, standalone task
-- Requires workspace_id, workflow_id, and repository (use repository_id or local_path)
+- Requires workspace_id, workflow_id, and repository (use repository_url, repository_id, or local_path)
 
 IMPORTANT:
 - Subtasks inherit repositories, workspace, workflow, agent profile, and executor from parent
-- Top-level tasks need explicit repository via repository_id or local_path
+- Top-level tasks need explicit repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
 - Set start_agent=false to create without starting an agent`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
@@ -408,7 +408,7 @@ IMPORTANT:
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
 
 IMPORTANT:
-- Requires workspace_id, workflow_id, and repository (use repository_id or local_path)
+- Requires workspace_id, workflow_id, and repository (use repository_url, repository_id, or local_path)
 - 'description' is the agent's initial prompt — be specific and detailed
 - Set start_agent=false to create without starting an agent
 - Use parent_id only when delegating to a known existing task by its ID`
@@ -429,6 +429,7 @@ IMPORTANT:
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true. Set to false to create the task without starting an agent.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID for top-level tasks. Not needed for subtasks (inherited from parent).")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo') for top-level tasks. Will create/find the repository automatically. Preferred for local worktree flow.")),
+			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo') for top-level tasks. The repository will be cloned automatically on first use. Not needed for subtasks (inherited from parent).")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional, defaults to repository's default branch.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),

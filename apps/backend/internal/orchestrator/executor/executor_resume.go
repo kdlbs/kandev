@@ -417,6 +417,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		AgentProfileID:  session.AgentProfileID,
 		TaskDescription: task.Description,
 		Priority:        task.Priority,
+		IsEphemeral:     task.IsEphemeral,
 	}
 
 	metadata := map[string]interface{}{}

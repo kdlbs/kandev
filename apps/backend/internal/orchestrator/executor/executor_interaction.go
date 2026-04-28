@@ -289,6 +289,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		ACPSessionID:    acpSessionID,
 		ExecutorType:    execConfig.ExecutorType,
 		Metadata:        execConfig.Metadata,
+		IsEphemeral:     task.IsEphemeral,
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.

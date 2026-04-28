@@ -238,6 +238,7 @@ type LaunchAgentRequest struct {
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "config" activates config-mode tools
+	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string

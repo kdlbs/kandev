@@ -510,6 +510,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		TaskDescription: prompt,
 		Priority:        task.Priority,
 		SessionID:       sessionID,
+		IsEphemeral:     task.IsEphemeral,
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)

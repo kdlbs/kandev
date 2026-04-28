@@ -292,6 +292,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 type mcpRepositoryInput struct {
 	RepositoryID string `json:"repository_id"`
 	LocalPath    string `json:"local_path"`
+	GitHubURL    string `json:"github_url"`
 	BaseBranch   string `json:"base_branch"`
 }
 
@@ -339,8 +340,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		req.WorkflowID = resolved.WorkflowID
 	}
 
+	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
+	if req.WorkspaceID == "" && h.taskSvc != nil {
+		if workspaces, wsErr := h.taskSvc.ListWorkspaces(ctx); wsErr == nil && len(workspaces) == 1 {
+			req.WorkspaceID = workspaces[0].ID
+		}
+	}
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+
+	if req.WorkflowID == "" && h.taskSvc != nil {
+		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID); wfErr == nil && len(workflows) == 1 {
+			req.WorkflowID = workflows[0].ID
+		}
 	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
@@ -389,6 +402,7 @@ func (h *Handlers) resolveTaskRepositories(
 			repos = append(repos, service.TaskRepositoryInput{
 				RepositoryID: r.RepositoryID,
 				LocalPath:    r.LocalPath,
+				GitHubURL:    r.GitHubURL,
 				BaseBranch:   r.BaseBranch,
 			})
 		}
@@ -399,6 +413,9 @@ func (h *Handlers) resolveTaskRepositories(
 		parent, err := h.taskSvc.GetTask(ctx, parentID)
 		if err != nil {
 			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
+		}
+		if parent.IsEphemeral {
+			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
 		}
 		var repos []service.TaskRepositoryInput
 		for _, r := range parent.Repositories {
@@ -415,11 +432,11 @@ func (h *Handlers) resolveTaskRepositories(
 		}, nil
 	}
 
-	// For top-level tasks, inherit from the calling agent's current task.
+	// For top-level tasks, inherit repos and workspace from the calling agent's current task.
 	if sourceTaskID != "" {
 		sourceTask, err := h.taskSvc.GetTask(ctx, sourceTaskID)
 		if err != nil {
-			h.logger.Warn("source task not found, skipping repo inheritance",
+			h.logger.Warn("source task not found, skipping inheritance",
 				zap.String("source_task_id", sourceTaskID), zap.Error(err))
 			return taskRepoResult{}, nil
 		}
@@ -431,7 +448,10 @@ func (h *Handlers) resolveTaskRepositories(
 				CheckoutBranch: r.CheckoutBranch,
 			})
 		}
-		return taskRepoResult{Repos: repos}, nil
+		return taskRepoResult{
+			Repos:       repos,
+			WorkspaceID: sourceTask.WorkspaceID,
+		}, nil
 	}
 
 	return taskRepoResult{}, nil

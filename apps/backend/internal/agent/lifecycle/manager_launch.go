@@ -167,9 +167,17 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 			return resolved, "", "", ""
 		}
 	}
-	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
+	// For ephemeral tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
 	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
+	// Non-ephemeral tasks should not receive a fallback workspace — they should fail loudly
+	// if no repository is configured (the MCP handler validates this for auto-start tasks).
 	if workspacePath == "" && req.SessionID != "" && m.dataDir != "" {
+		if !req.IsEphemeral {
+			m.logger.Warn("non-ephemeral task has no workspace path; skipping quick-chat fallback",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID))
+			return "", "", "", ""
+		}
 		quickChatDir := filepath.Join(m.dataDir, "quick-chat")
 		if err := os.MkdirAll(quickChatDir, 0755); err != nil {
 			m.logger.Warn("failed to create quick-chat directory, continuing without workspace",

@@ -120,17 +120,22 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		// Add repository info (only valid for top-level tasks)
 		repositoryID := req.GetString("repository_id", "")
 		localPath := req.GetString("local_path", "")
+		repositoryURL := req.GetString("repository_url", "")
 		baseBranch := req.GetString("base_branch", "")
-		if (repositoryID != "" || localPath != "") && parentID != "" {
-			return mcp.NewToolResultError("repository_id and local_path are only valid for top-level tasks; subtasks inherit their repository from the parent"), nil
+		hasRepo := repositoryID != "" || localPath != "" || repositoryURL != ""
+		if hasRepo && parentID != "" {
+			return mcp.NewToolResultError("repository_id, local_path, and repository_url are only valid for top-level tasks; subtasks inherit their repository from the parent"), nil
 		}
-		if repositoryID != "" || localPath != "" {
+		if hasRepo {
 			repo := map[string]string{}
 			if repositoryID != "" {
 				repo["repository_id"] = repositoryID
 			}
 			if localPath != "" {
 				repo["local_path"] = localPath
+			}
+			if repositoryURL != "" {
+				repo["github_url"] = repositoryURL
 			}
 			if baseBranch != "" {
 				repo["base_branch"] = baseBranch

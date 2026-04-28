@@ -263,6 +263,10 @@ type LaunchRequest struct {
 	Metadata        map[string]interface{}
 	ModelOverride   string // If set, use this model instead of the profile's model
 
+	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
+	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
+	IsEphemeral bool
+
 	// Executor configuration - determines which runtime to use
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
