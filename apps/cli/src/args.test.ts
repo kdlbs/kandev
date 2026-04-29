@@ -96,6 +96,20 @@ describe("resolvePorts", () => {
     expect(r.backendPort).toBe(6666);
   });
 
+  it("--port wins over KANDEV_BACKEND_PORT (explicit CLI > env var)", () => {
+    const r = resolvePorts({ command: "start", port: 3000 }, {
+      KANDEV_BACKEND_PORT: "4000",
+    } as NodeJS.ProcessEnv);
+    expect(r.backendPort).toBe(3000);
+  });
+
+  it("--port wins over KANDEV_WEB_PORT in dev (explicit CLI > env var)", () => {
+    const r = resolvePorts({ command: "dev", port: 3000 }, {
+      KANDEV_WEB_PORT: "4000",
+    } as NodeJS.ProcessEnv);
+    expect(r.webPort).toBe(3000);
+  });
+
   it("KANDEV_PORT routes to web port for dev", () => {
     const r = resolvePorts({ command: "dev" }, { KANDEV_PORT: "9000" } as NodeJS.ProcessEnv);
     expect(r).toEqual({ backendPort: undefined, webPort: 9000 });

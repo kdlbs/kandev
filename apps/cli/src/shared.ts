@@ -123,8 +123,8 @@ export function logStartupInfo(options: StartupInfoOptions): void {
   const backendUrl = ports.backendUrl;
   const webUrl = `http://localhost:${ports.webPort}`;
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] backend (api):", backendUrl);
-  console.log("[kandev] web (internal):", webUrl);
+  console.log("[kandev] backend:", backendUrl);
+  console.log("[kandev] web:", webUrl);
   console.log("[kandev] agentctl port:", ports.agentctlPort);
   console.log("[kandev] mcp url:", `${backendUrl}/mcp`);
   if (dbPath) {

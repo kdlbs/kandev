@@ -122,19 +122,23 @@ export type ResolvedPorts = {
   webPort?: number;
 };
 
-// `--port` (and KANDEV_PORT) maps to the public front door: backend in run/start (proxied), web in dev (HMR direct). Explicit per-process flags still win.
+// `--port` (and KANDEV_PORT) maps to the public front door: backend in run/start (proxied), web in dev (HMR direct).
+// Precedence: explicit per-process CLI flag > generic CLI flag (--port) > explicit env var > generic env var (KANDEV_PORT).
+// Explicit CLI always beats env, so a stray KANDEV_BACKEND_PORT can't silently override --port.
 export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): ResolvedPorts {
-  const publicPort = options.port ?? envPort(env, "KANDEV_PORT");
-  let backendPort = options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT");
-  let webPort = options.webPort ?? envPort(env, "KANDEV_WEB_PORT");
-  if (publicPort !== undefined) {
-    if (options.command === "dev") {
-      webPort = webPort ?? publicPort;
-    } else {
-      backendPort = backendPort ?? publicPort;
-    }
+  const genericCli = options.port;
+  const genericEnv = envPort(env, "KANDEV_PORT");
+  if (options.command === "dev") {
+    return {
+      backendPort: options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT"),
+      webPort: options.webPort ?? genericCli ?? envPort(env, "KANDEV_WEB_PORT") ?? genericEnv,
+    };
   }
-  return { backendPort, webPort };
+  return {
+    backendPort:
+      options.backendPort ?? genericCli ?? envPort(env, "KANDEV_BACKEND_PORT") ?? genericEnv,
+    webPort: options.webPort ?? envPort(env, "KANDEV_WEB_PORT"),
+  };
 }
 
 function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
