@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -88,8 +89,16 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		return nil, err
 	}
 
+	// Notify subscribers that agentctl is starting. createExecution already
+	// spawns waitForAgentctlReady which publishes AgentctlReady/AgentctlError,
+	// but AgentctlStarting is only published in the Launch path — add it here
+	// so workspace-only executions also notify the frontend.
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
+
 	// For workspace-only executions (no agent), wait for agentctl to be ready
-	// then connect the workspace stream so process output can be received
+	// then connect the workspace stream so process output can be received.
+	// Note: AgentctlReady/Error events are already handled by waitForAgentctlReady
+	// (started by createExecution), so this goroutine only connects the stream.
 	go func() {
 		// Use detached context that respects stopCh for graceful shutdown
 		waitCtx, cancel := appctx.Detached(ctx, m.stopCh, 60*time.Second)
