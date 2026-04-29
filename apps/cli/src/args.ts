@@ -111,8 +111,8 @@ function takeValue(argv: string[], i: number, flag: string): string {
 
 function parsePort(raw: string, flag: string): number {
   const n = Number(raw);
-  if (!Number.isFinite(n)) {
-    throw new ParseError(`${flag} value must be a number, got "${raw}"`);
+  if (!Number.isInteger(n)) {
+    throw new ParseError(`${flag} value must be an integer, got "${raw}"`);
   }
   return n;
 }
@@ -141,7 +141,7 @@ function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
   const val = env[name];
   if (!val) return undefined;
   const n = Number(val);
-  if (!Number.isFinite(n)) throw new ParseError(`${name} must be a number, got "${val}"`);
+  if (!Number.isInteger(n)) throw new ParseError(`${name} must be an integer, got "${val}"`);
   return n;
 }
 

@@ -52,7 +52,11 @@ describe("parseArgs", () => {
   });
 
   it("throws ParseError on a non-numeric port value", () => {
-    expect(() => parseArgs(["--port=abc"])).toThrow(/--port value must be a number/);
+    expect(() => parseArgs(["--port=abc"])).toThrow(/--port value must be an integer/);
+  });
+
+  it("throws ParseError on a non-integer port value", () => {
+    expect(() => parseArgs(["--port=3000.5"])).toThrow(/--port value must be an integer/);
   });
 });
 
@@ -107,7 +111,13 @@ describe("resolvePorts", () => {
   it("throws ParseError when KANDEV_BACKEND_PORT is not a number", () => {
     expect(() =>
       resolvePorts({ command: "run" }, { KANDEV_BACKEND_PORT: "nope" } as NodeJS.ProcessEnv),
-    ).toThrow(/KANDEV_BACKEND_PORT must be a number/);
+    ).toThrow(/KANDEV_BACKEND_PORT must be an integer/);
+  });
+
+  it("throws ParseError when KANDEV_PORT is a float", () => {
+    expect(() =>
+      resolvePorts({ command: "run" }, { KANDEV_PORT: "3000.5" } as NodeJS.ProcessEnv),
+    ).toThrow(/KANDEV_PORT must be an integer/);
   });
 });
 
