@@ -332,6 +332,49 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	return message, nil
 }
 
+// ExpirePendingPermissionRequestsForSession atomically marks every
+// permission_request message for the session whose metadata.status is NULL
+// or "pending" as "expired". Returns the IDs of rows that were updated so
+// the caller can publish message.updated events.
+//
+// The WHERE clause is what prevents the well-known race with the WS
+// approve/reject path: by the time we reach this statement, a concurrent
+// `UpdatePermissionMessage(... "approved")` may already have committed —
+// the WHERE filter sees the new "approved" status and excludes that row,
+// so this sweep can never demote a user-resolved decision back to
+// "expired".
+func (r *Repository) ExpirePendingPermissionRequestsForSession(ctx context.Context, sessionID string) ([]string, error) {
+	drv := r.db.DriverName()
+	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
+	selectQuery := fmt.Sprintf(`
+		SELECT id
+		FROM task_session_messages
+		WHERE task_session_id = ?
+		  AND type = 'permission_request'
+		  AND (%s IS NULL OR %s IN ('', 'pending'))
+	`, statusExpr, statusExpr)
+
+	var ids []string
+	if err := r.db.SelectContext(ctx, &ids, r.db.Rebind(selectQuery), sessionID); err != nil {
+		return nil, fmt.Errorf("list pending permission_request messages: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	updateQuery := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s
+		WHERE task_session_id = ?
+		  AND type = 'permission_request'
+		  AND (%s IS NULL OR %s IN ('', 'pending'))
+	`, dialect.JSONSet(drv, "metadata", "status", "expired"), statusExpr, statusExpr)
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(updateQuery), sessionID); err != nil {
+		return nil, fmt.Errorf("expire pending permission_request messages: %w", err)
+	}
+	return ids, nil
+}
+
 // CompletePendingToolCallsForTurn marks all non-terminal tool call messages for a turn as "complete".
 // This is a safety net to ensure no tool calls remain stuck in a non-terminal state (pending,
 // running, in_progress, etc.) after a turn completes.

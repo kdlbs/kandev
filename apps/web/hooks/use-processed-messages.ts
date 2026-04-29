@@ -37,7 +37,19 @@ function isPermissionVisible(message: Message, toolCallIds: Set<string>): boolea
   const toolCallId = metadata?.tool_call_id;
   if (toolCallId && toolCallIds.has(toolCallId)) return false;
   const status = metadata?.status;
-  if (status === "approved" || status === "denied" || status === "cancelled") return false;
+  // Backend writes status "approved" / "rejected" / "expired" (see
+  // task/service/service_messages.go). The earlier "denied" / "cancelled"
+  // values are accepted as legacy aliases — if a real resolved permission
+  // ever slips past the toolCallIds dedup, never resurface it as a fresh
+  // approve card.
+  if (
+    status === "approved" ||
+    status === "rejected" ||
+    status === "denied" ||
+    status === "expired" ||
+    status === "cancelled"
+  )
+    return false;
   return true;
 }
 

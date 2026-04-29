@@ -630,59 +630,45 @@ func (s *Service) FindPermissionMessageByToolCallID(ctx context.Context, session
 	return latest, nil
 }
 
-// ExpirePendingPermissionsForSession marks all permission_request messages
-// for the session that are still pending (no terminal status set) as
-// "expired", reusing UpdatePermissionMessage so each message also publishes
-// the message.updated event and cancels its related tool_call.
+// ExpirePendingPermissionsForSession atomically marks every
+// permission_request message for the session whose status is still
+// missing/"pending" as "expired", and publishes message.updated for each
+// row that flipped. Used by the orchestrator on turn complete to clean up
+// permission frames an agent emitted but never resolved (issue #717).
 //
-// Called by the orchestrator on agent turn completion to recover from agents
-// that emit permission_request frames but never resolve them — see issue
-// #717 (OpenCode ACP). Returns the number of messages transitioned.
+// The atomicity matters: the WS approve/reject path runs a separate
+// `UpdatePermissionMessage(... "approved")` and the agent's `complete`
+// notification can land while that write is in flight. A read-then-write
+// implementation here would race and overwrite "approved" with "expired",
+// leaving the FE rendering a stuck banner whose first click hits "pending
+// permission not found" because agentctl already consumed the response.
+// The repository's WHERE clause excludes any row that has already moved
+// to a terminal status, so a concurrent approve always wins the race.
 func (s *Service) ExpirePendingPermissionsForSession(ctx context.Context, sessionID string) (int, error) {
-	msgs, err := s.messages.ListMessages(ctx, sessionID)
+	expiredIDs, err := s.messages.ExpirePendingPermissionRequestsForSession(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
-
-	expired := 0
-	for _, msg := range msgs {
-		if msg.Type != models.MessageTypePermissionRequest {
-			continue
-		}
-		if !isPendingPermissionStatus(msg.Metadata) {
-			continue
-		}
-		pendingID, _ := msg.Metadata["pending_id"].(string)
-		if pendingID == "" {
-			continue
-		}
-		if err := s.UpdatePermissionMessage(ctx, sessionID, pendingID, "expired"); err != nil {
-			s.logger.Error("failed to expire pending permission message",
+	for _, id := range expiredIDs {
+		msg, err := s.messages.GetMessage(ctx, id)
+		if err != nil || msg == nil {
+			s.logger.Warn("expired permission message not found for event publish",
 				zap.String("session_id", sessionID),
-				zap.String("pending_id", pendingID),
-				zap.String("message_id", msg.ID),
+				zap.String("message_id", id),
 				zap.Error(err))
 			continue
 		}
-		expired++
+		s.publishMessageEvent(ctx, events.MessageUpdated, msg)
+		if toolCallID, ok := msg.Metadata["tool_call_id"].(string); ok && toolCallID != "" {
+			if err := s.UpdateToolCallMessage(ctx, sessionID, toolCallID, "error", "", "", nil); err != nil {
+				s.logger.Warn("failed to cancel related tool call message after expire",
+					zap.String("tool_call_id", toolCallID),
+					zap.String("message_id", id),
+					zap.Error(err))
+			}
+		}
 	}
-	return expired, nil
-}
-
-// isPendingPermissionStatus reports whether a permission_request message's
-// metadata indicates it is still awaiting user resolution. Missing or empty
-// status counts as pending — the create path doesn't always set it.
-func isPendingPermissionStatus(metadata map[string]interface{}) bool {
-	if metadata == nil {
-		return true
-	}
-	status, _ := metadata["status"].(string)
-	switch status {
-	case "", "pending":
-		return true
-	default:
-		return false
-	}
+	return len(expiredIDs), nil
 }
 
 // UpdateClarificationMessage updates a clarification request message's status and response.

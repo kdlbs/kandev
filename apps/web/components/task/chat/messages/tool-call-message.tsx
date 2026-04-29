@@ -130,7 +130,10 @@ function parsePermission(permissionMessage: Message | undefined) {
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
   const permissionStatus = permissionMetadata?.status;
   const isPermissionPending =
-    !!permissionMessage && permissionStatus !== "approved" && permissionStatus !== "rejected";
+    !!permissionMessage &&
+    permissionStatus !== "approved" &&
+    permissionStatus !== "rejected" &&
+    permissionStatus !== "expired";
   return { permissionMetadata, permissionStatus, isPermissionPending };
 }
 

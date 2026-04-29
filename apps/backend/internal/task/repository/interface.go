@@ -67,6 +67,11 @@ type MessageRepository interface {
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	// ExpirePendingPermissionRequestsForSession atomically marks every
+	// permission_request message for the session whose metadata.status is
+	// missing, empty, or "pending" as "expired". Returns the IDs of the
+	// rows that were updated.
+	ExpirePendingPermissionRequestsForSession(ctx context.Context, sessionID string) ([]string, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
