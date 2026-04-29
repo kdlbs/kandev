@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
-import { KEY_SEQUENCES, ctrlChord } from "@/lib/terminal/key-sequences";
+import { KEY_SEQUENCES } from "@/lib/terminal/key-sequences";
 import { useShellKeySender } from "@/hooks/domains/session/use-shell-key-sender";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
+import { refocusXtermTextarea } from "@/lib/terminal/refocus-xterm";
+import { useShellModifiersStore, isActive } from "@/lib/terminal/shell-modifiers";
 
 export type MobileTerminalKeybarProps = {
   sessionId: string | null | undefined;
@@ -14,6 +16,9 @@ export type MobileTerminalKeybarProps = {
   baseBottomOffset?: string;
 };
 
+/** Height of the bar in px (border-t + py-1.5 + h-8 button). Used by the mobile layout to pad the terminal so content doesn't hide behind the bar. */
+export const KEYBAR_HEIGHT_PX = 48;
+
 type KeyDef = {
   /** Stable id used for data-testid (e.g. `keybar-key-esc`). */
   id: string;
@@ -21,10 +26,8 @@ type KeyDef = {
   label: ReactNode;
   /** Accessible label. */
   ariaLabel: string;
-  /** Sequence emitted on plain tap. */
+  /** Sequence emitted on tap. Ctrl/Shift transforms are applied downstream. */
   seq: string;
-  /** Character fed to ctrlChord when Ctrl is latched; null skips chording (use plain seq). */
-  chordChar?: string;
 };
 
 const KEYS: readonly KeyDef[] = [
@@ -38,20 +41,12 @@ const KEYS: readonly KeyDef[] = [
   { id: "end", label: "End", ariaLabel: "End", seq: KEY_SEQUENCES.end },
   { id: "pageup", label: "PgUp", ariaLabel: "Page Up", seq: KEY_SEQUENCES.pageUp },
   { id: "pagedown", label: "PgDn", ariaLabel: "Page Down", seq: KEY_SEQUENCES.pageDown },
-  { id: "pipe", label: "|", ariaLabel: "Pipe", seq: "|", chordChar: "|" },
-  { id: "tilde", label: "~", ariaLabel: "Tilde", seq: "~", chordChar: "~" },
-  { id: "slash", label: "/", ariaLabel: "Slash", seq: "/", chordChar: "/" },
-  { id: "dash", label: "-", ariaLabel: "Dash", seq: "-", chordChar: "-" },
-  { id: "underscore", label: "_", ariaLabel: "Underscore", seq: "_", chordChar: "_" },
+  { id: "pipe", label: "|", ariaLabel: "Pipe", seq: "|" },
+  { id: "tilde", label: "~", ariaLabel: "Tilde", seq: "~" },
+  { id: "slash", label: "/", ariaLabel: "Slash", seq: "/" },
+  { id: "dash", label: "-", ariaLabel: "Dash", seq: "-" },
+  { id: "underscore", label: "_", ariaLabel: "Underscore", seq: "_" },
 ];
-
-const LETTER_KEYS: readonly KeyDef[] = "abcdefghijklmnopqrstuvwxyz".split("").map((c) => ({
-  id: `letter-${c}`,
-  label: c,
-  ariaLabel: `Letter ${c}`,
-  seq: c,
-  chordChar: c,
-}));
 
 export function MobileTerminalKeybar({
   sessionId,
@@ -59,64 +54,64 @@ export function MobileTerminalKeybar({
   baseBottomOffset,
 }: MobileTerminalKeybarProps) {
   const send = useShellKeySender(sessionId);
-  const { bottomOffset, keyboardOpen } = useVisualViewportOffset();
-  const [ctrlLatched, setCtrlLatched] = useState(false);
-  const [ctrlSticky, setCtrlSticky] = useState(false);
+  const { keyboardOpen, viewportBottom } = useVisualViewportOffset();
+  const ctrl = useShellModifiersStore((s) => s.ctrl);
+  const shift = useShellModifiersStore((s) => s.shift);
+  const toggleCtrl = useShellModifiersStore((s) => s.toggleCtrl);
+  const toggleShift = useShellModifiersStore((s) => s.toggleShift);
 
-  const ctrlActive = ctrlLatched || ctrlSticky;
+  const tapSend = useCallback(
+    (data: string) => {
+      refocusXtermTextarea();
+      send(data);
+    },
+    [send],
+  );
 
   const onCtrlTap = useCallback(() => {
-    if (ctrlSticky) {
-      setCtrlSticky(false);
-      setCtrlLatched(false);
-      return;
-    }
-    if (ctrlLatched) {
-      setCtrlSticky(true);
-      return;
-    }
-    setCtrlLatched(true);
-  }, [ctrlLatched, ctrlSticky]);
+    refocusXtermTextarea();
+    toggleCtrl();
+  }, [toggleCtrl]);
 
-  const onKeyTap = useCallback(
-    (key: KeyDef) => {
-      const chord = ctrlActive && key.chordChar ? ctrlChord(key.chordChar) : null;
-      send(chord ?? key.seq);
-      if (ctrlLatched && !ctrlSticky) setCtrlLatched(false);
-    },
-    [ctrlActive, ctrlLatched, ctrlSticky, send],
-  );
+  const onShiftTap = useCallback(() => {
+    refocusXtermTextarea();
+    toggleShift();
+  }, [toggleShift]);
 
   if (!visible || !sessionId) return null;
 
-  const bottom = resolveBottom({ keyboardOpen, bottomOffset, baseBottomOffset });
+  const position = resolvePosition({ keyboardOpen, viewportBottom, baseBottomOffset });
 
   return (
     <div
       data-testid="mobile-terminal-keybar"
       className="fixed left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur"
-      style={{ bottom }}
+      style={{ ...position, height: `${KEYBAR_HEIGHT_PX}px` }}
     >
       <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5">
-        <KeybarButton
+        <ModifierButton
           id="ctrl"
+          label="Ctrl"
           ariaLabel="Control"
-          ariaPressed={ctrlActive}
+          state={ctrl}
           onTap={onCtrlTap}
-          active={ctrlActive}
-          sticky={ctrlSticky}
-        >
-          Ctrl
-        </KeybarButton>
+        />
+        <ModifierButton
+          id="shift"
+          label="Shift"
+          ariaLabel="Shift"
+          state={shift}
+          onTap={onShiftTap}
+        />
         <KeybarButton
           id="ctrl-c"
           ariaLabel="Control C"
-          onTap={() => send(KEY_SEQUENCES.ctrlC)}
+          onTap={() => tapSend(KEY_SEQUENCES.ctrlC)}
           variant="destructive"
         >
           ^C
         </KeybarButton>
-        <KeybarButton id="ctrl-d" ariaLabel="Control D" onTap={() => send(KEY_SEQUENCES.ctrlD)}>
+        <KeybarButton id="ctrl-d" ariaLabel="Control D" onTap={() => tapSend(KEY_SEQUENCES.ctrlD)}>
           ^D
         </KeybarButton>
         {KEYS.map((key) => (
@@ -124,39 +119,58 @@ export function MobileTerminalKeybar({
             key={key.id}
             id={key.id}
             ariaLabel={key.ariaLabel}
-            onTap={() => onKeyTap(key)}
+            onTap={() => tapSend(key.seq)}
           >
             {key.label}
           </KeybarButton>
         ))}
-        {ctrlActive &&
-          LETTER_KEYS.map((key) => (
-            <KeybarButton
-              key={key.id}
-              id={key.id}
-              ariaLabel={key.ariaLabel}
-              onTap={() => onKeyTap(key)}
-            >
-              {key.label}
-            </KeybarButton>
-          ))}
       </div>
     </div>
   );
 }
 
-function resolveBottom({
+function resolvePosition({
   keyboardOpen,
-  bottomOffset,
+  viewportBottom,
   baseBottomOffset,
 }: {
   keyboardOpen: boolean;
-  bottomOffset: number;
+  viewportBottom: number;
   baseBottomOffset: string | undefined;
-}): string {
-  if (keyboardOpen) return `${bottomOffset}px`;
-  if (baseBottomOffset) return `calc(${baseBottomOffset} + env(safe-area-inset-bottom, 0px))`;
-  return "env(safe-area-inset-bottom, 0px)";
+}): React.CSSProperties {
+  // iOS Safari drifts fixed elements positioned via `bottom` while the visual
+  // viewport scrolls with the keyboard up. Anchoring via `top` tied to the
+  // visual viewport's bottom edge stays glued to the keyboard.
+  if (keyboardOpen) {
+    return { top: `${viewportBottom - KEYBAR_HEIGHT_PX}px`, bottom: "auto" };
+  }
+  const base = baseBottomOffset
+    ? `calc(${baseBottomOffset} + env(safe-area-inset-bottom, 0px))`
+    : "env(safe-area-inset-bottom, 0px)";
+  return { bottom: base };
+}
+
+type ModifierButtonProps = {
+  id: string;
+  label: string;
+  ariaLabel: string;
+  state: { latched: boolean; sticky: boolean };
+  onTap: () => void;
+};
+
+function ModifierButton({ id, label, ariaLabel, state, onTap }: ModifierButtonProps) {
+  return (
+    <KeybarButton
+      id={id}
+      ariaLabel={ariaLabel}
+      ariaPressed={isActive(state)}
+      active={isActive(state)}
+      sticky={state.sticky}
+      onTap={onTap}
+    >
+      {label}
+    </KeybarButton>
+  );
 }
 
 type KeybarButtonProps = {
@@ -189,10 +203,14 @@ function KeybarButton({
       aria-pressed={ariaPressed}
       data-testid={`keybar-key-${id}`}
       data-sticky={sticky ? "true" : undefined}
+      onPointerDown={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.preventDefault()}
       onClick={onTap}
+      style={{ touchAction: "manipulation" }}
       className={cn(
         "h-8 min-w-10 shrink-0 px-2 font-mono text-sm cursor-pointer",
-        sticky && "ring-2 ring-primary/60",
+        active && "ring-2 ring-primary/60",
+        sticky && "ring-primary",
       )}
     >
       {children}

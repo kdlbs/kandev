@@ -43,6 +43,7 @@ describe("useVisualViewportOffset", () => {
     const { result } = renderHook(() => useVisualViewportOffset());
     expect(result.current.bottomOffset).toBe(0);
     expect(result.current.keyboardOpen).toBe(false);
+    expect(result.current.viewportBottom).toBe(800);
   });
 
   it("reports keyboard offset when visualViewport shrinks", () => {
@@ -55,6 +56,17 @@ describe("useVisualViewportOffset", () => {
 
     expect(result.current.bottomOffset).toBe(300);
     expect(result.current.keyboardOpen).toBe(true);
+    expect(result.current.viewportBottom).toBe(500);
+  });
+
+  it("viewportBottom tracks offsetTop + height for top-anchored positioning", () => {
+    const { result } = renderHook(() => useVisualViewportOffset());
+    act(() => {
+      vv.height = 600;
+      vv.offsetTop = 50;
+      vv.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.viewportBottom).toBe(650);
   });
 
   it("accounts for offsetTop", () => {
