@@ -221,6 +221,17 @@ func (s *Service) ListTeams(ctx context.Context, workspaceID string) ([]LinearTe
 	return client.ListTeams(ctx)
 }
 
+// ListStates returns the workflow states for a team identified by its key.
+// Mirrors the other Service methods so handlers never reach into clientFor
+// directly.
+func (s *Service) ListStates(ctx context.Context, workspaceID, teamKey string) ([]LinearWorkflowState, error) {
+	client, err := s.clientFor(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListStates(ctx, teamKey)
+}
+
 // SearchIssues runs a filtered search for the workspace.
 func (s *Service) SearchIssues(ctx context.Context, workspaceID string, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error) {
 	client, err := s.clientFor(ctx, workspaceID)
@@ -295,10 +306,15 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if secret == "" {
 		return nil, "", errors.New("no api key stored — paste one to test")
 	}
-	if stored, _ := s.store.GetConfig(ctx, req.WorkspaceID); stored != nil {
-		if cfg.AuthMethod == "" {
-			cfg.AuthMethod = stored.AuthMethod
-		}
+	stored, storeErr := s.store.GetConfig(ctx, req.WorkspaceID)
+	if storeErr != nil {
+		// Soft-fail: a transient DB error here only loses the saved-config
+		// fallback values; the inline credentials still work for the test.
+		s.log.Warn("linear: load stored config for credential resolution failed",
+			zap.String("workspace_id", req.WorkspaceID), zap.Error(storeErr))
+	}
+	if stored != nil && cfg.AuthMethod == "" {
+		cfg.AuthMethod = stored.AuthMethod
 	}
 	return cfg, secret, nil
 }

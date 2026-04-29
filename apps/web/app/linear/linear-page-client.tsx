@@ -45,7 +45,7 @@ function NotConfiguredNotice({ workspaceId }: { workspaceId?: string }) {
           Linear is not configured for this workspace.{" "}
           <Link
             href={workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings"}
-            className="underline font-medium"
+            className="underline font-medium cursor-pointer"
           >
             Configure Linear
           </Link>{" "}
@@ -394,7 +394,7 @@ function DisabledNotice({ workspaceId }: { workspaceId: string }) {
           Linear integration is disabled for this workspace.{" "}
           <Link
             href={`/settings/workspace/${workspaceId}/linear`}
-            className="underline font-medium"
+            className="underline font-medium cursor-pointer"
           >
             Re-enable it in settings
           </Link>

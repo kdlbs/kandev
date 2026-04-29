@@ -43,19 +43,39 @@ export function LinearQuickTaskLauncher({
 }: QuickTaskLauncherProps) {
   const router = useRouter();
 
-  const defaultWorkflow = workflows[0];
-  const sortedStepsForWorkflow = useMemo(
-    () =>
-      steps
-        .filter((s) => s.workflow_id === defaultWorkflow?.id)
-        .sort((a, b) => a.position - b.position),
-    [steps, defaultWorkflow],
-  );
-  const defaultStep = sortedStepsForWorkflow[0];
-  const stepsForWorkflow = useMemo(
-    () => sortedStepsForWorkflow.map((s) => ({ id: s.id, title: s.name, events: s.events })),
-    [sortedStepsForWorkflow],
-  );
+  // Default to the first workflow that actually has steps, not just
+  // workflows[0] — otherwise an empty first workflow blocks Start task even
+  // when other workflows would work fine. Bundling the lookup, the sort and
+  // the dialog projection into one memo keeps the launcher's hook list flat
+  // and avoids cascading useMemo deps.
+  const launchData = useMemo(() => {
+    for (const wf of workflows) {
+      const wfSteps = steps
+        .filter((s) => s.workflow_id === wf.id)
+        .sort((a, b) => a.position - b.position);
+      if (wfSteps.length > 0) {
+        return {
+          defaultWorkflow: wf as Workflow | undefined,
+          defaultStep: wfSteps[0],
+          stepsForWorkflow: wfSteps.map((s) => ({
+            id: s.id,
+            title: s.name,
+            events: s.events,
+          })),
+        };
+      }
+    }
+    return {
+      defaultWorkflow: undefined as Workflow | undefined,
+      defaultStep: undefined as WorkflowStep | undefined,
+      stepsForWorkflow: [] as Array<{
+        id: string;
+        title: string;
+        events: WorkflowStep["events"];
+      }>,
+    };
+  }, [workflows, steps]);
+  const { defaultWorkflow, defaultStep, stepsForWorkflow } = launchData;
   const dialog = useMemo(() => (issue ? buildDialogState(issue) : null), [issue]);
 
   const handleOpenChange = (open: boolean) => {

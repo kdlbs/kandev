@@ -87,6 +87,8 @@ apps/backend/
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
 │   ├── integration/      # External integrations
+│   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
+│   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
 │   ├── health/           # Health check endpoints

@@ -55,8 +55,15 @@ export function LinearImportBar({ workspaceId, disabled, onImport }: LinearImpor
 
   if (!available) return null;
 
+  // Closing the popover discards any stale validation/error state so the
+  // next open starts clean rather than rehydrating yesterday's failure.
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setError(null);
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>

@@ -58,8 +58,15 @@ export function LinearLinkButton({ taskId, workspaceId, taskTitle }: LinearLinkB
 
   if (!available || !taskId || !workspaceId) return null;
 
+  // Closing the popover discards any stale validation/error so reopening
+  // starts clean.
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setError(null);
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>

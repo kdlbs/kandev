@@ -14,6 +14,11 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// errMsgWorkspaceIDRequired is the response body returned when a handler is
+// invoked without the workspace_id query parameter. Centralised because the
+// linter flags repeated string literals at three or more occurrences.
+const errMsgWorkspaceIDRequired = "workspace_id required"
+
 // RegisterRoutes wires the Linear HTTP and WebSocket handlers.
 func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	ctrl := &Controller{service: svc, logger: log}
@@ -46,7 +51,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 func (c *Controller) httpGetConfig(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	cfg, err := c.service.GetConfig(ctx.Request.Context(), workspaceID)
@@ -82,7 +87,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	if err := c.service.DeleteConfig(ctx.Request.Context(), workspaceID); err != nil {
@@ -109,7 +114,7 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 func (c *Controller) httpListTeams(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	teams, err := c.service.ListTeams(ctx.Request.Context(), workspaceID)
@@ -127,12 +132,7 @@ func (c *Controller) httpListStates(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and team_key required"})
 		return
 	}
-	client, err := c.service.clientFor(ctx.Request.Context(), workspaceID)
-	if err != nil {
-		c.writeClientError(ctx, err)
-		return
-	}
-	states, err := client.ListStates(ctx.Request.Context(), teamKey)
+	states, err := c.service.ListStates(ctx.Request.Context(), workspaceID, teamKey)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -143,7 +143,7 @@ func (c *Controller) httpListStates(ctx *gin.Context) {
 func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	filter := SearchFilter{
@@ -167,7 +167,7 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 func (c *Controller) httpGetIssue(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	id := ctx.Param("id")
@@ -182,7 +182,7 @@ func (c *Controller) httpGetIssue(ctx *gin.Context) {
 func (c *Controller) httpSetIssueState(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	id := ctx.Param("id")

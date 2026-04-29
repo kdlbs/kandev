@@ -80,7 +80,7 @@ function SecretField({
       <p className="text-xs text-muted-foreground">
         Create a personal API key at{" "}
         <a
-          className="underline"
+          className="underline cursor-pointer"
           href="https://linear.app/settings/account/security"
           target="_blank"
           rel="noreferrer"

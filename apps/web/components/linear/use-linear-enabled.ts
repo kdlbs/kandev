@@ -19,20 +19,28 @@ function readEnabled(workspaceId: string): boolean {
   }
 }
 
+// State tagged with the workspace it was read for. Comparing the tag against
+// the currently-requested workspaceId at read time gives us a stale-free
+// `loaded` signal without calling setState synchronously inside the effect
+// body (which the react-hooks lint rule forbids).
+type EnabledState = { workspaceId: string | undefined; enabled: boolean };
+
 export function useLinearEnabled(workspaceId: string | undefined) {
-  const [enabled, setEnabledState] = useState(true);
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState<EnabledState>({ workspaceId: undefined, enabled: true });
 
   useEffect(() => {
     let cancelled = false;
     async function init() {
       if (cancelled) return;
-      if (workspaceId) setEnabledState(readEnabled(workspaceId));
-      setLoaded(true);
+      const next = workspaceId ? readEnabled(workspaceId) : true;
+      setState({ workspaceId, enabled: next });
     }
     void init();
     if (!workspaceId) return;
-    const onChange = () => setEnabledState(readEnabled(workspaceId));
+    const onChange = () => {
+      const next = readEnabled(workspaceId);
+      setState({ workspaceId, enabled: next });
+    };
     window.addEventListener("storage", onChange);
     window.addEventListener(SYNC_EVENT, onChange);
     return () => {
@@ -51,10 +59,15 @@ export function useLinearEnabled(workspaceId: string | undefined) {
       } catch {
         // Quota or private mode: state still updates in-memory.
       }
-      setEnabledState(next);
+      setState({ workspaceId, enabled: next });
     },
     [workspaceId],
   );
 
+  // `loaded` flips true once the state's workspace tag matches the caller's;
+  // this naturally resets when workspaceId changes without us ever writing a
+  // synchronous `setLoaded(false)` inside the effect.
+  const loaded = state.workspaceId === workspaceId;
+  const enabled = loaded ? state.enabled : true;
   return { enabled, setEnabled, loaded };
 }
