@@ -15,8 +15,10 @@ import {
   IconTimeline,
   IconBrandGithub,
   IconTicket,
+  IconHexagon,
 } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
+import { useLinearAvailable } from "@/components/linear/use-linear-availability";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -84,6 +86,23 @@ function JiraTopbarButton({ workspaceId }: { workspaceId: string | undefined }) 
         </Button>
       </TooltipTrigger>
       <TooltipContent>Jira</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function LinearTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
+  const available = useLinearAvailable(workspaceId);
+  if (!available) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="icon" asChild className="cursor-pointer">
+          <Link href="/linear">
+            <IconHexagon className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Linear</TooltipContent>
     </Tooltip>
   );
 }
@@ -169,6 +188,7 @@ function TabletHeader({
         <TooltipProvider>
           <GitHubTopbarButton />
           <JiraTopbarButton workspaceId={workspaceId} />
+          <LinearTopbarButton workspaceId={workspaceId} />
         </TooltipProvider>
       </div>
       {onSearchChange && (
@@ -250,6 +270,7 @@ function DesktopHeader({
           <TooltipProvider>
             <GitHubTopbarButton />
             <JiraTopbarButton workspaceId={workspaceId} />
+            <LinearTopbarButton workspaceId={workspaceId} />
           </TooltipProvider>
           <Button variant="outline" asChild className="cursor-pointer gap-2">
             <Link href="/stats">

@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/jira"
+	"github.com/kandev/kandev/internal/linear"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -101,6 +102,13 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(jiraErr))
 	}
 
+	// Initialize Linear service
+	linearSecrets := &linearSecretAdapter{store: repos.Secrets}
+	linearSvc, _, linearErr := linear.Provide(dbPool.Writer(), dbPool.Reader(), linearSecrets, log)
+	if linearErr != nil {
+		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(linearErr))
+	}
+
 	return &Services{
 		Task:     taskSvc,
 		User:     userSvc,
@@ -110,6 +118,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Workflow: workflowSvc,
 		GitHub:   githubSvc,
 		Jira:     jiraSvc,
+		Linear:   linearSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
@@ -266,6 +275,46 @@ func (a *jiraSecretAdapter) Exists(ctx context.Context, id string) (bool, error)
 		// the "secret not found:" prefix; treat that as the absence case and
 		// surface anything else (DB outage, decoding failure) so the caller
 		// can log it instead of silently reporting "not configured".
+		if strings.HasPrefix(err.Error(), "secret not found:") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// linearSecretAdapter adapts secrets.SecretStore to linear.SecretStore. Linear
+// stores its API key keyed by "linear:{workspaceID}:token". The adapter mirrors
+// the upsert-onto-create/update translation that jiraSecretAdapter does.
+type linearSecretAdapter struct {
+	store secrets.SecretStore
+}
+
+func (a *linearSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
+	return a.store.Reveal(ctx, id)
+}
+
+func (a *linearSecretAdapter) Set(ctx context.Context, id, name, value string) error {
+	exists, err := a.Exists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+	}
+	return a.store.Create(ctx, &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: id, Name: name},
+		Value:  value,
+	})
+}
+
+func (a *linearSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
+}
+
+func (a *linearSecretAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	_, err := a.store.Get(ctx, id)
+	if err != nil {
 		if strings.HasPrefix(err.Error(), "secret not found:") {
 			return false, nil
 		}

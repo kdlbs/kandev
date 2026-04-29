@@ -23,6 +23,10 @@ import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
+import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
+import { LinearLinkButton } from "@/components/linear/linear-link-button";
+import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
+import { useLinearAvailable } from "@/components/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -148,6 +152,40 @@ const TaskTopBar = memo(function TaskTopBar({
     </header>
   );
 });
+
+// IssueTrackerButtons picks the right ticket button for a task. Jira and
+// Linear use the same TEAM-NUMBER identifier shape, so both `extract` calls
+// would match "ENG-123" — we resolve ambiguity by preferring whichever
+// integration is currently available for the workspace, with Jira winning the
+// tie-break since it shipped first. When the title carries no identifier,
+// both link buttons are offered (each gated on its own availability).
+function IssueTrackerButtons({
+  taskId,
+  workspaceId,
+  taskTitle,
+}: {
+  taskId: string | null | undefined;
+  workspaceId: string | null | undefined;
+  taskTitle: string | null | undefined;
+}) {
+  const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
+  const jiraKey = extractJiraKey(taskTitle);
+  const linearKey = extractLinearKey(taskTitle);
+
+  if (jiraKey && jiraAvailable) {
+    return <JiraTicketButton workspaceId={workspaceId} taskTitle={taskTitle} />;
+  }
+  if (linearKey && linearAvailable) {
+    return <LinearIssueButton workspaceId={workspaceId} taskTitle={taskTitle} />;
+  }
+  return (
+    <>
+      <JiraLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+      <LinearLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+    </>
+  );
+}
 
 /** Left section: breadcrumbs, branch pill */
 function TopBarLeft({
@@ -349,11 +387,7 @@ function TopBarRight({
             isAgentctlReady={isAgentctlReady}
           />
           <PRTopbarButton />
-          {extractJiraKey(taskTitle) ? (
-            <JiraTicketButton workspaceId={workspaceId} taskTitle={taskTitle} />
-          ) : (
-            <JiraLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-          )}
+          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
           <QuickChatButton workspaceId={workspaceId} />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
           <LayoutPresetSelector />

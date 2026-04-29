@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
+import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -80,6 +81,7 @@ type DialogFormBodyProps = {
   hasDescription: boolean;
   workspaceId: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
+  onLinearImport?: (issue: LinearIssue) => void;
   branchOptions: ReturnType<typeof useBranchOptions>;
   branchesLoading: boolean;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
@@ -117,6 +119,7 @@ function DialogFormBody({
   hasDescription,
   workspaceId,
   onJiraImport,
+  onLinearImport,
   branchOptions,
   branchesLoading,
   agentProfileOptions,
@@ -153,6 +156,7 @@ function DialogFormBody({
         enhance={enhance}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
+        onLinearImport={onLinearImport}
       />
       {!isSessionMode &&
         renderCreateEditSelectors({
@@ -283,6 +287,22 @@ function useJiraImportHandler(fs: DialogFormState) {
       const description = ticket.description?.trim()
         ? `${ticket.description}\n\n---\nJira: ${ticket.url}`
         : `Jira: ${ticket.url}`;
+      fs.descriptionInputRef.current?.setValue(description);
+      fs.setHasDescription(true);
+    },
+    [fs],
+  );
+}
+
+function useLinearImportHandler(fs: DialogFormState) {
+  return useCallback(
+    (issue: LinearIssue) => {
+      const title = `[${issue.identifier}] ${issue.title}`;
+      fs.setTaskName(title);
+      fs.setHasTitle(true);
+      const description = issue.description?.trim()
+        ? `${issue.description}\n\n---\nLinear: ${issue.url}`
+        : `Linear: ${issue.url}`;
       fs.descriptionInputRef.current?.setValue(description);
       fs.setHasDescription(true);
     },
@@ -425,18 +445,88 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     handleKeyDown,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),
+    handleLinearImport: useLinearImportHandler(fs),
   };
+}
+
+type DialogFormProps = {
+  setup: ReturnType<typeof useTaskCreateDialogSetup>;
+  workspaceId: string | null;
+};
+
+function DialogForm({ setup, workspaceId }: DialogFormProps) {
+  const { fs, isSessionMode, isCreateMode, isTaskStarted, workflows, agentProfiles } = setup;
+  const { snapshots, branchesLoading, computed, handlers, handleKeyDown } = setup;
+  const { handleJiraImport, handleLinearImport } = setup;
+  const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
+  const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
+      <DialogFormBody
+        isSessionMode={isSessionMode}
+        isCreateMode={isCreateMode}
+        isTaskStarted={isTaskStarted}
+        isPassthroughProfile={computed.isPassthroughProfile}
+        initialDescription={fs.currentDefaults.description}
+        hasDescription={fs.hasDescription}
+        workspaceId={workspaceId}
+        onJiraImport={handleJiraImport}
+        onLinearImport={handleLinearImport}
+        branchOptions={computed.branchOptions}
+        branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
+        agentProfileOptions={computed.agentProfileOptions}
+        executorProfileOptions={computed.executorProfileOptions}
+        agentProfiles={agentProfiles}
+        agentProfilesLoading={computed.agentProfilesLoading}
+        executorsLoading={computed.executorsLoading}
+        isCreatingSession={fs.isCreatingSession}
+        workflows={workflows}
+        snapshots={snapshots}
+        effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
+        fs={fs}
+        handleKeyDown={handleKeyDown}
+        onBranchChange={handlers.handleBranchChange}
+        onAgentProfileChange={handlers.handleAgentProfileChange}
+        onExecutorProfileChange={handlers.handleExecutorProfileChange}
+        onWorkflowChange={handlers.handleWorkflowChange}
+        hasRepositorySelection={computed.hasRepositorySelection}
+        isLocalExecutor={computed.isLocalExecutor}
+        enhance={setup.enhance}
+        workflowAgentLocked={computed.workflowAgentLocked}
+        onToggleFreshBranch={handlers.handleToggleFreshBranch}
+      />
+      <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
+        <TaskCreateDialogFooter
+          isSessionMode={isSessionMode}
+          isCreateMode={isCreateMode}
+          isEditMode={setup.isEditMode}
+          isTaskStarted={isTaskStarted}
+          isPassthroughProfile={computed.isPassthroughProfile}
+          isCreatingSession={fs.isCreatingSession}
+          isCreatingTask={fs.isCreatingTask}
+          hasTitle={fs.hasTitle}
+          hasDescription={fs.hasDescription}
+          hasRepositorySelection={computed.hasRepositorySelection}
+          branch={fs.branch}
+          agentProfileId={computed.effectiveAgentProfileId}
+          workspaceId={workspaceId}
+          effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
+          executorHint={computed.executorHint}
+          onCancel={handleCancel}
+          onUpdateWithoutAgent={handleUpdateWithoutAgent}
+          onCreateWithoutAgent={handleCreateWithoutAgent}
+          onCreateWithPlanMode={handleCreateWithPlanMode}
+        />
+      </DialogFooter>
+    </form>
+  );
 }
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
-  const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
-  const { sessionRepoName, workflows, agentProfiles, snapshots } = setup;
-  const { repositoriesLoading, branchesLoading, computed, handlers, handleKeyDown } = setup;
-  const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
-  const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
-  const { handleJiraImport } = setup;
+  const { fs, isCreateMode, isEditMode, isTaskStarted } = setup;
+  const { repositoriesLoading, computed, handlers } = setup;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -448,7 +538,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             isCreateMode={isCreateMode}
             isEditMode={isEditMode}
             isTaskStarted={isTaskStarted}
-            sessionRepoName={sessionRepoName}
+            sessionRepoName={setup.sessionRepoName}
             initialTitle={initialValues?.title}
             taskName={fs.taskName}
             repositoryId={fs.repositoryId}
@@ -466,63 +556,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
           />
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
-          <DialogFormBody
-            isSessionMode={isSessionMode}
-            isCreateMode={isCreateMode}
-            isTaskStarted={isTaskStarted}
-            isPassthroughProfile={computed.isPassthroughProfile}
-            initialDescription={fs.currentDefaults.description}
-            hasDescription={fs.hasDescription}
-            workspaceId={workspaceId}
-            onJiraImport={handleJiraImport}
-            branchOptions={computed.branchOptions}
-            branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
-            agentProfileOptions={computed.agentProfileOptions}
-            executorProfileOptions={computed.executorProfileOptions}
-            agentProfiles={agentProfiles}
-            agentProfilesLoading={computed.agentProfilesLoading}
-            executorsLoading={computed.executorsLoading}
-            isCreatingSession={fs.isCreatingSession}
-            workflows={workflows}
-            snapshots={snapshots}
-            effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
-            fs={fs}
-            handleKeyDown={handleKeyDown}
-            onBranchChange={handlers.handleBranchChange}
-            onAgentProfileChange={handlers.handleAgentProfileChange}
-            onExecutorProfileChange={handlers.handleExecutorProfileChange}
-            onWorkflowChange={handlers.handleWorkflowChange}
-            hasRepositorySelection={computed.hasRepositorySelection}
-            isLocalExecutor={computed.isLocalExecutor}
-            enhance={setup.enhance}
-            workflowAgentLocked={computed.workflowAgentLocked}
-            onToggleFreshBranch={handlers.handleToggleFreshBranch}
-          />
-          <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-            <TaskCreateDialogFooter
-              isSessionMode={isSessionMode}
-              isCreateMode={isCreateMode}
-              isEditMode={isEditMode}
-              isTaskStarted={isTaskStarted}
-              isPassthroughProfile={computed.isPassthroughProfile}
-              isCreatingSession={fs.isCreatingSession}
-              isCreatingTask={fs.isCreatingTask}
-              hasTitle={fs.hasTitle}
-              hasDescription={fs.hasDescription}
-              hasRepositorySelection={computed.hasRepositorySelection}
-              branch={fs.branch}
-              agentProfileId={computed.effectiveAgentProfileId}
-              workspaceId={workspaceId}
-              effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
-              executorHint={computed.executorHint}
-              onCancel={handleCancel}
-              onUpdateWithoutAgent={handleUpdateWithoutAgent}
-              onCreateWithoutAgent={handleCreateWithoutAgent}
-              onCreateWithPlanMode={handleCreateWithPlanMode}
-            />
-          </DialogFooter>
-        </form>
+        <DialogForm setup={setup} workspaceId={workspaceId} />
         <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
       </DialogContent>
     </Dialog>

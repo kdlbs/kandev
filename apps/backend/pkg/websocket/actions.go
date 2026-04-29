@@ -402,6 +402,17 @@ const (
 	ActionJiraProjectsList     = "jira.projects.list"
 )
 
+// Linear integration actions
+const (
+	ActionLinearConfigGet       = "linear.config.get"
+	ActionLinearConfigSet       = "linear.config.set"
+	ActionLinearConfigDelete    = "linear.config.delete"
+	ActionLinearConfigTest      = "linear.config.test"
+	ActionLinearIssueGet        = "linear.issue.get"
+	ActionLinearIssueTransition = "linear.issue.transition"
+	ActionLinearTeamsList       = "linear.teams.list"
+)
+
 // Error codes
 const (
 	ErrorCodeBadRequest    = "BAD_REQUEST"

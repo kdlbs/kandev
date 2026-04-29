@@ -14,6 +14,7 @@ import {
   computeBranchPlaceholder,
 } from "@/components/task-create-dialog-fresh-branch";
 import type { JiraTicket } from "@/lib/types/jira";
+import type { LinearIssue } from "@/lib/types/linear";
 
 type SelectorOption = {
   value: string;
@@ -360,7 +361,22 @@ export type DialogPromptSectionProps = {
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workspaceId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
+  onLinearImport?: (issue: LinearIssue) => void;
 };
+
+// importBindings collapses the optional Jira/Linear import callbacks into the
+// shape TaskFormInputs expects, dropping integrations that aren't applicable
+// (session mode, started tasks, or no callback wired). Keeps DialogPromptSection
+// below the cyclomatic-complexity bar.
+function importBindings<T>(
+  enabled: boolean,
+  workspaceId: string | null,
+  isPassthroughProfile: boolean,
+  onImport: ((value: T) => void) | undefined,
+) {
+  if (!enabled || !onImport) return undefined;
+  return { workspaceId, disabled: isPassthroughProfile, onImport };
+}
 
 export function DialogPromptSection({
   isSessionMode,
@@ -373,8 +389,10 @@ export function DialogPromptSection({
   enhance,
   workspaceId,
   onJiraImport,
+  onLinearImport,
 }: DialogPromptSectionProps) {
-  const showJiraImport = !isSessionMode && !isTaskStarted && !!onJiraImport;
+  const importsEnabled = !isSessionMode && !isTaskStarted;
+  const ws = workspaceId ?? null;
   return (
     <>
       <TaskFormInputs
@@ -390,15 +408,8 @@ export function DialogPromptSection({
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
-        jiraImport={
-          showJiraImport && onJiraImport
-            ? {
-                workspaceId: workspaceId ?? null,
-                disabled: isPassthroughProfile,
-                onImport: onJiraImport,
-              }
-            : undefined
-        }
+        jiraImport={importBindings(importsEnabled, ws, isPassthroughProfile, onJiraImport)}
+        linearImport={importBindings(importsEnabled, ws, isPassthroughProfile, onLinearImport)}
       />
       {isPassthroughProfile && hasDescription && (
         <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>

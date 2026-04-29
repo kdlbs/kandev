@@ -31,6 +31,7 @@ import (
 
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
+	linearpkg "github.com/kandev/kandev/internal/linear"
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -339,6 +340,13 @@ func startAgentInfrastructure(
 		jiraPoller := jirapkg.NewPoller(services.Jira, log)
 		jiraPoller.Start(ctx)
 		addCleanup(func() error { jiraPoller.Stop(); return nil })
+	}
+
+	// Start Linear auth-health poller, mirroring the Jira poller.
+	if services.Linear != nil {
+		linearPoller := linearpkg.NewPoller(services.Linear, log)
+		linearPoller.Start(ctx)
+		addCleanup(func() error { linearPoller.Stop(); return nil })
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,

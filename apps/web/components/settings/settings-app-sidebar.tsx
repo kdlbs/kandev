@@ -13,6 +13,7 @@ import {
   IconKey,
   IconMessageCircle,
   IconBrandGithub,
+  IconHexagon,
   IconSparkles,
   IconWand,
   IconGitBranch,
@@ -109,6 +110,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
             const repositoriesPath = `${workspacePath}/repositories`;
             const githubPath = `${workspacePath}/github`;
             const jiraPath = `${workspacePath}/jira`;
+            const linearPath = `${workspacePath}/linear`;
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
@@ -151,6 +153,14 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                       <Link href={jiraPath}>
                         <IconTicket className="h-3.5 w-3.5" />
                         <span>Jira</span>
+                      </Link>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                  <SidebarMenuSubItem>
+                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === linearPath}>
+                      <Link href={linearPath}>
+                        <IconHexagon className="h-3.5 w-3.5" />
+                        <span>Linear</span>
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
