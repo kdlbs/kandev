@@ -350,23 +350,26 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		effectivePrompt = task.Description
 	}
 
-	// Process on_turn_start before launching the agent, just like user-initiated messages.
-	// This allows workflow transitions (e.g. move_to_next) to fire on the initial prompt.
-	// If the target step has a different agent profile, executeStepTransition switches
-	// the session — so we need to pick up the new session afterwards.
-	s.processOnTurnStartViaEngine(ctx, taskID, session)
-
-	// Re-read the session after on_turn_start may have switched it (agent profile change).
-	// The original session may have been completed; use the active session for this task.
+	// NOTE: on_turn_start is intentionally NOT processed here.
+	//   - User-initiated path: dispatchPromptAsync (message_handlers.go) already
+	//     calls ProcessOnTurnStart before invoking StartCreatedSession via
+	//     forwardMessageAsPrompt, so on_turn_start has already fired.
+	//   - Workflow auto-start path: autoStartStepPrompt calls us because the
+	//     workflow just transitioned us into this step (via on_turn_complete or
+	//     on_enter). Firing on_turn_start again here cascades the workflow back
+	//     out before the step's auto-start prompt can be delivered to its agent.
+	//
+	// However, for the user-initiated path, on_turn_start may have switched the
+	// session profile already, in which case the session ID we were called with
+	// is now COMPLETED and we need to redirect to the new active session.
 	session, err = s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
+		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
 	if session.State == models.TaskSessionStateCompleted {
-		// on_turn_start switched the agent profile — find the new active session.
 		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if activeErr != nil || activeSession == nil {
-			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
 		sessionID = activeSession.ID

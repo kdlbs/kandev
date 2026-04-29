@@ -1,0 +1,158 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import { registerTasksHandlers } from "./tasks";
+
+type Listener = (state: AppState) => void;
+
+/**
+ * Minimal in-memory store for the tasks WS handler tests.
+ * The handler reads kanban tasks, kanbanMulti snapshots, and tasks.activeTaskId/activeSessionId,
+ * and calls setActiveSession; everything else can stay default.
+ */
+function makeStore(initial: Partial<AppState> = {}) {
+  let state = {
+    kanban: { workflowId: "wf1", steps: [], tasks: [] },
+    kanbanMulti: { snapshots: {}, isLoading: false },
+    tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
+    setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
+      state = {
+        ...state,
+        tasks: {
+          activeTaskId: taskId,
+          activeSessionId: sessionId,
+          pinnedSessionId: sessionId,
+        },
+      };
+    }),
+    setActiveSessionAuto: vi.fn((taskId: string, sessionId: string | null) => {
+      state = {
+        ...state,
+        tasks: {
+          ...state.tasks,
+          activeTaskId: taskId,
+          activeSessionId: sessionId,
+        },
+      };
+    }),
+    ...initial,
+  } as unknown as AppState;
+
+  const listeners = new Set<Listener>();
+  return {
+    getState: () => state,
+    setState: (updater: AppState | ((s: AppState) => AppState)) => {
+      const next =
+        typeof updater === "function" ? (updater as (s: AppState) => AppState)(state) : updater;
+      state = { ...state, ...next };
+      for (const l of listeners) l(state);
+    },
+    subscribe: (l: Listener) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    destroy: vi.fn(),
+    getInitialState: vi.fn(),
+  } as unknown as StoreApi<AppState> & { getState: () => AppState };
+}
+
+function makeTask(id: string, primarySessionId: string | null, workflowId = "wf1") {
+  return {
+    task_id: id,
+    workflow_id: workflowId,
+    workflow_step_id: "step1",
+    title: "Test",
+    description: "",
+    state: "IN_PROGRESS",
+    primary_session_id: primarySessionId,
+    is_ephemeral: false,
+  } as Record<string, unknown>;
+}
+
+function makeMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.updated" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
+}
+
+describe("task.updated primary-session focus follow", () => {
+  let store: ReturnType<typeof makeStore>;
+  let setActiveSessionAuto: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    setActiveSessionAuto = vi.fn();
+  });
+
+  it("follows focus to the new primary when the user is on the previous primary", () => {
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: { activeTaskId: "t1", activeSessionId: "sess-old", pinnedSessionId: null },
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).toHaveBeenCalledTimes(1);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
+  });
+
+  it("does NOT follow focus when the user is on a different session than the previous primary", () => {
+    // User manually selected sess-other; primary swapping shouldn't yank them away.
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: { activeTaskId: "t1", activeSessionId: "sess-other", pinnedSessionId: "sess-other" },
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("does NOT follow focus when the user is viewing a different task", () => {
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: { activeTaskId: "t2", activeSessionId: "sess-old", pinnedSessionId: null },
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call setActiveSessionAuto when the primary did not change", () => {
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: { activeTaskId: "t1", activeSessionId: "sess-old", pinnedSessionId: null },
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-old")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});

@@ -5,7 +5,7 @@ export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
   workflows: { items: [], activeId: null },
-  tasks: { activeTaskId: null, activeSessionId: null },
+  tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
 };
 
 export const createKanbanSlice: StateCreator<
@@ -46,17 +46,29 @@ export const createKanbanSlice: StateCreator<
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = null;
+      // New task → drop any pin; the pin only applies within a single task.
+      draft.tasks.pinnedSessionId = null;
     });
   },
   setActiveSession: (taskId, sessionId) => {
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = sessionId;
+      // User-initiated selection: pin so WS auto-replace handoff respects it.
+      draft.tasks.pinnedSessionId = sessionId;
+    });
+  },
+  setActiveSessionAuto: (taskId, sessionId) => {
+    set((draft) => {
+      draft.tasks.activeTaskId = taskId;
+      draft.tasks.activeSessionId = sessionId;
+      // Auto-driven (WS) selection: don't touch pinnedSessionId.
     });
   },
   clearActiveSession: () =>
     set((draft) => {
       draft.tasks.activeSessionId = null;
+      draft.tasks.pinnedSessionId = null;
     }),
   setWorkflowSnapshot: (workflowId, data) =>
     set((draft) => {

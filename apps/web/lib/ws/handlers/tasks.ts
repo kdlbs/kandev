@@ -64,6 +64,17 @@ function upsertTaskInBothKanbans(
   return next;
 }
 
+/** Look up a task across both single-kanban and multi-kanban snapshots. */
+function findTaskInState(state: AppState, taskId: string): KanbanTask | undefined {
+  const fromKanban = state.kanban.tasks.find((t) => t.id === taskId);
+  if (fromKanban) return fromKanban;
+  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+    const found = snapshot.tasks.find((t) => t.id === taskId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** Remove a task from both single-kanban and multi-kanban snapshots. */
 function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string): AppState {
   let next = state;
@@ -102,9 +113,15 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
       if (message.payload.is_ephemeral) return;
 
+      // Capture the previous primary session id BEFORE the upsert so we can
+      // detect a primary-session swap (e.g. workflow profile switch reusing a
+      // different session) and follow focus to the new primary.
+      const beforeState = store.getState();
+      const taskId = message.payload.task_id;
+      const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
+
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
-        const taskId = message.payload.task_id;
 
         if (message.payload.archived_at) {
           return removeTaskFromBothKanbans(state, wfId, taskId);
@@ -112,6 +129,24 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
         return upsertTaskInBothKanbans(state, wfId, message.payload);
       });
+
+      // Follow focus to the new primary when:
+      //  - the user is currently viewing this task,
+      //  - the user was sitting on the previous primary (i.e. we haven't been
+      //    pinned to a different session by manual selection), and
+      //  - the primary actually changed.
+      // This makes workflow profile switches transparent: the agent that's
+      // about to run is the one the user sees.
+      const afterState = store.getState();
+      const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
+      if (
+        newPrimary &&
+        newPrimary !== previousPrimary &&
+        afterState.tasks.activeTaskId === taskId &&
+        afterState.tasks.activeSessionId === previousPrimary
+      ) {
+        afterState.setActiveSessionAuto(taskId, newPrimary);
+      }
     },
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;

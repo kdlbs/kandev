@@ -172,16 +172,19 @@ function maybeAdoptSessionOnTransition(
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
-    state.setActiveSession(taskId, sessionId);
+    state.setActiveSessionAuto(taskId, sessionId);
     return;
   }
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
+    // If the user explicitly pinned this session (manual click), don't yank
+    // them away just because the workflow moved it to a terminal state.
+    if (state.tasks.pinnedSessionId === sessionId) return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
-      state.setActiveSession(taskId, replacement);
+      state.setActiveSessionAuto(taskId, replacement);
     }
   }
 }

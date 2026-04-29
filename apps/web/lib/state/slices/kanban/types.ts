@@ -75,6 +75,12 @@ export type WorkflowsState = {
 export type TaskState = {
   activeTaskId: string | null;
   activeSessionId: string | null;
+  // pinnedSessionId tracks the session the USER explicitly selected.
+  // Set by setActiveSession (user-initiated). Cleared when navigating to a
+  // different task. WS auto-adopt paths use setActiveSessionAuto which leaves
+  // pinnedSessionId alone — and skip auto-replace when the terminating session
+  // matches the pin (the user wants to stay even though the workflow moved on).
+  pinnedSessionId: string | null;
 };
 
 export type KanbanSliceState = {
@@ -90,6 +96,10 @@ export type KanbanSliceActions = {
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  // setActiveSessionAuto is the same as setActiveSession but doesn't update
+  // pinnedSessionId. Used by WS handlers to follow workflow-driven session
+  // switches without overriding a user's manual selection.
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
   setKanbanMultiLoading: (loading: boolean) => void;

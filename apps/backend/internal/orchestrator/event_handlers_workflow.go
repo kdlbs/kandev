@@ -458,10 +458,11 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
-// switchSessionForStep stops the current session and creates a new one with a different agent profile.
-// Returns the new session, or nil + error if the switch fails.
-// The new session is prepared BEFORE completing the old one: if PrepareSession fails, the old
-// session remains active and the task stays recoverable.
+// switchSessionForStep activates a session for the new agent profile.
+// If an existing session on this task already uses the target profile it is
+// reused (re-promoted to primary, brought out of COMPLETED if it had been
+// switched away from previously). Otherwise a new session is prepared.
+// In both cases the previous session is stopped and marked COMPLETED.
 func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
 	s.logger.Info("switching session for workflow step agent profile change",
 		zap.String("task_id", taskID),
@@ -475,6 +476,120 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("task_id", taskID), zap.Error(err))
 	}
 
+	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+	if lookupErr != nil {
+		s.logger.Warn("failed to look up reusable session, falling through to create new",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", newAgentProfileID),
+			zap.Error(lookupErr))
+	}
+	if existing != nil {
+		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+	}
+
+	return s.createNewSessionForStep(ctx, taskID, currentSession, newAgentProfileID)
+}
+
+// findReusableSessionForProfile returns the most-recently-updated session on
+// this task that uses the target profile (and is not the session being
+// switched away from), or nil if none exists. Failed/cancelled sessions are
+// excluded — those are dead and shouldn't be revived implicitly.
+func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, profileID, excludeSessionID string) (*models.TaskSession, error) {
+	if profileID == "" {
+		return nil, nil
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var best *models.TaskSession
+	for _, sess := range sessions {
+		if sess.ID == excludeSessionID {
+			continue
+		}
+		if sess.AgentProfileID != profileID {
+			continue
+		}
+		// Skip user-cancelled sessions — those are explicit stops and
+		// shouldn't be auto-revived. FAILED sessions are reused (the failure
+		// may have been transient; either way the user expects "one session
+		// per profile per task" so we revive rather than orphan a duplicate).
+		if sess.State == models.TaskSessionStateCancelled {
+			continue
+		}
+		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
+			best = sess
+		}
+	}
+	return best, nil
+}
+
+// reuseSessionForStep promotes an existing session to primary, brings it out
+// of COMPLETED/FAILED if needed, and stops + completes the previous session.
+// The agent for the reused session is not relaunched here — when a prompt
+// arrives, the autoStart/PromptTask paths handle the launch.
+//
+// Previously-launched sessions (executors_running record exists, has resume
+// token) are flipped to WAITING_FOR_INPUT so PromptTask's ensureSessionRunning
+// lazy-resumes them via ResumeSession.
+//
+// Never-launched sessions (e.g. PrepareSession created the row but the
+// workflow switched away before the agent started) have no executors_running
+// record. They go to CREATED so autoStartStepPrompt routes through
+// StartCreatedSession → LaunchPreparedSession (a full fresh launch).
+func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
+	s.logger.Info("reusing existing session for profile",
+		zap.String("task_id", taskID),
+		zap.String("current_session", currentSession.ID),
+		zap.String("reused_session", existing.ID),
+		zap.String("reused_profile", existing.AgentProfileID),
+		zap.String("reused_state", string(existing.State)))
+
+	if existing.State == models.TaskSessionStateCompleted || existing.State == models.TaskSessionStateFailed {
+		s.reviveReusedSession(ctx, existing)
+	}
+
+	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
+		s.logger.Warn("failed to set reused session as primary",
+			zap.String("session_id", existing.ID), zap.Error(err))
+	}
+
+	s.completeAndStopSession(ctx, taskID, currentSession)
+	return existing, nil
+}
+
+// reviveReusedSession flips a terminal (COMPLETED/FAILED) session back to a
+// state where the downstream autoStart/PromptTask paths can launch its agent.
+// The target state depends on whether the session was ever launched:
+//   - Has executors_running record → WAITING_FOR_INPUT, lazy-resume from token
+//   - No record → CREATED, fresh launch via StartCreatedSession
+//
+// The previous error message (from a prior FAILED state) is cleared so the
+// frontend stops surfacing stale red banners on a now-active session.
+func (s *Service) reviveReusedSession(ctx context.Context, session *models.TaskSession) {
+	wasLaunched := false
+	if running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
+		wasLaunched = true
+	}
+	if wasLaunched {
+		session.State = models.TaskSessionStateWaitingForInput
+	} else {
+		session.State = models.TaskSessionStateCreated
+	}
+	session.CompletedAt = nil
+	session.ErrorMessage = ""
+	session.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to revive reused session out of COMPLETED",
+			zap.String("session_id", session.ID),
+			zap.String("target_state", string(session.State)),
+			zap.Error(err))
+	}
+}
+
+// createNewSessionForStep is the original switch-and-create-fresh-session path,
+// used when there is no existing session for the target profile.
+func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
 	// Prepare the new session BEFORE touching the old one.
 	// If any step below fails, the old session remains active and the task stays recoverable.
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -522,34 +637,38 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("session_id", newSession.ID), zap.Error(err))
 	}
 
-	// New session is ready — now safe to stop the old agent and complete the old session.
-	if currentSession.AgentExecutionID != "" {
-		if err := s.agentManager.StopAgent(ctx, currentSession.AgentExecutionID, false); err != nil {
+	s.completeAndStopSession(ctx, taskID, currentSession)
+	return newSession, nil
+}
+
+// completeAndStopSession stops the agent for a session and marks it COMPLETED.
+// Used by both the reuse path and the create-new path to terminate the
+// previous session in a uniform way. IsPrimary is cleared explicitly so the
+// full-row UpdateTaskSession write doesn't overwrite the SetPrimarySession
+// call the caller just made on the replacement session.
+func (s *Service) completeAndStopSession(ctx context.Context, taskID string, session *models.TaskSession) {
+	if session.AgentExecutionID != "" {
+		if err := s.agentManager.StopAgent(ctx, session.AgentExecutionID, false); err != nil {
 			s.logger.Warn("failed to stop agent for session switch",
-				zap.String("session_id", currentSession.ID),
+				zap.String("session_id", session.ID),
 				zap.Error(err))
 		}
 	}
 
-	// Mark the current session as completed.
 	// Use updateTaskSessionState to publish a session.state_changed WS event so the
 	// frontend learns the old session is terminal and can adopt the new one.
-	s.updateTaskSessionState(ctx, taskID, currentSession.ID, models.TaskSessionStateCompleted, "", false)
-	// Also set CompletedAt timestamp for bookkeeping (updateTaskSessionState only sets state).
-	// Clear IsPrimary to avoid overwriting the SetPrimarySession call above when writing back.
+	s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateCompleted, "", false)
+
 	now := time.Now().UTC()
-	currentSession.State = models.TaskSessionStateCompleted
-	currentSession.IsPrimary = false
-	currentSession.CompletedAt = &now
-	currentSession.UpdatedAt = now
-	if err := s.repo.UpdateTaskSession(ctx, currentSession); err != nil {
-		// New session is already created; log but don't abort.
+	session.State = models.TaskSessionStateCompleted
+	session.IsPrimary = false
+	session.CompletedAt = &now
+	session.UpdatedAt = now
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
 		s.logger.Warn("failed to complete old session after switch",
-			zap.String("session_id", currentSession.ID),
+			zap.String("session_id", session.ID),
 			zap.Error(err))
 	}
-
-	return newSession, nil
 }
 
 // maybySwitchSessionForProfile checks whether the step requires a different agent profile
