@@ -109,6 +109,8 @@ export type StartupInfoOptions = {
   /** Mode header line, e.g. "dev mode: using local repo" or "release: v0.0.12 (github latest)" */
   header: string;
   ports: PortConfig;
+  /** The user-facing URL — the one the browser will open. */
+  publicUrl: string;
   /** Database file path */
   dbPath?: string;
   /** Log level being used */
@@ -119,11 +121,19 @@ export type StartupInfoOptions = {
  * Logs a unified startup info block to the console.
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
-  const { header, ports, dbPath, logLevel } = options;
+  const { header, ports, publicUrl, dbPath, logLevel } = options;
+  const backendUrl = ports.backendUrl;
+  const webUrl = `http://localhost:${ports.webPort}`;
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] url: http://localhost:" + ports.backendPort);
+  console.log("[kandev] open:", publicUrl);
+  if (backendUrl !== publicUrl) {
+    console.log("[kandev] backend (api):", backendUrl);
+  }
+  if (webUrl !== publicUrl) {
+    console.log("[kandev] web (internal):", webUrl);
+  }
   console.log("[kandev] agentctl port:", ports.agentctlPort);
-  console.log("[kandev] mcp url:", `http://localhost:${ports.backendPort}/mcp`);
+  console.log("[kandev] mcp url:", `${backendUrl}/mcp`);
   if (dbPath) {
     console.log("[kandev] db path:", dbPath);
   }

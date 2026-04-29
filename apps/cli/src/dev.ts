@@ -27,10 +27,12 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const webEnv = buildWebEnv({ ports, debug: true });
   const logLevel =
     process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
+  const webUrl = `http://localhost:${ports.webPort}`;
 
   logStartupInfo({
     header: "dev mode: using local repo",
     ports,
+    publicUrl: webUrl,
     dbPath,
     logLevel,
   });
@@ -52,7 +54,6 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
-  const webUrl = `http://localhost:${ports.webPort}`;
   console.log("[kandev] starting web...");
   const webProc = launchWebApp({
     command: "pnpm",
@@ -63,7 +64,7 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     label: "web",
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log(`[kandev] web ready at ${webUrl}`);
+  console.log(`[kandev] open: ${webUrl}`);
   openBrowser(webUrl);
 }
 
