@@ -98,9 +98,14 @@ describe("resolvePorts", () => {
     expect(r.backendPort).toBe(5555);
   });
 
-  it("KANDEV_WEB_PORT sets the internal web port", () => {
+  it("KANDEV_WEB_PORT sets the internal web port in dev", () => {
     const r = resolvePorts({ command: "dev" }, { KANDEV_WEB_PORT: "8080" } as NodeJS.ProcessEnv);
     expect(r.webPort).toBe(8080);
+  });
+
+  it("KANDEV_WEB_PORT sets the internal web port in run/start (backend stays undefined)", () => {
+    const r = resolvePorts({ command: "run" }, { KANDEV_WEB_PORT: "8080" } as NodeJS.ProcessEnv);
+    expect(r).toEqual({ backendPort: undefined, webPort: 8080 });
   });
 
   it("--port maps to backend in every command (including dev)", () => {
