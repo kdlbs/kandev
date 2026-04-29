@@ -18,6 +18,7 @@ import {
   IconGitBranch,
   IconArrowsShuffle,
   IconTicket,
+  IconPlugConnected,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -326,6 +327,16 @@ export function SettingsAppSidebar() {
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
                 <SecretsSidebarSection pathname={pathname} />
+
+                {/* External MCP */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/settings/external-mcp"}>
+                    <Link href="/settings/external-mcp">
+                      <IconPlugConnected className="h-4 w-4" />
+                      <span>External MCP</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
 
                 {/* Changelog */}
                 <SidebarMenuItem>

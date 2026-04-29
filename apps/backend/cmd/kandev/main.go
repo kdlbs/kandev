@@ -427,7 +427,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -465,6 +465,7 @@ func buildHTTPServer(
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
+	addCleanup func(func() error),
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -472,6 +473,11 @@ func buildHTTPServer(
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
+
+	port := cfg.Server.Port
+	if port == 0 {
+		port = ports.Backend
+	}
 
 	registerRoutes(routeParams{
 		router:                  router,
@@ -495,15 +501,13 @@ func buildHTTPServer(
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
+		addCleanup:              addCleanup,
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
+		httpPort:                port,
 		log:                     log,
 	})
 
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
-	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      router,

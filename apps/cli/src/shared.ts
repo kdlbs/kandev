@@ -7,12 +7,7 @@
 
 import type { ChildProcess } from "node:child_process";
 
-import {
-  DEFAULT_AGENTCTL_PORT,
-  DEFAULT_BACKEND_PORT,
-  DEFAULT_MCP_PORT,
-  DEFAULT_WEB_PORT,
-} from "./constants";
+import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 
@@ -20,9 +15,7 @@ export type PortConfig = {
   backendPort: number;
   webPort: number;
   agentctlPort: number;
-  mcpPort: number;
   backendUrl: string;
-  mcpUrl: string;
 };
 
 /**
@@ -36,15 +29,12 @@ export async function pickPorts(backendPort?: number, webPort?: number): Promise
   const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const resolvedWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
-  const mcpPort = await pickAvailablePort(DEFAULT_MCP_PORT);
 
   return {
     backendPort: resolvedBackendPort,
     webPort: resolvedWebPort,
     agentctlPort,
-    mcpPort,
     backendUrl: `http://localhost:${resolvedBackendPort}`,
-    mcpUrl: `http://localhost:${mcpPort}/sse`,
   };
 }
 
@@ -69,7 +59,6 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
     KANDEV_SERVER_PORT: String(ports.backendPort),
     KANDEV_WEB_INTERNAL_URL: `http://localhost:${ports.webPort}`,
     KANDEV_AGENT_STANDALONE_PORT: String(ports.agentctlPort),
-    KANDEV_AGENT_MCP_SERVER_PORT: String(ports.mcpPort),
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
     ...extra,
   };
@@ -134,8 +123,7 @@ export function logStartupInfo(options: StartupInfoOptions): void {
   console.log(`[kandev] ${header}`);
   console.log("[kandev] url: http://localhost:" + ports.backendPort);
   console.log("[kandev] agentctl port:", ports.agentctlPort);
-  console.log("[kandev] mcp port:", ports.mcpPort);
-  console.log("[kandev] mcp url:", ports.mcpUrl);
+  console.log("[kandev] mcp url:", `http://localhost:${ports.backendPort}/mcp`);
   if (dbPath) {
     console.log("[kandev] db path:", dbPath);
   }

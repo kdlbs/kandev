@@ -2,8 +2,9 @@
 // These values are the single source of truth in Go; the TypeScript CLI
 // mirrors them in apps/cli/src/constants.ts.
 //
-// All four ports are clustered around 37429–40429 to avoid collisions with
-// commonly used ports (8080, 9090, 9999, etc.) while keeping them memorable.
+// Ports cluster around 37429–39429 to avoid collisions with commonly used
+// ports (8080, 9090, 9999, etc.) while keeping them memorable. The external
+// MCP endpoint is served by the backend HTTP server at /mcp on the Backend port.
 package ports
 
 const (
@@ -15,7 +16,4 @@ const (
 
 	// AgentCtl is the default control port for the agentctl sidecar.
 	AgentCtl = 39429
-
-	// MCP is the default port for the standalone MCP server.
-	MCP = 40429
 )
