@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 import pkg from "../package.json";
-import { parseArgs, resolvePorts } from "./args";
+import { deprecationReplacement, parseArgs, ParseError, resolvePorts } from "./args";
 import { runDev } from "./dev";
 import { runRelease } from "./run";
 import { runStart } from "./start";
@@ -43,13 +43,13 @@ Options:
   --help, -h       Show help.
 
 Advanced:
-  --backend-port       Deprecated alias for --port (start/run). Sets the Go
-                       backend port directly. Also reads KANDEV_BACKEND_PORT.
-  --web-internal-port  Override the internal Next.js port (start/run only). The
-                       Go backend reverse-proxies to it; users never hit it
-                       directly. Also reads KANDEV_WEB_PORT.
+  --backend-port       Sets the Go backend port directly. Deprecated alias for
+                       --port in run/start. Also reads KANDEV_BACKEND_PORT.
+  --web-internal-port  Override the Next.js port. In run/start the backend
+                       reverse-proxies to it; in dev it is the URL the browser
+                       opens (same effect as --port). Also reads KANDEV_WEB_PORT.
   --web-port           Deprecated alias for --web-internal-port. Misleading name
-                       because the public URL is on the backend port.
+                       because in run/start the public URL is on the backend port.
 `);
 }
 
@@ -77,10 +77,15 @@ function findRepoRoot(startDir: string): string | null {
 }
 
 async function main(): Promise<void> {
-  const { options, showHelp } = parseArgs(process.argv.slice(2));
+  const { options, showHelp, deprecatedFlags } = parseArgs(process.argv.slice(2));
   if (showHelp) {
     printHelp();
     return;
+  }
+
+  for (const flag of deprecatedFlags) {
+    const replacement = deprecationReplacement(flag, options.command);
+    process.stderr.write(`[kandev] ${flag} is deprecated; use ${replacement}\n`);
   }
 
   const resolved = resolvePorts(options, process.env);
@@ -122,6 +127,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  if (err instanceof ParseError) {
+    console.error(`[kandev] ${err.message}`);
+    console.error("[kandev] run --help for usage");
+    process.exit(2);
+  }
   console.error(`[kandev] ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

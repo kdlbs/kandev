@@ -252,7 +252,6 @@ function launchReleaseApps(prepared: PreparedRelease): {
       agentctlPort: prepared.agentctlPort,
       backendUrl: prepared.backendUrl,
     },
-    publicUrl: prepared.backendUrl,
     dbPath: prepared.dbPath,
     logLevel: prepared.logLevel,
   });

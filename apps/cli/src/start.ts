@@ -170,7 +170,6 @@ export async function runStart({
   logStartupInfo({
     header: "start mode: using local build",
     ports,
-    publicUrl: ports.backendUrl,
     dbPath,
     logLevel,
   });

@@ -1,23 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { _resetWarnedFlagsForTest, parseArgs, resolvePorts } from "./args";
+import { deprecationReplacement, parseArgs, ParseError, resolvePorts } from "./args";
 
 describe("parseArgs", () => {
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    _resetWarnedFlagsForTest();
-    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  });
-
-  afterEach(() => {
-    stderrSpy.mockRestore();
-  });
-
   it("defaults to the run command with no args", () => {
-    const { options, showHelp } = parseArgs([]);
+    const { options, showHelp, deprecatedFlags } = parseArgs([]);
     expect(options.command).toBe("run");
     expect(showHelp).toBe(false);
+    expect(deprecatedFlags).toEqual([]);
   });
 
   it("parses --port and --port=<n>", () => {
@@ -25,36 +15,44 @@ describe("parseArgs", () => {
     expect(parseArgs(["--port=3000"]).options.port).toBe(3000);
   });
 
-  it("parses --web-internal-port (the renamed advanced flag) without warning", () => {
-    expect(parseArgs(["--web-internal-port", "12345"]).options.webPort).toBe(12345);
-    expect(parseArgs(["--web-internal-port=12345"]).options.webPort).toBe(12345);
-    expect(stderrSpy).not.toHaveBeenCalled();
+  it("parses --web-internal-port (the renamed advanced flag) without a deprecation note", () => {
+    const r = parseArgs(["--web-internal-port", "12345"]);
+    expect(r.options.webPort).toBe(12345);
+    expect(r.deprecatedFlags).toEqual([]);
   });
 
-  it("emits a deprecation warning for --backend-port but still parses it", () => {
-    const { options } = parseArgs(["--backend-port", "3447"]);
-    expect(options.backendPort).toBe(3447);
-    expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining("--backend-port is deprecated; use --port"),
-    );
+  it("records --backend-port as deprecated but still parses it", () => {
+    const r = parseArgs(["--backend-port", "3447"]);
+    expect(r.options.backendPort).toBe(3447);
+    expect(r.deprecatedFlags).toEqual(["--backend-port"]);
   });
 
-  it("emits a deprecation warning for --web-port pointing at --web-internal-port", () => {
-    const { options } = parseArgs(["--web-port=8080"]);
-    expect(options.webPort).toBe(8080);
-    expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining("--web-port is deprecated; use --web-internal-port"),
-    );
+  it("records --web-port as deprecated", () => {
+    const r = parseArgs(["--web-port=8080"]);
+    expect(r.options.webPort).toBe(8080);
+    expect(r.deprecatedFlags).toEqual(["--web-port"]);
   });
 
-  it("warns about each deprecated flag at most once per process", () => {
-    parseArgs(["--backend-port=1", "--backend-port=2"]);
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
+  it("dedupes deprecated flags across repeats", () => {
+    const r = parseArgs(["--backend-port=1", "--backend-port=2"]);
+    expect(r.deprecatedFlags).toEqual(["--backend-port"]);
   });
 
   it("reports --help via showHelp without exiting", () => {
-    const { showHelp } = parseArgs(["--help"]);
-    expect(showHelp).toBe(true);
+    expect(parseArgs(["--help"]).showHelp).toBe(true);
+  });
+
+  it("throws ParseError when a value-taking flag has no value", () => {
+    expect(() => parseArgs(["--port"])).toThrow(ParseError);
+    expect(() => parseArgs(["--port"])).toThrow(/--port requires a value/);
+  });
+
+  it("throws ParseError when the next token is another flag", () => {
+    expect(() => parseArgs(["--port", "--debug"])).toThrow(/--port requires a value/);
+  });
+
+  it("throws ParseError on a non-numeric port value", () => {
+    expect(() => parseArgs(["--port=abc"])).toThrow(/--port value must be a number/);
   });
 });
 
@@ -98,5 +96,21 @@ describe("resolvePorts", () => {
   it("returns undefined for both ports when nothing is set", () => {
     const r = resolvePorts({ command: "run" }, {} as NodeJS.ProcessEnv);
     expect(r).toEqual({ backendPort: undefined, webPort: undefined });
+  });
+});
+
+describe("deprecationReplacement", () => {
+  it("points --backend-port at --port for run/start", () => {
+    expect(deprecationReplacement("--backend-port", "run")).toBe("--port");
+    expect(deprecationReplacement("--backend-port", "start")).toBe("--port");
+  });
+
+  it("points --backend-port at the env var in dev (since --port maps to web there)", () => {
+    expect(deprecationReplacement("--backend-port", "dev")).toBe("KANDEV_BACKEND_PORT");
+  });
+
+  it("points --web-port at --web-internal-port", () => {
+    expect(deprecationReplacement("--web-port", "run")).toBe("--web-internal-port");
+    expect(deprecationReplacement("--web-port", "dev")).toBe("--web-internal-port");
   });
 });

@@ -1,10 +1,3 @@
-/**
- * Pure CLI argument parsing + port resolution.
- *
- * Kept free of side effects (other than a one-shot stderr deprecation note)
- * so it can be unit-tested without spawning the launcher.
- */
-
 export type Command = "run" | "dev" | "start";
 
 export type CliOptions = {
@@ -20,11 +13,19 @@ export type CliOptions = {
 export type ParseResult = {
   options: CliOptions;
   showHelp: boolean;
+  /** Deprecated flags seen on the command line. cli.ts emits warnings after parsing so they can be command-aware. */
+  deprecatedFlags: string[];
 };
+
+export class ParseError extends Error {}
 
 export function parseArgs(argv: string[]): ParseResult {
   const opts: CliOptions = { command: "run" };
   let showHelp = false;
+  const deprecatedFlags: string[] = [];
+  const noteDeprecated = (flag: string) => {
+    if (!deprecatedFlags.includes(flag)) deprecatedFlags.push(flag);
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -36,7 +37,7 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
     if (arg === "--version") {
-      opts.version = argv[i + 1];
+      opts.version = takeValue(argv, i, "--version");
       i += 1;
       continue;
     }
@@ -49,43 +50,43 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
     if (arg === "--port") {
-      opts.port = Number(argv[i + 1]);
+      opts.port = parsePort(takeValue(argv, i, "--port"), "--port");
       i += 1;
       continue;
     }
     if (arg.startsWith("--port=")) {
-      opts.port = Number(arg.split("=")[1]);
+      opts.port = parsePort(arg.split("=")[1], "--port");
       continue;
     }
     if (arg === "--backend-port") {
-      opts.backendPort = Number(argv[i + 1]);
-      warnDeprecatedFlag("--backend-port", "--port");
+      opts.backendPort = parsePort(takeValue(argv, i, "--backend-port"), "--backend-port");
+      noteDeprecated("--backend-port");
       i += 1;
       continue;
     }
     if (arg.startsWith("--backend-port=")) {
-      opts.backendPort = Number(arg.split("=")[1]);
-      warnDeprecatedFlag("--backend-port", "--port");
+      opts.backendPort = parsePort(arg.split("=")[1], "--backend-port");
+      noteDeprecated("--backend-port");
       continue;
     }
     if (arg === "--web-internal-port") {
-      opts.webPort = Number(argv[i + 1]);
+      opts.webPort = parsePort(takeValue(argv, i, "--web-internal-port"), "--web-internal-port");
       i += 1;
       continue;
     }
     if (arg.startsWith("--web-internal-port=")) {
-      opts.webPort = Number(arg.split("=")[1]);
+      opts.webPort = parsePort(arg.split("=")[1], "--web-internal-port");
       continue;
     }
     if (arg === "--web-port") {
-      opts.webPort = Number(argv[i + 1]);
-      warnDeprecatedFlag("--web-port", "--web-internal-port");
+      opts.webPort = parsePort(takeValue(argv, i, "--web-port"), "--web-port");
+      noteDeprecated("--web-port");
       i += 1;
       continue;
     }
     if (arg.startsWith("--web-port=")) {
-      opts.webPort = Number(arg.split("=")[1]);
-      warnDeprecatedFlag("--web-port", "--web-internal-port");
+      opts.webPort = parsePort(arg.split("=")[1], "--web-port");
+      noteDeprecated("--web-port");
       continue;
     }
     if (arg === "--verbose" || arg === "-v") {
@@ -97,7 +98,23 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
   }
-  return { options: opts, showHelp };
+  return { options: opts, showHelp, deprecatedFlags };
+}
+
+function takeValue(argv: string[], i: number, flag: string): string {
+  const v = argv[i + 1];
+  if (v === undefined || v.startsWith("-")) {
+    throw new ParseError(`${flag} requires a value`);
+  }
+  return v;
+}
+
+function parsePort(raw: string, flag: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new ParseError(`${flag} value must be a number, got "${raw}"`);
+  }
+  return n;
 }
 
 export type ResolvedPorts = {
@@ -105,17 +122,7 @@ export type ResolvedPorts = {
   webPort?: number;
 };
 
-/**
- * Resolves backend/web ports from CLI options + env, applying the rule that
- * `--port` (and KANDEV_PORT) maps to whichever process is the public front
- * door for the chosen command:
- *
- * - start / run → backend port (the Go server reverse-proxies Next.js)
- * - dev         → web port (browser hits Next dev directly for HMR)
- *
- * Explicit `--backend-port` / `--web-port` (and their *_PORT env vars)
- * always take precedence over the generic `--port`.
- */
+// `--port` (and KANDEV_PORT) maps to the public front door: backend in run/start (proxied), web in dev (HMR direct). Explicit per-process flags still win.
 export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): ResolvedPorts {
   const publicPort = options.port ?? envPort(env, "KANDEV_PORT");
   let backendPort = options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT");
@@ -135,14 +142,15 @@ function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
   return val ? Number(val) : undefined;
 }
 
-const warnedFlags = new Set<string>();
-function warnDeprecatedFlag(oldFlag: string, newFlag: string): void {
-  if (warnedFlags.has(oldFlag)) return;
-  warnedFlags.add(oldFlag);
-  process.stderr.write(`[kandev] ${oldFlag} is deprecated; use ${newFlag}\n`);
-}
-
-// Test-only: resets the dedup set between cases.
-export function _resetWarnedFlagsForTest(): void {
-  warnedFlags.clear();
+// Returns the suggested replacement for a deprecated flag, given the active command.
+// `--port` maps to backend in run/start and to web in dev — so for dev users who
+// explicitly used `--backend-port`, the right pointer is the env var, not `--port`.
+export function deprecationReplacement(flag: string, command: Command): string {
+  if (flag === "--backend-port") {
+    return command === "dev" ? "KANDEV_BACKEND_PORT" : "--port";
+  }
+  if (flag === "--web-port") {
+    return "--web-internal-port";
+  }
+  return "--port";
 }

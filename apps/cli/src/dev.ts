@@ -32,7 +32,6 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   logStartupInfo({
     header: "dev mode: using local repo",
     ports,
-    publicUrl: webUrl,
     dbPath,
     logLevel,
   });
