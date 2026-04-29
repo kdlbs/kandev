@@ -170,6 +170,7 @@ function CreateFormActions({
 type BuildProfileConfigInput = {
   isRemote: boolean;
   isSprites: boolean;
+  isDocker: boolean;
   networkPolicyRules: NetworkPolicyRule[];
   remoteCredentials: string[];
   agentEnvVars: Record<string, string | null>;
@@ -177,12 +178,15 @@ type BuildProfileConfigInput = {
   localGitIdentity: GitIdentityState;
   gitUserName: string;
   gitUserEmail: string;
+  dockerfile: string;
+  imageTag: string;
 };
 
 function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
   const {
     isRemote,
     isSprites,
+    isDocker,
     networkPolicyRules,
     remoteCredentials,
     agentEnvVars,
@@ -190,6 +194,8 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
     localGitIdentity,
     gitUserName,
     gitUserEmail,
+    dockerfile,
+    imageTag,
   } = input;
   const config: Record<string, string> = {};
   if (isSprites && networkPolicyRules.length > 0) {
@@ -216,7 +222,23 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
       config.git_user_email = effectiveEmail;
     }
   }
+  applyDockerCreateConfig(config, isDocker, dockerfile, imageTag);
   return Object.keys(config).length > 0 ? config : undefined;
+}
+
+function applyDockerCreateConfig(
+  config: Record<string, string>,
+  isDocker: boolean,
+  dockerfile: string,
+  imageTag: string,
+): void {
+  if (!isDocker) return;
+  if (dockerfile.trim()) {
+    config.dockerfile = dockerfile;
+  }
+  if (imageTag.trim()) {
+    config.image_tag = imageTag.trim();
+  }
 }
 
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
@@ -406,6 +428,7 @@ function useCreateProfileSave(
         config: buildProfileConfig({
           isRemote: form.isRemote,
           isSprites: form.isSprites,
+          isDocker: form.isDocker,
           networkPolicyRules: form.networkPolicyRules,
           remoteCredentials: form.remoteCredentials,
           agentEnvVars: form.agentEnvVars,
@@ -413,6 +436,8 @@ function useCreateProfileSave(
           localGitIdentity: form.localGitIdentity,
           gitUserName: form.gitUserName,
           gitUserEmail: form.gitUserEmail,
+          dockerfile: form.dockerfile,
+          imageTag: form.imageTag,
         }),
         prepare_script: form.prepareScript,
         cleanup_script: form.cleanupScript,

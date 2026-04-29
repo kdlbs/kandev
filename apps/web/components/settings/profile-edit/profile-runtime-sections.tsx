@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type { ExecutorProfile } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
@@ -16,17 +15,28 @@ import {
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
 
-export function DockerSections({ profile }: { profile: ExecutorProfile }) {
-  const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
-  const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
+type DockerSectionsProps = {
+  profile: ExecutorProfile;
+  dockerfile: string;
+  onDockerfileChange: (v: string) => void;
+  imageTag: string;
+  onImageTagChange: (v: string) => void;
+};
 
+export function DockerSections({
+  profile,
+  dockerfile,
+  onDockerfileChange,
+  imageTag,
+  onImageTagChange,
+}: DockerSectionsProps) {
   return (
     <>
       <DockerfileBuildCard
         dockerfile={dockerfile}
-        onDockerfileChange={setDockerfile}
+        onDockerfileChange={onDockerfileChange}
         imageTag={imageTag}
-        onImageTagChange={setImageTag}
+        onImageTagChange={onImageTagChange}
       />
       <DockerContainersCard profileId={profile.id} />
     </>

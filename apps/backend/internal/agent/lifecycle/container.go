@@ -21,20 +21,21 @@ import (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
-	AgentConfig     agents.Agent
-	WorkspacePath   string // If empty, workspace is not mounted (will clone inside container)
-	TaskID          string
-	TaskDescription string
-	Model           string
-	SessionID       string
-	Credentials     map[string]string
-	ProfileInfo     *AgentProfileInfo
-	InstanceID      string
-	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
-	McpServers      []McpServerConfig
-	McpMode         string
-	PrepareScript   string // Script to run inside container before agent starts (e.g., clone repo)
-	BootstrapNonce  string // one-time nonce for agentctl handshake (set internally)
+	AgentConfig      agents.Agent
+	WorkspacePath    string // If empty, workspace is not mounted (will clone inside container)
+	TaskID           string
+	TaskDescription  string
+	Model            string
+	SessionID        string
+	Credentials      map[string]string
+	ProfileInfo      *AgentProfileInfo
+	InstanceID       string
+	MainRepoGitDir   string // Path to main repo's .git directory (for worktrees)
+	McpServers       []McpServerConfig
+	McpMode          string
+	PrepareScript    string // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	BootstrapNonce   string // one-time nonce for agentctl handshake (set internally)
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -236,10 +237,15 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	ag := config.AgentConfig
 	rt := ag.Runtime()
 
-	// Build image name with tag
+	// Build image name with tag. A profile-level image_tag override (e.g. a
+	// custom Dockerfile built via the executor profile UI) takes precedence
+	// over the agent's hardcoded runtime default.
 	imageName := rt.Image
 	if rt.Tag != "" {
 		imageName = fmt.Sprintf("%s:%s", rt.Image, rt.Tag)
+	}
+	if config.ImageTagOverride != "" {
+		imageName = config.ImageTagOverride
 	}
 
 	// Build command using Agent's BuildCommand

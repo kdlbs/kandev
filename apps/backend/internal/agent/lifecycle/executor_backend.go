@@ -72,6 +72,7 @@ const (
 	MetadataKeyRemoteAuthHome  = "remote_auth_target_home"
 	MetadataKeyGitUserName     = "git_user_name"
 	MetadataKeyGitUserEmail    = "git_user_email"
+	MetadataKeyImageTagOverride = "image_tag_override"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous

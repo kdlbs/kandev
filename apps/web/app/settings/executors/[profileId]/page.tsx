@@ -258,6 +258,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [mcpPolicy, setMcpPolicy] = useState(profile.mcp_policy ?? "");
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
+  const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
+  const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -295,6 +297,10 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setPrepareScript,
     cleanupScript,
     setCleanupScript,
+    dockerfile,
+    setDockerfile,
+    imageTag,
+    setImageTag,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -365,7 +371,25 @@ function buildSaveConfig(
   } else {
     delete config.git_user_email;
   }
+  applyDockerConfig(config, form);
   return config;
+}
+
+function applyDockerConfig(
+  config: Record<string, string>,
+  form: ReturnType<typeof useProfileFormState>,
+): void {
+  if (!form.isDocker) return;
+  if (form.dockerfile.trim()) {
+    config.dockerfile = form.dockerfile;
+  } else {
+    delete config.dockerfile;
+  }
+  if (form.imageTag.trim()) {
+    config.image_tag = form.imageTag.trim();
+  } else {
+    delete config.image_tag;
+  }
 }
 
 function ProfileEditSections({
@@ -389,7 +413,15 @@ function ProfileEditSections({
           secrets={secrets}
         />
       )}
-      {form.isDocker && <DockerSections profile={profile} />}
+      {form.isDocker && (
+        <DockerSections
+          profile={profile}
+          dockerfile={form.dockerfile}
+          onDockerfileChange={form.setDockerfile}
+          imageTag={form.imageTag}
+          onImageTagChange={form.setImageTag}
+        />
+      )}
       {form.isRemote && (
         <SpritesSections
           isRemote={form.isRemote}

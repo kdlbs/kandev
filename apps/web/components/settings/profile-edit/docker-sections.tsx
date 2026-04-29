@@ -17,7 +17,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 
-const DEFAULT_IMAGE_TAG = "kandev/agent:latest";
+const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
 const DEFAULT_DOCKERFILE = "FROM ubuntu:24.04\n";
 
 type BuildStatus = "idle" | "building" | "success" | "failed";
