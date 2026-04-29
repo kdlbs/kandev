@@ -270,6 +270,12 @@ func (s *Service) GetRepository(ctx context.Context, id string) (*models.Reposit
 	return s.repoEntities.GetRepository(ctx, id)
 }
 
+// GetRepositoryByProviderInfo looks up a repository by workspace and provider identity.
+// Returns nil (with nil error) when no matching repository exists.
+func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, owner, name string) (*models.Repository, error) {
+	return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+}
+
 // FindOrCreateRepository looks up a repository by provider info, creating one if not found.
 // If the repository exists but has no LocalPath and the request provides one, updates LocalPath.
 func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, error) {

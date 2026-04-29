@@ -1,4 +1,7 @@
+import { execSync } from "node:child_process";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("PR watcher merged cleanup", () => {
@@ -115,8 +118,26 @@ test.describe("PR watcher merged cleanup", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+
+    // --- Register the GitHub repo so the PR watcher can resolve it to a real
+    // local path (the seed repo created in test-base.ts has no provider info,
+    // and clone-from-real-GitHub fails for the mocked testorg/testrepo). ---
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "GitHub Test Repo",
+      provider: "github",
+      provider_owner: "testorg",
+      provider_name: "testrepo",
+    });
+
+    // Create the PR's head branch in the local seed repo so the executor's
+    // git checkout for auto-started review tasks succeeds (in production this
+    // branch would have been fetched during clone).
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git branch -f feature/reviewed main", { cwd: repoDir, env: gitEnv });
 
     // --- Setup mock GitHub ---
     await apiClient.mockGitHubReset();
