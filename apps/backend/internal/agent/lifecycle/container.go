@@ -257,6 +257,14 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	}
 	cmd := ag.BuildCommand(cmdOpts)
 
+	// Resolve the in-container workspace path. Clone-inside-container mode leaves
+	// config.WorkspacePath empty (no host bind mount); the entrypoint clones into
+	// /workspace, so use that for both mount expansion and the container WorkingDir.
+	workspacePath := config.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = "/workspace"
+	}
+
 	// Expand mounts
 	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag)
 
@@ -290,7 +298,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		Image:       imageName,
 		Cmd:         cmd.Args(),
 		Env:         env,
-		WorkingDir:  rt.WorkingDir,
+		WorkingDir:  cm.expandMountSource(rt.WorkingDir, workspacePath),
 		Mounts:      mounts,
 		NetworkMode: cm.networkName,
 		Memory:      memoryBytes,
