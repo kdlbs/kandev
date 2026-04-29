@@ -280,7 +280,11 @@ type repositoryResolverAdapter struct {
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
-	if existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name); err == nil && existing != nil && existing.LocalPath != "" {
+	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
+	}
+	if existing != nil && existing.LocalPath != "" {
 		baseBranch := defaultBranch
 		if baseBranch == "" {
 			baseBranch = existing.DefaultBranch

@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestTaskService creates a real task service with an in-memory SQLite DB for integration tests.
+// newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
 // Returns the service and the raw repo (for seeding data).
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
 	t.Helper()

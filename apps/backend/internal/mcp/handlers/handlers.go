@@ -414,7 +414,11 @@ func (h *Handlers) resolveTaskRepositories(
 		// Inherit workspace from source task so multi-workspace installs don't
 		// fail auto-resolution when the agent supplies an explicit repository.
 		if sourceTaskID != "" && h.taskSvc != nil {
-			if src, srcErr := h.taskSvc.GetTask(ctx, sourceTaskID); srcErr == nil {
+			src, srcErr := h.taskSvc.GetTask(ctx, sourceTaskID)
+			if srcErr != nil {
+				h.logger.Warn("source task lookup failed, skipping workspace inheritance",
+					zap.String("source_task_id", sourceTaskID), zap.Error(srcErr))
+			} else {
 				result.WorkspaceID = src.WorkspaceID
 			}
 		}
