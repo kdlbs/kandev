@@ -18,6 +18,10 @@ export function buildClaudeCodeConfig(streamableUrl: string): string {
   );
 }
 
+export function buildClaudeCodeCliCommand(streamableUrl: string): string {
+  return `claude mcp add --transport http --scope user ${SERVER_NAME} ${streamableUrl}`;
+}
+
 export function buildCursorConfig(streamableUrl: string): string {
   return JSON.stringify(
     {
@@ -38,4 +42,50 @@ export function buildCodexConfig(streamableUrl: string): string {
     `url = "${streamableUrl}"`,
     `transport = "streamable_http"`,
   ].join("\n");
+}
+
+export function buildCodexCliCommand(streamableUrl: string): string {
+  return `codex mcp add ${SERVER_NAME} --url ${streamableUrl}`;
+}
+
+// Auggie's ~/.augment/settings.json uses the same { type: "http", url } shape as Claude Code.
+export function buildAuggieConfig(streamableUrl: string): string {
+  return buildClaudeCodeConfig(streamableUrl);
+}
+
+export function buildAuggieCliCommand(streamableUrl: string): string {
+  return `auggie mcp add ${SERVER_NAME} --transport http --url ${streamableUrl}`;
+}
+
+export function buildOpenCodeConfig(streamableUrl: string): string {
+  return JSON.stringify(
+    {
+      $schema: "https://opencode.ai/config.json",
+      mcp: {
+        [SERVER_NAME]: {
+          type: "remote",
+          url: streamableUrl,
+          enabled: true,
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+export function buildCopilotCliConfig(streamableUrl: string): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        [SERVER_NAME]: {
+          type: "http",
+          url: streamableUrl,
+          tools: ["*"],
+        },
+      },
+    },
+    null,
+    2,
+  );
 }
