@@ -141,9 +141,9 @@ function KanbanCardBadges({ task }: { task: Task }) {
   if (!showRow) return null;
 
   return (
-    <div className="flex items-center justify-end gap-2 mt-1">
+    <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
       {task.parentTaskId && (
-        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px]">
+        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
           <IconSubtask className="h-3 w-3 shrink-0" />
           <span className="truncate">{parentTitle ?? "Subtask"}</span>
         </Badge>
