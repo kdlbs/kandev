@@ -31,6 +31,7 @@ import {
   useDialogFormState,
   useTaskCreateDialogEffects,
   useDialogHandlers,
+  useLockedFieldSync,
   useSessionRepoName,
   useTaskCreateDialogData,
   computeIsTaskStarted,
@@ -70,6 +71,41 @@ interface TaskCreateDialogProps {
   initialValues?: TaskCreateDialogInitialValues;
   taskId?: string | null;
   parentTaskId?: string;
+  /**
+   * Optional UI rendered below the description textarea. Used by feature wrappers
+   * such as Improve Kandev to add capture toggles and pre-flight status without
+   * forking the dialog.
+   */
+  extraFormSlot?: React.ReactNode;
+  /**
+   * Optional async transform applied to the task description before the API
+   * payload is built. Awaited; receives the trimmed description and returns
+   * the value to send. Used to append context-bundle file paths.
+   */
+  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
+  /**
+   * Optional locks for individual fields. When a flag is true, the
+   * corresponding selector is disabled (or hidden, for workflow). Used by
+   * feature wrappers such as Improve Kandev to enforce a fixed
+   * repository / branch / workflow selection.
+   */
+  lockedFields?: { repository?: boolean; branch?: boolean; workflow?: boolean };
+  /**
+   * Optional override for the task description textarea placeholder. Used by
+   * feature wrappers (e.g. Improve Kandev) to suggest the kind of input
+   * expected.
+   */
+  descriptionPlaceholder?: string;
+  /**
+   * Optional slot rendered above the description textarea (e.g. a bug/feature
+   * tab toggle for Improve Kandev).
+   */
+  aboveDescriptionSlot?: React.ReactNode;
+  /**
+   * Optional slot rendered below the branch/agent/executor selectors (e.g.
+   * a workflow preview or contextual help for Improve Kandev).
+   */
+  bottomSlot?: React.ReactNode;
 }
 
 type DialogFormBodyProps = {
@@ -108,56 +144,59 @@ type DialogFormBodyProps = {
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
   onToggleFreshBranch: (enabled: boolean) => void;
+  extraFormSlot?: React.ReactNode;
+  lockedFields?: TaskCreateDialogProps["lockedFields"];
+  descriptionPlaceholder?: string;
+  aboveDescriptionSlot?: React.ReactNode;
+  bottomSlot?: React.ReactNode;
 };
 
-function DialogFormBody({
-  isSessionMode,
-  isCreateMode,
-  isTaskStarted,
-  isPassthroughProfile,
-  initialDescription,
-  hasDescription,
-  workspaceId,
-  onJiraImport,
-  onLinearImport,
-  branchOptions,
-  branchesLoading,
-  agentProfileOptions,
-  executorProfileOptions,
-  agentProfiles,
-  agentProfilesLoading,
-  executorsLoading,
-  isCreatingSession,
-  workflows,
-  snapshots,
-  effectiveWorkflowId,
-  fs,
-  handleKeyDown,
-  onBranchChange,
-  onAgentProfileChange,
-  onExecutorProfileChange,
-  onWorkflowChange,
-  hasRepositorySelection,
-  isLocalExecutor,
-  enhance,
-  workflowAgentLocked,
-  onToggleFreshBranch,
-}: DialogFormBodyProps) {
+function DialogFormBody(p: DialogFormBodyProps) {
+  const {
+    isSessionMode,
+    isCreateMode,
+    isTaskStarted,
+    branchOptions,
+    branchesLoading,
+    agentProfileOptions,
+    executorProfileOptions,
+    agentProfiles,
+    agentProfilesLoading,
+    executorsLoading,
+    isCreatingSession,
+    workflows,
+    snapshots,
+    effectiveWorkflowId,
+    fs,
+    onBranchChange,
+    onAgentProfileChange,
+    onExecutorProfileChange,
+    onWorkflowChange,
+    hasRepositorySelection,
+    isLocalExecutor,
+    workflowAgentLocked,
+    onToggleFreshBranch,
+    lockedFields,
+  } = p;
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
       <DialogPromptSection
         isSessionMode={isSessionMode}
         isTaskStarted={isTaskStarted}
-        isPassthroughProfile={isPassthroughProfile}
-        initialDescription={initialDescription}
-        hasDescription={hasDescription}
+        isPassthroughProfile={p.isPassthroughProfile}
+        initialDescription={p.initialDescription}
+        hasDescription={p.hasDescription}
         fs={fs}
-        handleKeyDown={handleKeyDown}
-        enhance={enhance}
-        workspaceId={workspaceId}
-        onJiraImport={onJiraImport}
-        onLinearImport={onLinearImport}
+        handleKeyDown={p.handleKeyDown}
+        enhance={p.enhance}
+        workspaceId={p.workspaceId}
+        descriptionPlaceholder={p.descriptionPlaceholder}
+        onJiraImport={p.onJiraImport}
+        onLinearImport={p.onLinearImport}
+        extraFormSlot={p.extraFormSlot}
+        aboveDescriptionSlot={p.aboveDescriptionSlot}
       />
+
       {!isSessionMode &&
         renderCreateEditSelectors({
           isTaskStarted,
@@ -177,16 +216,19 @@ function DialogFormBody({
           onAgentProfileChange,
           onExecutorProfileChange,
           onToggleFreshBranch,
+          branchLocked: !!lockedFields?.branch,
         })}
-      <WorkflowSection
-        isCreateMode={isCreateMode}
-        isTaskStarted={isTaskStarted}
-        workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
-        snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
-        effectiveWorkflowId={effectiveWorkflowId}
-        onWorkflowChange={onWorkflowChange}
-        agentProfiles={agentProfiles}
-      />
+      {!lockedFields?.workflow && (
+        <WorkflowSection
+          isCreateMode={isCreateMode}
+          isTaskStarted={isTaskStarted}
+          workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
+          snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
+          effectiveWorkflowId={effectiveWorkflowId}
+          onWorkflowChange={onWorkflowChange}
+          agentProfiles={agentProfiles}
+        />
+      )}
       {isSessionMode && (
         <SessionSelectors
           agentProfileOptions={agentProfileOptions}
@@ -202,6 +244,7 @@ function DialogFormBody({
           ExecutorProfileSelectorComponent={ExecutorProfileSelector}
         />
       )}
+      {p.bottomSlot}
     </div>
   );
 }
@@ -225,7 +268,7 @@ type CreateEditSelectorsRenderArgs = Pick<
   | "onAgentProfileChange"
   | "onExecutorProfileChange"
   | "onToggleFreshBranch"
->;
+> & { branchLocked?: boolean };
 
 function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
   const { fs } = args;
@@ -254,6 +297,7 @@ function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
       freshBranchEnabled={fs.freshBranchEnabled}
       onToggleFreshBranch={args.onToggleFreshBranch}
       currentLocalBranch={fs.currentLocalBranch}
+      branchLocked={args.branchLocked}
       BranchSelectorComponent={BranchSelector}
       AgentSelectorComponent={AgentSelector}
       ExecutorProfileSelectorComponent={ExecutorProfileSelector}
@@ -370,6 +414,7 @@ function useSubmitHandlersWiring({
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
     repositoryLocalPath,
+    transformDescriptionBeforeSubmit: props.transformDescriptionBeforeSubmit,
   });
 }
 
@@ -415,6 +460,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     toast,
     workflows,
   });
+  useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useSubmitHandlersWiring({
     props,
@@ -452,9 +498,22 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
 type DialogFormProps = {
   setup: ReturnType<typeof useTaskCreateDialogSetup>;
   workspaceId: string | null;
+  extraFormSlot?: React.ReactNode;
+  lockedFields?: TaskCreateDialogProps["lockedFields"];
+  descriptionPlaceholder?: string;
+  aboveDescriptionSlot?: React.ReactNode;
+  bottomSlot?: React.ReactNode;
 };
 
-function DialogForm({ setup, workspaceId }: DialogFormProps) {
+function DialogForm({
+  setup,
+  workspaceId,
+  extraFormSlot,
+  lockedFields,
+  descriptionPlaceholder,
+  aboveDescriptionSlot,
+  bottomSlot,
+}: DialogFormProps) {
   const { fs, isSessionMode, isCreateMode, isTaskStarted, workflows, agentProfiles } = setup;
   const { snapshots, branchesLoading, computed, handlers, handleKeyDown } = setup;
   const { handleJiraImport, handleLinearImport } = setup;
@@ -494,6 +553,11 @@ function DialogForm({ setup, workspaceId }: DialogFormProps) {
         enhance={setup.enhance}
         workflowAgentLocked={computed.workflowAgentLocked}
         onToggleFreshBranch={handlers.handleToggleFreshBranch}
+        extraFormSlot={extraFormSlot}
+        lockedFields={lockedFields}
+        descriptionPlaceholder={descriptionPlaceholder}
+        aboveDescriptionSlot={aboveDescriptionSlot}
+        bottomSlot={bottomSlot}
       />
       <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
         <TaskCreateDialogFooter
@@ -526,7 +590,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
   const { fs, isCreateMode, isEditMode, isTaskStarted } = setup;
-  const { repositoriesLoading, computed, handlers } = setup;
+  const { sessionRepoName, repositoriesLoading, computed, handlers } = setup;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -534,32 +598,74 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
-          <DialogHeaderContent
+          <RenderHeader
+            initialTitle={initialValues?.title}
+            workspaceId={workspaceId}
             isCreateMode={isCreateMode}
             isEditMode={isEditMode}
             isTaskStarted={isTaskStarted}
-            sessionRepoName={setup.sessionRepoName}
-            initialTitle={initialValues?.title}
-            taskName={fs.taskName}
-            repositoryId={fs.repositoryId}
-            discoveredRepoPath={fs.discoveredRepoPath}
-            workspaceId={workspaceId}
+            sessionRepoName={sessionRepoName}
+            fs={fs}
             repositoriesLoading={repositoriesLoading}
-            discoverReposLoading={fs.discoverReposLoading}
-            headerRepositoryOptions={computed.headerRepositoryOptions}
-            onRepositoryChange={handlers.handleRepositoryChange}
-            onTaskNameChange={handlers.handleTaskNameChange}
-            useGitHubUrl={fs.useGitHubUrl}
-            githubUrl={fs.githubUrl}
-            githubUrlError={fs.githubUrlError}
-            onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-            onGitHubUrlChange={handlers.handleGitHubUrlChange}
+            computed={computed}
+            handlers={handlers}
+            repositoryLocked={!!props.lockedFields?.repository}
           />
         </DialogHeader>
-        <DialogForm setup={setup} workspaceId={workspaceId} />
+        <DialogForm
+          setup={setup}
+          workspaceId={workspaceId}
+          extraFormSlot={props.extraFormSlot}
+          lockedFields={props.lockedFields}
+          descriptionPlaceholder={props.descriptionPlaceholder}
+          aboveDescriptionSlot={props.aboveDescriptionSlot}
+          bottomSlot={props.bottomSlot}
+        />
         <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+type RenderHeaderProps = {
+  initialTitle: string | undefined;
+  workspaceId: string | null | undefined;
+  isCreateMode: boolean;
+  isEditMode: boolean;
+  isTaskStarted: boolean;
+  sessionRepoName: string | null | undefined;
+  fs: ReturnType<typeof useTaskCreateDialogSetup>["fs"];
+  repositoriesLoading: boolean;
+  computed: ReturnType<typeof useTaskCreateDialogSetup>["computed"];
+  handlers: ReturnType<typeof useTaskCreateDialogSetup>["handlers"];
+  repositoryLocked?: boolean;
+};
+
+function RenderHeader(props: RenderHeaderProps) {
+  const { fs, computed, handlers } = props;
+  return (
+    <DialogHeaderContent
+      isCreateMode={props.isCreateMode}
+      isEditMode={props.isEditMode}
+      isTaskStarted={props.isTaskStarted}
+      sessionRepoName={props.sessionRepoName ?? undefined}
+      initialTitle={props.initialTitle}
+      taskName={fs.taskName}
+      repositoryId={fs.repositoryId}
+      discoveredRepoPath={fs.discoveredRepoPath}
+      workspaceId={props.workspaceId ?? null}
+      repositoriesLoading={props.repositoriesLoading}
+      discoverReposLoading={fs.discoverReposLoading}
+      headerRepositoryOptions={computed.headerRepositoryOptions}
+      onRepositoryChange={handlers.handleRepositoryChange}
+      onTaskNameChange={handlers.handleTaskNameChange}
+      useGitHubUrl={fs.useGitHubUrl}
+      githubUrl={fs.githubUrl}
+      githubUrlError={fs.githubUrlError}
+      onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
+      onGitHubUrlChange={handlers.handleGitHubUrlChange}
+      repositoryLocked={props.repositoryLocked}
+    />
   );
 }
 

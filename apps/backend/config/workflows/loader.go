@@ -16,6 +16,7 @@ type templateYAML struct {
 	ID          string        `yaml:"id"`
 	Name        string        `yaml:"name"`
 	Description string        `yaml:"description"`
+	Hidden      bool          `yaml:"hidden,omitempty"`
 	Steps       []stepDefYAML `yaml:"steps"`
 }
 
@@ -92,6 +93,7 @@ func loadTemplate(filename string) (*models.WorkflowTemplate, error) {
 		Name:        raw.Name,
 		Description: raw.Description,
 		IsSystem:    true,
+		Hidden:      raw.Hidden,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

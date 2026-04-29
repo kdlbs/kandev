@@ -143,6 +143,7 @@ export type Workflow = {
   workflow_template_id?: string | null;
   agent_profile_id?: string;
   sort_order?: number;
+  hidden?: boolean;
   created_at: string;
   updated_at: string;
 };

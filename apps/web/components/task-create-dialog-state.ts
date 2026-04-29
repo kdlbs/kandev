@@ -405,6 +405,32 @@ export function useDialogFormState(
   return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...freshBranch, clearDraft };
 }
 
+// Pushes late-arriving locked field values (workflow id, repository id, branch)
+// into form state when they change after the dialog is already open. Used by
+// feature wrappers like Improve Kandev that resolve these values asynchronously.
+export function useLockedFieldSync(
+  open: boolean,
+  workflowId: string | null,
+  initialValues: TaskCreateDialogInitialValues | undefined,
+  fs: ReturnType<typeof useDialogFormState>,
+) {
+  const repoId = initialValues?.repositoryId;
+  const branch = initialValues?.branch;
+  useEffect(() => {
+    if (!open) return;
+    if (workflowId && workflowId !== fs.selectedWorkflowId) {
+      fs.setSelectedWorkflowId(workflowId);
+    }
+    if (repoId && repoId !== fs.repositoryId) {
+      fs.setRepositoryId(repoId);
+    }
+    if (branch && branch !== fs.branch) {
+      fs.setBranch(branch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, workflowId, repoId, branch]);
+}
+
 export type { DialogFormState } from "@/components/task-create-dialog-types";
 export {
   computePassthroughProfile,

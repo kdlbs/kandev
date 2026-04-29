@@ -464,7 +464,7 @@ func TestService_ListWorkflows(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow 1"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Workflow 2"})
 
-	workflows, err := svc.ListWorkflows(ctx, "ws-1")
+	workflows, err := svc.ListWorkflows(ctx, "ws-1", false)
 	if err != nil {
 		t.Fatalf("failed to list workflows: %v", err)
 	}

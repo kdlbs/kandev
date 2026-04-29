@@ -71,7 +71,7 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 }
 
 func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string) (dto.ListWorkflowsResponse, error) {
-	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID, false)
 	if err != nil {
 		return dto.ListWorkflowsResponse{}, err
 	}
@@ -228,7 +228,7 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 
 	workflowID := c.Query("workflow_id")
 	if workflowID == "" {
-		workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID)
+		workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID, false)
 		if err != nil {
 			handleNotFound(c, h.logger, err, "workflow not found")
 			return
@@ -302,7 +302,7 @@ func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		}
 	}
-	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID)
+	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID, false)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)

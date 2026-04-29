@@ -124,6 +124,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		Name:               req.Name,
 		Description:        req.Description,
 		WorkflowTemplateID: req.WorkflowTemplateID,
+		Hidden:             req.Hidden,
 	}
 
 	if err := s.workflows.CreateWorkflow(ctx, workflow); err != nil {
@@ -196,9 +197,10 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListWorkflows returns all workflows for a workspace (or all if empty)
-func (s *Service) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
-	return s.workflows.ListWorkflows(ctx, workspaceID)
+// ListWorkflows returns workflows for a workspace, excluding hidden ones by default.
+// Pass includeHidden=true to include system-only flows like Improve Kandev.
+func (s *Service) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error) {
+	return s.workflows.ListWorkflows(ctx, workspaceID, includeHidden)
 }
 
 // ReorderWorkflows updates sort_order for workflows within a workspace.

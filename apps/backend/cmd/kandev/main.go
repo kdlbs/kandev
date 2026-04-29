@@ -352,7 +352,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, addCleanup, runCleanups)
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, addCleanup, runCleanups)
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -369,6 +369,7 @@ func startGatewayAndServe(
 	agentRegistry *registry.Registry,
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
+	repoCloner *repoclone.Cloner,
 	addCleanup func(func() error),
 	runCleanups func(),
 ) bool {
@@ -437,7 +438,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -476,6 +477,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	repoCloner *repoclone.Cloner,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -512,6 +514,8 @@ func buildHTTPServer(
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		addCleanup:              addCleanup,
+		repoCloner:              repoCloner,
+		version:                 "0.1.0",
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
 		httpPort:                port,

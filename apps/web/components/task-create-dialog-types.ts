@@ -226,4 +226,10 @@ export type SubmitHandlersDeps = {
   isLocalExecutor: boolean;
   /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
   repositoryLocalPath: string;
+  /**
+   * Optional async transform applied to the trimmed description before the
+   * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
+   * append generated context like bundle file paths.
+   */
+  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
 };

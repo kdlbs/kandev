@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -16,9 +17,12 @@ import {
   IconBrandGithub,
   IconTicket,
   IconHexagon,
+  IconStethoscope,
 } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
 import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
+import { linkToTask } from "@/lib/links";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -107,6 +111,35 @@ function LinearTopbarButton({ workspaceId }: { workspaceId: string | undefined }
   );
 }
 
+function ImproveKandevTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setOpen(true)}
+            className="cursor-pointer"
+            data-testid="improve-kandev-button"
+          >
+            <IconStethoscope className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Improve KanDev</TooltipContent>
+      </Tooltip>
+      <ImproveKandevDialog
+        open={open}
+        onOpenChange={setOpen}
+        workspaceId={workspaceId ?? null}
+        onSuccess={(task) => router.push(linkToTask(task.id))}
+      />
+    </>
+  );
+}
+
 function ViewToggleGroup({
   toggleValue,
   onValueChange,
@@ -189,6 +222,7 @@ function TabletHeader({
           <GitHubTopbarButton />
           <JiraTopbarButton workspaceId={workspaceId} />
           <LinearTopbarButton workspaceId={workspaceId} />
+          <ImproveKandevTopbarButton workspaceId={workspaceId} />
         </TooltipProvider>
       </div>
       {onSearchChange && (
@@ -271,13 +305,18 @@ function DesktopHeader({
             <GitHubTopbarButton />
             <JiraTopbarButton workspaceId={workspaceId} />
             <LinearTopbarButton workspaceId={workspaceId} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" asChild className="cursor-pointer">
+                  <Link href="/stats">
+                    <IconChartBar className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stats</TooltipContent>
+            </Tooltip>
+            <ImproveKandevTopbarButton workspaceId={workspaceId} />
           </TooltipProvider>
-          <Button variant="outline" asChild className="cursor-pointer gap-2">
-            <Link href="/stats">
-              <IconChartBar className="h-4 w-4" />
-              <span>Stats</span>
-            </Link>
-          </Button>
         </div>
       </div>
       {onSearchChange && (

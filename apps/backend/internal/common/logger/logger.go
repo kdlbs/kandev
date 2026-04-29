@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
 
 // Context keys for extracting values from context.
@@ -99,7 +101,9 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 		writeSyncer = zapcore.AddSync(file)
 	}
 
-	core := zapcore.NewCore(encoder, writeSyncer, level)
+	outputCore := zapcore.NewCore(encoder, writeSyncer, level)
+	bufferCore := buffer.NewCore(buffer.Default(), level)
+	core := zapcore.NewTee(outputCore, bufferCore)
 	zapLogger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 
 	return &Logger{
@@ -212,4 +216,10 @@ func (l *Logger) Zap() *zap.Logger {
 // Sugar returns the underlying zap.SugaredLogger for printf-style logging.
 func (l *Logger) Sugar() *zap.SugaredLogger {
 	return l.sugar
+}
+
+// BufferSnapshot returns a copy of the entries currently held in the
+// process-wide log ring buffer used by Improve Kandev reports.
+func (l *Logger) BufferSnapshot() []buffer.Entry {
+	return buffer.Default().Snapshot()
 }

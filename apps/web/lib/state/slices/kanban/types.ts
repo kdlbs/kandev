@@ -68,6 +68,7 @@ export type WorkflowsState = {
     description?: string | null;
     sortOrder?: number;
     agent_profile_id?: string;
+    hidden?: boolean;
   }>;
   activeId: string | null;
 };

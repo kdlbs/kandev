@@ -75,6 +75,7 @@ type CreateEditSelectorsProps = {
   freshBranchEnabled: boolean;
   onToggleFreshBranch: (enabled: boolean) => void;
   currentLocalBranch: string;
+  branchLocked?: boolean;
 };
 
 type AgentColumnProps = Pick<
@@ -149,6 +150,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     currentLocalBranch,
     BranchSelectorComponent,
     ExecutorProfileSelectorComponent,
+    branchLocked,
   } = props;
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
   const lockedToCurrentBranch = isLocalWithoutGitHubUrl && !freshBranchEnabled;
@@ -160,6 +162,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     optionCount: branchOptions.length,
   });
   const branchDisabled =
+    branchLocked ||
     lockedToCurrentBranch ||
     !hasRepositorySelection ||
     branchesLoading ||
@@ -362,6 +365,12 @@ export type DialogPromptSectionProps = {
   workspaceId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
+  /** Extension slot rendered below the description textarea (e.g. log-capture toggle). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional override for the description textarea placeholder. */
+  descriptionPlaceholder?: string;
+  /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
+  aboveDescriptionSlot?: React.ReactNode;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the
@@ -390,11 +399,18 @@ export function DialogPromptSection({
   workspaceId,
   onJiraImport,
   onLinearImport,
+  extraFormSlot,
+  descriptionPlaceholder,
+  aboveDescriptionSlot,
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
+  const placeholder = isPassthroughProfile
+    ? "Passthrough mode — prompt not supported"
+    : descriptionPlaceholder;
   return (
     <>
+      {aboveDescriptionSlot}
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
@@ -404,13 +420,14 @@ export function DialogPromptSection({
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
         disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined}
+        placeholder={placeholder}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
         jiraImport={importBindings(importsEnabled, ws, isPassthroughProfile, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, isPassthroughProfile, onLinearImport)}
       />
+      {extraFormSlot}
       {isPassthroughProfile && hasDescription && (
         <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
       )}

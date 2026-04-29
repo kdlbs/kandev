@@ -273,7 +273,7 @@ func (h *Handlers) handleDeleteByField(
 func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list workflows", "Failed to list workflows",
 		func(ctx context.Context, workspaceID string) (any, error) {
-			workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID)
+			workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, false)
 			if err != nil {
 				return nil, err
 			}
@@ -374,7 +374,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	if req.WorkflowID == "" && h.taskSvc != nil {
-		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID); wfErr != nil {
+		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID, false); wfErr != nil {
 			h.logger.Warn("failed to auto-resolve workflow", zap.String("workspace_id", req.WorkspaceID), zap.Error(wfErr))
 		} else if len(workflows) == 1 {
 			req.WorkflowID = workflows[0].ID

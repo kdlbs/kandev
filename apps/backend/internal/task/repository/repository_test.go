@@ -77,7 +77,7 @@ func TestSQLiteRepository_SeedsDefaultWorkspace(t *testing.T) {
 		t.Errorf("expected Default Workspace, got %s", workspaces[0].Name)
 	}
 
-	workflows, err := repo.ListWorkflows(ctx, workspaces[0].ID)
+	workflows, err := repo.ListWorkflows(ctx, workspaces[0].ID, false)
 	if err != nil {
 		t.Fatalf("failed to list workflows: %v", err)
 	}

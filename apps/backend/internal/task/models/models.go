@@ -54,15 +54,18 @@ type Task struct {
 
 // Workflow represents a task workflow
 type Workflow struct {
-	ID                 string    `json:"id"`
-	WorkspaceID        string    `json:"workspace_id"`
-	Name               string    `json:"name"`
-	Description        string    `json:"description"`
-	AgentProfileID     string    `json:"agent_profile_id,omitempty"`
-	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"`
-	SortOrder          int       `json:"sort_order"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string  `json:"id"`
+	WorkspaceID        string  `json:"workspace_id"`
+	Name               string  `json:"name"`
+	Description        string  `json:"description"`
+	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
+	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
+	SortOrder          int     `json:"sort_order"`
+	// Hidden workflows are excluded from management and picker UIs by default.
+	// Used by system-only flows like Improve Kandev.
+	Hidden    bool      `json:"hidden,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Workspace represents a workspace

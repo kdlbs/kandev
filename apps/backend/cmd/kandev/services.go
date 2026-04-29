@@ -329,8 +329,8 @@ type workflowProviderAdapter struct {
 }
 
 // ListWorkflows implements workflowservice.WorkflowProvider.
-func (a *workflowProviderAdapter) ListWorkflows(ctx context.Context, workspaceID string) ([]*taskmodels.Workflow, error) {
-	return a.svc.ListWorkflows(ctx, workspaceID)
+func (a *workflowProviderAdapter) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
+	return a.svc.ListWorkflows(ctx, workspaceID, includeHidden)
 }
 
 // GetWorkflow implements workflowservice.WorkflowProvider.
