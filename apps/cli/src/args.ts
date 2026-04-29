@@ -3,7 +3,6 @@ export type Command = "run" | "dev" | "start";
 export type CliOptions = {
   command: Command;
   version?: string;
-  port?: number;
   backendPort?: number;
   webPort?: number;
   verbose?: boolean;
@@ -13,7 +12,7 @@ export type CliOptions = {
 export type ParseResult = {
   options: CliOptions;
   showHelp: boolean;
-  /** Deprecated flags seen on the command line. cli.ts emits warnings after parsing so they can be command-aware. */
+  /** Deprecated flags seen on the command line. cli.ts emits warnings after parsing. */
   deprecatedFlags: string[];
 };
 
@@ -51,24 +50,15 @@ export function parseArgs(argv: string[]): ParseResult {
       opts.command = "dev";
       continue;
     }
-    if (arg === "--port") {
-      opts.port = parsePort(takeValue(argv, i, "--port"), "--port");
+    // --port is an alias for --backend-port (the user-facing port in run/start).
+    if (arg === "--port" || arg === "--backend-port") {
+      opts.backendPort = parsePort(takeValue(argv, i, arg), arg);
       i += 1;
       continue;
     }
-    if (arg.startsWith("--port=")) {
-      opts.port = parsePort(arg.split("=")[1], "--port");
-      continue;
-    }
-    if (arg === "--backend-port") {
-      opts.backendPort = parsePort(takeValue(argv, i, "--backend-port"), "--backend-port");
-      noteDeprecated("--backend-port");
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--backend-port=")) {
-      opts.backendPort = parsePort(arg.split("=")[1], "--backend-port");
-      noteDeprecated("--backend-port");
+    if (arg.startsWith("--port=") || arg.startsWith("--backend-port=")) {
+      const flag = arg.startsWith("--port=") ? "--port" : "--backend-port";
+      opts.backendPort = parsePort(arg.slice(flag.length + 1), flag);
       continue;
     }
     if (arg === "--web-internal-port") {
@@ -77,7 +67,7 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
     if (arg.startsWith("--web-internal-port=")) {
-      opts.webPort = parsePort(arg.split("=")[1], "--web-internal-port");
+      opts.webPort = parsePort(arg.slice("--web-internal-port=".length), "--web-internal-port");
       continue;
     }
     if (arg === "--web-port") {
@@ -87,7 +77,7 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
     if (arg.startsWith("--web-port=")) {
-      opts.webPort = parsePort(arg.split("=")[1], "--web-port");
+      opts.webPort = parsePort(arg.slice("--web-port=".length), "--web-port");
       noteDeprecated("--web-port");
       continue;
     }
@@ -113,7 +103,7 @@ function takeValue(argv: string[], i: number, flag: string): string {
 
 function parsePort(raw: string, flag: string): number {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+  if (raw === "" || !Number.isInteger(n) || n < 1 || n > 65535) {
     throw new ParseError(`${flag} value must be an integer between 1 and 65535, got "${raw}"`);
   }
   return n;
@@ -124,19 +114,11 @@ export type ResolvedPorts = {
   webPort?: number;
 };
 
-// Precedence: explicit CLI > --port > explicit env var > KANDEV_PORT; explicit CLI always beats env.
+// CLI flags beat env vars; KANDEV_PORT is an alias for KANDEV_BACKEND_PORT.
 export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): ResolvedPorts {
-  const genericCli = options.port;
-  const genericEnv = envPort(env, "KANDEV_PORT");
-  if (options.command === "dev") {
-    return {
-      backendPort: options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT"),
-      webPort: options.webPort ?? genericCli ?? envPort(env, "KANDEV_WEB_PORT") ?? genericEnv,
-    };
-  }
   return {
     backendPort:
-      options.backendPort ?? genericCli ?? envPort(env, "KANDEV_BACKEND_PORT") ?? genericEnv,
+      options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT") ?? envPort(env, "KANDEV_PORT"),
     webPort: options.webPort ?? envPort(env, "KANDEV_WEB_PORT"),
   };
 }
@@ -149,15 +131,4 @@ function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
     throw new ParseError(`${name} must be an integer between 1 and 65535, got "${val}"`);
   }
   return n;
-}
-
-// In dev, --port maps to web, so --backend-port → KANDEV_BACKEND_PORT (not --port).
-export function deprecationReplacement(flag: string, command: Command): string {
-  if (flag === "--backend-port") {
-    return command === "dev" ? "KANDEV_BACKEND_PORT" : "--port";
-  }
-  if (flag === "--web-port") {
-    return "--web-internal-port";
-  }
-  return "--port";
 }

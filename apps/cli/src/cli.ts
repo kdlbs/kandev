@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 import pkg from "../package.json";
-import { deprecationReplacement, parseArgs, ParseError, resolvePorts } from "./args";
+import { parseArgs, ParseError, resolvePorts } from "./args";
 import { runDev } from "./dev";
 import { runRelease } from "./run";
 import { runStart } from "./start";
@@ -35,21 +35,19 @@ Options:
   run              Use release bundles (default).
   --dev            Alias for "dev".
   --version        Release tag to install (default: latest).
-  --port           Port to open kandev on (or KANDEV_PORT env var). In start/run
-                   this is the backend port (front door); in dev it is the Next
-                   dev server port.
+  --port           Port for the Go backend (the URL kandev opens on in
+                   start/run). Alias for --backend-port. Also reads
+                   KANDEV_PORT or KANDEV_BACKEND_PORT.
   --verbose, -v    Show info logs from backend + web.
   --debug          Show debug logs + agent message dumps.
   --help, -h       Show help.
 
 Advanced:
-  --backend-port       Sets the Go backend port directly. Deprecated alias for
-                       --port in run/start. Also reads KANDEV_BACKEND_PORT.
-  --web-internal-port  Override the Next.js port. In run/start the backend
-                       reverse-proxies to it; in dev it is the URL the browser
-                       opens (same effect as --port). Also reads KANDEV_WEB_PORT.
-  --web-port           Deprecated alias for --web-internal-port. Misleading name
-                       because in run/start the public URL is on the backend port.
+  --backend-port       Same as --port.
+  --web-internal-port  Override the internal Next.js port. The Go backend
+                       reverse-proxies to it; users hit the backend port.
+                       Also reads KANDEV_WEB_PORT.
+  --web-port           Deprecated alias for --web-internal-port.
 `);
 }
 
@@ -84,8 +82,7 @@ async function main(): Promise<void> {
   }
 
   for (const flag of deprecatedFlags) {
-    const replacement = deprecationReplacement(flag, options.command);
-    process.stderr.write(`[kandev] ${flag} is deprecated; use ${replacement}\n`);
+    process.stderr.write(`[kandev] ${flag} is deprecated; use --web-internal-port\n`);
   }
 
   const resolved = resolvePorts(options, process.env);
