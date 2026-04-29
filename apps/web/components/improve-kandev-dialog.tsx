@@ -12,10 +12,7 @@ import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import type { Task } from "@/lib/types/http";
 import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
-import {
-  CreateModeView,
-  type BootstrapState,
-} from "./improve-kandev-dialog-create";
+import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
 
 type ImproveKandevDialogProps = {
   open: boolean;
@@ -199,8 +196,8 @@ function GhAuthMissing({
         <div>
           <p className="font-medium text-foreground">GitHub CLI not authenticated</p>
           <p className="mt-1 text-muted-foreground">
-            The final step of this workflow opens a pull request, which needs the{" "}
-            <code>gh</code> CLI to be authenticated. {auth.message}
+            The final step of this workflow opens a pull request, which needs the <code>gh</code>{" "}
+            CLI to be authenticated. {auth.message}
           </p>
         </div>
       </div>
@@ -234,27 +231,22 @@ function IntroExplanation({
       </p>
 
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Describe a bug you hit or a feature you&apos;d like, and we&apos;ll create a
-        task on your own agent to implement it in the kandev codebase.
+        Describe a bug you hit or a feature you&apos;d like, and we&apos;ll create a task on your
+        own agent to implement it in the kandev codebase.
       </p>
 
       <p className="text-sm leading-relaxed text-muted-foreground">
         When it&apos;s done, the agent opens a pull request to{" "}
-        <code className="font-mono text-xs">kdlbs/kandev</code> for the maintainers to
-        review, saving them time and shipping the improvement to everyone.
+        <code className="font-mono text-xs">kdlbs/kandev</code> for the maintainers to review,
+        saving them time and shipping the improvement to everyone.
       </p>
 
       <ul className="space-y-2 text-sm text-muted-foreground">
-        <IntroBullet>
-          Create a task describing your bug or feature request
-        </IntroBullet>
-        <IntroBullet>
-          Your agent implements it in the kandev repository, with tests
-        </IntroBullet>
+        <IntroBullet>Create a task describing your bug or feature request</IntroBullet>
+        <IntroBullet>Your agent implements it in the kandev repository, with tests</IntroBullet>
         <IntroBullet>You verify and test the change in a second kandev instance</IntroBullet>
         <IntroBullet>
-          The agent forks{" "}
-          <code className="font-mono text-xs">kdlbs/kandev</code> to your GitHub
+          The agent forks <code className="font-mono text-xs">kdlbs/kandev</code> to your GitHub
           account and opens a PR from your fork, credited to you
         </IntroBullet>
       </ul>
@@ -283,5 +275,3 @@ function IntroBullet({ children }: { children: React.ReactNode }) {
     </li>
   );
 }
-
-

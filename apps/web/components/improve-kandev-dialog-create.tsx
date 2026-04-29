@@ -2,18 +2,9 @@
 
 import { Fragment, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@kandev/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@kandev/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconLoader2,
   IconAlertTriangle,
@@ -121,9 +112,7 @@ function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           {ordered.map((s, i) => (
             <Fragment key={s.id}>
-              {i > 0 && (
-                <IconArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-              )}
+              {i > 0 && <IconArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="flex cursor-help items-center gap-1.5">
@@ -136,10 +125,7 @@ function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
                     <span className="text-foreground">{s.name}</span>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  className="max-w-xs text-xs leading-relaxed"
-                >
+                <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
                   {STEP_DESCRIPTIONS[s.name.toLowerCase()] ?? s.name}
                 </TooltipContent>
               </Tooltip>
@@ -169,16 +155,16 @@ function UsefulInfoCollapsible() {
       <CollapsibleContent>
         <div className="mt-2 space-y-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           <p>
-            Shell command you can run in the secondary instance, plus slash-command{" "}
-            <em>skills</em> you can ask the agent to run during the workflow.
+            Shell command you can run in the secondary instance, plus slash-command <em>skills</em>{" "}
+            you can ask the agent to run during the workflow.
           </p>
           <div className="space-y-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
               Shell
             </p>
             <UsefulInfoItem cmd="make install && make dev">
-              Boots a secondary kandev dev instance with a clean DB so you can verify
-              the change without touching your main one.
+              Boots a secondary kandev dev instance with a clean DB so you can verify the change
+              without touching your main one.
             </UsefulInfoItem>
           </div>
           <div className="space-y-2">
@@ -188,18 +174,13 @@ function UsefulInfoCollapsible() {
             <UsefulInfoItem cmd="/commit">
               Stages and commits changes using Conventional Commits.
             </UsefulInfoItem>
-            <UsefulInfoItem cmd="/push">
-              Commits and pushes to the current branch.
-            </UsefulInfoItem>
+            <UsefulInfoItem cmd="/push">Commits and pushes to the current branch.</UsefulInfoItem>
             <UsefulInfoItem cmd="/verify">
               Runs format, typecheck, test, and lint across the monorepo.
             </UsefulInfoItem>
-            <UsefulInfoItem cmd="/pr">
-              Commits, pushes, and opens a pull request.
-            </UsefulInfoItem>
+            <UsefulInfoItem cmd="/pr">Commits, pushes, and opens a pull request.</UsefulInfoItem>
             <UsefulInfoItem cmd="/pr-fixup">
-              Waits for CI and automated reviews, then fixes failures and addresses
-              comments.
+              Waits for CI and automated reviews, then fixes failures and addresses comments.
             </UsefulInfoItem>
           </div>
         </div>
@@ -208,13 +189,7 @@ function UsefulInfoCollapsible() {
   );
 }
 
-function UsefulInfoItem({
-  cmd,
-  children,
-}: {
-  cmd: string;
-  children: React.ReactNode;
-}) {
+function UsefulInfoItem({ cmd, children }: { cmd: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
       <code className="font-mono text-[11px] text-foreground">{cmd}</code>
@@ -273,10 +248,10 @@ function BootstrapStatusSlot({
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
-              KanDev keeps a small in-memory ring buffer of the most recent backend logs
-              and browser console events. When enabled, those logs are written to a
-              temporary folder on your machine, and the file paths are appended to the
-              task description so the agent can read them while investigating.
+              KanDev keeps a small in-memory ring buffer of the most recent backend logs and browser
+              console events. When enabled, those logs are written to a temporary folder on your
+              machine, and the file paths are appended to the task description so the agent can read
+              them while investigating.
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

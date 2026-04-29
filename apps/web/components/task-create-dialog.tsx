@@ -587,26 +587,24 @@ function DialogForm({
 }
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
-  const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
-  const { fs, isCreateMode, isEditMode, isTaskStarted } = setup;
-  const { sessionRepoName, repositoriesLoading, computed, handlers } = setup;
+  const { fs, computed, handlers } = setup;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         data-testid="create-task-dialog"
         className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
           <RenderHeader
-            initialTitle={initialValues?.title}
-            workspaceId={workspaceId}
-            isCreateMode={isCreateMode}
-            isEditMode={isEditMode}
-            isTaskStarted={isTaskStarted}
-            sessionRepoName={sessionRepoName}
+            initialTitle={props.initialValues?.title}
+            workspaceId={props.workspaceId}
+            isCreateMode={setup.isCreateMode}
+            isEditMode={setup.isEditMode}
+            isTaskStarted={setup.isTaskStarted}
+            sessionRepoName={setup.sessionRepoName}
             fs={fs}
-            repositoriesLoading={repositoriesLoading}
+            repositoriesLoading={setup.repositoriesLoading}
             computed={computed}
             handlers={handlers}
             repositoryLocked={!!props.lockedFields?.repository}
@@ -614,7 +612,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         </DialogHeader>
         <DialogForm
           setup={setup}
-          workspaceId={workspaceId}
+          workspaceId={props.workspaceId}
           extraFormSlot={props.extraFormSlot}
           lockedFields={props.lockedFields}
           descriptionPlaceholder={props.descriptionPlaceholder}
