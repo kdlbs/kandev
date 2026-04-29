@@ -42,7 +42,9 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
     if (arg.startsWith("--version=")) {
-      opts.version = arg.split("=")[1];
+      const value = arg.slice("--version=".length);
+      if (value.length === 0) throw new ParseError("--version requires a value");
+      opts.version = value;
       continue;
     }
     if (arg === "--dev") {
@@ -141,9 +143,9 @@ export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): Resol
 
 function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
   const val = env[name];
-  if (!val) return undefined;
+  if (val === undefined) return undefined;
   const n = Number(val);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+  if (val === "" || !Number.isInteger(n) || n < 1 || n > 65535) {
     throw new ParseError(`${name} must be an integer between 1 and 65535, got "${val}"`);
   }
   return n;
