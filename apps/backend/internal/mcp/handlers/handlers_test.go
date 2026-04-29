@@ -282,6 +282,37 @@ func TestResolveTaskRepositories_EphemeralParent_Rejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "ephemeral")
 }
 
+func TestResolveTaskRepositories_ExplicitRepos_InheritsSourceWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	// Seed workspace and source task to inherit from.
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	_, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Source task",
+	})
+	require.NoError(t, err)
+	tasks, err := svc.ListTasks(ctx, "wf-1")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	sourceTaskID := tasks[0].ID
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	explicit := []mcpRepositoryInput{
+		{GitHubURL: "https://github.com/acme/widgets", BaseBranch: "main"},
+	}
+	result, err := h.resolveTaskRepositories(ctx, "", sourceTaskID, explicit)
+	require.NoError(t, err)
+	require.Len(t, result.Repos, 1)
+	assert.Equal(t, "https://github.com/acme/widgets", result.Repos[0].GitHubURL)
+	assert.Equal(t, "ws-1", result.WorkspaceID, "should inherit source task workspace even with explicit repos")
+}
+
 func TestResolveTaskRepositories_SourceTask_InheritsWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

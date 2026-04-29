@@ -410,7 +410,15 @@ func (h *Handlers) resolveTaskRepositories(
 				BaseBranch:   r.BaseBranch,
 			})
 		}
-		return taskRepoResult{Repos: repos}, nil
+		result := taskRepoResult{Repos: repos}
+		// Inherit workspace from source task so multi-workspace installs don't
+		// fail auto-resolution when the agent supplies an explicit repository.
+		if sourceTaskID != "" && h.taskSvc != nil {
+			if src, srcErr := h.taskSvc.GetTask(ctx, sourceTaskID); srcErr == nil {
+				result.WorkspaceID = src.WorkspaceID
+			}
+		}
+		return result, nil
 	}
 
 	if parentID != "" {
