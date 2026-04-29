@@ -120,10 +120,13 @@ export type StartupInfoOptions = {
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
   const { header, ports, dbPath, logLevel } = options;
+  const backendUrl = ports.backendUrl;
+  const webUrl = `http://localhost:${ports.webPort}`;
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] url: http://localhost:" + ports.backendPort);
+  console.log("[kandev] backend:", backendUrl);
+  console.log("[kandev] web:", webUrl);
   console.log("[kandev] agentctl port:", ports.agentctlPort);
-  console.log("[kandev] mcp url:", `http://localhost:${ports.backendPort}/mcp`);
+  console.log("[kandev] mcp url:", `${backendUrl}/mcp`);
   if (dbPath) {
     console.log("[kandev] db path:", dbPath);
   }
