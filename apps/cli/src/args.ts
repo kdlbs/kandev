@@ -111,8 +111,8 @@ function takeValue(argv: string[], i: number, flag: string): string {
 
 function parsePort(raw: string, flag: string): number {
   const n = Number(raw);
-  if (!Number.isInteger(n)) {
-    throw new ParseError(`${flag} value must be an integer, got "${raw}"`);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new ParseError(`${flag} value must be an integer between 1 and 65535, got "${raw}"`);
   }
   return n;
 }
@@ -141,7 +141,9 @@ function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
   const val = env[name];
   if (!val) return undefined;
   const n = Number(val);
-  if (!Number.isInteger(n)) throw new ParseError(`${name} must be an integer, got "${val}"`);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new ParseError(`${name} must be an integer between 1 and 65535, got "${val}"`);
+  }
   return n;
 }
 

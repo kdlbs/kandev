@@ -58,6 +58,10 @@ describe("parseArgs", () => {
   it("throws ParseError on a non-integer port value", () => {
     expect(() => parseArgs(["--port=3000.5"])).toThrow(/--port value must be an integer/);
   });
+
+  it.each(["0", "-1", "65536"])("throws ParseError on out-of-range port %s", (val) => {
+    expect(() => parseArgs([`--port=${val}`])).toThrow(/--port value must be an integer between/);
+  });
 });
 
 describe("resolvePorts", () => {
@@ -118,6 +122,12 @@ describe("resolvePorts", () => {
     expect(() =>
       resolvePorts({ command: "run" }, { KANDEV_PORT: "3000.5" } as NodeJS.ProcessEnv),
     ).toThrow(/KANDEV_PORT must be an integer/);
+  });
+
+  it.each(["0", "-1", "65536"])("throws ParseError when KANDEV_PORT is out-of-range %s", (val) => {
+    expect(() =>
+      resolvePorts({ command: "run" }, { KANDEV_PORT: val } as NodeJS.ProcessEnv),
+    ).toThrow(/KANDEV_PORT must be an integer between/);
   });
 });
 
