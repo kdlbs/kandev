@@ -129,6 +129,17 @@ describe("resolvePorts", () => {
       resolvePorts({ command: "run" }, { KANDEV_PORT: val } as NodeJS.ProcessEnv),
     ).toThrow(/KANDEV_PORT must be an integer between/);
   });
+
+  it("KANDEV_WEB_PORT sets the web port", () => {
+    const r = resolvePorts({ command: "dev" }, { KANDEV_WEB_PORT: "8080" } as NodeJS.ProcessEnv);
+    expect(r.webPort).toBe(8080);
+  });
+
+  it("throws ParseError when KANDEV_WEB_PORT is out of range", () => {
+    expect(() =>
+      resolvePorts({ command: "dev" }, { KANDEV_WEB_PORT: "0" } as NodeJS.ProcessEnv),
+    ).toThrow(/KANDEV_WEB_PORT must be an integer between/);
+  });
 });
 
 describe("deprecationReplacement", () => {
