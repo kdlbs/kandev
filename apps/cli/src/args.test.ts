@@ -60,18 +60,12 @@ describe("parseArgs", () => {
 
 describe("resolvePorts", () => {
   it("maps --port to backend port for run/start", () => {
-    const r = resolvePorts(
-      { command: "start", port: 3447 },
-      {} as NodeJS.ProcessEnv,
-    );
+    const r = resolvePorts({ command: "start", port: 3447 }, {} as NodeJS.ProcessEnv);
     expect(r).toEqual({ backendPort: 3447, webPort: undefined });
   });
 
   it("maps --port to web port for dev", () => {
-    const r = resolvePorts(
-      { command: "dev", port: 3000 },
-      {} as NodeJS.ProcessEnv,
-    );
+    const r = resolvePorts({ command: "dev", port: 3000 }, {} as NodeJS.ProcessEnv);
     expect(r).toEqual({ backendPort: undefined, webPort: 3000 });
   });
 
@@ -89,10 +83,10 @@ describe("resolvePorts", () => {
   });
 
   it("KANDEV_BACKEND_PORT wins over KANDEV_PORT", () => {
-    const r = resolvePorts(
-      { command: "run" },
-      { KANDEV_PORT: "5555", KANDEV_BACKEND_PORT: "6666" } as NodeJS.ProcessEnv,
-    );
+    const r = resolvePorts({ command: "run" }, {
+      KANDEV_PORT: "5555",
+      KANDEV_BACKEND_PORT: "6666",
+    } as NodeJS.ProcessEnv);
     expect(r.backendPort).toBe(6666);
   });
 
