@@ -97,6 +97,18 @@ describe("resolvePorts", () => {
     const r = resolvePorts({ command: "run" }, {} as NodeJS.ProcessEnv);
     expect(r).toEqual({ backendPort: undefined, webPort: undefined });
   });
+
+  it("throws ParseError when KANDEV_PORT is not a number", () => {
+    expect(() =>
+      resolvePorts({ command: "run" }, { KANDEV_PORT: "abc" } as NodeJS.ProcessEnv),
+    ).toThrow(ParseError);
+  });
+
+  it("throws ParseError when KANDEV_BACKEND_PORT is not a number", () => {
+    expect(() =>
+      resolvePorts({ command: "run" }, { KANDEV_BACKEND_PORT: "nope" } as NodeJS.ProcessEnv),
+    ).toThrow(/KANDEV_BACKEND_PORT must be a number/);
+  });
 });
 
 describe("deprecationReplacement", () => {

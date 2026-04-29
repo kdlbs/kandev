@@ -139,12 +139,13 @@ export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): Resol
 
 function envPort(env: NodeJS.ProcessEnv, name: string): number | undefined {
   const val = env[name];
-  return val ? Number(val) : undefined;
+  if (!val) return undefined;
+  const n = Number(val);
+  if (!Number.isFinite(n)) throw new ParseError(`${name} must be a number, got "${val}"`);
+  return n;
 }
 
-// Returns the suggested replacement for a deprecated flag, given the active command.
-// `--port` maps to backend in run/start and to web in dev — so for dev users who
-// explicitly used `--backend-port`, the right pointer is the env var, not `--port`.
+// In dev, --port maps to web, so --backend-port → KANDEV_BACKEND_PORT (not --port).
 export function deprecationReplacement(flag: string, command: Command): string {
   if (flag === "--backend-port") {
     return command === "dev" ? "KANDEV_BACKEND_PORT" : "--port";
