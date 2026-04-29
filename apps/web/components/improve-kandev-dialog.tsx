@@ -43,11 +43,12 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   // external system" pattern (parent-controlled `open` toggling).
   useEffect(() => {
     if (open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setMode("intro");
     setAuth({ kind: "checking" });
     setBootstrap({ kind: "idle" });
     setCaptureLogs(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open]);
 
   useGitHubAuthCheck(open, workspaceId, setAuth);

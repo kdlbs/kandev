@@ -47,6 +47,7 @@ export async function uploadFrontendLog(
     level: e.level,
     message: e.message,
     args: e.args,
+    stack: e.stack,
   }));
   return fetchJson<{ path: string }>("/api/v1/system/improve-kandev/bundle/frontend-log", {
     ...options,

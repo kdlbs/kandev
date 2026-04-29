@@ -153,7 +153,11 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     branchLocked,
   } = props;
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
-  const lockedToCurrentBranch = isLocalWithoutGitHubUrl && !freshBranchEnabled;
+  // When `branchLocked` is true the caller pinned a specific branch (e.g.
+  // Improve Kandev) — suppress the local-executor "current branch" shortcut and
+  // the FreshBranchToggle so users can't drift away from the pinned value.
+  const lockedToCurrentBranch =
+    !branchLocked && isLocalWithoutGitHubUrl && !freshBranchEnabled;
   const branchPlaceholder = computeBranchPlaceholder({
     lockedToCurrentBranch,
     currentLocalBranch,
@@ -187,7 +191,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             disabled={branchDisabled}
           />
         </div>
-        {isLocalWithoutGitHubUrl && (
+        {isLocalWithoutGitHubUrl && !branchLocked && (
           <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
         )}
       </div>

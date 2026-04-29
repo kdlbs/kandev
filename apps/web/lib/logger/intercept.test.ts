@@ -47,6 +47,9 @@ describe("console interceptor", () => {
     expect(snap[1].level).toBe("warn");
     expect(snap[2].level).toBe("error");
     expect(snap[2].message).toBe("boom");
+    // Error stack must survive on the entry so the bundle preserves it.
+    expect(typeof snap[2].stack).toBe("string");
+    expect(snap[2].stack).toContain("Error");
 
     expect(infoSpy).toHaveBeenCalledWith("hello", { user: "x" });
     expect(warnSpy).toHaveBeenCalledWith("careful");

@@ -38,12 +38,16 @@ function extractMessage(first: unknown): string {
 
 function buildEntry(level: LogLevel, source: string, args: unknown[]): LogEntry {
   const message = extractMessage(args[0]);
+  // Preserve the originating Error's stack on the entry so the bundle keeps it
+  // even though we serialize args by value below.
+  const stack = args[0] instanceof Error ? args[0].stack : undefined;
   return {
     timestamp: new Date().toISOString(),
     level,
     source,
     message,
     args: args.length > 1 ? args.slice(1).map(safeStringify) : undefined,
+    stack,
   };
 }
 
@@ -84,6 +88,7 @@ export function installConsoleInterceptor(): void {
               : undefined,
         },
       ],
+      stack: event.error instanceof Error ? event.error.stack : undefined,
     });
   });
 
@@ -100,6 +105,7 @@ export function installConsoleInterceptor(): void {
         reason instanceof Error
           ? [{ name: reason.name, stack: reason.stack }]
           : [safeStringify(reason)],
+      stack: reason instanceof Error ? reason.stack : undefined,
     });
   });
 }

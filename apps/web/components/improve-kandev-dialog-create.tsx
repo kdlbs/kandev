@@ -307,7 +307,6 @@ function BootstrapBanner({ bootstrap }: { bootstrap: BootstrapState }) {
 
 function ContributorBanner({ data }: { data: ImproveKandevBootstrapResponse }) {
   const { github_login: login, has_write_access: hasWrite } = data;
-  if (!login) return null;
   return (
     <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
       {hasWrite ? (
@@ -316,7 +315,13 @@ function ContributorBanner({ data }: { data: ImproveKandevBootstrapResponse }) {
         <IconGitFork className="h-3.5 w-3.5 mt-0.5 shrink-0" />
       )}
       <span>
-        Contributing as <code className="font-mono text-foreground">@{login}</code>.{" "}
+        Contributing as{" "}
+        {login ? (
+          <code className="font-mono text-foreground">@{login}</code>
+        ) : (
+          <span>your GitHub account</span>
+        )}
+        .{" "}
         {hasWrite
           ? "You have write access to kdlbs/kandev, so the agent will push directly to a branch on the upstream repo."
           : "The agent will fork kdlbs/kandev to your account during the PR step and open a pull request from your fork."}

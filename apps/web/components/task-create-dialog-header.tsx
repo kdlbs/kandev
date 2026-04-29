@@ -101,7 +101,9 @@ function resolveSelectorPlaceholder(p: RepoSourceInputProps): string {
 }
 
 function RepoSourceInput(p: RepoSourceInputProps): React.ReactNode {
-  if (p.useGitHubUrl) return <GhUrlInput {...p} />;
+  // When the dialog locks the repository (e.g. Improve Kandev pinning kdlbs/kandev),
+  // never expose the editable GitHub URL input — even if useGitHubUrl is on.
+  if (p.useGitHubUrl && !p.repositoryLocked) return <GhUrlInput {...p} />;
   const isDisabled =
     p.repositoryLocked ||
     p.isTaskStarted ||

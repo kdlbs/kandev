@@ -66,4 +66,12 @@ describe("buildImproveKandevDescription", () => {
       "Context bundle for the agent:",
     );
   });
+
+  it("omits the frontend_log path when upload fails", async () => {
+    uploadFrontendLog.mockRejectedValueOnce(new Error("network down"));
+    const out = await buildImproveKandevDescription("desc", bootstrap, true);
+    expect(out).toContain(bootstrap.bundle_files.metadata);
+    expect(out).toContain(bootstrap.bundle_files.backend_log);
+    expect(out).not.toContain(bootstrap.bundle_files.frontend_log);
+  });
 });

@@ -73,6 +73,14 @@ var (
 	flagVersion  = flag.Bool("version", false, "Show version information")
 )
 
+// Build-time variables injected via -ldflags "-X main.Version=... -X main.Commit=... -X main.BuildTime=..."
+// (see apps/backend/Makefile). Defaults apply when running un-stamped builds (e.g. `go run`).
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildTime = "unknown"
+)
+
 func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: kandev [options]\n\n")
@@ -103,7 +111,7 @@ func realMain() int {
 	}
 
 	if *flagVersion {
-		fmt.Println("kandev version 0.1.0")
+		fmt.Printf("kandev version %s (commit %s, built %s)\n", Version, Commit, BuildTime)
 		return 0
 	}
 
@@ -515,7 +523,7 @@ func buildHTTPServer(
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		addCleanup:              addCleanup,
 		repoCloner:              repoCloner,
-		version:                 "0.1.0",
+		version:                 Version,
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
 		httpPort:                port,

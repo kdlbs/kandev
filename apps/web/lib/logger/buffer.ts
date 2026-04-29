@@ -14,6 +14,7 @@ export interface LogEntry {
   source: string; // "console" | "window.onerror" | "unhandledrejection"
   message: string;
   args?: unknown[]; // serialized best-effort
+  stack?: string; // populated when the entry originated from an Error
 }
 
 export const DEFAULT_CAPACITY = 500;

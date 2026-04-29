@@ -10,8 +10,13 @@ import {
  * Append the bundle file paths to the user-supplied description as a
  * machine-readable footer the agent prompt instructs to read.
  *
- * If captureLogs is true, also upload the current in-memory frontend log
- * snapshot to the bundle directory before returning.
+ * Behavior:
+ * - When `bootstrap` is null, returns the description unchanged.
+ * - When `captureLogs` is false, returns the description unchanged.
+ * - When `captureLogs` is true, attempts to upload the current in-memory
+ *   frontend log snapshot to the bundle directory and only includes the
+ *   `frontend_log` entry when the upload succeeded — referencing a file
+ *   that was never written would mislead the agent.
  */
 export async function buildImproveKandevDescription(
   description: string,
@@ -21,11 +26,12 @@ export async function buildImproveKandevDescription(
   if (!bootstrap) return description;
   if (!captureLogs) return description;
 
+  let frontendLogUploaded = false;
   try {
     await uploadFrontendLog(bootstrap.bundle_dir, snapshotLogs());
+    frontendLogUploaded = true;
   } catch {
-    // Frontend log upload is best-effort — surface failure to the user via
-    // the surrounding try/catch in the dialog rather than aborting submission.
+    // Frontend log upload is best-effort — keep submitting the task without it.
   }
 
   const lines = [
@@ -35,7 +41,9 @@ export async function buildImproveKandevDescription(
     "Context bundle for the agent:",
     `- ${bootstrap.bundle_files.metadata}`,
     `- ${bootstrap.bundle_files.backend_log}`,
-    `- ${bootstrap.bundle_files.frontend_log}`,
   ];
+  if (frontendLogUploaded) {
+    lines.push(`- ${bootstrap.bundle_files.frontend_log}`);
+  }
   return lines.join("\n");
 }

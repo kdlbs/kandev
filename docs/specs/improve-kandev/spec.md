@@ -75,8 +75,11 @@ the user's own agent picks up immediately — turning every report into a contri
 - Automatic transitions between workflow steps (user moves manually).
 - Rate limiting, quotas, or one-task-at-a-time guards.
 - Log redaction or sensitive-value scrubbing.
-- Fork management or upstream-URL configuration; the user is expected to have
-  `gh` configured to push to a fork or to have write access to `kdlbs/kandev`.
+- Manual upstream-URL configuration. The user is expected to have `gh`
+  authenticated; during the PR step, the agent automatically forks
+  `kdlbs/kandev` to the user's account when they lack write access on the
+  upstream repo, and pushes directly otherwise. Manual fork/remote setup
+  remains an optional advanced workflow but is not part of this feature.
 - A generic feedback inbox or report archive; this feature produces tasks,
   not stored reports.
 - Cleanup of the temporary log bundle directory; left to OS/temp policy.
