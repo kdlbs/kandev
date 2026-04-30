@@ -159,10 +159,9 @@ export default async function Page({ searchParams }: PageProps) {
         sessionId: t.primary_session_id!,
         workspaceId: t.workspace_id,
         name: t.title !== "Quick Chat" ? t.title : undefined,
-        agentProfileId:
-          (t.metadata && typeof t.metadata === "object"
-            ? (t.metadata as Record<string, unknown>).agent_profile_id
-            : undefined) as string | undefined,
+        agentProfileId: (t.metadata && typeof t.metadata === "object"
+          ? (t.metadata as Record<string, unknown>).agent_profile_id
+          : undefined) as string | undefined,
       }));
 
     initialState = {

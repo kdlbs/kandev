@@ -78,9 +78,7 @@ function QuickChatTabs({
 }
 
 function useIsQuickChatPassthrough(sessionId: string) {
-  const sessionPassthrough = useAppStore(
-    (s) => s.taskSessions.items[sessionId]?.is_passthrough,
-  );
+  const sessionPassthrough = useAppStore((s) => s.taskSessions.items[sessionId]?.is_passthrough);
   const profileId = useAppStore((s) => {
     const fromSession = s.taskSessions.items[sessionId]?.agent_profile_id;
     if (fromSession) return fromSession;
