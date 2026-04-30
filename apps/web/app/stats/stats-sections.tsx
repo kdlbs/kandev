@@ -223,6 +223,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Longest Tasks</CardTitle>
+          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -239,6 +240,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
           <CardTitle className="text-sm font-medium text-muted-foreground">
             Quickest Tasks
           </CardTitle>
+          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
