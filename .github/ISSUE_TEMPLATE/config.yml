@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Kandev documentation
+    url: https://github.com/kdlbs/kandev/tree/main/docs
+    about: Read setup, Docker, Kubernetes, workflow, and API documentation.
+  - name: Security issue
+    url: https://github.com/kdlbs/kandev/security/advisories/new
+    about: Report vulnerabilities privately instead of opening a public issue.

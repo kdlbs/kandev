@@ -1,0 +1,219 @@
+name: Bug report
+description: Report a reproducible problem in Kandev.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Good reports let maintainers reproduce the failure quickly.
+
+        Before posting, remove secrets, tokens, private repository URLs, private prompts, and customer data from logs or screenshots.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke? Keep it short and concrete.
+      placeholder: Starting a Codex task in a Docker executor fails after the agent profile is selected.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Pick the closest area.
+      options:
+        - Web UI
+        - Backend API
+        - WebSocket/session streaming
+        - Agent lifecycle
+        - agentctl
+        - Executor/runtime
+        - Git/worktree operations
+        - GitHub integration
+        - Workflow/queue
+        - CLI
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Kandev version
+      description: Use the release version, commit SHA, or Docker image tag/digest.
+      placeholder: v0.4.2, 9f2c1ab, or ghcr.io/kdlbs/kandev@sha256:...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-mode
+    attributes:
+      label: Install mode
+      options:
+        - Docker Compose
+        - Docker run
+        - Kubernetes
+        - Local development
+        - Source build
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include host OS, architecture, browser, Docker/Kubernetes versions, and anything unusual about the runtime.
+      placeholder: |
+        - OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 + WSL2
+        - Architecture: arm64 / amd64
+        - Browser: Chrome 124 / Firefox 125 / Safari 17
+        - Docker: 26.1.0
+        - Kubernetes: v1.30.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: kandev-config
+    attributes:
+      label: Kandev configuration
+      description: Paste relevant sanitized Kandev config. Use "N/A" if no config changes.
+      placeholder: |
+        - Executor type/profile: name shown in Kandev settings
+        - Agent profile: Codex / Claude Code / OpenCode / Amp / Copilot
+        - Model/provider: gpt-5.4 / claude-... / other
+        - Repository source: local path / GitHub clone / remote executor clone
+        - Relevant KANDEV_* env vars:
+          KANDEV_HOME_DIR=/data
+          KANDEV_WORKTREE_BASEPATH=/data/worktrees
+    validations:
+      required: true
+
+  - type: textarea
+    id: task-session
+    attributes:
+      label: Task/session context
+      description: Include IDs and workflow context if the bug happens inside a task. Use "N/A" if not task-specific.
+      placeholder: |
+        - Workspace ID:
+        - Workflow/step:
+        - Task ID:
+        - Session ID:
+        - Branch/worktree:
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List exact clicks, commands, config, and inputs needed to trigger the bug.
+      placeholder: |
+        1. Start Kandev with ...
+        2. Create workspace ...
+        3. Select executor ...
+        4. Start task ...
+        5. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      description: How often can you reproduce this with the steps above?
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Once
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: clean-state
+    attributes:
+      label: Clean-state check
+      description: Did you try with a fresh Kandev data directory, workspace, or browser session?
+      options:
+        - Reproduces on clean state
+        - Does not reproduce on clean state
+        - Not tried
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The task starts and agent output streams to the session panel.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: The task stays queued and backend logs show ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and artifacts
+      description: Paste relevant sanitized logs, screenshots, HAR files, or recordings. Use "No logs observed" if none exist.
+      placeholder: |
+        Backend:
+        ```text
+        ...
+        ```
+
+        Browser console:
+        ```text
+        ...
+        ```
+
+        Container/pod:
+        ```text
+        docker logs kandev
+        kubectl logs -l app=kandev
+        ```
+
+        Agent/session:
+        ```text
+        ...
+        ```
+    validations:
+      required: true
+
+  - type: input
+    id: regression
+    attributes:
+      label: Last known good version
+      description: If this used to work, provide the version, commit, date, or image tag.
+      placeholder: v0.4.1, commit abc123, or "unknown"
+
+  - type: textarea
+    id: extra-context
+    attributes:
+      label: Extra context
+      description: Add links to minimal reproduction repositories, related issues, or notes that help isolate the failure.
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Before submitting
+      options:
+        - label: I can reproduce this using the steps above.
+          required: true
+        - label: I removed secrets, tokens, private repository URLs, private prompts, and customer data.
+          required: true
+        - label: I searched existing issues and did not find a duplicate.
+          required: true

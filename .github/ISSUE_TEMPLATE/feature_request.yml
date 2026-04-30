@@ -1,0 +1,118 @@
+name: Feature request
+description: Propose a Kandev improvement with clear user value.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for product changes, workflow improvements, and new integrations.
+
+        If something is broken or regressed, open a bug report instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow is blocked or painful today?
+      placeholder: When several agents run in parallel, it is hard to tell which task owns each worktree.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want. Focus on outcome, not only implementation.
+      placeholder: Show the active worktree and branch next to each session, with a quick link to git status.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Pick the closest area.
+      options:
+        - Web UI
+        - Backend API
+        - WebSocket/session streaming
+        - Agent lifecycle
+        - agentctl
+        - Executor/runtime
+        - Git/worktree operations
+        - GitHub integration
+        - Workflow/queue
+        - CLI
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: user-type
+    attributes:
+      label: Who needs this?
+      options:
+        - Individual developer
+        - Team using shared Kandev instance
+        - Maintainer/operator
+        - Integration/plugin author
+        - Enterprise/admin user
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Target workflow
+      description: Show where this fits in Kandev. Include executor, agent profile, workflow step, or integration details when relevant.
+      placeholder: |
+        1. User creates task from the kanban board.
+        2. User chooses an executor and agent profile.
+        3. User needs to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workaround exists today? What other designs did you consider?
+      placeholder: Today users inspect git status from the terminal, but this loses task/session context.
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this feature to be complete?
+      placeholder: |
+        - Users can see ...
+        - Users can do ...
+        - Existing behavior remains ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and constraints
+      description: Include security, privacy, performance, compatibility, or migration concerns.
+      placeholder: Do not expose secret env vars from executor config. Must work across relevant executor runtimes.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link related issues, discussions, specs, mockups, or comparable open-source behavior.
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues and did not find this request already tracked.
+          required: true
+        - label: This request describes user value, not only an implementation detail.
+          required: true
