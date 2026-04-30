@@ -16,6 +16,12 @@ var cursorACPLogoDark []byte
 
 const cursorACPPkg = "cursor-acp"
 
+// cursorFullAutoShell wraps the cursor-acp bridge so the underlying cursor-agent
+// runs in full-auto mode. The bridge hardcodes its argv and only honors the
+// CURSOR_AGENT_EXECUTABLE env to override the binary, so we point that env at a
+// shim that re-exec's cursor-agent with --force --trust --sandbox disabled.
+const cursorFullAutoShell = `set -e; SHIM=$(mktemp -t cursor-agent-shim.XXXXXX); printf '#!/bin/sh\nexec cursor-agent --force --trust --sandbox disabled "$@"\n' > "$SHIM"; chmod +x "$SHIM"; CURSOR_AGENT_EXECUTABLE="$SHIM" exec npx -y ` + cursorACPPkg
+
 var (
 	_ Agent            = (*CursorACP)(nil)
 	_ PassthroughAgent = (*CursorACP)(nil)
@@ -36,7 +42,7 @@ func NewCursorACP() *CursorACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("cursor-agent"),
+				PassthroughCmd: NewCommand("cursor-agent", "-f"),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -77,7 +83,7 @@ func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", cursorACPPkg).Build()
+	return Cmd("sh", "-c", cursorFullAutoShell).Build()
 }
 
 func (a *CursorACP) Runtime() *RuntimeConfig {
@@ -85,7 +91,7 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", cursorACPPkg).Build(),
+		Cmd:         Cmd("sh", "-c", cursorFullAutoShell).Build(),
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via CURSOR_API_KEY or ~/.cursor credentials (see RemoteAuth)
 		Env:         map[string]string{},
@@ -136,6 +142,6 @@ func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
 func (a *CursorACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", cursorACPPkg),
+		Command:   NewCommand("sh", "-c", cursorFullAutoShell),
 	}
 }
