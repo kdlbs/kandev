@@ -477,6 +477,64 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 	}
 }
 
+// TestSQLiteRepository_GetMessageByToolCallID_ExcludesPermissionRequest locks
+// in the second half of the approval-reappear fix: a tool_call message and a
+// permission_request message can both carry the same tool_call_id (the
+// permission_request stores it for FE pairing). The lookup must always return
+// the tool_call row — otherwise a downstream tool_update would land on the
+// permission_request and overwrite the user's approve/reject decision.
+func TestSQLiteRepository_GetMessageByToolCallID_ExcludesPermissionRequest(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-1")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-1")
+
+	// Permission_request created FIRST so an ORDER BY created_at ASC sweep
+	// without the type filter would race to it. The fix must ignore type
+	// ordering and always return the tool_call row.
+	permMsg := &models.Message{
+		ID: "msg-perm-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-1", "pending_id": "p-1", "status": "pending"},
+	}
+	if err := repo.CreateMessage(ctx, permMsg); err != nil {
+		t.Fatalf("create permission message: %v", err)
+	}
+	toolMsg := &models.Message{
+		ID: "msg-tool-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-1", "status": "running"},
+	}
+	if err := repo.CreateMessage(ctx, toolMsg); err != nil {
+		t.Fatalf("create tool_call message: %v", err)
+	}
+
+	got, err := repo.GetMessageByToolCallID(ctx, sessionID, "tc-1")
+	if err != nil {
+		t.Fatalf("GetMessageByToolCallID: %v", err)
+	}
+	if got.Type != models.MessageTypeToolCall {
+		t.Errorf("expected tool_call row, got type=%s id=%s", got.Type, got.ID)
+	}
+	if got.ID != toolMsg.ID {
+		t.Errorf("expected msg-tool-1, got %s", got.ID)
+	}
+
+	// And when only the permission_request exists, the lookup must return an
+	// error (not match the permission_request as a fallback).
+	if _, err := repo.GetMessageByToolCallID(ctx, sessionID, "tc-not-here"); err == nil {
+		t.Error("expected error for missing tool_call_id, got nil")
+	}
+}
+
 // TestGetPrimarySessionInfoByTaskIDs_PopulatesID locks in the SQL fix: the
 // SELECT now includes ts.id so session.ID is populated on the returned
 // TaskSession. Before the fix, publishTaskEvent saw sessionInfo.ID == "" and

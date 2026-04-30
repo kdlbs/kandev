@@ -470,7 +470,10 @@ func (s *Service) createToolCallMessageFallback(ctx context.Context, sessionID, 
 // explicit at the layer that does the writing.
 func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, result, title string, normalized *streams.NormalizedPayload) {
 	if message.Type == models.MessageTypePermissionRequest {
-		s.logger.Warn("applyToolCallMessageUpdate refusing to overwrite permission_request",
+		// Error severity: the repo-layer GetMessageByToolCallID filter is supposed
+		// to make this branch unreachable. Reaching it means a caller bug; surface
+		// it loudly so the invariant violation isn't silently swallowed.
+		s.logger.Error("applyToolCallMessageUpdate refusing to overwrite permission_request",
 			zap.String("message_id", message.ID),
 			zap.String("incoming_status", status))
 		return
