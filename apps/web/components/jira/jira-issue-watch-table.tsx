@@ -5,7 +5,6 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useToast } from "@/components/toast-provider";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 
 type JiraIssueWatchTableProps = {
@@ -38,7 +37,6 @@ function WatchActions({
   onTrigger: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const { toast } = useToast();
   return (
     <div className="flex items-center justify-end gap-1">
       <Tooltip>
@@ -69,8 +67,9 @@ function WatchActions({
             className="h-7 w-7 p-0 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
+              // Toast is fired by the parent's wrappedTrigger on completion —
+              // the inline "Checking…" toast it used to fire here was a duplicate.
               onTrigger(watch.id);
-              toast({ description: "Checking JIRA for new tickets..." });
             }}
           >
             <IconRefresh className="h-3.5 w-3.5" />

@@ -35,4 +35,9 @@ export const createJiraSlice: StateCreator<JiraSlice, [["zustand/immer", never]]
     set((draft) => {
       draft.jiraIssueWatches.items = draft.jiraIssueWatches.items.filter((w) => w.id !== id);
     }),
+  resetJiraIssueWatches: () =>
+    set((draft) => {
+      draft.jiraIssueWatches.items = [];
+      draft.jiraIssueWatches.loaded = false;
+    }),
 });

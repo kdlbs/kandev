@@ -259,6 +259,7 @@ export type AppState = {
   addJiraIssueWatch: (watch: JiraIssueWatch) => void;
   updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
   removeJiraIssueWatch: (id: string) => void;
+  resetJiraIssueWatches: () => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;

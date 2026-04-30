@@ -26,6 +26,7 @@ export function useJiraIssueWatches(workspaceId: string | null) {
   const loaded = useAppStore((s) => s.jiraIssueWatches.loaded);
   const loading = useAppStore((s) => s.jiraIssueWatches.loading);
   const setWatches = useAppStore((s) => s.setJiraIssueWatches);
+  const resetWatches = useAppStore((s) => s.resetJiraIssueWatches);
   const setLoading = useAppStore((s) => s.setJiraIssueWatchesLoading);
   const addWatch = useAppStore((s) => s.addJiraIssueWatch);
   const updateWatch = useAppStore((s) => s.updateJiraIssueWatch);
@@ -35,14 +36,15 @@ export function useJiraIssueWatches(workspaceId: string | null) {
 
   useEffect(() => {
     if (!workspaceId) return;
-    // Workspace changed — invalidate the cached list so the fetch effect below
-    // re-runs against the new workspace instead of short-circuiting on stale
-    // `loaded`. Skipped on the first mount when ref === workspaceId already.
+    // Workspace changed — invalidate the cached list AND clear `loaded` so
+    // the fetch effect below re-runs against the new workspace. Calling
+    // `setWatches([])` here would be wrong: that action keeps `loaded=true`,
+    // and the fetch effect would short-circuit on the stale guard.
     if (lastWorkspaceId.current !== null && lastWorkspaceId.current !== workspaceId) {
-      setWatches([]);
+      resetWatches();
     }
     lastWorkspaceId.current = workspaceId;
-  }, [workspaceId, setWatches]);
+  }, [workspaceId, resetWatches]);
 
   useEffect(() => {
     if (!workspaceId || loaded || loading) return;

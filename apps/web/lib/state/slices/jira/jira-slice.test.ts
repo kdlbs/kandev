@@ -70,4 +70,17 @@ describe("jira issue-watches slice", () => {
     store.getState().removeJiraIssueWatch("b");
     expect(store.getState().jiraIssueWatches.items.map((w) => w.id)).toEqual(["a", "c"]);
   });
+
+  it("resetJiraIssueWatches clears items AND loaded so a refetch is triggered", () => {
+    // The whole point of this action vs. setJiraIssueWatches([]) — an empty
+    // setWatches keeps loaded=true and would block the fetch effect from
+    // re-running on workspace switch.
+    const store = makeStore();
+    store.getState().setJiraIssueWatches([watch("a")]);
+    expect(store.getState().jiraIssueWatches.loaded).toBe(true);
+
+    store.getState().resetJiraIssueWatches();
+    expect(store.getState().jiraIssueWatches.items).toEqual([]);
+    expect(store.getState().jiraIssueWatches.loaded).toBe(false);
+  });
 });
