@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -275,11 +277,35 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
 	}
 
-	return s.LaunchSession(ctx, &LaunchSessionRequest{
+	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Intent:    IntentResume,
 	})
+	if err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	return resp, nil
+}
+
+func normalizeRecoverSessionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isMissingProfileResumeError(err) {
+		return fmt.Errorf("the agent profile used by this session was deleted; start a new session and choose an available agent profile")
+	}
+	return err
+}
+
+func isMissingProfileResumeError(err error) bool {
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "agent profile not found") ||
+		strings.Contains(msg, "profile not found") ||
+		strings.Contains(msg, "failed to resolve agent profile")
 }
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.

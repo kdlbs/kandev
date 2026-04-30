@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -118,6 +119,40 @@ func TestResolveIntent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNormalizeRecoverSessionError(t *testing.T) {
+	t.Run("maps sql ErrNoRows to actionable profile guidance", func(t *testing.T) {
+		err := normalizeRecoverSessionError(sql.ErrNoRows)
+		if err == nil {
+			t.Fatal("expected mapped error")
+		}
+		if got := err.Error(); got != "the agent profile used by this session was deleted; start a new session and choose an available agent profile" {
+			t.Fatalf("unexpected error: %q", got)
+		}
+	})
+
+	t.Run("maps profile not found errors to actionable profile guidance", func(t *testing.T) {
+		in := errors.New("failed to resolve agent profile: profile not found: sql: no rows in result set")
+		err := normalizeRecoverSessionError(in)
+		if err == nil {
+			t.Fatal("expected mapped error")
+		}
+		if got := err.Error(); got != "the agent profile used by this session was deleted; start a new session and choose an available agent profile" {
+			t.Fatalf("unexpected error: %q", got)
+		}
+	})
+
+	t.Run("passes through unrelated errors", func(t *testing.T) {
+		in := errors.New("network timeout")
+		err := normalizeRecoverSessionError(in)
+		if err == nil {
+			t.Fatal("expected passthrough error")
+		}
+		if err.Error() != in.Error() {
+			t.Fatalf("expected passthrough error %q, got %q", in.Error(), err.Error())
+		}
+	})
 }
 
 // --- launchRestoreWorkspace ---
