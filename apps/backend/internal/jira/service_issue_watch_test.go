@@ -109,6 +109,30 @@ func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
 	}
 }
 
+func TestService_UpdateIssueWatch_RejectsEmptyWorkflowFields(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		JQL: "project = PROJ",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	empty := ""
+	// `{"workflowId": ""}` would land here — the nil guard in applyIssueWatchPatch
+	// doesn't catch explicit empty strings, and a watch with empty WorkflowID
+	// would silently drop every event the orchestrator tries to handle.
+	for _, req := range []*UpdateIssueWatchRequest{
+		{WorkflowID: &empty},
+		{WorkflowStepID: &empty},
+	} {
+		if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for %+v, got %v", req, err)
+		}
+	}
+}
+
 func TestService_UpdateIssueWatch_NotFound(t *testing.T) {
 	f := newSvcFixture(t)
 	prompt := "x"

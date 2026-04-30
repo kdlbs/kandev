@@ -473,8 +473,15 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	applyIssueWatchPatch(w, req)
+	// Empty-string PATCH writes (`{"workflowId": ""}` etc.) bypass the nil
+	// guard in applyIssueWatchPatch — Go's JSON decoder returns a non-nil
+	// pointer to "". Guard the post-patch state so a PATCH can't strip a row
+	// of the fields the orchestrator needs to create tasks.
 	if w.JQL == "" {
 		return nil, fmt.Errorf("%w: jql cannot be empty", ErrInvalidConfig)
+	}
+	if w.WorkflowID == "" || w.WorkflowStepID == "" {
+		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
 	}
 	if err := validatePollInterval(w.PollIntervalSeconds); err != nil {
 		return nil, err
