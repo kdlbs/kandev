@@ -66,24 +66,30 @@ export function useJiraIssueWatches(workspaceId: string | null) {
 
   const update = useCallback(
     async (id: string, req: UpdateJiraIssueWatchInput) => {
-      const watch = await updateJiraIssueWatch(id, req);
+      if (!workspaceId) throw new Error("workspaceId required");
+      const watch = await updateJiraIssueWatch(workspaceId, id, req);
       updateWatch(watch);
       return watch;
     },
-    [updateWatch],
+    [workspaceId, updateWatch],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      await deleteJiraIssueWatch(id);
+      if (!workspaceId) throw new Error("workspaceId required");
+      await deleteJiraIssueWatch(workspaceId, id);
       removeWatch(id);
     },
-    [removeWatch],
+    [workspaceId, removeWatch],
   );
 
-  const trigger = useCallback(async (id: string) => {
-    return triggerJiraIssueWatch(id);
-  }, []);
+  const trigger = useCallback(
+    async (id: string) => {
+      if (!workspaceId) throw new Error("workspaceId required");
+      return triggerJiraIssueWatch(workspaceId, id);
+    },
+    [workspaceId],
+  );
 
   return { items, loaded, loading, create, update, remove, trigger };
 }

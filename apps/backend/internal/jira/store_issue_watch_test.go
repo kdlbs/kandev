@@ -207,13 +207,13 @@ func TestStore_IssueWatchTask_ReserveDedup(t *testing.T) {
 		t.Error("expected second reservation to lose due to UNIQUE constraint")
 	}
 
-	// HasIssueWatchTask reflects the reservation regardless of who won.
-	has, err := store.HasIssueWatchTask(ctx, w.ID, "PROJ-7")
+	// ListSeenIssueKeys reflects the reservation regardless of who won.
+	seen, err := store.ListSeenIssueKeys(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("has: %v", err)
+		t.Fatalf("list seen: %v", err)
 	}
-	if !has {
-		t.Error("expected has=true after reservation")
+	if _, ok := seen["PROJ-7"]; !ok {
+		t.Error("expected PROJ-7 in seen set after reservation")
 	}
 }
 

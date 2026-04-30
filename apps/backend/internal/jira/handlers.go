@@ -209,6 +209,9 @@ func (c *Controller) httpCreateIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
 	var req UpdateIssueWatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -224,6 +227,9 @@ func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
 	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), id); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -242,6 +248,11 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		c.writeIssueWatchError(ctx, err)
 		return
 	}
+	if !workspaceMatches(ctx, w.WorkspaceID) {
+		// 404 not 403 — don't reveal whether the ID exists.
+		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		return
+	}
 	tickets, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
 	if err != nil {
 		c.writeClientError(ctx, err)
@@ -251,6 +262,34 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		c.service.publishNewJiraIssueEvent(ctx.Request.Context(), w, t)
 	}
 	ctx.JSON(http.StatusOK, gin.H{"newIssues": len(tickets)})
+}
+
+// assertWatchInWorkspace guards mutation/trigger endpoints against IDOR: the
+// caller must supply `?workspace_id=...` matching the watch's workspace. The
+// list/create endpoints already require this query; mirroring it here closes
+// the gap where a known watch UUID from another workspace could be mutated.
+// Writes the response and returns false on mismatch — caller bails out.
+func (c *Controller) assertWatchInWorkspace(ctx *gin.Context, id string) bool {
+	w, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		c.writeIssueWatchError(ctx, err)
+		return false
+	}
+	if !workspaceMatches(ctx, w.WorkspaceID) {
+		// Use 404 so a probing client can't tell whether a watch ID exists in
+		// another workspace.
+		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		return false
+	}
+	return true
+}
+
+// workspaceMatches returns true when the request's `workspace_id` query param
+// matches the resource's stored workspace. Empty query is rejected so the
+// caller can't bypass the check by omitting the parameter.
+func workspaceMatches(ctx *gin.Context, resourceWorkspace string) bool {
+	q := ctx.Query("workspace_id")
+	return q != "" && q == resourceWorkspace
 }
 
 func (c *Controller) writeIssueWatchError(ctx *gin.Context, err error) {

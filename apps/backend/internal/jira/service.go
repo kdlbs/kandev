@@ -516,8 +516,8 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTi
 		return nil, err
 	}
 	// Bulk-fetch the dedup set once per call instead of one query per ticket —
-	// a broad JQL can return up to issueWatchSearchPageSize tickets, and each
-	// HasIssueWatchTask round-trip multiplies the per-tick cost.
+	// a broad JQL can return up to issueWatchSearchPageSize tickets, so a
+	// per-ticket round-trip would multiply the per-tick cost.
 	seen, err := s.store.ListSeenIssueKeys(ctx, w.ID)
 	if err != nil {
 		s.log.Warn("jira: dedup set fetch failed",

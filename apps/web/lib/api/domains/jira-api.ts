@@ -113,27 +113,44 @@ export async function createJiraIssueWatch(
   });
 }
 
+// All mutation/trigger endpoints require `workspace_id` so the backend can
+// reject cross-workspace IDOR (a watch UUID from another workspace would
+// otherwise be mutable by id alone). The list/create endpoints already scope
+// by workspace; these now match.
+
 export async function updateJiraIssueWatch(
+  workspaceId: string,
   id: string,
   payload: UpdateJiraIssueWatchInput,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<JiraIssueWatch>(`/api/v1/jira/watches/issue/${encodeURIComponent(id)}`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
-  });
+  return fetchJson<JiraIssueWatch>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
+    },
+  );
 }
 
-export async function deleteJiraIssueWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/jira/watches/issue/${encodeURIComponent(id)}`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "DELETE" },
-  });
+export async function deleteJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
+  );
 }
 
-export async function triggerJiraIssueWatch(id: string, options?: ApiRequestOptions) {
+export async function triggerJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<{ newIssues: number }>(
-    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}/trigger`,
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}/trigger?workspace_id=${encodeURIComponent(workspaceId)}`,
     { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
   );
 }

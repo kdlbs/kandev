@@ -370,24 +370,10 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey str
 	return err
 }
 
-// HasIssueWatchTask reports whether a reservation already exists for a ticket.
-// Used by the poller to filter out previously-seen tickets before publishing
-// duplicate events.
-func (s *Store) HasIssueWatchTask(ctx context.Context, watchID, issueKey string) (bool, error) {
-	var n int
-	err := s.ro.GetContext(ctx, &n,
-		`SELECT COUNT(*) FROM jira_issue_watch_tasks WHERE issue_watch_id = ? AND issue_key = ?`,
-		watchID, issueKey)
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
 // ListSeenIssueKeys returns the set of ticket keys already reserved against a
-// watch. Cheaper than calling HasIssueWatchTask once per ticket — a single
-// JQL search can return up to 50 tickets per tick, so the per-call savings
-// scale with the workspace's watch count.
+// watch. Returning a set in one query is cheaper than per-ticket existence
+// checks — a single JQL search can return up to 50 tickets per tick, so the
+// per-call savings scale with the workspace's watch count.
 func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[string]struct{}, error) {
 	var keys []string
 	err := s.ro.SelectContext(ctx, &keys,
