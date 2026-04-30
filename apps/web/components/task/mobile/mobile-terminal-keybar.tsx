@@ -89,13 +89,7 @@ export function MobileTerminalKeybar({
       style={{ ...position, height: `${KEYBAR_HEIGHT_PX}px` }}
     >
       <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5">
-        <ModifierButton
-          id="ctrl"
-          label="Ctrl"
-          ariaLabel="Control"
-          state={ctrl}
-          onTap={onCtrlTap}
-        />
+        <ModifierButton id="ctrl" label="Ctrl" ariaLabel="Control" state={ctrl} onTap={onCtrlTap} />
         <ModifierButton
           id="shift"
           label="Shift"

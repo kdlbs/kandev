@@ -444,11 +444,9 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     await simulateKeyboardOpen(testPage, 300);
 
     await expect
-      .poll(
-        () =>
-          panel.evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom) || 0),
-        { timeout: 3_000 },
-      )
+      .poll(() => panel.evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom) || 0), {
+        timeout: 3_000,
+      })
       .toBeGreaterThan(padBefore);
   });
 
