@@ -127,6 +127,21 @@ describe("usePlanPanelAutoOpen", () => {
     renderHook(() => usePlanPanelAutoOpen());
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
   });
+});
+
+describe("usePlanPanelAutoOpen — eager fetch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockActiveTaskId = "task-1";
+    mockPlan = agentPlan();
+    mockLastSeen = undefined;
+    mockIsLoaded = true;
+    mockConnectionStatus = "connected";
+    mockIsRestoringLayout = false;
+    mockApi = { getPanel: mockGetPanel };
+    mockGetPanel.mockReturnValue(null);
+    mockGetTaskPlan.mockResolvedValue(null);
+  });
 
   it("eagerly fetches the plan when not yet loaded", () => {
     mockIsLoaded = false;
