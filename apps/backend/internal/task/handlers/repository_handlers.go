@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -274,7 +275,14 @@ func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
 
 func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 	repoID := c.Param("id")
-	branches, err := h.service.ListRepositoryBranches(c.Request.Context(), repoID)
+	ctx := c.Request.Context()
+
+	var fetchedAt, fetchError string
+	if c.Query("refresh") == queryValueTrue {
+		fetchedAt, fetchError = h.refreshBranches(ctx, repoID)
+	}
+
+	branches, err := h.service.ListRepositoryBranches(ctx, repoID)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
@@ -284,7 +292,7 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
 		return
 	}
-	current := h.currentBranchForWorkspaceRepo(c.Request.Context(), repoID)
+	current := h.currentBranchForWorkspaceRepo(ctx, repoID)
 	dtoBranches := make([]dto.BranchDTO, len(branches))
 	for i, branch := range branches {
 		dtoBranches[i] = dto.FromBranch(branch)
@@ -293,7 +301,28 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 		Branches:      dtoBranches,
 		Total:         len(dtoBranches),
 		CurrentBranch: current,
+		FetchedAt:     fetchedAt,
+		FetchError:    fetchError,
 	})
+}
+
+// refreshBranches runs `git fetch` for the repository and returns the
+// timestamp + error string suitable for the response body. Failures are
+// best-effort: the branches are still returned so a transient network error
+// doesn't blank the dropdown.
+func (h *RepositoryHandlers) refreshBranches(ctx context.Context, repoID string) (fetchedAt, fetchError string) {
+	res, err := h.service.RefreshRepositoryBranches(ctx, repoID)
+	if err != nil {
+		h.logger.Warn("branch refresh failed", zap.String("repo_id", repoID), zap.Error(err))
+		return "", err.Error()
+	}
+	if !res.FetchedAt.IsZero() {
+		fetchedAt = res.FetchedAt.UTC().Format(time.RFC3339)
+	}
+	if res.Err != nil {
+		fetchError = res.Err.Error()
+	}
+	return fetchedAt, fetchError
 }
 
 // currentBranchForWorkspaceRepo is best-effort; failures (repo not found,

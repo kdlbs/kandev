@@ -532,10 +532,12 @@ export function useTaskCreateDialogData(
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
-  const { branches, isLoading: branchesLoading } = useRepositoryBranches(
-    fs.repositoryId || null,
-    Boolean(open && fs.repositoryId),
-  );
+  const {
+    branches,
+    isLoading: branchesLoading,
+    refresh: refreshBranches,
+    fetchedAt: branchesFetchedAt,
+  } = useRepositoryBranches(fs.repositoryId || null, Boolean(open && fs.repositoryId));
   const computed = useDialogComputed({
     fs,
     open,
@@ -560,6 +562,8 @@ export function useTaskCreateDialogData(
     repositoriesLoading,
     branches,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
     computed,
   };
 }

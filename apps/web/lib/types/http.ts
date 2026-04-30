@@ -495,6 +495,12 @@ export type RepositoryBranchesResponse = {
   branches: Branch[];
   total: number;
   current_branch?: string;
+  // RFC3339 timestamp of the most recent `git fetch` for this repository,
+  // when refresh was requested. Empty if no refresh has been performed.
+  fetched_at?: string;
+  // Human-readable error from the last fetch attempt for this request, if
+  // one was attempted and failed. Empty otherwise.
+  fetch_error?: string;
 };
 
 export type LocalRepositoryStatusResponse = {

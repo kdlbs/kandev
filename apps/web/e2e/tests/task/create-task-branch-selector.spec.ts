@@ -518,3 +518,125 @@ test.describe("Fresh-branch flow", () => {
     }
   });
 });
+
+test.describe("Branch refresh + filter", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("refresh button in branch dropdown triggers ?refresh=true request", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    if (!seedData.worktreeExecutorProfileId) {
+      test.skip(true, "No worktree executor profile in seed data");
+      return;
+    }
+    const { executors } = await apiClient.listExecutors();
+    const worktreeProfileName = executors
+      .flatMap((e) => e.profiles ?? [])
+      .find((p) => p.id === seedData.worktreeExecutorProfileId)?.name;
+    if (!worktreeProfileName) {
+      test.skip(true, "Could not resolve worktree profile name");
+      return;
+    }
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    await testPage.getByTestId("task-title-input").fill("Refresh button test");
+    await testPage.getByTestId("task-description-input").fill("triggers git fetch");
+    // Worktree executor → branch selector enabled and refresh button visible.
+    await testPage.getByTestId("executor-profile-selector").click();
+    await testPage.getByRole("option", { name: worktreeProfileName }).click();
+
+    const branchSelector = testPage.getByTestId("branch-selector");
+    await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
+    await branchSelector.click();
+
+    const refreshButton = testPage.getByTestId("branch-refresh-button");
+    await expect(refreshButton).toBeVisible({ timeout: 5_000 });
+
+    // Wait until the cold-load refresh request finishes so the button isn't
+    // disabled when we click it.
+    await expect(refreshButton).toBeEnabled({ timeout: 10_000 });
+
+    const refreshRequest = testPage.waitForRequest(
+      (req) =>
+        req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
+        req.url().includes("refresh=true") &&
+        req.method() === "GET",
+    );
+    await refreshButton.click();
+    await refreshRequest;
+  });
+
+  test("branch filter ranks exact match above substring matches", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    if (!seedData.worktreeExecutorProfileId) {
+      test.skip(true, "No worktree executor profile in seed data");
+      return;
+    }
+    const { executors } = await apiClient.listExecutors();
+    const worktreeProfileName = executors
+      .flatMap((e) => e.profiles ?? [])
+      .find((p) => p.id === seedData.worktreeExecutorProfileId)?.name;
+    if (!worktreeProfileName) {
+      test.skip(true, "Could not resolve worktree profile name");
+      return;
+    }
+
+    // Seed an isolated repo with branches that contain overlapping substrings
+    // so the filter has something interesting to rank.
+    const repoName = "E2E Filter Repo";
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-filter-branches");
+    fs.mkdirSync(repoDir, { recursive: true });
+    const env = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoDir, env });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env });
+    // -B creates or resets the branch so the test is idempotent across retries.
+    for (const name of ["develop", "feature/develop-helpers", "feature/auth-develop-flow"]) {
+      execSync(`git checkout -B ${name}`, { cwd: repoDir, env });
+      execSync(`git commit --allow-empty -m "${name}"`, { cwd: repoDir, env });
+      execSync("git checkout main", { cwd: repoDir, env });
+    }
+    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", { name: repoName });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    await testPage.getByTestId("task-title-input").fill("Filter ranking test");
+    await testPage.getByTestId("task-description-input").fill("exact match wins");
+    await testPage.getByTestId("repository-selector").click();
+    await testPage
+      .getByRole("option", { name: new RegExp(`^${repoName}\\b`, "i") })
+      .first()
+      .click();
+    await testPage.getByTestId("executor-profile-selector").click();
+    await testPage.getByRole("option", { name: worktreeProfileName }).click();
+
+    const branchSelector = testPage.getByTestId("branch-selector");
+    await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
+    await branchSelector.click();
+
+    // Wait for the cold-load fetch to populate the dropdown with our branches.
+    await expect(testPage.getByRole("option", { name: /feature\/develop-helpers/ })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await testPage.getByPlaceholder("Search branches...").fill("develop");
+
+    // After filtering, the exact match "develop" must rank first. cmdk renders
+    // matched options in descending score order, so the first [role="option"]
+    // in the DOM is the top-ranked branch. Options carry the branch name in
+    // data-value; the visible text also contains a "local" badge so we assert
+    // on the attribute rather than text content.
+    const firstOption = testPage.getByRole("option").first();
+    await expect(firstOption).toHaveAttribute("data-value", "develop", { timeout: 5_000 });
+  });
+});

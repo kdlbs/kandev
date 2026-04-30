@@ -26,6 +26,10 @@ export type RepositoryBranchesState = {
   itemsByRepositoryId: Record<string, Branch[]>;
   loadingByRepositoryId: Record<string, boolean>;
   loadedByRepositoryId: Record<string, boolean>;
+  // RFC3339 timestamp of the most recent successful refresh from the backend.
+  fetchedAtByRepositoryId: Record<string, string | undefined>;
+  // Last fetch error for each repository, when a refresh attempt failed.
+  fetchErrorByRepositoryId: Record<string, string | undefined>;
 };
 
 export type RepositoryScriptsState = {
@@ -46,7 +50,11 @@ export type WorkspaceSliceActions = {
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
-  setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
+  setRepositoryBranches: (
+    repositoryId: string,
+    branches: Branch[],
+    meta?: { fetchedAt?: string; fetchError?: string },
+  ) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;

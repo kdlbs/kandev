@@ -8,6 +8,8 @@ export const defaultWorkspaceState: WorkspaceSliceState = {
     itemsByRepositoryId: {},
     loadingByRepositoryId: {},
     loadedByRepositoryId: {},
+    fetchedAtByRepositoryId: {},
+    fetchErrorByRepositoryId: {},
   },
   repositoryScripts: {
     itemsByRepositoryId: {},
@@ -48,11 +50,17 @@ export const createWorkspaceSlice: StateCreator<
     set((draft) => {
       draft.repositories.loadingByWorkspaceId[workspaceId] = loading;
     }),
-  setRepositoryBranches: (repositoryId, branches) =>
+  setRepositoryBranches: (repositoryId, branches, meta) =>
     set((draft) => {
       draft.repositoryBranches.itemsByRepositoryId[repositoryId] = branches;
       draft.repositoryBranches.loadingByRepositoryId[repositoryId] = false;
       draft.repositoryBranches.loadedByRepositoryId[repositoryId] = true;
+      if (meta?.fetchedAt !== undefined) {
+        draft.repositoryBranches.fetchedAtByRepositoryId[repositoryId] = meta.fetchedAt;
+      }
+      // fetchError is replaced on every successful response (empty string clears it).
+      draft.repositoryBranches.fetchErrorByRepositoryId[repositoryId] =
+        meta?.fetchError ?? undefined;
     }),
   setRepositoryBranchesLoading: (repositoryId, loading) =>
     set((draft) => {

@@ -29,6 +29,8 @@ type CreateEditSelectorsProps = {
   branch: string;
   onBranchChange: (value: string) => void;
   branchesLoading: boolean;
+  onRefreshBranches?: () => void;
+  branchesFetchedAt?: string;
   localBranchesLoading: boolean;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
@@ -52,6 +54,9 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     searchPlaceholder: string;
     emptyMessage: string;
+    onRefresh?: () => void;
+    refreshing?: boolean;
+    fetchedAt?: string;
   }>;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
@@ -137,6 +142,8 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     branch,
     onBranchChange,
     branchesLoading,
+    onRefreshBranches,
+    branchesFetchedAt,
     localBranchesLoading,
     executorProfileOptions,
     executorProfileId,
@@ -182,6 +189,9 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             searchPlaceholder="Search branches..."
             emptyMessage="No branch found."
             disabled={branchDisabled}
+            onRefresh={!isLocalWithoutGitHubUrl ? onRefreshBranches : undefined}
+            refreshing={branchesLoading}
+            fetchedAt={branchesFetchedAt}
           />
         </div>
         {isLocalWithoutGitHubUrl && (

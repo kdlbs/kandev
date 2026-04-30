@@ -309,6 +309,13 @@ type RepositoryBranchesResponse struct {
 	Branches      []BranchDTO `json:"branches"`
 	Total         int         `json:"total"`
 	CurrentBranch string      `json:"current_branch,omitempty"`
+	// FetchedAt is the timestamp of the most recent `git fetch` for this
+	// repository (RFC3339). Empty when no refresh has been requested in the
+	// process lifetime.
+	FetchedAt string `json:"fetched_at,omitempty"`
+	// FetchError is the human-readable error from the last fetch attempt for
+	// this request, if one was attempted and failed. Empty otherwise.
+	FetchError string `json:"fetch_error,omitempty"`
 }
 
 // LocalRepositoryStatusResponse reports current branch + dirty paths for a
