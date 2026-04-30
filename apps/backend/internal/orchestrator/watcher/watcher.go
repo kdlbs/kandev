@@ -92,7 +92,8 @@ type EventHandlers struct {
 	// Agent events
 	OnAgentStarted      func(ctx context.Context, data AgentEventData)
 	OnAgentRunning      func(ctx context.Context, data AgentEventData)
-	OnAgentReady        func(ctx context.Context, data AgentEventData)
+	OnAgentBootReady    func(ctx context.Context, data AgentEventData) // ACP session initialized; idle, no turn yet
+	OnAgentReady        func(ctx context.Context, data AgentEventData) // Turn ended; agent idle waiting for follow-up
 	OnAgentCompleted    func(ctx context.Context, data AgentEventData)
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
@@ -280,6 +281,7 @@ func (w *Watcher) subscribeToAgentEvents() error {
 	}{
 		{events.AgentStarted, w.handlers.OnAgentStarted},
 		{events.AgentRunning, w.handlers.OnAgentRunning},
+		{events.AgentBootReady, w.handlers.OnAgentBootReady},
 		{events.AgentReady, w.handlers.OnAgentReady},
 		{events.AgentCompleted, w.handlers.OnAgentCompleted},
 		{events.AgentFailed, w.handlers.OnAgentFailed},

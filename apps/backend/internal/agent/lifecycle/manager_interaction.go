@@ -341,7 +341,12 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		zap.String("new_acp_session_id", newSessionID))
 
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentReady, execution)
+	// Boot-equivalent signal: a fresh ACP session is alive but no turn has run yet.
+	// Use AgentBootReady so the orchestrator routes this to handleAgentBootReady
+	// (idle/WAITING transition) rather than handleAgentReady (turn-end transition,
+	// which would fire on_turn_complete against the current step — the original
+	// boot-vs-turn ambiguity bug).
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 	return nil
 }
 
@@ -595,9 +600,11 @@ func (m *Manager) initializeACPSessionForRestart(
 		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
 	}
 
-	// Mark execution as ready
+	// Mark execution as ready. This is a *boot* signal — initializeACPSessionForRestart
+	// is the post-restart init path and no turn has run yet, so AgentBootReady (not
+	// AgentReady) is what subscribers want to route on.
 	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentReady, execution)
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 
 	return nil
 }
@@ -813,42 +820,62 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 	return nil
 }
 
-// MarkReady marks an execution as ready for follow-up prompts.
+// MarkReady marks an execution as ready for follow-up prompts AFTER A TURN.
+// Use MarkBootReady instead when the agent has just initialized and hasn't yet
+// processed a turn — orchestrator subscribers rely on the distinction.
 //
 // This transitions the execution to the "ready" state, indicating the agent has finished
-// processing the current prompt and is waiting for user input. This is called:
-//   - After agent initialization completes (session loaded, workspace ready)
-//   - After agent finishes processing a prompt (via stream completion event)
-//   - After cancelling an agent turn (to allow new prompts)
+// processing the current prompt and is waiting for user input. Called when:
+//   - Agent finishes processing a prompt (via stream completion event)
+//   - User cancels an agent turn (to allow new prompts)
+//
+// State Machine Transitions:
+//
+//	Running -> Ready (after prompt completion)
+//	Any     -> Ready (after cancel)
+//
+// Publishes events.AgentReady. Returns error if execution not found.
+func (m *Manager) MarkReady(executionID string) error {
+	return m.markReadyEvent(executionID, events.AgentReady)
+}
+
+// MarkBootReady marks a freshly-initialized execution as ready for its first
+// prompt. Distinct from MarkReady so the orchestrator can disambiguate boot
+// signals from turn-end signals without race-prone flag tracking. Use this
+// from session/init paths and post-context-reset; use MarkReady from the
+// turn-completion path.
 //
 // State Machine Transitions:
 //
 //	Starting -> Ready (after initialization)
-//	Running  -> Ready (after prompt completion)
-//	Any      -> Ready (after cancel)
 //
-// Publishes an AgentReady event to notify subscribers (frontend, orchestrator).
-//
-// Returns error if execution not found.
-func (m *Manager) MarkReady(executionID string) error {
+// Publishes events.AgentBootReady. Returns error if execution not found.
+func (m *Manager) MarkBootReady(executionID string) error {
+	return m.markReadyEvent(executionID, events.AgentBootReady)
+}
+
+// markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
+// the execution to the Ready status and publish their respective event type.
+func (m *Manager) markReadyEvent(executionID, eventType string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	// Skip if already ready (prevents duplicate events)
+	// Skip if already ready (prevents duplicate events). This guard is shared
+	// across MarkReady and MarkBootReady — once Ready is set, neither type fires
+	// again until the next status transition (Running on prompt, Stopped on stop).
 	if execution.Status == v1.AgentStatusReady {
 		return nil
 	}
 
 	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
 
-	m.logger.Info("execution ready for follow-up prompts",
-		zap.String("execution_id", executionID))
+	m.logger.Info("execution ready",
+		zap.String("execution_id", executionID),
+		zap.String("event_type", eventType))
 
-	// Publish ready event
-	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentReady, execution)
-
+	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
 	return nil
 }
 

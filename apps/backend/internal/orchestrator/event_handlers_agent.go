@@ -99,8 +99,79 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
 }
 
-// handleAgentReady handles agent ready events (turn complete in passthrough mode)
-// This is called when the agent finishes processing and is waiting for input.
+// handleAgentBootReady handles the boot signal: an agent's ACP session has
+// finished initializing but no turn has run yet. This event is distinct from
+// agent.ready (turn-end) so the orchestrator never has to disambiguate the
+// two with race-prone flags.
+//
+// The only job here is to flip the session to WAITING_FOR_INPUT so callers
+// that are gating on that state (e.g. PromptTask's waitForSessionReady after
+// ensureSessionRunning kicked off ResumeSession) can proceed. Crucially we do
+// NOT call processOnTurnCompleteViaEngine — there's no turn to complete, and
+// stepping the workflow off a boot signal is what caused the production
+// ping-pong bug.
+func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.logger.Warn("missing session_id for agent boot ready event",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	if s.isSessionResetInProgress(data.SessionID) {
+		s.logger.Debug("ignoring agent.boot_ready while session reset is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for agent.boot_ready",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	// Stale event: the session has rotated to a different execution. The agent
+	// process tied to data.AgentExecutionID is no longer the active one for this
+	// session, so its boot signal is irrelevant.
+	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
+		s.logger.Debug("ignoring stale agent.boot_ready for non-active execution",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("event_execution_id", data.AgentExecutionID),
+			zap.String("active_execution_id", session.AgentExecutionID))
+		return
+	}
+
+	// Terminal sessions never need a boot signal — if a stale init event
+	// arrives after the session was completed/cancelled, just drop it.
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring agent.boot_ready for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return
+	}
+
+	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
+	// from a previously launched session and the boot signal arrived faster
+	// than persistResumeState wrote STARTING), skip — there's nothing to flip
+	// and waitForSessionReady's poll will pick it up.
+	if session.State == models.TaskSessionStateWaitingForInput {
+		s.logger.Debug("agent.boot_ready: session already WAITING_FOR_INPUT, no-op",
+			zap.String("session_id", data.SessionID))
+		return
+	}
+
+	s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+}
+
+// handleAgentReady handles turn-end ready events: the agent finished processing
+// a prompt and is waiting for the next input. This is the *only* event that
+// should evaluate workflow on_turn_complete actions — boot signals route
+// through handleAgentBootReady instead.
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
 
 	if data.SessionID == "" {
@@ -145,6 +216,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
+
+	// A move_task_kandev call during this turn deferred the actual move to
+	// avoid racing on_enter against the running turn. Apply it now: the move
+	// is the explicit transition the agent requested, so skip the regular
+	// on_turn_complete evaluation against the (still old) step.
+	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
+		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+		return
+	}
 
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
@@ -318,6 +398,36 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 			zap.Error(err))
 		return
 	}
+
+	// Skip transition logic when this event is the side-effect of a deliberate
+	// stop (e.g. a workflow profile-switch calling completeAndStopSession). Two
+	// signals identify that case:
+	//   - Stale execution ID: the session has already adopted a new agent
+	//     execution (or cleared the old one), so this event refers to a stopped
+	//     run, not the current one.
+	//   - Terminal session state: completeAndStopSession set state to COMPLETED
+	//     before StopAgent fired this event.
+	// Without this guard, processOnTurnCompleteViaEngine evaluates the *current*
+	// task step (which has already moved past where this agent ran) and triggers
+	// spurious transitions — manifesting as task-step ping-pong on profile switches.
+	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
+		s.logger.Debug("ignoring stale agent.completed for non-active execution",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("event_execution_id", data.AgentExecutionID),
+			zap.String("active_execution_id", session.AgentExecutionID))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return
+	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring agent.completed; session already in terminal state (deliberate stop)",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return
+	}
+
 	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
 	// If no workflow transition occurred, move task to REVIEW state for user review

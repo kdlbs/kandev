@@ -251,8 +251,11 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	for _, ev := range mockBus.PublishedEvents {
 		eventTypes = append(eventTypes, ev.Type)
 	}
-	if !slices.Contains(eventTypes, events.AgentReady) {
-		t.Fatalf("expected %q event, got %v", events.AgentReady, eventTypes)
+	// Restart is a boot scenario — initializeACPSessionForRestart publishes
+	// AgentBootReady (not AgentReady) so the orchestrator routes it to
+	// handleAgentBootReady rather than evaluating on_turn_complete.
+	if !slices.Contains(eventTypes, events.AgentBootReady) {
+		t.Fatalf("expected %q event, got %v", events.AgentBootReady, eventTypes)
 	}
 	if !slices.Contains(eventTypes, events.AgentACPSessionCreated) {
 		t.Fatalf("expected %q event, got %v", events.AgentACPSessionCreated, eventTypes)

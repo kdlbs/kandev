@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -16,6 +18,7 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		WorkflowID     string `json:"workflow_id"`
 		WorkflowStepID string `json:"workflow_step_id"`
 		Position       int    `json:"position"`
+		Prompt         string `json:"prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -29,13 +32,108 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
+	if req.Prompt == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required: provide a hand-off message for the receiving agent", nil)
+	}
 
+	// When the call originates from an agent mid-turn (the common case for
+	// move_task_kandev), running MoveTask now races on_enter processing against
+	// the agent's still-active turn — corrupting session state, evaluating
+	// on_turn_complete on the wrong step, and orphaning the queued prompt.
+	// Defer instead: queue the prompt and record a pending move so
+	// handleAgentReady applies it deterministically when the turn ends.
+	session := h.lookupSession(ctx, req.TaskID)
+	if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
+		if req.Prompt != "" {
+			wrapped := "You were moved to this step with the following message: " + req.Prompt
+			h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped)
+		}
+		h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
+			TaskID:         req.TaskID,
+			WorkflowID:     req.WorkflowID,
+			WorkflowStepID: req.WorkflowStepID,
+			Position:       req.Position,
+		})
+		// Return a task DTO that reflects the post-move state. The actual DB
+		// transition happens later in handleAgentReady → applyPendingMove, but
+		// the agent's tool contract is "move_task → moved task back". Echoing a
+		// pending/deferred shape confuses the agent into retrying or looping;
+		// a normal task DTO lets it close out the turn so agent.ready can fire.
+		return ws.NewResponse(msg.ID, msg.Action, h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
+	}
+
+	// Idle session (e.g. UI-driven move via MCP) — apply immediately.
+	if req.Prompt != "" && session != nil {
+		wrapped := "You were moved to this step with the following message: " + req.Prompt
+		h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped)
+	}
 	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
+}
+
+// synthesizeMovedTaskDTO returns a task DTO with the post-move step/workflow
+// values filled in. Used by the deferred-move path so the agent's tool call
+// sees a "successful move" response shape, freeing it to end the turn (which
+// is what triggers applyPendingMove). If we can't load the task, fall back to
+// a minimal map so the call still resolves.
+func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowID, workflowStepID string, position int) any {
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		h.logger.Warn("failed to load task for synthetic move response",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return map[string]any{
+			"id":               taskID,
+			"workflow_id":      workflowID,
+			"workflow_step_id": workflowStepID,
+			"position":         position,
+		}
+	}
+	clone := *task
+	clone.WorkflowID = workflowID
+	clone.WorkflowStepID = workflowStepID
+	clone.Position = position
+	return dto.FromTask(&clone)
+}
+
+// lookupSession returns the task's primary session, or nil if none exists.
+// Errors are logged at warn level — the move can still proceed via the
+// immediate path even when session lookup fails.
+func (h *Handlers) lookupSession(ctx context.Context, taskID string) *models.TaskSession {
+	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil || session == nil {
+		h.logger.Warn("failed to resolve primary session for task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil
+	}
+	return session
+}
+
+// queueMoveTaskPrompt enqueues a user-supplied prompt on the task's primary session.
+// Errors and missing dependencies are logged at warn level — the move itself is the
+// primary side-effect of the MCP call and should still succeed.
+func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) {
+	if h.messageQueue == nil {
+		h.logger.Warn("move_task prompt provided but message queue is unavailable",
+			zap.String("task_id", taskID))
+		return
+	}
+	if sessionID == "" {
+		h.logger.Warn("move_task prompt provided but task has no primary session",
+			zap.String("task_id", taskID))
+		return
+	}
+	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", "mcp-move-task", false, nil); err != nil {
+		h.logger.Warn("failed to queue prompt for moved task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

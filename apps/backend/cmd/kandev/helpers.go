@@ -513,7 +513,7 @@ func registerMCPAndDebugRoutes(
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.log,
+		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)

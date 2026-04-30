@@ -52,9 +52,20 @@ func isTransientPromptError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// "execution not found" is transient during a session resume: ResumeSession
+	// registers the new execution synchronously, but the agent process and
+	// agentctl bring-up is async (see runAgentProcessAsync). If PromptTask races
+	// the bring-up — e.g. the resume's boot ready event hasn't fired yet, or the
+	// session pointer has stale AgentExecutionID — the lookup may miss. Treating
+	// it as transient lets autoStartStepPrompt's retry loop give the resume time
+	// to finish settling.
+	if errors.Is(err, executor.ErrExecutionNotFound) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "agent stream disconnected") ||
-		strings.Contains(msg, "use of closed network connection")
+		strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "execution not found")
 }
 
 func isAgentAlreadyRunningError(err error) bool {
@@ -892,6 +903,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+	// The lifecycle layer publishes events.AgentBootReady (handled by handleAgentBootReady)
+	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
+	// no flag-tracking needed.
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
@@ -926,6 +940,10 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", session.AgentExecutionID))
 
+	// Boot ready is published as events.AgentBootReady by the lifecycle layer
+	// and routed to handleAgentBootReady, which flips the session to
+	// WAITING_FOR_INPUT — that's what waitForSessionReady polls for. No flag
+	// tracking required here.
 	launchCtx := context.WithoutCancel(ctx)
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
@@ -1615,6 +1633,17 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
+	}
+
+	// Reload session after ensureSessionRunning. If a resume happened, ResumeSession
+	// updated the session's AgentExecutionID via persistResumeState — but only on the
+	// pointer it received. If anything along the way swapped the pointer or the
+	// caller's struct is otherwise stale (e.g. a concurrent write), executor.Prompt
+	// would call PromptAgent with the OLD execution ID and get ErrExecutionNotFound.
+	// Re-reading from the DB after ensureSessionRunning guarantees we use the
+	// freshly-persisted AgentExecutionID.
+	if reloaded, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && reloaded != nil {
+		session = reloaded
 	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)

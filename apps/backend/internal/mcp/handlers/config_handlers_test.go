@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -339,6 +340,72 @@ func TestHandleMoveTask_InvalidPayload(t *testing.T) {
 	resp, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+}
+
+// recordingMessageQueuer captures QueueMessage calls for assertion.
+type recordingMessageQueuer struct {
+	calls []messagequeue.QueuedMessage
+}
+
+func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+	msg := messagequeue.QueuedMessage{
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Content:   content,
+		Model:     model,
+		PlanMode:  planMode,
+		QueuedBy:  userID,
+	}
+	r.calls = append(r.calls, msg)
+	return &msg, nil
+}
+
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+}
+
+// TestQueueMoveTaskPrompt_NilQueueIsSafe ensures that providing a prompt with no
+// configured message queue is handled gracefully (logged, no panic).
+func TestQueueMoveTaskPrompt_NilQueueIsSafe(t *testing.T) {
+	h := &Handlers{logger: testLogger(t).WithFields()}
+
+	// Should not panic — the nil-queue branch short-circuits.
+	h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+}
+
+// TestQueueMoveTaskPrompt_EmptySessionIDIsSafe ensures that a missing primary
+// session is handled gracefully (logged, no panic, no queue call).
+func TestQueueMoveTaskPrompt_EmptySessionIDIsSafe(t *testing.T) {
+	queue := &recordingMessageQueuer{}
+	h := &Handlers{
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+
+	h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
+
+	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
+}
+
+// TestQueueMoveTaskPrompt_QueuesWithExpectedFields verifies the happy-path
+// invocation: the prompt is queued on the resolved session with the expected
+// metadata (sender = "mcp-move-task", plan mode disabled, no model override).
+func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
+	queue := &recordingMessageQueuer{}
+	h := &Handlers{
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+
+	h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+
+	require.Len(t, queue.calls, 1)
+	got := queue.calls[0]
+	assert.Equal(t, "session-99", got.SessionID)
+	assert.Equal(t, "task-1", got.TaskID)
+	assert.Equal(t, "Please fix the failing test in foo_test.go", got.Content)
+	assert.Equal(t, "mcp-move-task", got.QueuedBy)
+	assert.False(t, got.PlanMode)
+	assert.Equal(t, "", got.Model)
 }
 
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {

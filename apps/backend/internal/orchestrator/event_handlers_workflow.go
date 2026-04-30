@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -554,6 +556,15 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 			zap.String("session_id", existing.ID), zap.Error(err))
 	}
 
+	// Transfer any queued message and pending move from the session being
+	// switched away from to the reused session — without this, a hand-off
+	// prompt queued via move_task_kandev on the previous session is orphaned
+	// and gets delivered to the wrong agent the next time that previous
+	// session is reused (e.g. on the on_turn_complete bounce back).
+	if s.messageQueue != nil {
+		s.messageQueue.TransferSession(ctx, currentSession.ID, existing.ID)
+	}
+
 	s.completeAndStopSession(ctx, taskID, currentSession)
 	return existing, nil
 }
@@ -629,6 +640,13 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 		}
 	}
 
+	// Transfer any queued message (e.g. a move_task_kandev hand-off prompt) and
+	// pending move from the old session to the new one — the queue is keyed by
+	// session ID, and without this the prompt would never reach the new agent.
+	if s.messageQueue != nil {
+		s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID)
+	}
+
 	// Promote the new session to primary so it's loaded when navigating back to this task.
 	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
 	// event — the frontend reads primarySessionId from the task to render the star icon.
@@ -647,6 +665,16 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 // full-row UpdateTaskSession write doesn't overwrite the SetPrimarySession
 // call the caller just made on the replacement session.
 func (s *Service) completeAndStopSession(ctx context.Context, taskID string, session *models.TaskSession) {
+	// Flip state to COMPLETED *before* stopping the agent. StopAgent fires an
+	// agent.completed event, and handleAgentCompleted's terminal-state guard
+	// only short-circuits when the session is already in a terminal state. If
+	// we stopped first, the event would fire while state is still RUNNING (or
+	// WAITING_FOR_INPUT for the deferred-move flow), the guard would miss it,
+	// and processOnTurnCompleteViaEngine would evaluate the *new* (already
+	// transitioned) step's on_turn_complete — re-firing the very transition we
+	// just performed and ping-ponging the task between steps.
+	s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateCompleted, "", false)
+
 	if session.AgentExecutionID != "" {
 		if err := s.agentManager.StopAgent(ctx, session.AgentExecutionID, false); err != nil {
 			s.logger.Warn("failed to stop agent for session switch",
@@ -654,10 +682,6 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 				zap.Error(err))
 		}
 	}
-
-	// Use updateTaskSessionState to publish a session.state_changed WS event so the
-	// frontend learns the old session is terminal and can adopt the new one.
-	s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateCompleted, "", false)
 
 	now := time.Now().UTC()
 	session.State = models.TaskSessionStateCompleted
@@ -727,6 +751,14 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
 	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
+		// Active-turn case (e.g. move_task_kandev mid-turn): the agent is still
+		// running and will fire agent.ready when the turn ends. Don't flip state
+		// to WAITING here — handleAgentReady's RUNNING/STARTING guard would then
+		// silence the event and orphan the queue. handleAgentReady runs
+		// on_turn_complete against the new step and drains the queue itself.
+		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			return
+		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		s.drainQueuedMessageAfterTransition(ctx, sessionID)
@@ -821,6 +853,12 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			}()
 			return
 		}
+		// Same active-turn guard as the no-on_enter branch above: if the agent
+		// is still mid-turn, leave state alone so handleAgentReady can run on
+		// turn end. See that branch for the full rationale.
+		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			return
+		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		// handleAgentReady early-returns when a workflow transition occurs (#677),
@@ -830,6 +868,78 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// from inline processOnEnter.
 		s.drainQueuedMessageAfterTransition(ctx, sessionID)
 	}
+}
+
+// applyPendingMove applies a deferred move_task_kandev call now that the agent's
+// turn has ended. Synchronous: updates the task's step in the DB, runs on_exit
+// for the source step and on_enter for the target step. Bypasses
+// task.Service.MoveTask (and the task.moved event) so the orchestrator's async
+// task.moved handler doesn't run a second processStepExitAndEnter for the same
+// transition. The message queue is left intact — any user-supplied prompt
+// already queued by handleMoveTask is delivered by the on_enter path or by
+// drainQueuedMessageAfterTransition.
+func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
+	if s.workflowStepGetter == nil || s.workflowStore == nil {
+		s.logger.Warn("cannot apply pending move: workflow components missing",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load task for pending move",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	fromStepID := task.WorkflowStepID
+	if fromStepID == move.WorkflowStepID {
+		// Step already matches — nothing to transition. Just leave the queued
+		// prompt for the natural drain path.
+		s.logger.Info("pending move target equals current step; skipping transition",
+			zap.String("task_id", taskID),
+			zap.String("step_id", fromStepID))
+		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		return
+	}
+
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, move.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		s.logger.Error("failed to load target step for pending move",
+			zap.String("task_id", taskID),
+			zap.String("target_step_id", move.WorkflowStepID),
+			zap.Error(err))
+		return
+	}
+
+	// Mark the session WAITING_FOR_INPUT before processOnEnter runs. The agent
+	// just finished its turn; the active-turn guard in processOnEnter would
+	// otherwise see RUNNING and skip the on_enter processing.
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+
+	if err := s.workflowStore.ApplyTransition(ctx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
+		s.logger.Error("failed to apply pending move transition",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+
+	s.logger.Info("applying pending move",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from_step_id", fromStepID),
+		zap.String("to_step_id", move.WorkflowStepID))
+
+	// Run on_exit + on_enter asynchronously. This call originated from
+	// handleAgentReady on the WS event reader goroutine; processStepExitAndEnter
+	// can take many seconds (resume + agentctl bootstrap) and would otherwise
+	// block that reader, queueing other agent events behind it and creating
+	// race conditions with concurrent on_turn_complete / agent.completed events
+	// for the same session. The DB transition is already persisted above, so
+	// it's safe to defer the rest.
+	taskDescription := task.Description
+	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
 }
 
 // drainQueuedMessageAfterTransition takes any user-queued message and dispatches
@@ -896,9 +1006,33 @@ func (s *Service) autoStartStepPrompt(
 ) error {
 	sessionID := session.ID
 
+	// Take any queued message (e.g. from move_task_kandev with a hand-off
+	// prompt) and concatenate with the step's auto-start prompt — auto-start
+	// content first, hand-off after. Track it so terminal failure paths can
+	// restore it instead of dropping the user's prompt on the floor.
+	var takenMsg *messagequeue.QueuedMessage
+	if s.messageQueue != nil {
+		if msg, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok && msg != nil && msg.Content != "" {
+			takenMsg = msg
+			prompt = prompt + "\n\n" + msg.Content
+			s.publishQueueStatusEvent(ctx, sessionID)
+		}
+	}
+
+	// requeueTaken puts the original queued message back so a manual retry can
+	// pick it up. Skip when shouldQueueIfBusy successfully re-queued the
+	// concatenated prompt (the content is already preserved there).
+	requeueTaken := func() {
+		if takenMsg == nil {
+			return
+		}
+		s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
+	}
+
 	if shouldQueueIfBusy {
 		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode)
 		if err != nil {
+			requeueTaken()
 			return err
 		}
 		if queued {
@@ -919,6 +1053,9 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
 		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, nil)
+		if err != nil {
+			requeueTaken()
+		}
 		return err
 	}
 
@@ -929,39 +1066,103 @@ func (s *Service) autoStartStepPrompt(
 			return nil
 		}
 
+		// ErrExecutionNotFound means ResumeSession landed on an execution that
+		// the lifecycle manager no longer has (e.g. the post-resume agent
+		// process failed to start and runAgentProcessAsync removed it). The
+		// session's stored AgentExecutionID is now stale. Recover by clearing
+		// it and routing through StartCreatedSession for a fresh launch — the
+		// prompt is baked into LaunchPreparedSession so we don't lose it.
+		if errors.Is(err, executor.ErrExecutionNotFound) {
+			s.logger.Warn("auto-start: PromptTask hit missing execution; falling back to fresh launch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName))
+			return s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, takenMsg)
+		}
+
 		// "already has an agent running" means the execution store still tracks
 		// an active agent for this session (e.g. session state is CREATED but
 		// the agent was launched by a concurrent path). Queue instead of retrying.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
 			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+				requeueTaken()
 				return queueErr
 			}
 			return nil
 		}
 
 		if !isAgentPromptInProgressError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
+			requeueTaken()
 			return err
 		}
 
 		if shouldQueueIfBusy {
 			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+				requeueTaken()
 				return queueErr
 			}
 			return nil
 		}
 
 		if attempt == maxRetryAttempts {
+			requeueTaken()
 			return err
 		}
 
 		delay := time.Duration(50*(1<<(attempt-1))) * time.Millisecond
 		select {
 		case <-ctx.Done():
+			requeueTaken()
 			return fmt.Errorf("auto-start context canceled: %w", ctx.Err())
 		case <-time.After(delay):
 		}
 	}
 
+	return nil
+}
+
+// fallbackFreshLaunchOnMissingExecution recovers from a PromptTask that returned
+// ErrExecutionNotFound — the session's stored AgentExecutionID points at an
+// execution the lifecycle manager doesn't have, so the resume path is dead.
+// Clear the stale ID, flip state to CREATED, and route through StartCreatedSession
+// (which uses LaunchPreparedSession with the prompt baked in — bypassing resume).
+// On further failure, the queued message is restored so a manual retry recovers it.
+func (s *Service) fallbackFreshLaunchOnMissingExecution(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	takenMsg *messagequeue.QueuedMessage,
+) error {
+	requeue := func() {
+		if takenMsg != nil {
+			s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
+		}
+	}
+
+	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("auto-start fallback: failed to load session",
+			zap.String("session_id", sessionID), zap.Error(err))
+		requeue()
+		return err
+	}
+
+	fresh.AgentExecutionID = ""
+	fresh.State = models.TaskSessionStateCreated
+	fresh.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, fresh); err != nil {
+		s.logger.Error("auto-start fallback: failed to reset session for fresh launch",
+			zap.String("session_id", sessionID), zap.Error(err))
+		requeue()
+		return err
+	}
+
+	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, nil); err != nil {
+		s.logger.Error("auto-start fallback: fresh launch failed",
+			zap.String("session_id", sessionID), zap.Error(err))
+		requeue()
+		return err
+	}
 	return nil
 }
 

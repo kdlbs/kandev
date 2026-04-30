@@ -42,6 +42,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "list_tasks_kandev")
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "update_task_kandev")
+	assert.Contains(t, tools, "move_task_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -69,7 +70,6 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_agent_profile_kandev")
 	assert.NotContains(t, tools, "get_mcp_config_kandev")
 	assert.NotContains(t, tools, "update_mcp_config_kandev")
-	assert.NotContains(t, tools, "move_task_kandev")
 	assert.NotContains(t, tools, "delete_task_kandev")
 	assert.NotContains(t, tools, "archive_task_kandev")
 	assert.NotContains(t, tools, "list_executors_kandev")
@@ -193,8 +193,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 8 kanban + 1 interaction + 4 plan = 13
-	assert.Equal(t, 13, len(tools))
+	// 9 kanban + 1 interaction + 4 plan = 14
+	assert.Equal(t, 14, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {

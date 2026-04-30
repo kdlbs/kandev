@@ -307,7 +307,7 @@ func (s *Server) registerTools() {
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 8
+		count += 9
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -378,6 +378,17 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("move_task_kandev",
+			mcp.WithDescription("Move a task to a different workflow step and send a hand-off prompt to the receiving agent. Use when handing the task off to another step (e.g. QA → review) with specific instructions for what should happen next."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
+			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
+			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("Hand-off message for the receiving agent. Delivered as the agent's first prompt at the new step — if the target step has auto_start_agent, the step's own prompt is concatenated before this one. Be specific: this is the only direction the receiving agent has for what to do.")),
+		),
+		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
 }
 
