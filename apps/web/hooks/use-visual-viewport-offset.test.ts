@@ -116,5 +116,6 @@ describe("useVisualViewportOffset", () => {
     const { result } = renderHook(() => useVisualViewportOffset());
     expect(result.current.bottomOffset).toBe(0);
     expect(result.current.keyboardOpen).toBe(false);
+    expect(result.current.viewportBottom).toBe(0);
   });
 });
