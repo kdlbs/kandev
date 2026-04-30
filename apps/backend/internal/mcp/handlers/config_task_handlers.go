@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -173,14 +174,24 @@ func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowI
 
 // lookupSession returns the task's primary session.
 //   - (session, nil) — task has a primary session.
-//   - (nil, nil)     — task has no primary session yet (legitimate "empty" state).
-//   - (nil, err)     — backend lookup failed; the caller should map this to an
-//     internal error rather than treating it as "no session", since collapsing
-//     them lets transient backend failures surface as user-input validation
-//     errors.
+//   - (nil, nil)     — task has no primary session yet (legitimate "empty"
+//     state — task was created but no agent has been launched). The
+//     repository signals this with a "no primary session found for task:"
+//     error string; we treat it as a not-found rather than a failure so the
+//     caller can fall through to the idle-move path instead of rejecting the
+//     request.
+//   - (nil, err)     — real backend lookup failure (DB error, etc.). The
+//     caller should map this to an internal error rather than collapsing it
+//     into "no session" downstream.
 func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil {
+		// "no primary session found for task: <id>" is the repo's not-found
+		// signal — see scanTaskSession's noRowsErr formatting. Match by
+		// substring; there's no exported sentinel to errors.Is against.
+		if strings.Contains(err.Error(), "no primary session found for task") {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return session, nil
