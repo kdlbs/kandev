@@ -48,6 +48,7 @@ func (r *Registry) LoadDefaults() {
 		agents.NewClaudeACP(),
 		agents.NewCodexACP(),
 		agents.NewCopilotACP(),
+		agents.NewCursorACP(),
 		agents.NewGemini(),
 		agents.NewOpenCodeACP(),
 		agents.NewAmpACP(),
