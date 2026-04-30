@@ -112,7 +112,7 @@ test.describe("Sessionless task switching", () => {
     test.setTimeout(90_000);
 
     // Two tasks with agents — A navigated first, then B, then back to A. The
-    // back-to-A switch goes through performSessionSwitch's slow path which
+    // back-to-A switch goes through performEnvSwitch's slow path which
     // historically applied the saved (potentially corrupt) blob verbatim.
     const taskA = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -182,7 +182,7 @@ test.describe("Sessionless task switching", () => {
       window.sessionStorage.setItem(`kandev.dockview.layout.${sid}`, JSON.stringify(corrupt));
     }, sessionAId!);
 
-    // Switch back to A — performSessionSwitch should drop the corrupt blob
+    // Switch back to A — performEnvSwitch should drop the corrupt blob
     // and rebuild the default instead of applying the zero-width layout.
     await session.clickTaskInSidebar("Layout Recovery Task A");
     await expect(testPage).toHaveURL(new RegExp(`/t/${taskA.id}(?:\\?|$)`), { timeout: 10_000 });
