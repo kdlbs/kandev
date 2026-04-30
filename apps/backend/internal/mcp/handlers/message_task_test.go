@@ -39,6 +39,7 @@ type promptCall struct {
 }
 type startCreatedCall struct {
 	taskID, sessionID, agentProfileID, prompt string
+	skipMessageRecord                         bool
 }
 
 func (f *fakeOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
@@ -57,10 +58,16 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
-func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, _, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _ bool, _ []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{taskID, sessionID, agentProfileID, prompt})
+	f.startCreatedCalls = append(f.startCreatedCalls, startCreatedCall{
+		taskID:            taskID,
+		sessionID:         sessionID,
+		agentProfileID:    agentProfileID,
+		prompt:            prompt,
+		skipMessageRecord: skipMessageRecord,
+	})
 	return &executor.TaskExecution{SessionID: sessionID}, nil
 }
 
@@ -258,6 +265,9 @@ func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 	assert.Equal(t, sess.ID, c.sessionID)
 	assert.Equal(t, "agent-profile-1", c.agentProfileID)
 	assert.Equal(t, "kick off the work", c.prompt)
+	// skipMessageRecord must be false so postLaunchCreated → recordInitialMessage
+	// writes the prompt to the receiving task's chat.
+	assert.False(t, c.skipMessageRecord, "skipMessageRecord must be false so the prompt is recorded in chat")
 }
 
 func TestHandleMessageTask_FailedSession_Rejects(t *testing.T) {

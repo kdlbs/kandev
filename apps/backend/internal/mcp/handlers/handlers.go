@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -631,7 +632,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found or has no session: "+err.Error(), nil)
 	}
 	if session == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no active session — use create_task_kandev to start one", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
 	}
 
 	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, req.Prompt)
@@ -712,10 +713,54 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if _, resumeErr := h.sessionLauncher.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
 		return "", fmt.Errorf("failed to resume session: %w", resumeErr)
 	}
+	// ResumeTaskSession starts the agent asynchronously. Poll until the session
+	// is ready to accept prompts so the retry doesn't race the agent boot.
+	// Mirrors message_handlers.handlePromptWithResume.
+	if waitErr := h.waitForSessionReady(ctx, sessionID); waitErr != nil {
+		return "", fmt.Errorf("session not ready after resume: %w", waitErr)
+	}
 	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return "sent", nil
+}
+
+// waitForSessionReady polls until the session reaches WAITING_FOR_INPUT (ready for
+// a prompt) or a terminal state. Mirrors message_handlers.waitForSessionReady.
+func (h *Handlers) waitForSessionReady(ctx context.Context, sessionID string) error {
+	const (
+		pollInterval = 1 * time.Second
+		maxWait      = 90 * time.Second
+	)
+	deadline := time.Now().Add(maxWait)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for session to become ready after resume")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to check session state: %w", err)
+		}
+		switch session.State {
+		case models.TaskSessionStateWaitingForInput:
+			return nil
+		case models.TaskSessionStateFailed:
+			errMsg := session.ErrorMessage
+			if errMsg == "" {
+				errMsg = "session failed during resume"
+			}
+			return fmt.Errorf("session failed after resume: %s", errMsg)
+		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+			return fmt.Errorf("session in unexpected state after resume: %s", session.State)
+		default:
+			// STARTING or RUNNING — keep polling
+		}
+	}
 }
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
