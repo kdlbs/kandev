@@ -195,7 +195,6 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     rerender();
     expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
   });
-
 });
 
 describe("usePlanPanelAutoOpen — race guards", () => {
