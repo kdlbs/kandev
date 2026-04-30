@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
@@ -22,9 +22,6 @@ export function usePlanPanelAutoOpen() {
   const isLoaded = useAppStore((s) =>
     activeTaskId ? (s.taskPlans.loadedByTaskId[activeTaskId] ?? false) : false,
   );
-  const isLoading = useAppStore((s) =>
-    activeTaskId ? (s.taskPlans.loadingByTaskId[activeTaskId] ?? false) : false,
-  );
   const lastSeen = useAppStore((s) =>
     activeTaskId ? s.taskPlans.lastSeenUpdatedAtByTaskId[activeTaskId] : undefined,
   );
@@ -36,22 +33,38 @@ export function usePlanPanelAutoOpen() {
   const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
 
+  // Track tasks we've already attempted to fetch so a transient failure
+  // doesn't put us in an infinite retry loop (the in-flight `loading` flag
+  // would otherwise re-trigger the effect via dep updates). Cleared per
+  // task only on successful navigation away.
+  const attemptedRef = useRef<Set<string>>(new Set());
+
   // Eagerly fetch the plan on task load. The Plan panel mounts `useTaskPlan`
   // only after the panel exists, so without this fetch a plan written by the
   // agent before the browser's WS connected (fast auto-start path) would never
   // populate the store and the auto-open below would never fire.
   useEffect(() => {
     if (!activeTaskId || connectionStatus !== "connected") return;
-    if (isLoaded || isLoading) return;
+    if (isLoaded) return;
+    if (attemptedRef.current.has(activeTaskId)) return;
     const taskId = activeTaskId;
+    attemptedRef.current.add(taskId);
     setTaskPlanLoading(taskId, true);
     getTaskPlan(taskId)
       .then((fetched) => setTaskPlan(taskId, fetched))
       .catch(() => {
-        /* swallow — useTaskPlan will retry once the panel mounts */
+        /* swallow — `useTaskPlan` retries on panel mount and on the next
+         * WS reconnect via its own connectionStatus-keyed effect. */
       })
       .finally(() => setTaskPlanLoading(taskId, false));
-  }, [activeTaskId, connectionStatus, isLoaded, isLoading, setTaskPlan, setTaskPlanLoading]);
+  }, [activeTaskId, connectionStatus, isLoaded, setTaskPlan, setTaskPlanLoading]);
+
+  // Drop the attempt mark when the WS reconnects so a transient failure can
+  // be retried after recovery.
+  useEffect(() => {
+    if (connectionStatus === "connected") return;
+    attemptedRef.current.clear();
+  }, [connectionStatus]);
 
   useEffect(() => {
     if (!api || isRestoringLayout) return;
@@ -62,10 +75,11 @@ export function usePlanPanelAutoOpen() {
       // recorded `lastSeen` (cold hydrate). The plan was already acknowledged
       // before the reload — mark seen so a stale indicator doesn't flash.
       // Live updates keep `lastSeen` populated and re-arm normally.
-      if (lastSeen === undefined && activeTaskId) markTaskPlanSeen(activeTaskId);
+      // `activeTaskId` is non-null here because `plan` was derived from it.
+      if (lastSeen === undefined) markTaskPlanSeen(plan.task_id);
       return;
     }
 
     addPlanPanel({ quiet: true, inCenter: true });
-  }, [api, isRestoringLayout, plan, lastSeen, addPlanPanel, activeTaskId, markTaskPlanSeen]);
+  }, [api, isRestoringLayout, plan, lastSeen, addPlanPanel, markTaskPlanSeen]);
 }

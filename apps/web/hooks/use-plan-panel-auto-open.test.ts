@@ -13,7 +13,6 @@ let mockActiveTaskId: string | null = "task-1";
 let mockPlan: TaskPlan | null = null;
 let mockLastSeen: string | undefined = undefined;
 let mockIsLoaded = true;
-let mockIsLoading = false;
 let mockConnectionStatus = "connected";
 let mockIsRestoringLayout = false;
 let mockApi: { getPanel: typeof mockGetPanel } | null = { getPanel: mockGetPanel };
@@ -25,7 +24,6 @@ vi.mock("@/components/state-provider", () => ({
       taskPlans: {
         byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
         loadedByTaskId: mockActiveTaskId ? { [mockActiveTaskId]: mockIsLoaded } : {},
-        loadingByTaskId: mockActiveTaskId ? { [mockActiveTaskId]: mockIsLoading } : {},
         lastSeenUpdatedAtByTaskId:
           mockActiveTaskId && mockLastSeen !== undefined
             ? { [mockActiveTaskId]: mockLastSeen }
@@ -75,7 +73,6 @@ describe("usePlanPanelAutoOpen", () => {
     mockPlan = agentPlan();
     mockLastSeen = undefined;
     mockIsLoaded = true;
-    mockIsLoading = false;
     mockConnectionStatus = "connected";
     mockIsRestoringLayout = false;
     mockApi = { getPanel: mockGetPanel };
@@ -161,5 +158,24 @@ describe("usePlanPanelAutoOpen", () => {
     renderHook(() => usePlanPanelAutoOpen());
     expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
+  });
+
+  it("does not retry the eager fetch after a failure", async () => {
+    mockIsLoaded = false;
+    mockPlan = null;
+    let rejectFn: (err: Error) => void = () => {};
+    mockGetTaskPlan.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectFn = reject;
+        }),
+    );
+    const { rerender } = renderHook(() => usePlanPanelAutoOpen());
+    expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
+    rejectFn(new Error("boom"));
+    await new Promise((r) => setTimeout(r, 0));
+    rerender();
+    rerender();
+    expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
   });
 });
