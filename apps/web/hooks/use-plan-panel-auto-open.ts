@@ -54,9 +54,14 @@ export function usePlanPanelAutoOpen() {
       .then((fetched) => {
         // Race guard: if a WS event populated the store while our HTTP
         // request was in flight, don't overwrite a real plan with a
-        // stale `null` (server didn't have it yet at fetch time).
+        // stale response — neither a `null` (server didn't have it yet
+        // at fetch time) nor an older non-null version (HTTP saw an
+        // earlier write than the WS event we already applied).
         const live = storeApi.getState().taskPlans.byTaskId[taskId];
-        if (fetched === null && live) return;
+        if (live) {
+          if (fetched === null) return;
+          if (Date.parse(fetched.updated_at) < Date.parse(live.updated_at)) return;
+        }
         setTaskPlan(taskId, fetched);
       })
       .catch(() => {

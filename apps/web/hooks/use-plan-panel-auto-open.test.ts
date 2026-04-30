@@ -196,6 +196,41 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
   });
 
+});
+
+describe("usePlanPanelAutoOpen — race guards", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockActiveTaskId = "task-1";
+    mockPlan = agentPlan();
+    mockLastSeen = undefined;
+    mockIsLoaded = true;
+    mockConnectionStatus = "connected";
+    mockIsRestoringLayout = false;
+    mockApi = { getPanel: mockGetPanel };
+    mockGetPanel.mockReturnValue(null);
+    mockGetTaskPlan.mockResolvedValue(null);
+  });
+
+  it("does not overwrite a newer WS-delivered plan with an older HTTP result", async () => {
+    mockIsLoaded = false;
+    mockPlan = null;
+    let resolveFn: (v: TaskPlan | null) => void = () => {};
+    mockGetTaskPlan.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFn = resolve;
+        }),
+    );
+    renderHook(() => usePlanPanelAutoOpen());
+    // WS delivers the latest plan while the HTTP fetch is in flight.
+    mockPlan = agentPlan(TS_LATER);
+    // HTTP resolves with an older snapshot of the same plan.
+    resolveFn(agentPlan(TS));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetTaskPlan).not.toHaveBeenCalled();
+  });
+
   it("does not overwrite a WS-delivered plan when the fetch resolves with null", async () => {
     mockIsLoaded = false;
     mockPlan = null;
