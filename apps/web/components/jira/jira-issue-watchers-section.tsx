@@ -13,12 +13,22 @@ import type { JiraIssueWatch } from "@/lib/types/jira";
 
 type Props = { workspaceId: string };
 
+// RawActions is the slice of useJiraIssueWatches that this component needs to
+// wrap with toasts. Pulled out so useToastedActions doesn't itself call the
+// hook a second time on the same workspace — the parent passes its callbacks
+// down, keeping a single fetch + single store subscription per render tree.
+type RawActions = {
+  create: ReturnType<typeof useJiraIssueWatches>["create"];
+  update: ReturnType<typeof useJiraIssueWatches>["update"];
+  remove: ReturnType<typeof useJiraIssueWatches>["remove"];
+  trigger: ReturnType<typeof useJiraIssueWatches>["trigger"];
+};
+
 // useToastedActions wraps the raw create/update/delete/trigger callbacks with
 // success/failure toasts. Kept separate so the section component stays under
 // the 100-line lint limit and the toast wiring is testable in isolation.
-function useToastedActions(workspaceId: string) {
+function useToastedActions({ create, update, remove, trigger }: RawActions) {
   const { toast } = useToast();
-  const { create, update, remove, trigger } = useJiraIssueWatches(workspaceId);
 
   const wrappedCreate = useCallback(
     async (req: Parameters<typeof create>[0]) => {
@@ -102,8 +112,8 @@ function useToastedActions(workspaceId: string) {
  * dialog for create/edit. Mirrors the GitHub issue-watch UI patterns.
  */
 export function JiraIssueWatchersSection({ workspaceId }: Props) {
-  const { items, loading } = useJiraIssueWatches(workspaceId);
-  const actions = useToastedActions(workspaceId);
+  const { items, loading, create, update, remove, trigger } = useJiraIssueWatches(workspaceId);
+  const actions = useToastedActions({ create, update, remove, trigger });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<JiraIssueWatch | null>(null);

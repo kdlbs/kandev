@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -139,4 +140,75 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestIsIssueWatchDue(t *testing.T) {
+	now := time.Now()
+	stamp := now.Add(-30 * time.Second)
+	cases := []struct {
+		name     string
+		watch    *IssueWatch
+		expected bool
+	}{
+		{
+			name:     "never polled is always due",
+			watch:    &IssueWatch{PollIntervalSeconds: 300},
+			expected: true,
+		},
+		{
+			name:     "polled less than interval ago is not due",
+			watch:    &IssueWatch{PollIntervalSeconds: 300, LastPolledAt: &stamp},
+			expected: false,
+		},
+		{
+			name:     "polled at exactly the interval boundary is due",
+			watch:    &IssueWatch{PollIntervalSeconds: 30, LastPolledAt: &stamp},
+			expected: true,
+		},
+		{
+			name:     "zero interval falls back to default and gates accordingly",
+			watch:    &IssueWatch{PollIntervalSeconds: 0, LastPolledAt: &stamp},
+			expected: false, // default 300s > 30s elapsed
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isIssueWatchDue(tc.watch, now); got != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, got)
+			}
+		})
+	}
+}
+
+func TestPoller_CheckIssueWatches_RespectsPerWatchInterval(t *testing.T) {
+	f := newPollerFixture(t)
+	ctx := context.Background()
+	f.saveConfig(t, "ws-1", "tok")
+
+	eb := bus.NewMemoryEventBus(logger.Default())
+	defer eb.Close()
+	f.svc.SetEventBus(eb)
+
+	// Watch was just polled — should be skipped on this tick.
+	w := newTestIssueWatch("ws-1")
+	w.PollIntervalSeconds = 300
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := f.store.UpdateIssueWatchLastPolled(ctx, w.ID, now); err != nil {
+		t.Fatalf("stamp: %v", err)
+	}
+
+	calls := 0
+	f.client.searchFn = func(_ string) (*SearchResult, error) {
+		calls++
+		return &SearchResult{Tickets: []JiraTicket{{Key: "X-1"}}, IsLast: true}, nil
+	}
+
+	f.poller.checkIssueWatches(ctx)
+
+	if calls != 0 {
+		t.Errorf("expected gating to skip the JIRA search, got %d call(s)", calls)
+	}
 }

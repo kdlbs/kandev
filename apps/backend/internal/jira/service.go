@@ -476,6 +476,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if w.JQL == "" {
 		return nil, fmt.Errorf("%w: jql cannot be empty", ErrInvalidConfig)
 	}
+	if err := validatePollInterval(w.PollIntervalSeconds); err != nil {
+		return nil, err
+	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -493,12 +496,7 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 // whether the search succeeded — a failing search still counts as "we tried"
 // so the UI can show liveness.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTicket, error) {
-	defer func() {
-		if err := s.store.UpdateIssueWatchLastPolled(ctx, w.ID, time.Now().UTC()); err != nil {
-			s.log.Warn("jira: update last_polled_at failed",
-				zap.String("watch_id", w.ID), zap.Error(err))
-		}
-	}()
+	defer s.stampLastPolled(w.ID)
 	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -510,21 +508,38 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTi
 	if err != nil {
 		return nil, err
 	}
+	// Bulk-fetch the dedup set once per call instead of one query per ticket —
+	// a broad JQL can return up to issueWatchSearchPageSize tickets, and each
+	// HasIssueWatchTask round-trip multiplies the per-tick cost.
+	seen, err := s.store.ListSeenIssueKeys(ctx, w.ID)
+	if err != nil {
+		s.log.Warn("jira: dedup set fetch failed",
+			zap.String("watch_id", w.ID), zap.Error(err))
+		seen = nil // fall through: a missing dedup set is safer than dropping all tickets
+	}
 	out := make([]*JiraTicket, 0, len(res.Tickets))
 	for i := range res.Tickets {
 		t := res.Tickets[i]
-		seen, err := s.store.HasIssueWatchTask(ctx, w.ID, t.Key)
-		if err != nil {
-			s.log.Warn("jira: dedup check failed",
-				zap.String("watch_id", w.ID), zap.String("issue_key", t.Key), zap.Error(err))
-			continue
-		}
-		if seen {
+		if _, ok := seen[t.Key]; ok {
 			continue
 		}
 		out = append(out, &t)
 	}
 	return out, nil
+}
+
+// stampLastPolled writes the current timestamp onto the watch row using a
+// fresh background context with a short write deadline. The caller's ctx may
+// already be cancelled (typical at poller shutdown), which would cause the
+// DB write to fail silently and the watch would look "never polled" on the
+// next backend restart. Mirrors the pattern in RecordAuthHealth.
+func (s *Service) stampLastPolled(watchID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer cancel()
+	if err := s.store.UpdateIssueWatchLastPolled(ctx, watchID, time.Now().UTC()); err != nil {
+		s.log.Warn("jira: update last_polled_at failed",
+			zap.String("watch_id", watchID), zap.Error(err))
+	}
 }
 
 // publishNewJiraIssueEvent emits the orchestrator-facing event for one freshly
@@ -557,6 +572,15 @@ func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, t
 // per-tick cost bounded even for very broad JQL queries.
 const issueWatchSearchPageSize = 50
 
+// MinIssueWatchPollInterval / MaxIssueWatchPollInterval bound the per-watch
+// JQL re-run cadence. The lower limit protects Atlassian from rapid-fire
+// polling; the upper limit keeps "stuck" rows from polling so rarely they
+// look broken to the user.
+const (
+	MinIssueWatchPollInterval = 60
+	MaxIssueWatchPollInterval = 3600
+)
+
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {
 		return fmt.Errorf("%w: workspaceId required", ErrInvalidConfig)
@@ -566,6 +590,21 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	}
 	if strings.TrimSpace(req.JQL) == "" {
 		return fmt.Errorf("%w: jql required", ErrInvalidConfig)
+	}
+	// 0 / unset is allowed — the store coerces to DefaultIssueWatchPollInterval.
+	// Any positive value must fall inside the documented bounds.
+	if req.PollIntervalSeconds != 0 {
+		if err := validatePollInterval(req.PollIntervalSeconds); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePollInterval(seconds int) error {
+	if seconds < MinIssueWatchPollInterval || seconds > MaxIssueWatchPollInterval {
+		return fmt.Errorf("%w: pollIntervalSeconds must be between %d and %d",
+			ErrInvalidConfig, MinIssueWatchPollInterval, MaxIssueWatchPollInterval)
 	}
 	return nil
 }

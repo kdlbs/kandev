@@ -17,10 +17,13 @@ import (
 // don't hammer Atlassian when many workspaces are configured.
 const defaultAuthPollInterval = 90 * time.Second
 
-// defaultIssuePollInterval is how often the issue-watch loop runs through every
-// enabled watcher. Five minutes mirrors the GitHub issue watcher cadence and
-// keeps API usage well below Atlassian's rate limits.
-const defaultIssuePollInterval = 5 * time.Minute
+// defaultIssuePollTickInterval is how often the issue-watch loop wakes up to
+// look at every enabled watcher. The actual JQL is only re-run for a watcher
+// when its per-watch `PollIntervalSeconds` has elapsed since `LastPolledAt`,
+// so this is the *minimum* granularity, not the *actual* cadence. 60 seconds
+// matches the smallest interval the UI accepts; the gating check then rate-
+// limits each individual watcher.
+const defaultIssuePollTickInterval = 60 * time.Second
 
 // Poller drives two background loops sharing a single Service:
 //   - auth health: probes stored credentials so the UI can show connect status.
@@ -48,7 +51,7 @@ func NewPoller(svc *Service, log *logger.Logger) *Poller {
 		service:       svc,
 		logger:        log,
 		authInterval:  defaultAuthPollInterval,
-		issueInterval: defaultIssuePollInterval,
+		issueInterval: defaultIssuePollTickInterval,
 	}
 }
 
@@ -144,6 +147,9 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if !isIssueWatchDue(w, time.Now()) {
+			continue
+		}
 		newTickets, err := p.service.CheckIssueWatch(ctx, w)
 		if err != nil {
 			p.logger.Debug("jira poller: check issue watch failed",
@@ -158,6 +164,22 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 			p.service.publishNewJiraIssueEvent(ctx, w, t)
 		}
 	}
+}
+
+// isIssueWatchDue reports whether enough time has passed since the watch was
+// last polled to re-run its JQL on this tick. A watch with no LastPolledAt
+// (never polled, or DB row freshly created) is always due. PollIntervalSeconds
+// <= 0 falls back to the default — the same normalisation the store applies on
+// write — so a corrupt row never blocks polling forever.
+func isIssueWatchDue(w *IssueWatch, now time.Time) bool {
+	if w.LastPolledAt == nil {
+		return true
+	}
+	interval := w.PollIntervalSeconds
+	if interval <= 0 {
+		interval = DefaultIssueWatchPollInterval
+	}
+	return now.Sub(*w.LastPolledAt) >= time.Duration(interval)*time.Second
 }
 
 func (p *Poller) fireIssueTickHook() {

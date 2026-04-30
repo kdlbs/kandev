@@ -383,3 +383,21 @@ func (s *Store) HasIssueWatchTask(ctx context.Context, watchID, issueKey string)
 	}
 	return n > 0, nil
 }
+
+// ListSeenIssueKeys returns the set of ticket keys already reserved against a
+// watch. Cheaper than calling HasIssueWatchTask once per ticket — a single
+// JQL search can return up to 50 tickets per tick, so the per-call savings
+// scale with the workspace's watch count.
+func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[string]struct{}, error) {
+	var keys []string
+	err := s.ro.SelectContext(ctx, &keys,
+		`SELECT issue_key FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		out[k] = struct{}{}
+	}
+	return out, nil
+}

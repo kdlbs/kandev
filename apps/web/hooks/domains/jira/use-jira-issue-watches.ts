@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listJiraIssueWatches,
   createJiraIssueWatch,
@@ -13,9 +13,13 @@ import type { CreateJiraIssueWatchInput, UpdateJiraIssueWatchInput } from "@/lib
 
 /**
  * useJiraIssueWatches owns the JIRA-watcher list for a workspace: it fetches
- * once when the workspace ID changes (and not before) and exposes CRUD
- * callbacks that mirror the GitHub useIssueWatches hook so UI components can
- * be ported with minimal friction.
+ * once per workspace and exposes CRUD callbacks that mirror the GitHub
+ * useIssueWatches hook so UI components can be ported with minimal friction.
+ *
+ * The store's `loaded` flag is global, not workspace-scoped — so a `workspaceId`
+ * change (workspace switch, navigating back to settings) needs to reset the
+ * cached list before the fetch effect runs, otherwise the user sees the
+ * previous workspace's watchers stale-rendered.
  */
 export function useJiraIssueWatches(workspaceId: string | null) {
   const items = useAppStore((s) => s.jiraIssueWatches.items);
@@ -26,6 +30,19 @@ export function useJiraIssueWatches(workspaceId: string | null) {
   const addWatch = useAppStore((s) => s.addJiraIssueWatch);
   const updateWatch = useAppStore((s) => s.updateJiraIssueWatch);
   const removeWatch = useAppStore((s) => s.removeJiraIssueWatch);
+
+  const lastWorkspaceId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    // Workspace changed — invalidate the cached list so the fetch effect below
+    // re-runs against the new workspace instead of short-circuiting on stale
+    // `loaded`. Skipped on the first mount when ref === workspaceId already.
+    if (lastWorkspaceId.current !== null && lastWorkspaceId.current !== workspaceId) {
+      setWatches([]);
+    }
+    lastWorkspaceId.current = workspaceId;
+  }, [workspaceId, setWatches]);
 
   useEffect(() => {
     if (!workspaceId || loaded || loading) return;

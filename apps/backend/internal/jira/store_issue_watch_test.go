@@ -239,6 +239,34 @@ func TestStore_IssueWatchTask_AssignTaskID(t *testing.T) {
 	}
 }
 
+func TestStore_IssueWatchTask_ListSeenIssueKeys(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, k := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
+		if _, err := store.ReserveIssueWatchTask(ctx, w.ID, k, "https://x/"+k); err != nil {
+			t.Fatalf("reserve %s: %v", k, err)
+		}
+	}
+
+	seen, err := store.ListSeenIssueKeys(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("list seen: %v", err)
+	}
+	for _, k := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
+		if _, ok := seen[k]; !ok {
+			t.Errorf("expected %s in seen set, got %v", k, seen)
+		}
+	}
+	if _, ok := seen["PROJ-99"]; ok {
+		t.Error("expected PROJ-99 not in seen set")
+	}
+}
+
 func TestStore_IssueWatchTask_Release(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

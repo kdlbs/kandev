@@ -210,7 +210,8 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
       <p className="text-xs text-muted-foreground">
         Sent to the agent for each new ticket. Placeholders: {`{{issue.key}}`},{" "}
         {`{{issue.summary}}`}, {`{{issue.url}}`}, {`{{issue.status}}`}, {`{{issue.priority}}`},{" "}
-        {`{{issue.assignee}}`}, {`{{issue.description}}`}.
+        {`{{issue.type}}`}, {`{{issue.assignee}}`}, {`{{issue.reporter}}`}, {`{{issue.project}}`},{" "}
+        {`{{issue.description}}`}.
       </p>
       <Textarea
         value={value}

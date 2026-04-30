@@ -83,6 +83,32 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	}
 }
 
+func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	for _, n := range []int{1, 30, 59, 3601, 86400} {
+		_, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID:         "ws-1",
+			WorkflowID:          "wf",
+			WorkflowStepID:      "step",
+			JQL:                 "project = PROJ",
+			PollIntervalSeconds: n,
+		})
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for pollIntervalSeconds=%d, got %v", n, err)
+		}
+	}
+	// Zero is allowed (the store coerces to default).
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf",
+		WorkflowStepID: "step",
+		JQL:            "project = PROJ",
+	}); err != nil {
+		t.Errorf("expected zero pollIntervalSeconds to be accepted (default fill), got %v", err)
+	}
+}
+
 func TestService_UpdateIssueWatch_NotFound(t *testing.T) {
 	f := newSvcFixture(t)
 	prompt := "x"
