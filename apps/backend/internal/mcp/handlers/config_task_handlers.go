@@ -33,84 +33,111 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
-	if req.Prompt == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required: provide a hand-off message for the receiving agent", nil)
-	}
 
-	// When the call originates from an agent mid-turn (the common case for
-	// move_task_kandev), running MoveTask now races on_enter processing against
-	// the agent's still-active turn — corrupting session state, evaluating
-	// on_turn_complete on the wrong step, and orphaning the queued prompt.
-	// Defer instead: queue the prompt and record a pending move so
-	// handleAgentReady applies it deterministically when the turn ends.
+	// Prompt is OPTIONAL — config-mode/admin moves don't always have an agent
+	// to hand off to. When supplied, it activates the deferred-move path that
+	// hands the receiving agent a directive on its first turn at the new step.
+	// When omitted, we just move the task and return.
 	session, lookupErr := h.lookupSession(ctx, req.TaskID)
 	if lookupErr != nil {
-		// A real backend failure resolving the primary session is an internal
-		// error, not a user-input validation failure — don't collapse it into
-		// "you have no session" downstream.
+		// Backend lookup failure is an internal error, not validation — don't
+		// collapse it into "you have no session" downstream.
 		h.logger.Error("move_task: failed to look up primary session",
 			zap.String("task_id", req.TaskID), zap.Error(lookupErr))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to look up task's primary session", nil)
 	}
-	if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
-		// The deferred path requires the message queue: it's where the hand-off
-		// prompt sits and where SetPendingMove lives. If neither is available
-		// we cannot honor the contract — surface a real error rather than panic
-		// or silently drop the prompt.
-		if h.messageQueue == nil {
-			h.logger.Error("move_task: message queue not configured; cannot defer move from active session",
-				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"move_task requires message queue support while the source session is active", nil)
-		}
-		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
-			h.logger.Error("move_task: failed to queue hand-off prompt",
-				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to queue move_task hand-off prompt", nil)
-		}
-		h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-			TaskID:         req.TaskID,
-			WorkflowID:     req.WorkflowID,
-			WorkflowStepID: req.WorkflowStepID,
-			Position:       req.Position,
-		})
-		// Return a task DTO that reflects the post-move state. The actual DB
-		// transition happens later in handleAgentReady → applyPendingMove, but
-		// the agent's tool contract is "move_task → moved task back". Echoing a
-		// pending/deferred shape confuses the agent into retrying or looping;
-		// a normal task DTO lets it close out the turn so agent.ready can fire.
-		return ws.NewResponse(msg.ID, msg.Action, h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
+
+	// Active source session + prompt → deferred path. Running MoveTask now
+	// would race on_enter processing against the agent's still-active turn —
+	// corrupting session state and orphaning the queued prompt. Defer until
+	// handleAgentReady fires applyPendingMove on turn-end.
+	if req.Prompt != "" && session != nil &&
+		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
+		return h.deferMoveTaskWithPrompt(ctx, msg, req, session)
 	}
 
-	// Idle session (e.g. UI-driven move via MCP) — apply immediately.
-	// The hand-off prompt is required (validated above), so when there's no
-	// session to deliver it on, we'd have to drop it on the floor — which would
-	// silently violate the tool's contract. Reject explicitly instead.
-	if session == nil {
-		h.logger.Warn("move_task: no primary session for task; cannot deliver required hand-off prompt",
-			zap.String("task_id", req.TaskID))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"move_task requires the task to have an active session so the hand-off prompt can be delivered", nil)
+	// Idle path — apply immediately. If a prompt was supplied, queue it on the
+	// session so the receiving agent's next turn picks it up; if not, just move.
+	return h.applyMoveTaskImmediate(ctx, msg, req, session)
+}
+
+// deferMoveTaskWithPrompt queues the hand-off prompt + records a PendingMove
+// for the agent's turn-end handler to apply. Used when the source session is
+// active and the caller supplied a prompt. Returns a synthetic moved-task DTO
+// so the agent's tool call resolves successfully and ends the turn cleanly.
+func (h *Handlers) deferMoveTaskWithPrompt(
+	ctx context.Context,
+	msg *ws.Message,
+	req struct {
+		TaskID         string `json:"task_id"`
+		WorkflowID     string `json:"workflow_id"`
+		WorkflowStepID string `json:"workflow_step_id"`
+		Position       int    `json:"position"`
+		Prompt         string `json:"prompt"`
+	},
+	session *models.TaskSession,
+) (*ws.Message, error) {
+	if h.messageQueue == nil {
+		h.logger.Error("move_task: message queue not configured; cannot defer move from active session",
+			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"move_task requires message queue support while the source session is active", nil)
 	}
 	wrapped := "You were moved to this step with the following message: " + req.Prompt
 	if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
-		h.logger.Error("move_task: failed to queue hand-off prompt for idle session",
+		h.logger.Error("move_task: failed to queue hand-off prompt",
 			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to queue move_task hand-off prompt", nil)
 	}
+	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
+		TaskID:         req.TaskID,
+		WorkflowID:     req.WorkflowID,
+		WorkflowStepID: req.WorkflowStepID,
+		Position:       req.Position,
+	})
+	return ws.NewResponse(msg.ID, msg.Action,
+		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
+}
+
+// applyMoveTaskImmediate runs the move now, optionally queueing a hand-off
+// prompt on the (idle) primary session beforehand. Used when the source
+// session is idle, when there's no source session at all, or when no prompt
+// was supplied (config-mode/admin moves).
+func (h *Handlers) applyMoveTaskImmediate(
+	ctx context.Context,
+	msg *ws.Message,
+	req struct {
+		TaskID         string `json:"task_id"`
+		WorkflowID     string `json:"workflow_id"`
+		WorkflowStepID string `json:"workflow_step_id"`
+		Position       int    `json:"position"`
+		Prompt         string `json:"prompt"`
+	},
+	session *models.TaskSession,
+) (*ws.Message, error) {
+	queuedSessionID := ""
+	if req.Prompt != "" && session != nil {
+		wrapped := "You were moved to this step with the following message: " + req.Prompt
+		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+			h.logger.Error("move_task: failed to queue hand-off prompt for idle session",
+				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to queue move_task hand-off prompt", nil)
+		}
+		queuedSessionID = session.ID
+	}
+
 	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
-		// Roll back the prompt we just queued — without this, the next agent
-		// turn would deliver a "You were moved to this step…" prompt for a
-		// move that didn't actually happen.
-		if h.messageQueue != nil {
-			if _, ok := h.messageQueue.TakeQueued(ctx, session.ID); ok {
+		// Roll back the queued prompt — without this, the next turn would
+		// deliver a "You were moved to this step…" message for a transition
+		// that didn't actually happen.
+		if queuedSessionID != "" && h.messageQueue != nil {
+			if _, ok := h.messageQueue.TakeQueued(ctx, queuedSessionID); ok {
 				h.logger.Warn("move_task: dropped queued hand-off prompt after MoveTask failure",
-					zap.String("task_id", req.TaskID), zap.String("session_id", session.ID))
+					zap.String("task_id", req.TaskID), zap.String("session_id", queuedSessionID))
 			}
 		}
 		h.logger.Error("failed to move task", zap.Error(err))

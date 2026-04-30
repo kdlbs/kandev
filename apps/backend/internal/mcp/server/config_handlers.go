@@ -247,12 +247,12 @@ func (s *Server) registerConfigTaskTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription("Move a task to a different workflow step and send a hand-off prompt to the receiving agent. Use when handing the task off to another step (e.g. QA → review) with specific instructions for what should happen next."),
+			mcp.WithDescription("Move a task to a different workflow step. Optionally send a hand-off prompt to the receiving agent — required only when handing the task off mid-turn (e.g. QA → review) with specific instructions. Plain admin/config moves can omit prompt."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("Hand-off message for the receiving agent. Delivered as the agent's first prompt at the new step — if the target step has auto_start_agent, the step's own prompt is concatenated before this one. Be specific: this is the only direction the receiving agent has for what to do.")),
+			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent. When supplied AND the source session is mid-turn, the move is deferred to the agent's turn-end and the prompt is delivered at the new step (concatenated after the step's own auto_start prompt, if any). Omit for plain admin/config moves where there's no agent to address.")),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
@@ -520,15 +520,15 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("workflow_step_id is required"), nil
 		}
-		prompt, err := req.RequireString("prompt")
-		if err != nil {
-			return mcp.NewToolResultError("prompt is required: provide a hand-off message for the receiving agent"), nil
-		}
+		// prompt is optional — only relevant when handing off mid-turn from one
+		// agent to another. Admin/config moves of idle tasks omit it.
 		payload := map[string]interface{}{
 			"task_id":          taskID,
 			"workflow_id":      workflowID,
 			"workflow_step_id": stepID,
-			"prompt":           prompt,
+		}
+		if prompt := req.GetString("prompt", ""); prompt != "" {
+			payload["prompt"] = prompt
 		}
 		if args := req.GetArguments(); args["position"] != nil {
 			payload["position"] = args["position"]

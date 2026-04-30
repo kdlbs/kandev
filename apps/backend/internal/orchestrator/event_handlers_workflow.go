@@ -1041,29 +1041,8 @@ func (s *Service) autoStartStepPrompt(
 	// content first, hand-off after — and forward attachments verbatim.
 	// Track the original message so terminal failure paths can restore it
 	// instead of dropping the user's prompt or attachments on the floor.
-	// Take attachment-only messages too: dropping them silently when Content
-	// is empty would lose images/files the user attached to the queued prompt.
-	var takenMsg *messagequeue.QueuedMessage
-	var attachments []v1.MessageAttachment
-	if s.messageQueue != nil {
-		if msg, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok && msg != nil && (msg.Content != "" || len(msg.Attachments) > 0) {
-			takenMsg = msg
-			if msg.Content != "" {
-				prompt = prompt + "\n\n" + msg.Content
-			}
-			if len(msg.Attachments) > 0 {
-				attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
-				for _, a := range msg.Attachments {
-					attachments = append(attachments, v1.MessageAttachment{
-						Type:     a.Type,
-						Data:     a.Data,
-						MimeType: a.MimeType,
-					})
-				}
-			}
-			s.publishQueueStatusEvent(ctx, sessionID)
-		}
-	}
+	takenMsg, mergedPrompt, attachments := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
+	prompt = mergedPrompt
 
 	// requeueTaken puts the original queued message back so a manual retry can
 	// pick it up. Skip when shouldQueueIfBusy successfully re-queued the
@@ -1211,6 +1190,39 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 	return nil
+}
+
+// takeAndMergeHandoffMessage drains any queued hand-off message for the session
+// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageAfterTransition)
+// and merges its content + attachments into the auto-start prompt. Returns the
+// original queued message (so terminal failure paths can re-queue it via
+// requeueMessage), the merged prompt, and the converted attachments. Empty
+// messages with neither content nor attachments are left in the queue.
+func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment) {
+	if s.messageQueue == nil {
+		return nil, basePrompt, nil
+	}
+	msg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0) {
+		return nil, basePrompt, nil
+	}
+	prompt := basePrompt
+	if msg.Content != "" {
+		prompt = basePrompt + "\n\n" + msg.Content
+	}
+	var attachments []v1.MessageAttachment
+	if len(msg.Attachments) > 0 {
+		attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
+		for _, a := range msg.Attachments {
+			attachments = append(attachments, v1.MessageAttachment{
+				Type:     a.Type,
+				Data:     a.Data,
+				MimeType: a.MimeType,
+			})
+		}
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	return msg, prompt, attachments
 }
 
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
