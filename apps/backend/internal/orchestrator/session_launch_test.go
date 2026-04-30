@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -223,6 +224,14 @@ func TestIsPassthroughProfile(t *testing.T) {
 		svc.agentManager = nil
 		if svc.isPassthroughProfile(context.Background(), "profile1") {
 			t.Error("expected isPassthroughProfile=false when agent manager is nil")
+		}
+	})
+
+	t.Run("resolver error returns false", func(t *testing.T) {
+		errorMgr := &mockAgentManager{resolveProfileErr: errors.New("lookup failed")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), errorMgr)
+		if svc.isPassthroughProfile(context.Background(), "profile1") {
+			t.Error("expected isPassthroughProfile=false when resolver errors")
 		}
 	})
 }
