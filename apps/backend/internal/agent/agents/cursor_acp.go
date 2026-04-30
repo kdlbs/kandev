@@ -139,9 +139,12 @@ func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
+// Probes only run initialize + session/new (never spawn cursor-agent), so
+// they don't need the full-auto wrapper — and `sh` isn't on the probe
+// command allowlist anyway.
 func (a *CursorACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("sh", "-c", cursorFullAutoShell),
+		Command:   NewCommand("npx", "-y", cursorACPPkg),
 	}
 }
