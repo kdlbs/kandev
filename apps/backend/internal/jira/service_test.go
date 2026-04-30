@@ -58,6 +58,7 @@ type fakeClient struct {
 	getTicketFn   func(key string) (*JiraTicket, error)
 	transitionFn  func(key, id string) error
 	listProjects  func() ([]JiraProject, error)
+	searchFn      func(jql string) (*SearchResult, error)
 	transitionLog []string // "key:id"
 }
 
@@ -89,7 +90,10 @@ func (c *fakeClient) ListProjects(_ context.Context) ([]JiraProject, error) {
 	}
 	return nil, nil
 }
-func (c *fakeClient) SearchTickets(_ context.Context, _, _ string, _ int) (*SearchResult, error) {
+func (c *fakeClient) SearchTickets(_ context.Context, jql, _ string, _ int) (*SearchResult, error) {
+	if c.searchFn != nil {
+		return c.searchFn(jql)
+	}
 	return &SearchResult{}, nil
 }
 

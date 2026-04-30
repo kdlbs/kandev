@@ -217,6 +217,9 @@ type Service struct {
 	// Issue task creator for auto-creating tasks from issue watch events
 	issueTaskCreator IssueTaskCreator
 
+	// Jira service for issue watch dedup operations
+	jiraService JiraService
+
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
@@ -636,6 +639,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to JIRA integration events
+	s.subscribeJiraEvents()
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()

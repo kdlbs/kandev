@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // SecretStore is the subset of the secrets store the service needs. Kept small
@@ -32,6 +34,7 @@ type Service struct {
 	clientFn  ClientFactory
 	cache     map[string]Client // workspaceID → client, cleared on config change.
 	probeHook func(workspaceID string)
+	eventBus  bus.EventBus
 }
 
 // ClientFactory builds a Client for the given config + secret. Overridable so
@@ -403,4 +406,193 @@ func normalizeSiteURL(raw string) string {
 		s = "https://" + s
 	}
 	return s
+}
+
+// SetEventBus wires the bus used to publish NewJiraIssueEvent. Optional: if
+// unset the poller still runs but observed tickets do not become Kandev tasks
+// — useful in tests that exercise the polling loop in isolation.
+func (s *Service) SetEventBus(eb bus.EventBus) {
+	s.mu.Lock()
+	s.eventBus = eb
+	s.mu.Unlock()
+}
+
+// --- Issue watch CRUD (thin pass-throughs to the store) ---
+
+// ErrIssueWatchNotFound is returned when GetIssueWatch's caller looks up an ID
+// that doesn't exist. Callers map this to HTTP 404.
+var ErrIssueWatchNotFound = errors.New("jira: issue watch not found")
+
+// CreateIssueWatch validates the request and persists a new watch row.
+func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchRequest) (*IssueWatch, error) {
+	if err := validateIssueWatchCreate(req); err != nil {
+		return nil, err
+	}
+	w := &IssueWatch{
+		WorkspaceID:         req.WorkspaceID,
+		WorkflowID:          req.WorkflowID,
+		WorkflowStepID:      req.WorkflowStepID,
+		JQL:                 strings.TrimSpace(req.JQL),
+		AgentProfileID:      req.AgentProfileID,
+		ExecutorProfileID:   req.ExecutorProfileID,
+		Prompt:              req.Prompt,
+		PollIntervalSeconds: req.PollIntervalSeconds,
+		Enabled:             true,
+	}
+	if req.Enabled != nil {
+		w.Enabled = *req.Enabled
+	}
+	if err := s.store.CreateIssueWatch(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// ListIssueWatches returns the watches configured for a workspace.
+func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	return s.store.ListIssueWatches(ctx, workspaceID)
+}
+
+// GetIssueWatch returns a single watch by ID or ErrIssueWatchNotFound.
+func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
+	w, err := s.store.GetIssueWatch(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if w == nil {
+		return nil, ErrIssueWatchNotFound
+	}
+	return w, nil
+}
+
+// UpdateIssueWatch applies a partial update by patching only the fields the
+// caller explicitly set, then persists the result.
+func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) (*IssueWatch, error) {
+	w, err := s.GetIssueWatch(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	applyIssueWatchPatch(w, req)
+	if w.JQL == "" {
+		return nil, fmt.Errorf("%w: jql cannot be empty", ErrInvalidConfig)
+	}
+	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// DeleteIssueWatch removes the watch and its dedup rows. Idempotent: deleting
+// a missing ID is a silent success.
+func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
+	return s.store.DeleteIssueWatch(ctx, id)
+}
+
+// CheckIssueWatch runs the watch's JQL once and returns the tickets that
+// haven't been turned into tasks yet. last_polled_at is stamped regardless of
+// whether the search succeeded — a failing search still counts as "we tried"
+// so the UI can show liveness.
+func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTicket, error) {
+	defer func() {
+		if err := s.store.UpdateIssueWatchLastPolled(ctx, w.ID, time.Now().UTC()); err != nil {
+			s.log.Warn("jira: update last_polled_at failed",
+				zap.String("watch_id", w.ID), zap.Error(err))
+		}
+	}()
+	client, err := s.clientFor(ctx, w.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	// Single page is enough per tick: the next poll picks up anything that
+	// overflowed maxResults. Pagination would let one chatty workspace starve
+	// the others without any real freshness benefit.
+	res, err := client.SearchTickets(ctx, w.JQL, "", issueWatchSearchPageSize)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*JiraTicket, 0, len(res.Tickets))
+	for i := range res.Tickets {
+		t := res.Tickets[i]
+		seen, err := s.store.HasIssueWatchTask(ctx, w.ID, t.Key)
+		if err != nil {
+			s.log.Warn("jira: dedup check failed",
+				zap.String("watch_id", w.ID), zap.String("issue_key", t.Key), zap.Error(err))
+			continue
+		}
+		if seen {
+			continue
+		}
+		out = append(out, &t)
+	}
+	return out, nil
+}
+
+// publishNewJiraIssueEvent emits the orchestrator-facing event for one freshly
+// observed ticket. No-op when the event bus is not wired (tests, early boot).
+func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, ticket *JiraTicket) {
+	s.mu.Lock()
+	eb := s.eventBus
+	s.mu.Unlock()
+	if eb == nil {
+		return
+	}
+	evt := bus.NewEvent(events.JiraNewIssue, "jira", &NewJiraIssueEvent{
+		IssueWatchID:      w.ID,
+		WorkspaceID:       w.WorkspaceID,
+		WorkflowID:        w.WorkflowID,
+		WorkflowStepID:    w.WorkflowStepID,
+		AgentProfileID:    w.AgentProfileID,
+		ExecutorProfileID: w.ExecutorProfileID,
+		Prompt:            w.Prompt,
+		Issue:             ticket,
+	})
+	if err := eb.Publish(ctx, events.JiraNewIssue, evt); err != nil {
+		s.log.Debug("jira: publish new issue event failed",
+			zap.String("watch_id", w.ID), zap.String("issue_key", ticket.Key), zap.Error(err))
+	}
+}
+
+// issueWatchSearchPageSize caps how many tickets a single CheckIssueWatch call
+// pulls from JIRA. 50 is well under the API's 100-result limit and keeps the
+// per-tick cost bounded even for very broad JQL queries.
+const issueWatchSearchPageSize = 50
+
+func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
+	if req.WorkspaceID == "" {
+		return fmt.Errorf("%w: workspaceId required", ErrInvalidConfig)
+	}
+	if req.WorkflowID == "" || req.WorkflowStepID == "" {
+		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
+	}
+	if strings.TrimSpace(req.JQL) == "" {
+		return fmt.Errorf("%w: jql required", ErrInvalidConfig)
+	}
+	return nil
+}
+
+func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
+	if req.WorkflowID != nil {
+		w.WorkflowID = *req.WorkflowID
+	}
+	if req.WorkflowStepID != nil {
+		w.WorkflowStepID = *req.WorkflowStepID
+	}
+	if req.JQL != nil {
+		w.JQL = strings.TrimSpace(*req.JQL)
+	}
+	if req.AgentProfileID != nil {
+		w.AgentProfileID = *req.AgentProfileID
+	}
+	if req.ExecutorProfileID != nil {
+		w.ExecutorProfileID = *req.ExecutorProfileID
+	}
+	if req.Prompt != nil {
+		w.Prompt = *req.Prompt
+	}
+	if req.Enabled != nil {
+		w.Enabled = *req.Enabled
+	}
+	if req.PollIntervalSeconds != nil {
+		w.PollIntervalSeconds = *req.PollIntervalSeconds
+	}
 }
