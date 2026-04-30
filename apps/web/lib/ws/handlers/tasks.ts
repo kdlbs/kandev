@@ -132,18 +132,20 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       // Follow focus to the new primary when:
       //  - the user is currently viewing this task,
-      //  - the user was sitting on the previous primary (i.e. we haven't been
-      //    pinned to a different session by manual selection), and
+      //  - the user was sitting on the previous primary,
+      //  - they did NOT explicitly pin that previous primary (a manual click
+      //    sets pinnedSessionId; pinned sessions must be left alone), and
       //  - the primary actually changed.
-      // This makes workflow profile switches transparent: the agent that's
-      // about to run is the one the user sees.
+      // This makes workflow profile switches transparent for unpinned users
+      // without yanking pinned ones off their deliberate selection.
       const afterState = store.getState();
       const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
       if (
         newPrimary &&
         newPrimary !== previousPrimary &&
         afterState.tasks.activeTaskId === taskId &&
-        afterState.tasks.activeSessionId === previousPrimary
+        afterState.tasks.activeSessionId === previousPrimary &&
+        afterState.tasks.pinnedSessionId !== previousPrimary
       ) {
         afterState.setActiveSessionAuto(taskId, newPrimary);
       }

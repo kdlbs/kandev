@@ -155,4 +155,25 @@ describe("task.updated primary-session focus follow", () => {
 
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
   });
+
+  // Regression: even when the user happens to be sitting on the previous
+  // primary, an explicit pin on it must override primary-follow-focus —
+  // otherwise a workflow profile switch silently yanks them off the session
+  // they deliberately clicked into.
+  it("does NOT follow focus when the user has pinned the previous primary", () => {
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: { activeTaskId: "t1", activeSessionId: "sess-old", pinnedSessionId: "sess-old" },
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
 });
