@@ -297,8 +297,14 @@ func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, f
 // GetMessageByToolCallID retrieves a tool message by session ID and tool_call_id in metadata.
 // Searches all message types that have a tool_call_id in metadata (tool_call, tool_read, tool_edit,
 // tool_execute, tool_search, todo, etc.).
+//
+// Permission_request messages also store tool_call_id but represent the user-approval card,
+// not the tool call itself. Excluded so a tool_update never lands on a permission_request
+// row — that would overwrite metadata.status (the user's approve/reject) and retype it to
+// tool_execute, making the prompt buttons reappear after the turn ends.
 func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
-	return r.getMessageByMetadataField(ctx, sessionID, "tool_call_id", toolCallID, "ORDER BY created_at ASC LIMIT 1")
+	return r.getMessageByMetadataField(ctx, sessionID, "tool_call_id", toolCallID,
+		"AND type != 'permission_request' ORDER BY created_at ASC LIMIT 1")
 }
 
 // GetMessageByPendingID retrieves a message by session ID and pending_id in metadata
@@ -335,12 +341,17 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 // CompletePendingToolCallsForTurn marks all non-terminal tool call messages for a turn as "complete".
 // This is a safety net to ensure no tool calls remain stuck in a non-terminal state (pending,
 // running, in_progress, etc.) after a turn completes.
+//
+// Excludes permission_request messages: they share `tool_call_id` in metadata but their
+// `status` is the user's approve/reject decision, not the tool call state. Forcing them to
+// "complete" wipes "approved"/"rejected" and re-shows the prompt buttons in the UI.
 func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	drv := r.db.DriverName()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s
 		WHERE turn_id = ?
+		  AND type != 'permission_request'
 		  AND %s NOT IN ('complete', 'error')
 		  AND %s
 	`, dialect.JSONSet(drv, "metadata", "status", "complete"),

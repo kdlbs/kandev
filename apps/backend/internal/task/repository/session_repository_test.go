@@ -372,8 +372,29 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		Type:     models.MessageTypeToolCall,
 		Metadata: map[string]interface{}{"tool_call_id": "tc-6", "status": "error"},
 	}
+	// Permission_request messages share `tool_call_id` in metadata but their `status`
+	// is the user's approve/reject decision, not the tool call state. The sweep must
+	// leave them alone — otherwise an "approved" prompt would be reset and re-shown.
+	approvedPermission := &models.Message{
+		ID: "msg-perm-approved-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-7", "pending_id": "p-1", "status": "approved"},
+	}
+	rejectedPermission := &models.Message{
+		ID: "msg-perm-rejected-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-8", "pending_id": "p-2", "status": "rejected"},
+	}
+	pendingPermission := &models.Message{
+		ID: "msg-perm-pending-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-9", "pending_id": "p-3", "status": "pending"},
+	}
 
-	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2, pendingTool, inProgressTool, errorTool} {
+	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2, pendingTool, inProgressTool, errorTool, approvedPermission, rejectedPermission, pendingPermission} {
 		if err := repo.CreateMessage(ctx, msg); err != nil {
 			t.Fatalf("failed to create message %s: %v", msg.ID, err)
 		}
@@ -385,7 +406,8 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		t.Fatalf("CompletePendingToolCallsForTurn failed: %v", err)
 	}
 
-	// Should have updated 4 non-terminal tool call messages (running x2, pending, in_progress)
+	// Should have updated 4 non-terminal tool call messages (running x2, pending, in_progress).
+	// Permission_request messages must be excluded even though they carry tool_call_id.
 	if affected != 4 {
 		t.Errorf("expected 4 affected rows, got %d", affected)
 	}
@@ -428,6 +450,21 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 	msg7, _ := repo.GetMessage(ctx, "msg-error-1")
 	if msg7.Metadata["status"] != "error" {
 		t.Errorf("expected msg-error-1 status 'error' (unchanged), got %v", msg7.Metadata["status"])
+	}
+
+	// Verify permission_request messages were NOT affected — their status carries the
+	// user's decision (approve/reject) which the sweep must never overwrite.
+	msgPermApproved, _ := repo.GetMessage(ctx, "msg-perm-approved-1")
+	if msgPermApproved.Metadata["status"] != "approved" {
+		t.Errorf("expected msg-perm-approved-1 status 'approved' (unchanged), got %v", msgPermApproved.Metadata["status"])
+	}
+	msgPermRejected, _ := repo.GetMessage(ctx, "msg-perm-rejected-1")
+	if msgPermRejected.Metadata["status"] != "rejected" {
+		t.Errorf("expected msg-perm-rejected-1 status 'rejected' (unchanged), got %v", msgPermRejected.Metadata["status"])
+	}
+	msgPermPending, _ := repo.GetMessage(ctx, "msg-perm-pending-1")
+	if msgPermPending.Metadata["status"] != "pending" {
+		t.Errorf("expected msg-perm-pending-1 status 'pending' (unchanged), got %v", msgPermPending.Metadata["status"])
 	}
 
 	// Running again should affect 0 rows
