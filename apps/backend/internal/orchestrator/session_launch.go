@@ -103,7 +103,13 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 // launchPrepare creates a session entry without launching the agent.
+// Passthrough profiles can't be "prepared" without a running PTY — the terminal
+// has nothing to attach to until the agent process exists. Upgrade those calls
+// to a full start so the PTY is ready by the time the user sees the terminal.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if s.isPassthroughProfile(ctx, req.AgentProfileID) {
+		return s.launchStart(ctx, req)
+	}
 	sessionID, err := s.PrepareTaskSession(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
@@ -117,6 +123,17 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 		SessionID: sessionID,
 		State:     string(models.TaskSessionStateCreated),
 	}, nil
+}
+
+func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
+	if profileID == "" || s.agentManager == nil {
+		return false
+	}
+	info, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return false
+	}
+	return info.CLIPassthrough
 }
 
 // launchStart creates a new session and launches the agent.
