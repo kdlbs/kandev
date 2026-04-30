@@ -1,11 +1,14 @@
 /**
- * Session switch logic for dockview layout management.
+ * Env switch logic for dockview layout management.
  *
- * Handles both a "fast path" (skip fromJSON when layout structure matches)
- * and a "slow path" (full layout rebuild via fromJSON).
+ * Layouts are keyed by `taskEnvironmentId`. Sessions sharing an env reuse the
+ * same layout, so switching between same-env sessions is a no-op at the
+ * layout level (handled by the caller). Cross-env switches use either a
+ * "fast path" (skip fromJSON when the structure already matches) or a
+ * "slow path" (full layout rebuild via fromJSON).
  */
 import type { DockviewApi, SerializedDockview } from "dockview-react";
-import { getSessionLayout } from "@/lib/local-storage";
+import { getEnvLayout } from "@/lib/local-storage";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
@@ -13,9 +16,9 @@ import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 
 const EPHEMERAL_COMPONENTS = new Set(["file-editor", "diff-viewer", "commit-detail"]);
 
-/** Fetch the saved layout for a session, dropping it if its shape is corrupted. */
-function getHealthySessionLayout(sessionId: string): object | null {
-  const saved = getSessionLayout(sessionId);
+/** Fetch the saved layout for an env, dropping it if its shape is corrupted. */
+function getHealthyEnvLayout(envId: string): object | null {
+  const saved = getEnvLayout(envId);
   if (!saved) return null;
   return isLayoutShapeHealthy(saved) ? saved : null;
 }
@@ -30,10 +33,12 @@ function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean 
   return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
 }
 
-export type SessionSwitchParams = {
+export type EnvSwitchParams = {
   api: DockviewApi;
-  oldSessionId: string | null;
-  newSessionId: string;
+  oldEnvId: string | null;
+  newEnvId: string;
+  /** Active session for the incoming env — used to keep the right session chat tab. */
+  activeSessionId: string | null;
   safeWidth: number;
   safeHeight: number;
   buildDefault: (api: DockviewApi) => void;
@@ -42,24 +47,21 @@ export type SessionSwitchParams = {
 
 /**
  * Remove ephemeral panels (file-editors, diffs, commit-details) from the
- * live layout. These are session-specific panels that shouldn't carry over.
+ * live layout. These are env-scoped panels that shouldn't carry over.
  *
  * When `keepSessionId` is provided, session chat panels whose ID does not
- * match `session:{keepSessionId}` are also removed. This handles cross-task
- * switches where the fast path is taken: without this, session tabs from the
- * old task remain visible alongside the new task's tab.
+ * match `session:{keepSessionId}` are also removed. This handles cross-env
+ * (cross-task) switches where the fast path is taken: without this, session
+ * tabs from the old env's task remain visible alongside the new task's tab.
  */
-function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
+function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): void {
   const toRemove = api.panels.filter((p) => {
     const comp = p.api.component;
     if (comp === "file-editor" || comp === "diff-viewer" || comp === "commit-detail") {
       return true;
     }
-    // Remove session chat tabs that belong to a different session.
-    // This covers cross-task switches where the layout structures match and
-    // the fast path is taken — old task's session tabs must not bleed through.
     if (
-      keepSessionId !== undefined &&
+      keepSessionId !== null &&
       comp === "chat" &&
       p.id.startsWith("session:") &&
       p.id !== `session:${keepSessionId}`
@@ -82,48 +84,30 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId?: string): void {
  * structure hasn't changed. Returns group IDs if the fast path was taken,
  * or null if a full rebuild is needed.
  */
-function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | null {
-  const { api, newSessionId, getDefaultLayout } = params;
+function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
+  const { api, newEnvId, activeSessionId, getDefaultLayout } = params;
   const currentLayout = fromDockviewApi(api);
-  const saved = getHealthySessionLayout(newSessionId);
+  const saved = getHealthyEnvLayout(newEnvId);
 
   let structuresMatch = false;
   if (saved) {
-    // Compare live layout against saved layout by structural component set
     structuresMatch = savedLayoutMatchesLive(currentLayout, saved as SerializedDockview);
   } else {
-    // No saved layout — target is the default; compare LayoutState structures
     structuresMatch = layoutStructuresMatch(currentLayout, getDefaultLayout());
   }
 
   if (!structuresMatch) return null;
 
-  // If the saved layout contains ephemeral panels (file-editors, diffs,
-  // commit-details), fall through to the slow path so that `api.fromJSON()`
-  // restores them.  The fast path skips fromJSON and removeEphemeralPanels
-  // would discard the current ones without restoring the target session's.
   if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
 
-  // Capture the outgoing session tab's group BEFORE removing it so we can
-  // place the new session tab in the same group. Without this, the lookup
-  // after removeEphemeralPanels finds no chat/session panels and falls
-  // through to a sidebar split — putting the new tab in a new group while
-  // the PR panel stays in the old center group.
   const outgoingSessionPanel = api.panels.find(
     (p) => p.id.startsWith("session:") || p.api.component === "chat",
   );
   const outgoingGroupId = outgoingSessionPanel?.group?.id;
 
-  // Fast path: keep the grid structure, clean up ephemeral panels and any
-  // session chat tabs that belong to a different session (cross-task switch).
-  // Session-scoped portals (browser, vscode, etc.) will be re-acquired
-  // via usePortalSlot's sessionId dependency change.
-  removeEphemeralPanels(api, newSessionId);
+  removeEphemeralPanels(api, activeSessionId);
 
-  // Create the new session tab inline so there's no gap between removing the
-  // old tab and creating the new one. useAutoSessionTab will detect the panel
-  // already exists and skip creation.
-  if (!api.getPanel(`session:${newSessionId}`)) {
+  if (activeSessionId && !api.getPanel(`session:${activeSessionId}`)) {
     const sidebarPanel = api.getPanel("sidebar");
     let position: import("dockview-react").AddPanelOptions["position"];
     if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
@@ -132,11 +116,11 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
       position = { direction: "right" as const, referencePanel: "sidebar" };
     }
     api.addPanel({
-      id: `session:${newSessionId}`,
+      id: `session:${activeSessionId}`,
       component: "chat",
       tabComponent: "sessionTab",
       title: "Agent",
-      params: { sessionId: newSessionId },
+      params: { sessionId: activeSessionId },
       position,
     });
   }
@@ -146,25 +130,21 @@ function tryFastSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
 }
 
 /**
- * Switch the dockview layout between sessions.
+ * Switch the dockview layout between task environments.
  *
  * Uses a fast path when layouts are structurally identical (common case),
  * falling back to a full `api.fromJSON()` rebuild when they differ.
  *
- * The caller is responsible for saving the old session layout and releasing
- * session-scoped portals before calling this function.
+ * The caller is responsible for saving the old env's layout and releasing
+ * env-scoped portals before calling this function.
  */
-export function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds {
-  const { api, newSessionId, safeWidth, safeHeight, buildDefault } = params;
+export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
+  const { api, newEnvId, safeWidth, safeHeight, buildDefault } = params;
 
-  // Try fast path: skip fromJSON when layout structure hasn't changed
-  const fastResult = tryFastSessionSwitch(params);
+  const fastResult = tryFastEnvSwitch(params);
   if (fastResult) return fastResult;
 
-  // Slow path: full layout rebuild via fromJSON. Use the validating loader
-  // so a corrupted blob from a previous failed switch is dropped instead of
-  // applied verbatim (which would collapse the central group).
-  const saved = getHealthySessionLayout(newSessionId);
+  const saved = getHealthyEnvLayout(newEnvId);
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);

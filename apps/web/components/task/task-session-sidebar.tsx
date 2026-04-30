@@ -310,11 +310,15 @@ type SwitchFn = (
 ) => void;
 
 function buildSwitchToSession(
+  store: StoreApi,
   setActiveSession: (taskId: string, sessionId: string) => void,
 ): SwitchFn {
   return (taskId, sessionId, oldSessionId) => {
+    const state = store.getState();
+    const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
+    const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
     setActiveSession(taskId, sessionId);
-    performLayoutSwitch(oldSessionId ?? null, sessionId);
+    if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
   };
 }
 
@@ -445,7 +449,10 @@ function useSidebarActions(store: StoreApi) {
     useLayoutSwitch: true,
   });
 
-  const switchToSession = useMemo(() => buildSwitchToSession(setActiveSession), [setActiveSession]);
+  const switchToSession = useMemo(
+    () => buildSwitchToSession(store, setActiveSession),
+    [store, setActiveSession],
+  );
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -478,7 +485,10 @@ function useSidebarActions(store: StoreApi) {
         if (switched) {
           replaceTaskUrl(taskId);
         } else {
-          finalizeNoSessionSelect(taskId, currentOldSessionId, {
+          const currentOldEnvId = currentOldSessionId
+            ? (store.getState().environmentIdBySessionId[currentOldSessionId] ?? null)
+            : null;
+          finalizeNoSessionSelect(taskId, currentOldEnvId, {
             setActiveTask,
             releaseLayoutToDefault,
             replaceTaskUrl,

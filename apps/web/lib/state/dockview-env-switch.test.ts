@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { performSessionSwitch, type SessionSwitchParams } from "./dockview-session-switch";
+import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
 
-// Mock dependencies
 vi.mock("@/lib/local-storage", () => ({
-  getSessionLayout: vi.fn(() => null),
+  getEnvLayout: vi.fn(() => null),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({
@@ -21,7 +20,7 @@ vi.mock("./layout-manager", () => ({
   layoutStructuresMatch: vi.fn(() => false),
 }));
 
-import { getSessionLayout } from "@/lib/local-storage";
+import { getEnvLayout } from "@/lib/local-storage";
 import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
 
 function makeMockApi() {
@@ -31,10 +30,9 @@ function makeMockApi() {
     fromJSON: vi.fn(),
     getPanel: vi.fn(() => null),
     addPanel: vi.fn(),
-  } as unknown as SessionSwitchParams["api"];
+  } as unknown as EnvSwitchParams["api"];
 }
 
-/** Build a SerializedDockview-shaped fixture that passes isLayoutShapeHealthy. */
 function makeHealthyLayoutWith(extraPanels: Record<string, { contentComponent: string }>) {
   return {
     grid: {
@@ -52,14 +50,15 @@ function makeHealthyLayoutWith(extraPanels: Record<string, { contentComponent: s
       ...extraPanels,
     },
     activeGroup: "g1",
-  } as unknown as ReturnType<typeof getSessionLayout>;
+  } as unknown as ReturnType<typeof getEnvLayout>;
 }
 
-function makeParams(overrides?: Partial<SessionSwitchParams>): SessionSwitchParams {
+function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
   return {
     api: makeMockApi(),
-    oldSessionId: "old-session",
-    newSessionId: "new-session",
+    oldEnvId: "old-env",
+    newEnvId: "new-env",
+    activeSessionId: "new-session",
     safeWidth: 800,
     safeHeight: 600,
     buildDefault: vi.fn(),
@@ -68,7 +67,7 @@ function makeParams(overrides?: Partial<SessionSwitchParams>): SessionSwitchPara
   };
 }
 
-describe("performSessionSwitch", () => {
+describe("performEnvSwitch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -77,17 +76,17 @@ describe("performSessionSwitch", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
   });
 
   it("calls api.layout on the fast path when saved layout matches", () => {
-    vi.mocked(getSessionLayout).mockReturnValueOnce(makeHealthyLayoutWith({}));
+    vi.mocked(getEnvLayout).mockReturnValueOnce(makeHealthyLayoutWith({}));
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
     expect(params.api.fromJSON).not.toHaveBeenCalled();
@@ -97,7 +96,7 @@ describe("performSessionSwitch", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.addPanel).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -115,10 +114,10 @@ describe("performSessionSwitch", () => {
       api: {
         ...makeMockApi(),
         getPanel: vi.fn((id: string) => (id === "session:new-session" ? panel : null)),
-      } as unknown as SessionSwitchParams["api"],
+      } as unknown as EnvSwitchParams["api"],
     });
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.addPanel).not.toHaveBeenCalled();
   });
@@ -127,13 +126,12 @@ describe("performSessionSwitch", () => {
     const savedLayout = makeHealthyLayoutWith({
       "preview:file-editor": { contentComponent: "file-editor" },
     });
-    vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
-    // Should use fromJSON (slow path) instead of fast path
     expect(params.api.fromJSON).toHaveBeenCalled();
   });
 
@@ -141,11 +139,11 @@ describe("performSessionSwitch", () => {
     const savedLayout = makeHealthyLayoutWith({
       "preview:file-diff": { contentComponent: "diff-viewer" },
     });
-    vi.mocked(getSessionLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
     vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.fromJSON).toHaveBeenCalled();
   });
@@ -153,7 +151,7 @@ describe("performSessionSwitch", () => {
   it("calls api.layout on the slow path (buildDefault fallback)", () => {
     const params = makeParams();
 
-    performSessionSwitch(params);
+    performEnvSwitch(params);
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
     expect(params.buildDefault).toHaveBeenCalledWith(params.api);

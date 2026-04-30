@@ -70,23 +70,25 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 // ---------------------------------------------------------------------------
 
 /**
- * Components whose portals are tied to a specific session.
+ * Components whose portals are tied to a specific task environment.
  *
- * When the user switches sessions, portals for these components are released
- * via `panelPortalManager.releaseBySession()` so stale state (WebSocket
- * connections, iframes, editor buffers) from the old session doesn't leak
- * into the new one.
+ * When the user switches task envs, portals for these components are released
+ * via `panelPortalManager.releaseByEnv()` so stale state (WebSocket
+ * connections, iframes, editor buffers) from the old env doesn't leak
+ * into the new one. Same-env session switches are a no-op — these portals
+ * persist because the underlying workspace, container, and git history all
+ * belong to the env, not the session.
  *
- * A component belongs here if its content is bound to session-specific runtime
+ * A component belongs here if its content is bound to env-specific runtime
  * state that can't be swapped by simply reading a new `activeSessionId` from
  * the store:
  *
- *  - file-editor   — editing a file in the session's worktree
- *  - browser       — iframe preview of the session's dev server URL
- *  - vscode        — VS Code Server iframe running in the session's container
- *  - commit-detail — displays a commit from the session's git history
- *  - diff-viewer   — shows file diffs from the session's working tree
- *  - pr-detail     — PR linked to the session's task
+ *  - file-editor   — editing a file in the env's worktree
+ *  - browser       — iframe preview of the env's dev server URL
+ *  - vscode        — VS Code Server iframe running in the env's container
+ *  - commit-detail — displays a commit from the env's git history
+ *  - diff-viewer   — shows file diffs from the env's working tree
+ *  - pr-detail     — PR linked to the env's task
  *
  * Components NOT listed here are **global** — they read `activeSessionId`
  * reactively from the store and automatically reflect the current session:
@@ -98,7 +100,7 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
  *  - files    — uses `useEnvironmentSessionId()` for stable file tree
  *  - plan     — reads `activeTaskId` from the store
  */
-const SESSION_SCOPED_COMPONENTS = new Set([
+const ENV_SCOPED_COMPONENTS = new Set([
   "file-editor",
   "browser",
   "vscode",
@@ -112,16 +114,17 @@ const SESSION_SCOPED_COMPONENTS = new Set([
  * managed by PanelPortalManager.  The actual panel content is rendered by
  * PanelPortalHost outside the dockview tree.
  *
- * Session-scoped panels are tagged with the current session ID so they can
- * be cleaned up on session switch.
+ * Env-scoped panels are tagged with the current task-env ID so they can be
+ * cleaned up on env switch.
  */
 function PortalSlot(props: IDockviewPanelProps) {
   const component = props.api.component;
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const sessionId = SESSION_SCOPED_COMPONENTS.has(component)
-    ? (activeSessionId ?? undefined)
-    : undefined;
-  const containerRef = usePortalSlot(props, sessionId);
+  const activeEnvId = useAppStore((s) => {
+    const sid = s.tasks.activeSessionId;
+    return sid ? (s.environmentIdBySessionId[sid] ?? null) : null;
+  });
+  const envId = ENV_SCOPED_COMPONENTS.has(component) ? (activeEnvId ?? undefined) : undefined;
+  const containerRef = usePortalSlot(props, envId);
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />;
 }
 
@@ -394,44 +397,34 @@ function renderPanel(
 const VALID_COMPONENTS = new Set(Object.keys(components));
 
 // ---------------------------------------------------------------------------
-// useSessionSwitchCleanup — backup layout switch for external session changes
+// useEnvSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
 
-function useSessionSwitchCleanup(effectiveSessionId: string | null) {
-  const prevSessionRef = useRef<string | null | undefined>(undefined);
-  const prevTaskRef = useRef<string | null>(null);
+function useEnvSwitchCleanup(effectiveSessionId: string | null) {
+  const prevEnvRef = useRef<string | null | undefined>(undefined);
   const appStore = useAppStoreApi();
   useEffect(() => {
-    if (prevSessionRef.current === undefined) {
-      prevSessionRef.current = effectiveSessionId;
+    const state = appStore.getState();
+    const newEnvId = effectiveSessionId
+      ? (state.environmentIdBySessionId[effectiveSessionId] ?? null)
+      : null;
+
+    if (prevEnvRef.current === undefined) {
+      prevEnvRef.current = newEnvId;
       return;
     }
-    if (prevSessionRef.current === effectiveSessionId) return;
+    if (prevEnvRef.current === newEnvId) return;
 
-    const oldSessionId = prevSessionRef.current;
-    prevSessionRef.current = effectiveSessionId;
+    const oldEnvId = prevEnvRef.current;
+    prevEnvRef.current = newEnvId;
 
-    // Portal cleanup is handled synchronously inside switchSessionLayout
-    // (in the dockview store action) before any fromJSON call. This hook
-    // serves as a backup for external session changes (e.g. WS-driven)
-    // that don't go through the sidebar/dropdown switch helpers.
-    if (effectiveSessionId) {
-      // Skip full layout rebuild for same-task session switches (workflow step
-      // transitions with different agent profiles). useAutoSessionTab already
-      // handles creating the new panel — a full fromJSON rebuild would destroy
-      // the old session tab and cause a visible layout flash.
-      const state = appStore.getState();
-      const oldTask = oldSessionId ? state.taskSessions.items[oldSessionId]?.task_id : null;
-      const newTask = state.taskSessions.items[effectiveSessionId]?.task_id;
-      // Use activeTaskId as fallback when the old session has been cleaned from
-      // the store (e.g., after a COMPLETED state change removed it).
-      const effectiveOldTask = oldTask ?? prevTaskRef.current;
-      if (effectiveOldTask && newTask && effectiveOldTask === newTask) {
-        prevTaskRef.current = newTask;
-        return;
-      }
-      prevTaskRef.current = newTask ?? null;
-      performLayoutSwitch(oldSessionId, effectiveSessionId);
+    // Portal cleanup is handled synchronously inside switchEnvLayout (in the
+    // dockview store action) before any fromJSON call. This hook serves as a
+    // backup for external session changes (e.g. WS-driven) that don't go
+    // through the sidebar/dropdown switch helpers. Same-env switches return
+    // early above (no-op).
+    if (newEnvId) {
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
     }
   }, [effectiveSessionId, appStore]);
 }
@@ -462,7 +455,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   const effectiveSessionId =
     useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
-  const sessionIdRef = useRef<string | null>(effectiveSessionId);
+  const effectiveEnvId = useAppStore((state) =>
+    effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
+  );
+  const envIdRef = useRef<string | null>(effectiveEnvId);
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const review = useReviewDialog(effectiveSessionId);
@@ -473,27 +469,27 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   usePlanPanelAutoOpen();
 
   useEffect(() => {
-    sessionIdRef.current = effectiveSessionId;
-  }, [effectiveSessionId]);
+    envIdRef.current = effectiveEnvId;
+  }, [effectiveEnvId]);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const api = event.api;
       setApi(api);
 
-      const currentSessionId = sessionIdRef.current;
+      const currentEnvId = envIdRef.current;
       // If a layout intent was passed via URL, skip saved layout restoration
-      const restored = !initialLayout && tryRestoreLayout(api, currentSessionId, VALID_COMPONENTS);
+      const restored = !initialLayout && tryRestoreLayout(api, currentEnvId, VALID_COMPONENTS);
       if (!restored) {
         buildDefaultLayout(api, initialLayout ?? undefined);
       }
 
-      useDockviewStore.setState({ currentLayoutSessionId: currentSessionId });
+      useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
       setupGroupTracking(api);
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
-      setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
+      setupLayoutPersistence(api, saveTimerRef, envIdRef);
       setupPortalCleanup(api, appStore);
     },
     [setApi, buildDefaultLayout, initialLayout, appStore],
@@ -503,7 +499,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
   // saved before a new session tab is created — otherwise the new session's
   // panel could leak into the old session's persisted layout.
-  useSessionSwitchCleanup(effectiveSessionId);
+  useEnvSwitchCleanup(effectiveSessionId);
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
@@ -549,7 +545,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
           className="flex-1 min-h-0"
         />
       </div>
-      <BottomTerminalPanel sessionId={effectiveSessionId} />
+      <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
       {effectiveSessionId && (
         <ReviewDialog

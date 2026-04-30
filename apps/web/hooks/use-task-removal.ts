@@ -85,12 +85,18 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
 
   /** Switch to the next available task after removal. */
   const switchToNextTask = useCallback(
-    async (nextTask: KanbanState["tasks"][number], oldSessionId: string | null) => {
+    async (nextTask: KanbanState["tasks"][number], oldEnvId: string | null) => {
       const { setActiveSession, setActiveTask } = store.getState();
 
+      const switchTo = (sessionId: string) => {
+        setActiveSession(nextTask.id, sessionId);
+        if (!useLayoutSwitch) return;
+        const newEnvId = store.getState().environmentIdBySessionId[sessionId] ?? null;
+        if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+      };
+
       if (nextTask.primarySessionId) {
-        setActiveSession(nextTask.id, nextTask.primarySessionId);
-        if (useLayoutSwitch) performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
+        switchTo(nextTask.primarySessionId);
         replaceTaskUrl(nextTask.id);
         return;
       }
@@ -98,8 +104,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       const sessions = await loadTaskSessionsForTask(nextTask.id);
       const sessionId = sessions[0]?.id ?? null;
       if (sessionId) {
-        setActiveSession(nextTask.id, sessionId);
-        if (useLayoutSwitch) performLayoutSwitch(oldSessionId, sessionId);
+        switchTo(sessionId);
       } else {
         setActiveTask(nextTask.id);
       }
@@ -143,8 +148,11 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         opts?.wasActiveSessionId !== undefined
           ? opts.wasActiveSessionId
           : store.getState().tasks.activeSessionId;
+      const oldEnvId = oldSessionId
+        ? (store.getState().environmentIdBySessionId[oldSessionId] ?? null)
+        : null;
       if (allRemainingTasks.length > 0) {
-        await switchToNextTask(allRemainingTasks[0], oldSessionId);
+        await switchToNextTask(allRemainingTasks[0], oldEnvId);
       } else {
         window.location.href = "/";
       }

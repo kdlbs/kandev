@@ -96,7 +96,8 @@ function activateNewSession(
   groupId: string | undefined,
   setActiveSession: (taskId: string, sessionId: string) => void,
 ) {
-  useDockviewStore.setState({ _skipLayoutSwitchForSession: sessionId });
+  // New session within the same task = same env, so the env switch action
+  // no-ops naturally. We just create the chat panel + activate.
   setActiveSession(taskId, sessionId);
   const { api, centerGroupId } = useDockviewStore.getState();
   if (api) addSessionPanel(api, groupId ?? centerGroupId, sessionId, tabLabel);

@@ -2,7 +2,7 @@ import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
-import { getSessionLayout, getSessionMaximizeState } from "@/lib/local-storage";
+import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
@@ -52,8 +52,8 @@ export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
   };
 }
 
-function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], sessionId: string | null): void {
-  const savedMax = sessionId ? getSessionMaximizeState(sessionId) : null;
+function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
+  const savedMax = envId ? getEnvMaximizeState(envId) : null;
   if (savedMax) {
     api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
     api.layout(api.width, api.height);
@@ -69,8 +69,8 @@ function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], sessionId: stri
   }
 }
 
-function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], sessionId: string): boolean {
-  const savedMax = getSessionMaximizeState(sessionId);
+function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): boolean {
+  const savedMax = getEnvMaximizeState(envId);
   if (!savedMax) return false;
   try {
     api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
@@ -89,28 +89,28 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], sessionId: strin
 
 export function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
-  currentSessionId: string | null,
+  currentEnvId: string | null,
   validComponents: Set<string>,
 ): boolean {
-  if (currentSessionId) {
+  if (currentEnvId) {
     try {
-      const sessionLayout = getSessionLayout(currentSessionId);
-      if (sessionLayout) {
-        const sanitized = sanitizeLayout(sessionLayout, validComponents);
+      const envLayout = getEnvLayout(currentEnvId);
+      if (envLayout) {
+        const sanitized = sanitizeLayout(envLayout, validComponents);
         if (!sanitized) {
           return false;
         }
         api.fromJSON(sanitized as SerializedDockview);
-        applyFixupsWithMaximize(api, currentSessionId);
+        applyFixupsWithMaximize(api, currentEnvId);
         return true;
       }
     } catch {
-      // Per-session restore failed, try global
+      // Per-env restore failed, try global
     }
-    if (tryRestoreMaximizeOnly(api, currentSessionId)) return true;
+    if (tryRestoreMaximizeOnly(api, currentEnvId)) return true;
   }
 
-  if (!currentSessionId) {
+  if (!currentEnvId) {
     try {
       const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
       if (saved) {

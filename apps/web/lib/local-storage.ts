@@ -317,17 +317,18 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 }
 
 // --- Dockview per-session layout (sessionStorage) ---
-const DOCKVIEW_SESSION_LAYOUT_PREFIX = "kandev.dockview.layout.";
+// Dockview layout is keyed by `taskEnvironmentId` so sessions sharing a task
+// env reuse one layout (the env owns the workspace, terminals, files, etc.).
+const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout.";
 
 /**
- * Get the saved dockview layout for a session
- * @param sessionId - The session ID
- * @returns The serialized layout object, or null if not found
+ * Get the saved dockview layout for a task environment.
+ * Returns null if not found.
  */
-export function getSessionLayout(sessionId: string): object | null {
+export function getEnvLayout(envId: string): object | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`);
+    const raw = window.sessionStorage.getItem(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`);
     if (!raw) return null;
     return JSON.parse(raw) as object;
   } catch {
@@ -335,16 +336,12 @@ export function getSessionLayout(sessionId: string): object | null {
   }
 }
 
-/**
- * Save the dockview layout for a session
- * @param sessionId - The session ID
- * @param layout - The serialized layout object from api.toJSON()
- */
-export function setSessionLayout(sessionId: string, layout: object): void {
+/** Save the dockview layout for a task environment. */
+export function setEnvLayout(envId: string, layout: object): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(
-      `${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`,
+      `${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`,
       JSON.stringify(layout),
     );
   } catch {
@@ -352,17 +349,17 @@ export function setSessionLayout(sessionId: string, layout: object): void {
   }
 }
 
-// --- Dockview per-session maximize state (sessionStorage) ---
-const DOCKVIEW_SESSION_MAXIMIZE_PREFIX = "kandev.dockview.maximize.";
+// --- Dockview per-env maximize state (sessionStorage) ---
+const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize.";
 
-export type SessionMaximizeState = {
+export type EnvMaximizeState = {
   /** The pre-maximize (normal) layout to restore on exit-maximize. */
   preMaximizeLayout: object;
   /** Native dockview JSON (api.toJSON()) for the maximized layout. */
   maximizedDockviewJson: object;
 };
 
-function isSessionMaximizeState(value: unknown): value is SessionMaximizeState {
+function isEnvMaximizeState(value: unknown): value is EnvMaximizeState {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   return (
@@ -373,23 +370,23 @@ function isSessionMaximizeState(value: unknown): value is SessionMaximizeState {
   );
 }
 
-export function getSessionMaximizeState(sessionId: string): SessionMaximizeState | null {
+export function getEnvMaximizeState(envId: string): EnvMaximizeState | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`);
+    const raw = window.sessionStorage.getItem(`${DOCKVIEW_ENV_MAXIMIZE_PREFIX}${envId}`);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isSessionMaximizeState(parsed) ? parsed : null;
+    return isEnvMaximizeState(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
-export function setSessionMaximizeState(sessionId: string, state: SessionMaximizeState): void {
+export function setEnvMaximizeState(envId: string, state: EnvMaximizeState): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(
-      `${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`,
+      `${DOCKVIEW_ENV_MAXIMIZE_PREFIX}${envId}`,
       JSON.stringify(state),
     );
   } catch {
@@ -397,10 +394,10 @@ export function setSessionMaximizeState(sessionId: string, state: SessionMaximiz
   }
 }
 
-export function removeSessionMaximizeState(sessionId: string): void {
+export function removeEnvMaximizeState(envId: string): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.removeItem(`${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`);
+    window.sessionStorage.removeItem(`${DOCKVIEW_ENV_MAXIMIZE_PREFIX}${envId}`);
   } catch {
     // Ignore
   }
@@ -626,10 +623,14 @@ export function setChatInputHeight(sessionId: string, height: number): void {
 // --- Task storage cleanup ---
 
 /**
- * Remove all session-scoped storage for a deleted task.
+ * Remove all session/env-scoped storage for a deleted task.
  * Call from task.deleted handler before the task is removed from state.
  */
-export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
+export function cleanupTaskStorage(
+  taskId: string,
+  sessionIds: string[],
+  envIds: string[] = [],
+): void {
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
@@ -639,9 +640,14 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
     setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
   }
 
-  // Session-keyed storage — clean all sessions belonging to the task
+  // Env-keyed storage — dockview layout + maximize live under task envs.
+  for (const envId of envIds) {
+    removeEnvMaximizeState(envId);
+    removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`);
+  }
+
+  // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
-    removeSessionMaximizeState(sessionId);
     removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
@@ -651,7 +657,6 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
     removeSessionStorage(`${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`);
     removeSessionStorage(`${FILES_PANEL_KEYS.EXPANDED}.${sessionId}`);
     removeSessionStorage(`${FILES_PANEL_KEYS.SCROLL}.${sessionId}`);
-    removeSessionStorage(`${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`);
     removeSessionStorage(`${OPEN_FILES_KEY}.${sessionId}`);
     removeSessionStorage(`${ACTIVE_TAB_KEY}.${sessionId}`);
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);

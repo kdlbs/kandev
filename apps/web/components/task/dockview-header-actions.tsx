@@ -367,11 +367,14 @@ function SidebarRightActions() {
 
   const handleTaskCreated = useCallback(
     (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
-      const oldSessionId = appStore.getState().tasks.activeSessionId;
+      const state = appStore.getState();
+      const oldSessionId = state.tasks.activeSessionId;
+      const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
-        performLayoutSwitch(oldSessionId, meta.taskSessionId);
+        const newEnvId = appStore.getState().environmentIdBySessionId[meta.taskSessionId] ?? null;
+        if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, meta.taskSessionId);
       }
       replaceTaskUrl(task.id);
     },
