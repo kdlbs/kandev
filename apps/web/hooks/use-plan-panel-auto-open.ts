@@ -74,10 +74,9 @@ export function usePlanPanelAutoOpen() {
       // recorded `lastSeen` (not persisted across sessions). We can't tell
       // whether the plan was acknowledged before reload or not, so we
       // optimistically mark it seen to avoid a stale indicator flash on
-      // every reload. A plan update arriving after reload will re-arm the
-      // indicator via the live-update path (lastSeen populated, panel
-      // exists → fall through to addPlanPanel which is idempotent for an
-      // existing panel and PlanTab re-renders the indicator).
+      // every reload. When a live update arrives after the reload,
+      // `lastSeen` is defined so we don't suppress it — PlanTab reads the
+      // store directly and re-arms the indicator.
       if (lastSeen === undefined) markTaskPlanSeen(plan.task_id);
       return;
     }
