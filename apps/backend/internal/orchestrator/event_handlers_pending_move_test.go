@@ -315,7 +315,7 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 
 	// 5) The hand-off prompt must have been delivered (or be queued for delivery)
 	//    on the impl session — not lost, not delivered to the QA session.
-	implPrompts := capturedPromptsForSession(agentMgr, "ae-impl-relaunch")
+	implPrompts := capturedPromptsForExecution(agentMgr, "ae-impl-relaunch")
 	implQueued := svc.messageQueue.GetStatus(ctx, implSession.ID)
 	if len(implPrompts) == 0 && !implQueued.IsQueued {
 		t.Error("hand-off prompt was neither delivered to the impl session nor queued for it")
@@ -333,11 +333,19 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 
 // --- Helpers ---
 
-func capturedPromptsForSession(agentMgr *mockAgentManager, _ string) []string {
+// capturedPromptsForExecution returns only the prompts that were sent to the
+// given agent execution ID. The earlier version ignored its selector and
+// returned every recorded prompt — which would let the test pass even if the
+// hand-off had been delivered to the wrong session.
+func capturedPromptsForExecution(agentMgr *mockAgentManager, executionID string) []string {
 	agentMgr.mu.Lock()
 	defer agentMgr.mu.Unlock()
-	out := make([]string, len(agentMgr.capturedPrompts))
-	copy(out, agentMgr.capturedPrompts)
+	out := make([]string, 0, len(agentMgr.capturedPromptCalls))
+	for _, c := range agentMgr.capturedPromptCalls {
+		if c.ExecutionID == executionID {
+			out = append(out, c.Prompt)
+		}
+	}
 	return out
 }
 

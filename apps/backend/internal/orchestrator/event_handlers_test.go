@@ -126,8 +126,11 @@ type mockAgentManager struct {
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 
-	// Prompt tracking
-	capturedPrompts []string // tracks prompts passed to PromptAgent
+	// Prompt tracking — capturedPrompts records prompts only (legacy, several
+	// tests assert on it directly). capturedPromptCalls records the same with
+	// the execution ID so callers can filter by the agent that received it.
+	capturedPrompts     []string
+	capturedPromptCalls []promptCall
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -146,6 +149,12 @@ type stopAgentCall struct {
 	ExecutionID string
 	Reason      string
 	Force       bool
+}
+
+// promptCall records one PromptAgent invocation with its target execution ID.
+type promptCall struct {
+	ExecutionID string
+	Prompt      string
 }
 
 type passthroughStdinCall struct {
@@ -171,10 +180,11 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return nil
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
+	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt})
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone

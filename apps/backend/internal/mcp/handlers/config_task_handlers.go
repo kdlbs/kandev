@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -44,9 +45,22 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	// handleAgentReady applies it deterministically when the turn ends.
 	session := h.lookupSession(ctx, req.TaskID)
 	if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
-		if req.Prompt != "" {
-			wrapped := "You were moved to this step with the following message: " + req.Prompt
-			h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped)
+		// The deferred path requires the message queue: it's where the hand-off
+		// prompt sits and where SetPendingMove lives. If neither is available
+		// we cannot honor the contract — surface a real error rather than panic
+		// or silently drop the prompt.
+		if h.messageQueue == nil {
+			h.logger.Error("move_task: message queue not configured; cannot defer move from active session",
+				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"move_task requires message queue support while the source session is active", nil)
+		}
+		wrapped := "You were moved to this step with the following message: " + req.Prompt
+		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+			h.logger.Error("move_task: failed to queue hand-off prompt",
+				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to queue move_task hand-off prompt", nil)
 		}
 		h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
 			TaskID:         req.TaskID,
@@ -63,9 +77,21 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 
 	// Idle session (e.g. UI-driven move via MCP) — apply immediately.
-	if req.Prompt != "" && session != nil {
-		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped)
+	// The hand-off prompt is required (validated above), so when there's no
+	// session to deliver it on, we'd have to drop it on the floor — which would
+	// silently violate the tool's contract. Reject explicitly instead.
+	if session == nil {
+		h.logger.Warn("move_task: no primary session for task; cannot deliver required hand-off prompt",
+			zap.String("task_id", req.TaskID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"move_task requires the task to have an active session so the hand-off prompt can be delivered", nil)
+	}
+	wrapped := "You were moved to this step with the following message: " + req.Prompt
+	if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+		h.logger.Error("move_task: failed to queue hand-off prompt for idle session",
+			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to queue move_task hand-off prompt", nil)
 	}
 	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
@@ -115,25 +141,21 @@ func (h *Handlers) lookupSession(ctx context.Context, taskID string) *models.Tas
 }
 
 // queueMoveTaskPrompt enqueues a user-supplied prompt on the task's primary session.
-// Errors and missing dependencies are logged at warn level — the move itself is the
-// primary side-effect of the MCP call and should still succeed.
-func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) {
+// Returns an error when the queue itself is missing or QueueMessage fails — the
+// caller decides whether to fail the whole move (running-session deferred path)
+// or proceed (idle path), since a queue failure makes the deferred contract
+// impossible to honor.
+func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) error {
 	if h.messageQueue == nil {
-		h.logger.Warn("move_task prompt provided but message queue is unavailable",
-			zap.String("task_id", taskID))
-		return
+		return fmt.Errorf("message queue is unavailable")
 	}
 	if sessionID == "" {
-		h.logger.Warn("move_task prompt provided but task has no primary session",
-			zap.String("task_id", taskID))
-		return
+		return fmt.Errorf("task has no primary session")
 	}
 	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", "mcp-move-task", false, nil); err != nil {
-		h.logger.Warn("failed to queue prompt for moved task",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		return fmt.Errorf("queue message: %w", err)
 	}
+	return nil
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

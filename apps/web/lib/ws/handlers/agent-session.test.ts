@@ -300,6 +300,32 @@ describe("session.state_changed → active session switching", () => {
 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
+
+  // Regression for the reverse-event-ordering race: if the OLD pinned session's
+  // COMPLETED event arrives before the NEW session's STARTING event, the
+  // terminal-handoff guard (which protects pinning) doesn't run on the COMPLETED
+  // event because s-new isn't yet in the store. When the STARTING event
+  // arrives, shouldAdoptNewSession returns true (old is now terminal) and would
+  // auto-yank the user off their pinned session — unless we re-check pinning on
+  // this path too.
+  it("does not yank a pinned session on reverse event ordering (old COMPLETED, then new STARTING)", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  });
 });
 
 describe("session.state_changed → active session handoff on terminal", () => {

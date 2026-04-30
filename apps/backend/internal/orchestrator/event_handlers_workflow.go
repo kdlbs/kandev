@@ -879,10 +879,24 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // already queued by handleMoveTask is delivered by the on_enter path or by
 // drainQueuedMessageAfterTransition.
 func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
+	// reinsertPendingMove restores the move so a future agent.ready can retry.
+	// Used on early failure paths (load errors, config issues) where the state
+	// hasn't been touched yet. NOT used after ApplyTransition has executed —
+	// at that point the workflow has either advanced or is in a corrupted state
+	// and re-attempting the move on the next turn would just re-trip the same
+	// failure (or worse, double-apply on a now-half-transitioned task).
+	reinsertPendingMove := func() {
+		if s.messageQueue == nil {
+			return
+		}
+		s.messageQueue.SetPendingMove(ctx, sessionID, move)
+	}
+
 	if s.workflowStepGetter == nil || s.workflowStore == nil {
 		s.logger.Warn("cannot apply pending move: workflow components missing",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
+		reinsertPendingMove()
 		return
 	}
 
@@ -891,12 +905,14 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Error("failed to load task for pending move",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		reinsertPendingMove()
 		return
 	}
 	fromStepID := task.WorkflowStepID
 	if fromStepID == move.WorkflowStepID {
 		// Step already matches — nothing to transition. Just leave the queued
-		// prompt for the natural drain path.
+		// prompt for the natural drain path. Don't reinsert: the move is
+		// effectively complete since the task is already at the target step.
 		s.logger.Info("pending move target equals current step; skipping transition",
 			zap.String("task_id", taskID),
 			zap.String("step_id", fromStepID))
@@ -910,6 +926,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("task_id", taskID),
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.Error(err))
+		reinsertPendingMove()
 		return
 	}
 
@@ -922,6 +939,19 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		// The hand-off prompt was queued by handleMoveTask before the move was
+		// applied. Now that the move failed, the on_enter path that would have
+		// drained the queue won't run, and handleAgentReady has already returned.
+		// Drop the orphan so it can't be misdelivered to the source step's agent
+		// on a future turn (it was authored for the move's *target* step).
+		if s.messageQueue != nil {
+			if _, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok {
+				s.publishQueueStatusEvent(ctx, sessionID)
+				s.logger.Warn("dropped hand-off prompt after pending-move transition failure",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID))
+			}
+		}
 		return
 	}
 
@@ -1007,14 +1037,30 @@ func (s *Service) autoStartStepPrompt(
 	sessionID := session.ID
 
 	// Take any queued message (e.g. from move_task_kandev with a hand-off
-	// prompt) and concatenate with the step's auto-start prompt — auto-start
-	// content first, hand-off after. Track it so terminal failure paths can
-	// restore it instead of dropping the user's prompt on the floor.
+	// prompt) and merge it with the step's auto-start prompt — auto-start
+	// content first, hand-off after — and forward attachments verbatim.
+	// Track the original message so terminal failure paths can restore it
+	// instead of dropping the user's prompt or attachments on the floor.
+	// Take attachment-only messages too: dropping them silently when Content
+	// is empty would lose images/files the user attached to the queued prompt.
 	var takenMsg *messagequeue.QueuedMessage
+	var attachments []v1.MessageAttachment
 	if s.messageQueue != nil {
-		if msg, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok && msg != nil && msg.Content != "" {
+		if msg, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok && msg != nil && (msg.Content != "" || len(msg.Attachments) > 0) {
 			takenMsg = msg
-			prompt = prompt + "\n\n" + msg.Content
+			if msg.Content != "" {
+				prompt = prompt + "\n\n" + msg.Content
+			}
+			if len(msg.Attachments) > 0 {
+				attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
+				for _, a := range msg.Attachments {
+					attachments = append(attachments, v1.MessageAttachment{
+						Type:     a.Type,
+						Data:     a.Data,
+						MimeType: a.MimeType,
+					})
+				}
+			}
 			s.publishQueueStatusEvent(ctx, sessionID)
 		}
 	}
@@ -1052,7 +1098,7 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, nil)
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, attachments)
 		if err != nil {
 			requeueTaken()
 		}
@@ -1061,7 +1107,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, nil)
+		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments)
 		if err == nil {
 			return nil
 		}
@@ -1077,7 +1123,7 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
-			return s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, takenMsg)
+			return s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, takenMsg, attachments)
 		}
 
 		// "already has an agent running" means the execution store still tracks
@@ -1132,6 +1178,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	taskID, sessionID, prompt string,
 	planMode bool,
 	takenMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -1157,7 +1204,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, nil); err != nil {
+	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, attachments); err != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
 			zap.String("session_id", sessionID), zap.Error(err))
 		requeue()

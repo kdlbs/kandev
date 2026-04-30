@@ -48,24 +48,20 @@ func isSessionResetInProgressError(err error) bool {
 	return err != nil && (errors.Is(err, ErrSessionResetInProgress) || strings.Contains(err.Error(), ErrSessionResetInProgress.Error()))
 }
 
+// isTransientPromptError reports whether a prompt error is worth retrying via
+// the queue. ErrExecutionNotFound is intentionally NOT included here:
+// callers that can recover (autoStartStepPrompt → fallbackFreshLaunchOnMissingExecution)
+// detect it explicitly via errors.Is and route differently; callers that
+// can't (executeQueuedMessage) should not infinite-requeue on it. Treating
+// "execution not found" as transient blanket-applies a retry that loops
+// forever when the execution is genuinely gone.
 func isTransientPromptError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// "execution not found" is transient during a session resume: ResumeSession
-	// registers the new execution synchronously, but the agent process and
-	// agentctl bring-up is async (see runAgentProcessAsync). If PromptTask races
-	// the bring-up — e.g. the resume's boot ready event hasn't fired yet, or the
-	// session pointer has stale AgentExecutionID — the lookup may miss. Treating
-	// it as transient lets autoStartStepPrompt's retry loop give the resume time
-	// to finish settling.
-	if errors.Is(err, executor.ErrExecutionNotFound) {
-		return true
-	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "agent stream disconnected") ||
-		strings.Contains(msg, "use of closed network connection") ||
-		strings.Contains(msg, "execution not found")
+		strings.Contains(msg, "use of closed network connection")
 }
 
 func isAgentAlreadyRunningError(err error) bool {
