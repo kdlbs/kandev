@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestResolveIntent(t *testing.T) {
@@ -227,11 +229,15 @@ func TestIsPassthroughProfile(t *testing.T) {
 
 // TestLaunchPrepare_PassthroughDoesNotRecurse guards against an infinite
 // launchStart ↔ launchPrepare bounce when a passthrough profile is combined
-// with AutoStart=true and a step that blocks auto-start. Wiring the full
-// scheduler+executor stack is heavy, so we run the dispatch in a goroutine
-// with a panic recover: stack-overflow recursion would never return, while
-// the legitimate downstream nil-deref panic from the stub scheduler still
-// completes within the deadline.
+// with AutoStart=true and a step that blocks auto-start.
+//
+// To actually exercise the guard, the task must be persisted with a
+// WorkflowStepID that maps to a step lacking `auto_start_agent` — otherwise
+// `shouldBlockAutoStart` short-circuits to false and the test bypasses the
+// downgrade path entirely. Wiring the full scheduler+executor stack is too
+// heavy, so we run in a goroutine with a panic recover: stack-overflow
+// recursion would never return, while the legitimate downstream nil-deref
+// panic from the stub scheduler still completes within the deadline.
 func TestLaunchPrepare_PassthroughDoesNotRecurse(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := &mockAgentManager{isPassthrough: true}
@@ -243,6 +249,11 @@ func TestLaunchPrepare_PassthroughDoesNotRecurse(t *testing.T) {
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, mgr)
+
+	// Persist a task with the blocking step so shouldBlockAutoStart returns
+	// true, forcing launchStart to downgrade into launchPrepare. Without the
+	// `!req.AutoStart` guard, that re-enters launchStart and recurses.
+	seedTaskAndSessionWithStep(t, repo, "task1", "sess-pass", "step-blocked")
 
 	done := make(chan struct{})
 	go func() {
@@ -266,6 +277,44 @@ func TestLaunchPrepare_PassthroughDoesNotRecurse(t *testing.T) {
 		// returned without recursing
 	case <-time.After(2 * time.Second):
 		t.Fatal("LaunchSession recursed indefinitely (timed out)")
+	}
+}
+
+// seedTaskAndSessionWithStep is a variant of seedTaskAndSession that wires
+// the task to a workflow step, required by shouldBlockAutoStart.
+func seedTaskAndSessionWithStep(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, stepID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkspace(ctx, ws)
+
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkflow(ctx, wf)
+
+	task := &models.Task{
+		ID:             taskID,
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepID,
+		Title:          "Test Task",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	session := &models.TaskSession{
+		ID:        sessionID,
+		TaskID:    taskID,
+		State:     models.TaskSessionStateCreated,
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
 	}
 }
 
