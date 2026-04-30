@@ -670,10 +670,11 @@ export class SessionPage {
     return this.page.getByRole("alertdialog");
   }
 
-  /** Primary star icon inside a dockview tab. */
+  /** Primary star icon inside a dockview session tab. The star is rendered as a
+   *  sibling of `.dv-default-tab` inside the `data-testid="session-tab-<id>"`
+   *  wrapper, so we anchor on that wrapper rather than `.dv-default-tab` itself. */
   primaryStarInTab(text: string): Locator {
-    const tab = this.page.locator(`.dv-default-tab:has-text('${text}')`);
-    return tab.locator(".tabler-icon-star").first();
+    return this.sessionTabByText(text).locator(".tabler-icon-star").first();
   }
 
   /** "Move to next step" button in the chat status bar. */

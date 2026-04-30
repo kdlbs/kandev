@@ -202,13 +202,17 @@ test.describe("Workflow agent profile switching", () => {
   });
 
   test("on_turn_start transition to step with agent override uses correct profile", async ({
+    testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(60_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
-    // Backlog (on_turn_start: move_to_next) → Step1 (profileB, auto_start)
+    // Backlog (on_turn_start: move_to_next) → Step1 (profileB)
+    // Per PR #743, on_turn_start fires on user-message dispatch (not agent boot),
+    // and on_turn_start transitions skip on_enter — the user's prompt is delivered
+    // to the new step's profile via maybeSwitchSessionForProfile.
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       "Agent Switch OnTurnStart",
@@ -222,10 +226,8 @@ test.describe("Workflow agent profile switching", () => {
     });
     await apiClient.updateWorkflowStep(step1.id, {
       agent_profile_id: profileB.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
     });
 
-    // Create task with profileA — on_turn_start should move to Step1 and switch to profileB
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "OnTurnStart Switch",
@@ -237,10 +239,35 @@ test.describe("Workflow agent profile switching", () => {
       },
     );
 
-    // Poll for sessions — on_turn_start creates an intermediate session then switches
-    const sessions = await pollSessions(apiClient, task.id, 2, 45_000);
-    const profileBSession = sessions.find((s) => s.agent_profile_id === profileB.id);
-    expect(profileBSession).toBeDefined();
+    // Wait for profileA session to be ready before sending the message
+    // that triggers on_turn_start.
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await expect(session.chat).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
+        },
+        { timeout: 30_000, message: "Waiting for profileA agent to be ready" },
+      )
+      .toBe(true);
+
+    // User message → dispatchPromptAsync → on_turn_start → move_to_next → Step1 (profileB)
+    await session.sendMessage("hello");
+    await expect(session.chat.getByText("hello")).toBeVisible({ timeout: 10_000 });
+
+    // Profile switch produces (or reuses) a session with profileB on this task.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some((s) => s.agent_profile_id === profileB.id);
+        },
+        { timeout: 30_000, message: "Waiting for profileB session after on_turn_start" },
+      )
+      .toBe(true);
   });
 
   test("auto-launches agent when step has profile override and prompt", async ({
@@ -414,10 +441,15 @@ test.describe("Workflow agent profile switching", () => {
 
   /**
    * Verifies the switchSessionForStep WS event fix: when a task is manually moved
-   * to a step with a different agent profile, the new session tab becomes the
-   * active dockview tab.
+   * to a step with a different agent profile, the new session is created and
+   * promoted to primary.
+   *
+   * Note: Per PR #743 (pinnedSessionId), navigating to /t/<taskId> calls
+   * setActiveSession which pins the initial primary. Workflow profile switches
+   * no longer yank focus from a pinned session, so this test asserts on the
+   * primary star indicator (not the active dockview tab).
    */
-  test("manual step move switches active session tab to new agent", async ({
+  test("manual step move promotes new agent session to primary", async ({
     testPage,
     apiClient,
     seedData,
@@ -476,18 +508,22 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2 — triggers new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The new "Profile B" tab should appear and become the active dockview tab
-    const activeProfileBTab = testPage.locator(
-      '.dv-tab.dv-active-tab [data-testid^="session-tab-"]',
-    );
-    await expect(activeProfileBTab).toContainText("Profile B", { timeout: 30_000 });
+    // The new "Profile B" tab should appear and the primary star should move to it
+    // (the active tab stays on Profile A because the SSR-load pin protects it).
+    const profileBTab = session.sessionTabByText("Profile B");
+    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 30_000 });
   });
 
   /**
    * Verifies that an on_turn_complete cascade that switches agent profiles
-   * also switches the active dockview session tab.
+   * promotes the new session to primary.
+   *
+   * Note: Per PR #743 (pinnedSessionId), the user's pinned tab is preserved.
+   * The active dockview tab stays on the pinned session; this test asserts on
+   * the primary star marker.
    */
-  test("on_turn_complete cascade switches active session tab to new agent", async ({
+  test("on_turn_complete cascade promotes new agent session to primary", async ({
     testPage,
     apiClient,
     seedData,
@@ -530,11 +566,10 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step1 → auto_start with profileA → on_turn_complete → Step2 (profileB)
     await apiClient.moveTask(task.id, workflow.id, step1.id);
 
-    // After the cascade, the active tab should be "Profile B" (the final step's agent)
-    const activeProfileBTab = testPage.locator(
-      '.dv-tab.dv-active-tab [data-testid^="session-tab-"]',
-    );
-    await expect(activeProfileBTab).toContainText("Profile B", { timeout: 45_000 });
+    // After the cascade, the Profile B tab should appear and own the primary star.
+    const profileBTab = session.sessionTabByText("Profile B");
+    await expect(profileBTab).toBeVisible({ timeout: 45_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 45_000 });
   });
 
   /**
@@ -596,13 +631,12 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The Profile B tab should become active
-    const activeTab = testPage.locator('.dv-tab.dv-active-tab [data-testid^="session-tab-"]');
-    await expect(activeTab).toContainText("Profile B", { timeout: 30_000 });
-
-    // The star icon should be visible inside the active tab (no reload needed)
-    const starIcon = activeTab.locator("svg.tabler-icon-star");
-    await expect(starIcon).toBeVisible({ timeout: 5_000 });
+    // The Profile B tab should appear and own the primary star (no reload needed).
+    // Per PR #743, the active dockview tab stays pinned to Profile A — the star
+    // moving is what proves SetPrimarySession's WS broadcast landed.
+    const profileBTab = session.sessionTabByText("Profile B");
+    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 30_000 });
   });
 
   /**
@@ -668,9 +702,12 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2 (no override) — should revert to profileA
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // The active tab should show Profile A (the task's default agent)
-    const activeTab = testPage.locator('.dv-tab.dv-active-tab [data-testid^="session-tab-"]');
-    await expect(activeTab).toContainText("Profile A", { timeout: 30_000 });
+    // A Profile A session should appear and own the primary star (no reload needed).
+    // Per PR #743, the user's pinned tab — Profile B from initial load — stays
+    // active; the primary marker is what proves the revert-to-default landed.
+    const profileATab = session.sessionTabByText("Profile A");
+    await expect(profileATab).toBeVisible({ timeout: 30_000 });
+    await expect(session.primaryStarInTab("Profile A")).toBeVisible({ timeout: 30_000 });
   });
 
   test("reset context checkbox is disabled when step has agent profile override", async ({
