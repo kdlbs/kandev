@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -992,8 +991,9 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		// Rollback: delete the ephemeral task to prevent orphans. Use a fresh
 		// background context — the request context may already be cancelled
 		// (e.g. client aborted, deadline exceeded), and we still want cleanup
-		// to run.
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// to run. TaskDeleteTimeout matches the other DeleteTask call sites
+		// in this file so a future change to the constant covers this path too.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 		defer cancel()
 		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Error("failed to rollback quick chat task",
