@@ -93,9 +93,7 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
 	// here, which lets clients populate slash menus before the first prompt.
-	// Use a detached context — the request context is cancelled the moment
-	// we return.
-	go a.emitAvailableCommandsAfterDelay(context.Background(), sid)
+	go a.emitAvailableCommandsAfterDelay(sid)
 
 	return acp.NewSessionResponse{
 		SessionId: sid,
@@ -146,7 +144,7 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
 	// Re-emit available commands after the session/load response flushes.
-	go a.emitAvailableCommandsAfterDelay(context.Background(), req.SessionId)
+	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
 	return acp.LoadSessionResponse{}, nil
 }
@@ -204,14 +202,9 @@ func (a *mockAgent) emitAvailableCommandsOnce(ctx context.Context, sid acp.Sessi
 // (OpenCode, Claude) emit available_commands_update notifications immediately
 // after these handshakes, so kandev clients can populate slash menus before
 // the first prompt — eager-init for quick chat depends on this.
-func (a *mockAgent) emitAvailableCommandsAfterDelay(ctx context.Context, sid acp.SessionId) {
-	const flushDelay = 50 * time.Millisecond
-	select {
-	case <-time.After(flushDelay):
-	case <-ctx.Done():
-		return
-	}
-	a.emitAvailableCommandsOnce(ctx, sid)
+func (a *mockAgent) emitAvailableCommandsAfterDelay(sid acp.SessionId) {
+	time.Sleep(50 * time.Millisecond)
+	a.emitAvailableCommandsOnce(context.Background(), sid)
 }
 
 // mockAvailableCommands returns the slash commands supported by the mock agent.

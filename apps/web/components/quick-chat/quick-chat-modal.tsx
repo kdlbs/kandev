@@ -126,12 +126,11 @@ function AgentPickerView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {agentProfiles.map((profile) => {
             const isPending = pendingAgentId === profile.id;
-            const isDisabled = isLoading;
             return (
               <button
                 key={profile.id}
                 onClick={() => onSelectAgent(profile.id)}
-                disabled={isDisabled}
+                disabled={isLoading}
                 className="group relative flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all hover:border-primary hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-transparent"
               >
                 <div className="flex items-center gap-2 w-full">
@@ -195,10 +194,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
             <QuickChatSessionView sessionId={activeSessionId} />
           )}
           {activeSessionNeedsAgent && (
-            <AgentPickerView
-              onSelectAgent={handleSelectAgent}
-              pendingAgentId={pendingAgentId}
-            />
+            <AgentPickerView onSelectAgent={handleSelectAgent} pendingAgentId={pendingAgentId} />
           )}
         </DialogContent>
       </Dialog>

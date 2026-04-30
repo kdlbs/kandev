@@ -31,11 +31,7 @@ function useQuickChatStore() {
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
 
 /** POSTs to start a quick-chat session and returns the response. */
-async function startQuickChatForAgent(
-  workspaceId: string,
-  agentId: string,
-  store: QuickChatStore,
-) {
+async function startQuickChatForAgent(workspaceId: string, agentId: string, store: QuickChatStore) {
   const agent = store.agentProfiles.find((p) => p.id === agentId);
   const sessionCount = store.sessions.filter((s) => s.sessionId !== "").length + 1;
   const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
@@ -53,8 +49,10 @@ async function startQuickChatForAgent(
  * (it's already running by the time the abort lands), and we'd never see the
  * task_id on the FE — orphaning the task. Instead we let every request run
  * to completion and reconcile by request id: if a newer pick superseded this
- * one before the response arrived, we delete the now-orphaned ephemeral task. */
-function useAgentSelection(workspaceId: string, store: QuickChatStore) {
+ * one before the response arrived, we delete the now-orphaned ephemeral task.
+ *
+ * Exported for unit testing — see `use-quick-chat-modal.test.ts`. */
+export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   const { toast } = useToast();
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
   // Monotonic request id; the latest click "wins" — older responses get
@@ -108,10 +106,11 @@ export function useQuickChatModal(workspaceId: string) {
   const store = useQuickChatStore();
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
-  const { pendingAgentId, reset, handleSelectAgent: doSelectAgent } = useAgentSelection(
-    workspaceId,
-    store,
-  );
+  const {
+    pendingAgentId,
+    reset,
+    handleSelectAgent: doSelectAgent,
+  } = useAgentSelection(workspaceId, store);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
