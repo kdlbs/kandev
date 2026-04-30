@@ -18,7 +18,6 @@ const SCORE_FULL_PREFIX = 0.9;
 const SCORE_LEAF_PREFIX = 0.85;
 const SCORE_SEGMENT_PREFIX = 0.75;
 const SCORE_FULL_SUBSTRING = 0.65;
-const SCORE_LEAF_SUBSTRING = 0.6;
 const SCORE_SEGMENT_SUBSTRING = 0.5;
 const SCORE_KEYWORD_PREFIX = 0.7;
 const SCORE_KEYWORD_SUBSTRING = 0.45;
@@ -88,7 +87,7 @@ function scoreKeywords(keywords: string[] | undefined, q: string): number {
 // search query. Returns 0 when no signal at all is found.
 export function scoreBranch(value: string, search: string, keywords?: string[]): number {
   const q = search.trim().toLowerCase();
-  if (q.length === 0) return SCORE_LEAF_SUBSTRING; // keep current order; show all
+  if (q.length === 0) return SCORE_SEGMENT_SUBSTRING; // keep current order; show all
   const v = value.toLowerCase();
   const leaf = leafSegment(v);
 
@@ -100,8 +99,10 @@ export function scoreBranch(value: string, search: string, keywords?: string[]):
   const segScore = scoreSegments(segments(v), q, SCORE_SEGMENT_PREFIX, SCORE_SEGMENT_SUBSTRING);
   if (segScore > 0) return segScore;
 
+  // Note: a leaf-substring case is intentionally absent — `leaf` is a suffix
+  // of `v`, so any substring match in the leaf is also a match in `v` and is
+  // already caught by the SCORE_FULL_SUBSTRING branch above.
   if (v.includes(q)) return SCORE_FULL_SUBSTRING - lengthPenalty(v);
-  if (leaf.includes(q)) return SCORE_LEAF_SUBSTRING - lengthPenalty(leaf);
 
   const kwScore = scoreKeywords(keywords, q);
   if (kwScore > 0) return kwScore;

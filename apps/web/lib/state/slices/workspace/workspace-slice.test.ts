@@ -55,3 +55,24 @@ describe("setRepositoryBranchesLoading", () => {
     expect(s.getState().repositoryBranches.loadingByRepositoryId[REPO]).toBe(false);
   });
 });
+
+describe("setRepositoryBranchesFetchError", () => {
+  it("records the error without touching cached branches", () => {
+    const s = makeStore();
+    s.getState().setRepositoryBranches(REPO, BRANCHES, { fetchedAt: FETCHED_AT });
+    s.getState().setRepositoryBranchesFetchError(REPO, "network down");
+    const state = s.getState().repositoryBranches;
+    expect(state.fetchErrorByRepositoryId[REPO]).toBe("network down");
+    // Cached branches and fetchedAt are preserved so the dropdown stays usable
+    // (stale-while-revalidate semantics).
+    expect(state.itemsByRepositoryId[REPO]).toEqual(BRANCHES);
+    expect(state.fetchedAtByRepositoryId[REPO]).toBe(FETCHED_AT);
+  });
+
+  it("clears the error when called with undefined", () => {
+    const s = makeStore();
+    s.getState().setRepositoryBranchesFetchError(REPO, "boom");
+    s.getState().setRepositoryBranchesFetchError(REPO, undefined);
+    expect(s.getState().repositoryBranches.fetchErrorByRepositoryId[REPO]).toBeUndefined();
+  });
+});

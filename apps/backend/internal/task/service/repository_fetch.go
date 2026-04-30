@@ -55,6 +55,11 @@ func newBranchFetcher(log *zap.Logger) *branchFetcher {
 // Fetch runs `git fetch --all --prune --no-tags` for repoPath unless the
 // cooldown is still active, in which case the previous result is returned
 // with Skipped=true. Concurrent calls for the same path coalesce.
+//
+// The singleflight closure deliberately uses a context detached from the
+// caller's: if the first caller's HTTP request is cancelled mid-flight (e.g.
+// browser tab closed), waiting callers must still get a real result and the
+// cooldown cache must not be poisoned with context.Canceled.
 func (f *branchFetcher) Fetch(ctx context.Context, repoPath string) BranchRefreshResult {
 	if cached, ok := f.checkCooldown(repoPath); ok {
 		return cached
@@ -65,7 +70,7 @@ func (f *branchFetcher) Fetch(ctx context.Context, repoPath string) BranchRefres
 		if cached, ok := f.checkCooldown(repoPath); ok {
 			return cached, nil
 		}
-		res := f.runFetch(ctx, repoPath)
+		res := f.runFetch(context.WithoutCancel(ctx), repoPath)
 		f.mu.Lock()
 		f.lastByKey[repoPath] = res
 		f.mu.Unlock()
@@ -97,9 +102,12 @@ func (f *branchFetcher) runFetch(ctx context.Context, repoPath string) BranchRef
 	if err != nil {
 		res.Err = fmt.Errorf("git fetch: %w", err)
 		if f.logger != nil {
+			// Avoid logging raw git output: it can contain remote URLs with
+			// embedded credentials or other sensitive data. Surface only the
+			// length and a sanitized summary instead.
 			f.logger.Warn("branch refresh fetch failed",
 				zap.String("path", repoPath),
-				zap.String("output", string(output)),
+				zap.Int("output_bytes", len(output)),
 				zap.Error(err))
 		}
 	}

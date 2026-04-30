@@ -66,6 +66,10 @@ export const createWorkspaceSlice: StateCreator<
     set((draft) => {
       draft.repositoryBranches.loadingByRepositoryId[repositoryId] = loading;
     }),
+  setRepositoryBranchesFetchError: (repositoryId, error) =>
+    set((draft) => {
+      draft.repositoryBranches.fetchErrorByRepositoryId[repositoryId] = error;
+    }),
   setRepositoryScripts: (repositoryId, scripts) =>
     set((draft) => {
       draft.repositoryScripts.itemsByRepositoryId[repositoryId] = scripts;

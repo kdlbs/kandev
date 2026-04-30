@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -97,6 +98,25 @@ func TestBranchFetcher_BothCooldownAndError(t *testing.T) {
 	}
 	if second.Err == nil {
 		t.Fatalf("skipped result should preserve the prior error")
+	}
+}
+
+// TestBranchFetcher_FirstCallerCancelDoesNotPoisonCache verifies that a
+// caller cancelling its context after triggering the singleflight does not
+// cause the cached result to record a context.Canceled error. The fetch must
+// run to completion using a detached context so subsequent waiters see a real
+// outcome.
+func TestBranchFetcher_FirstCallerCancelDoesNotPoisonCache(t *testing.T) {
+	root := t.TempDir()
+	repoPath := makeRepoWithCommit(t, filepath.Join(root, "repo"))
+
+	f := newBranchFetcher(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Fetch even runs
+
+	res := f.Fetch(ctx, repoPath)
+	if errors.Is(res.Err, context.Canceled) {
+		t.Fatalf("cached result must not record context.Canceled from caller's ctx; got %v", res.Err)
 	}
 }
 

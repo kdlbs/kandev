@@ -537,6 +537,7 @@ export function useTaskCreateDialogData(
     isLoading: branchesLoading,
     refresh: refreshBranches,
     fetchedAt: branchesFetchedAt,
+    fetchError: branchesFetchError,
   } = useRepositoryBranches(fs.repositoryId || null, Boolean(open && fs.repositoryId));
   const computed = useDialogComputed({
     fs,
@@ -564,6 +565,7 @@ export function useTaskCreateDialogData(
     branchesLoading,
     refreshBranches,
     branchesFetchedAt,
+    branchesFetchError,
     computed,
   };
 }

@@ -297,6 +297,7 @@ export type AppState = {
     meta?: { fetchedAt?: string; fetchError?: string },
   ) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
+  setRepositoryBranchesFetchError: (repositoryId: string, error: string | undefined) => void;
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   clearRepositoryScripts: (repositoryId: string) => void;

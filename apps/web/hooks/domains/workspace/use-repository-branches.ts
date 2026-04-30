@@ -30,6 +30,9 @@ export function useRepositoryBranches(repositoryId: string | null, enabled = tru
   );
   const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
   const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
+  const setRepositoryBranchesFetchError = useAppStore(
+    (state) => state.setRepositoryBranchesFetchError,
+  );
   const inFlightRef = useRef<string | null>(null);
 
   // Stable fetcher closed over the store actions; the repo id is a parameter
@@ -46,15 +49,19 @@ export function useRepositoryBranches(repositoryId: string | null, enabled = tru
             fetchError: response.fetch_error,
           });
         })
-        .catch(() => {
-          setRepositoryBranches(repoId, []);
+        .catch((err: unknown) => {
+          // Stale-while-revalidate: keep any previously-cached branches in
+          // place on transport failure so the dropdown stays usable. Only the
+          // fetchError is updated so callers can surface the failure.
+          const message = err instanceof Error ? err.message : "request failed";
+          setRepositoryBranchesFetchError(repoId, message);
         })
         .finally(() => {
           if (inFlightRef.current === repoId) inFlightRef.current = null;
           setRepositoryBranchesLoading(repoId, false);
         });
     },
-    [setRepositoryBranches, setRepositoryBranchesLoading],
+    [setRepositoryBranches, setRepositoryBranchesLoading, setRepositoryBranchesFetchError],
   );
 
   useEffect(() => {
