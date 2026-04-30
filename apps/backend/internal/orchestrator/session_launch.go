@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -299,13 +297,10 @@ func normalizeRecoverSessionError(err error) error {
 }
 
 func isMissingProfileResumeError(err error) bool {
-	if errors.Is(err, sql.ErrNoRows) {
-		return true
-	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "agent profile not found") ||
-		strings.Contains(msg, "profile not found") ||
-		strings.Contains(msg, "failed to resolve agent profile")
+	return strings.Contains(msg, "failed to resolve agent profile") ||
+		strings.Contains(msg, "agent profile not found") ||
+		(strings.Contains(msg, "agent profile") && strings.Contains(msg, "no rows in result set"))
 }
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.
