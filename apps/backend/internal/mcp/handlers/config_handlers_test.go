@@ -363,26 +363,37 @@ func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, task
 func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
 }
 
-// TestQueueMoveTaskPrompt_NilQueueIsSafe ensures that providing a prompt with no
-// configured message queue is handled gracefully (logged, no panic).
-func TestQueueMoveTaskPrompt_NilQueueIsSafe(t *testing.T) {
-	h := &Handlers{logger: testLogger(t).WithFields()}
-
-	// Should not panic — the nil-queue branch short-circuits.
-	h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+// TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
+// they just exercise QueueMessage. Returning (nil, false) is consistent with
+// "nothing to take", which is what the rollback path checks before logging.
+func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
+	return nil, false
 }
 
-// TestQueueMoveTaskPrompt_EmptySessionIDIsSafe ensures that a missing primary
-// session is handled gracefully (logged, no panic, no queue call).
-func TestQueueMoveTaskPrompt_EmptySessionIDIsSafe(t *testing.T) {
+// TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
+// and surfaces a descriptive error so callers can fail fast instead of silently
+// dropping the user-supplied prompt.
+func TestQueueMoveTaskPrompt_NilQueueReturnsError(t *testing.T) {
+	h := &Handlers{logger: testLogger(t).WithFields()}
+
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "message queue")
+}
+
+// TestQueueMoveTaskPrompt_EmptySessionIDReturnsError ensures a missing session ID
+// surfaces an error rather than silently no-op'ing — without a session there's
+// nowhere to deliver the prompt.
+func TestQueueMoveTaskPrompt_EmptySessionIDReturnsError(t *testing.T) {
 	queue := &recordingMessageQueuer{}
 	h := &Handlers{
 		messageQueue: queue,
 		logger:       testLogger(t).WithFields(),
 	}
 
-	h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
-
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "primary session")
 	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
 }
 
@@ -396,7 +407,8 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 		logger:       testLogger(t).WithFields(),
 	}
 
-	h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+	require.NoError(t, err)
 
 	require.Len(t, queue.calls, 1)
 	got := queue.calls[0]

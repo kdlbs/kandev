@@ -43,7 +43,16 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	// on_turn_complete on the wrong step, and orphaning the queued prompt.
 	// Defer instead: queue the prompt and record a pending move so
 	// handleAgentReady applies it deterministically when the turn ends.
-	session := h.lookupSession(ctx, req.TaskID)
+	session, lookupErr := h.lookupSession(ctx, req.TaskID)
+	if lookupErr != nil {
+		// A real backend failure resolving the primary session is an internal
+		// error, not a user-input validation failure — don't collapse it into
+		// "you have no session" downstream.
+		h.logger.Error("move_task: failed to look up primary session",
+			zap.String("task_id", req.TaskID), zap.Error(lookupErr))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to look up task's primary session", nil)
+	}
 	if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
 		// The deferred path requires the message queue: it's where the hand-off
 		// prompt sits and where SetPendingMove lives. If neither is available
@@ -95,6 +104,15 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
+		// Roll back the prompt we just queued — without this, the next agent
+		// turn would deliver a "You were moved to this step…" prompt for a
+		// move that didn't actually happen.
+		if h.messageQueue != nil {
+			if _, ok := h.messageQueue.TakeQueued(ctx, session.ID); ok {
+				h.logger.Warn("move_task: dropped queued hand-off prompt after MoveTask failure",
+					zap.String("task_id", req.TaskID), zap.String("session_id", session.ID))
+			}
+		}
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
 	}
@@ -126,18 +144,19 @@ func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowI
 	return dto.FromTask(&clone)
 }
 
-// lookupSession returns the task's primary session, or nil if none exists.
-// Errors are logged at warn level — the move can still proceed via the
-// immediate path even when session lookup fails.
-func (h *Handlers) lookupSession(ctx context.Context, taskID string) *models.TaskSession {
+// lookupSession returns the task's primary session.
+//   - (session, nil) — task has a primary session.
+//   - (nil, nil)     — task has no primary session yet (legitimate "empty" state).
+//   - (nil, err)     — backend lookup failed; the caller should map this to an
+//     internal error rather than treating it as "no session", since collapsing
+//     them lets transient backend failures surface as user-input validation
+//     errors.
+func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
-	if err != nil || session == nil {
-		h.logger.Warn("failed to resolve primary session for task",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return nil
+	if err != nil {
+		return nil, err
 	}
-	return session
+	return session, nil
 }
 
 // queueMoveTaskPrompt enqueues a user-supplied prompt on the task's primary session.

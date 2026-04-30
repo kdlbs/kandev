@@ -62,9 +62,13 @@ type SessionLauncher interface {
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
+// TakeQueued is exposed so move_task can roll back the hand-off prompt when the
+// underlying MoveTask call fails — without it, a queued "you were moved..."
+// message would survive a failed move and be delivered on the next agent turn.
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
 	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
+	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 
 // Handlers provides MCP WebSocket handlers.
