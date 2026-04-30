@@ -40,4 +40,11 @@ describe("openQuickChat agentProfileId persistence", () => {
       store.getState().quickChat.sessions.filter((s) => s.sessionId === SESSION_ID),
     ).toHaveLength(1);
   });
+
+  it("keeps existing agentProfileId when reopened without one", () => {
+    const store = makeStore();
+    store.getState().openQuickChat(SESSION_ID, WORKSPACE_ID, PROFILE_ID);
+    store.getState().openQuickChat(SESSION_ID, WORKSPACE_ID); // no profile
+    expect(findSession(store)?.agentProfileId).toBe(PROFILE_ID);
+  });
 });
