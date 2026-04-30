@@ -47,7 +47,9 @@ function buildUserSettingsState(
   return { ...mapUserSettingsResponse(resp), workspaceId };
 }
 
-function readAgentProfileId(metadata: Record<string, unknown> | null | undefined): string | undefined {
+function readAgentProfileId(
+  metadata: Record<string, unknown> | null | undefined,
+): string | undefined {
   if (!metadata || typeof metadata !== "object") return undefined;
   const value = metadata.agent_profile_id;
   return typeof value === "string" ? value : undefined;
