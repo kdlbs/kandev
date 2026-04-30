@@ -187,7 +187,8 @@ func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string)
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	return &executor.AgentProfileInfo{
-		SupportsMCP: true,
+		SupportsMCP:    true,
+		CLIPassthrough: m.isPassthrough,
 	}, nil
 }
 func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecutionID string) error {

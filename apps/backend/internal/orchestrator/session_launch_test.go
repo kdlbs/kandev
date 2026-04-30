@@ -3,8 +3,10 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func TestResolveIntent(t *testing.T) {
@@ -183,6 +185,87 @@ func TestLaunchRestoreWorkspace_Success(t *testing.T) {
 	}
 	if resp.State != string(models.TaskSessionStateCompleted) {
 		t.Errorf("expected state %q, got %q", models.TaskSessionStateCompleted, resp.State)
+	}
+}
+
+// --- launchPrepare passthrough upgrade ---
+
+func TestIsPassthroughProfile(t *testing.T) {
+	repo := setupTestRepo(t)
+	passthroughMgr := &mockAgentManager{isPassthrough: true}
+	regularMgr := &mockAgentManager{isPassthrough: false}
+
+	t.Run("passthrough profile detected", func(t *testing.T) {
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), passthroughMgr)
+		if !svc.isPassthroughProfile(context.Background(), "profile1") {
+			t.Error("expected isPassthroughProfile=true for passthrough profile")
+		}
+	})
+
+	t.Run("non-passthrough profile not detected", func(t *testing.T) {
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), regularMgr)
+		if svc.isPassthroughProfile(context.Background(), "profile1") {
+			t.Error("expected isPassthroughProfile=false for non-passthrough profile")
+		}
+	})
+
+	t.Run("empty profile id returns false", func(t *testing.T) {
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), passthroughMgr)
+		if svc.isPassthroughProfile(context.Background(), "") {
+			t.Error("expected isPassthroughProfile=false for empty profile id")
+		}
+	})
+
+	t.Run("nil agent manager returns false", func(t *testing.T) {
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.agentManager = nil
+		if svc.isPassthroughProfile(context.Background(), "profile1") {
+			t.Error("expected isPassthroughProfile=false when agent manager is nil")
+		}
+	})
+}
+
+// TestLaunchPrepare_PassthroughDoesNotRecurse guards against an infinite
+// launchStart ↔ launchPrepare bounce when a passthrough profile is combined
+// with AutoStart=true and a step that blocks auto-start. Wiring the full
+// scheduler+executor stack is heavy, so we run the dispatch in a goroutine
+// with a panic recover: stack-overflow recursion would never return, while
+// the legitimate downstream nil-deref panic from the stub scheduler still
+// completes within the deadline.
+func TestLaunchPrepare_PassthroughDoesNotRecurse(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := &mockAgentManager{isPassthrough: true}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-blocked"] = &wfmodels.WorkflowStep{
+		ID:   "step-blocked",
+		Name: "blocked",
+		// no on_enter actions => auto_start_agent missing => blocked
+	}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, mgr)
+
+	done := make(chan struct{})
+	go func() {
+		defer func() {
+			// Stub scheduler nil-deref is expected. Recursion would never reach
+			// this point.
+			_ = recover()
+			close(done)
+		}()
+		_, _ = svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+			TaskID:         "task1",
+			Intent:         IntentStart,
+			AgentProfileID: "profile-pass",
+			AutoStart:      true,
+			WorkflowStepID: "step-blocked",
+		})
+	}()
+
+	select {
+	case <-done:
+		// returned without recursing
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession recursed indefinitely (timed out)")
 	}
 }
 

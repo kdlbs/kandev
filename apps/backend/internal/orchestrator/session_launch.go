@@ -106,8 +106,12 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 // Passthrough profiles can't be "prepared" without a running PTY — the terminal
 // has nothing to attach to until the agent process exists. Upgrade those calls
 // to a full start so the PTY is ready by the time the user sees the terminal.
+//
+// AutoStart=true means we arrived here from launchStart's blocked-auto-start
+// downgrade path; skipping the upgrade in that case avoids a launchStart ↔
+// launchPrepare bounce.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if s.isPassthroughProfile(ctx, req.AgentProfileID) {
+	if !req.AutoStart && s.isPassthroughProfile(ctx, req.AgentProfileID) {
 		return s.launchStart(ctx, req)
 	}
 	sessionID, err := s.PrepareTaskSession(
