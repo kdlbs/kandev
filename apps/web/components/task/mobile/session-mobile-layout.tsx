@@ -10,8 +10,10 @@ import { TaskChangesPanel } from "../task-changes-panel";
 import { TaskFilesPanel } from "../task-files-panel";
 import { ShellTerminal } from "../shell-terminal";
 import { PassthroughTerminal } from "../passthrough-terminal";
+import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
+import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 
 const TOP_NAV_HEIGHT = "3.5rem";
@@ -92,6 +94,14 @@ function MobilePanelArea({
   topNavHeight,
   bottomNavHeight,
 }: MobilePanelAreaProps) {
+  const { keyboardOpen, bottomOffset } = useVisualViewportOffset();
+  // Keep terminal content's visible bottom glued to the keybar top. When the
+  // keyboard is up, the content area already pads for the bottom nav (which
+  // is now under the keyboard), so we subtract it back out and add the
+  // keyboard height instead.
+  const terminalPaddingBottom = keyboardOpen
+    ? `calc(${bottomOffset + KEYBAR_HEIGHT_PX}px - ${bottomNavHeight} - env(safe-area-inset-bottom, 0px))`
+    : `${KEYBAR_HEIGHT_PX}px`;
   return (
     <div
       className="flex flex-col"
@@ -135,7 +145,11 @@ function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "terminal" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
+        <div
+          data-testid="terminal-panel"
+          className="flex-1 min-h-0 flex flex-col p-2"
+          style={{ paddingBottom: terminalPaddingBottom }}
+        >
           <SessionPanelContent className="p-0 flex-1 min-h-0">
             <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
           </SessionPanelContent>
@@ -259,6 +273,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         handleOpenFile={handleOpenFile}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
+      />
+
+      {/* Terminal key-bar — docks above OS keyboard or bottom nav on the terminal panel */}
+      <MobileTerminalKeybar
+        sessionId={effectiveSessionId ?? null}
+        visible={currentMobilePanel === "terminal"}
+        baseBottomOffset={BOTTOM_NAV_HEIGHT}
       />
 
       {/* Fixed Bottom Navigation */}
