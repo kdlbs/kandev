@@ -307,7 +307,7 @@ func (s *Server) registerTools() {
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 9
+		count += 10
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++

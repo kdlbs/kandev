@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -222,22 +223,27 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	// Wrapped in synctest so the WaitForSessionReady poll's time.After advances
+	// virtually instead of blocking the test for ~1s of real time. Matches
+	// CLAUDE.md guidance to prefer synctest over time.Sleep-based waits.
+	synctest.Test(t, func(t *testing.T) {
+		svc, repo := newTestTaskService(t)
+		task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
-	h, orch := newMessageTaskHandler(t, svc)
-	orch.promptErrFirst = executor.ErrExecutionNotFound
+		h, orch := newMessageTaskHandler(t, svc)
+		orch.promptErrFirst = executor.ErrExecutionNotFound
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "retry me",
+		msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
+			"task_id": task.ID,
+			"prompt":  "retry me",
+		})
+		resp, err := h.handleMessageTask(context.Background(), msg)
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+		assert.Len(t, orch.promptCalls, 2, "should retry prompt after resume")
+		assert.Equal(t, 1, orch.resumeCalls)
 	})
-	resp, err := h.handleMessageTask(context.Background(), msg)
-	require.NoError(t, err)
-	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
-
-	assert.Len(t, orch.promptCalls, 2, "should retry prompt after resume")
-	assert.Equal(t, 1, orch.resumeCalls)
 }
 
 func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {

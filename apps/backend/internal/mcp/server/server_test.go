@@ -194,8 +194,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 9 kanban + 1 interaction + 4 plan = 14
-	assert.Equal(t, 14, len(tools))
+	// 10 kanban + 1 interaction + 4 plan = 15
+	assert.Equal(t, 15, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {

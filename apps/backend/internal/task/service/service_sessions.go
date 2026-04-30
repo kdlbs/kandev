@@ -2,11 +2,56 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// SessionReadyPollInterval is how often WaitForSessionReady polls session state.
+const SessionReadyPollInterval = 1 * time.Second
+
+// SessionReadyMaxWait is the maximum time WaitForSessionReady waits before timing out.
+const SessionReadyMaxWait = 90 * time.Second
+
+// WaitForSessionReady polls the session state until the agent is ready to accept
+// prompts. Returns nil when the session reaches WAITING_FOR_INPUT, or an error if
+// it transitions to FAILED/CANCELLED/COMPLETED, the context is cancelled, or the
+// timeout is exceeded. Used after ResumeTaskSession to gate the prompt retry until
+// the agent has actually finished booting.
+func (s *Service) WaitForSessionReady(ctx context.Context, sessionID string) error {
+	deadline := time.Now().Add(SessionReadyMaxWait)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for session to become ready after resume")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(SessionReadyPollInterval):
+		}
+		session, err := s.sessions.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to check session state: %w", err)
+		}
+		switch session.State {
+		case models.TaskSessionStateWaitingForInput:
+			return nil
+		case models.TaskSessionStateFailed:
+			errMsg := session.ErrorMessage
+			if errMsg == "" {
+				errMsg = "session failed during resume"
+			}
+			return fmt.Errorf("session failed after resume: %s", errMsg)
+		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+			return fmt.Errorf("session in unexpected state after resume: %s", session.State)
+		default:
+			// STARTING or RUNNING — keep polling
+		}
+	}
+}
 
 // ListTaskSessions returns all sessions for a task.
 func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
