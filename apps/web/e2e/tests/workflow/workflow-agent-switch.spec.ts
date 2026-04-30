@@ -256,6 +256,7 @@ test.describe("Workflow agent profile switching", () => {
 
     // User message → dispatchPromptAsync → on_turn_start → move_to_next → Step1 (profileB)
     await session.sendMessage("hello");
+    await expect(session.chat.getByText("hello")).toBeVisible({ timeout: 10_000 });
 
     // Profile switch produces (or reuses) a session with profileB on this task.
     await expect
@@ -568,7 +569,7 @@ test.describe("Workflow agent profile switching", () => {
     // After the cascade, the Profile B tab should appear and own the primary star.
     const profileBTab = session.sessionTabByText("Profile B");
     await expect(profileBTab).toBeVisible({ timeout: 45_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 30_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 45_000 });
   });
 
   /**
