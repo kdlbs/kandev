@@ -66,8 +66,8 @@ export function usePlanPanelAutoOpen() {
       .finally(() => setTaskPlanLoading(taskId, false));
   }, [activeTaskId, connectionStatus, isLoaded, setTaskPlan, setTaskPlanLoading, storeApi]);
 
-  // Drop the attempt mark when the WS reconnects so a transient failure can
-  // be retried after recovery.
+  // Clear the attempt set on WS disconnect so that when the WS reconnects
+  // the fetch effect can retry any tasks that previously failed or were pending.
   useEffect(() => {
     if (connectionStatus === "connected") return;
     attemptedRef.current.clear();
