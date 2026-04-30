@@ -28,8 +28,14 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
-  /** Kill the backend process and respawn with the same config (DB, ports, tmpDir persist). */
-  restart: () => Promise<void>;
+  /**
+   * Kill the backend process and respawn with the same config (DB, ports,
+   * tmpDir persist). Optional `envOverrides` mutates the captured env *for the
+   * lifetime of the worker*; pass them again on a subsequent restart to
+   * revert. Only in-memory execution state (running agents, WS connections)
+   * is lost.
+   */
+  restart: (envOverrides?: Record<string, string>) => Promise<void>;
 };
 
 async function waitForHealth(url: string, timeoutMs: number, proc?: ChildProcess): Promise<void> {
@@ -243,11 +249,11 @@ exec git "$@"
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
-        // Force-disable the agentctl auto-approve default. A developer may have
-        // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true in their shell for local dev,
-        // and inheriting it here silently bypasses the permission UI in tests
-        // that exercise the approve/reject flow.
-        AGENTCTL_AUTO_APPROVE_PERMISSIONS: "false",
+        // Most E2E tests rely on auto-approve being on so tools that require
+        // permission (Edit, Bash) just complete without UI interaction. Tests
+        // that exercise the approve/reject flow itself opt in by spawning their
+        // own backend with this env var set to "false" — see permission-approval.spec.ts.
+        AGENTCTL_AUTO_APPROVE_PERMISSIONS: process.env.AGENTCTL_AUTO_APPROVE_PERMISSIONS ?? "true",
         // Short window makes coalesce-boundary tests practical without wall-clock waits.
         KANDEV_PLAN_COALESCE_WINDOW_MS: process.env.KANDEV_PLAN_COALESCE_WINDOW_MS ?? "2000",
         GIT_AUTHOR_NAME: "E2E Test",
@@ -301,7 +307,12 @@ exec git "$@"
        * SQLite DB, tmpDir, and all persisted data survive the restart.
        * Only in-memory execution state (running agents, WS connections) is lost.
        */
-      const restart = async () => {
+      const restart = async (envOverrides?: Record<string, string>) => {
+        if (envOverrides) {
+          for (const [k, v] of Object.entries(envOverrides)) {
+            (backendEnv as Record<string, string>)[k] = v;
+          }
+        }
         await killProcessGroup(backendProc);
         // Wait for OS to release the TCP port — Linux TIME_WAIT can exceed 500ms under load
         await new Promise((r) => setTimeout(r, 2_000));

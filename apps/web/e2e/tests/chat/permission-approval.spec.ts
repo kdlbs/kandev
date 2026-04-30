@@ -38,6 +38,17 @@ async function seedMultiPermissionTask(
 test.describe("Permission approval persistence", () => {
   test.describe.configure({ retries: 1 });
 
+  // Most E2E tests run with auto-approve on so tools-needing-permission scenarios
+  // (e.g. /e2e:read-and-edit) don't block the agent. This test specifically
+  // exercises the approve UI, so it needs auto-approve OFF — restart the worker
+  // backend with the override before this file's tests, then restore.
+  test.beforeAll(async ({ backend }) => {
+    await backend.restart({ AGENTCTL_AUTO_APPROVE_PERMISSIONS: "false" });
+  });
+  test.afterAll(async ({ backend }) => {
+    await backend.restart({ AGENTCTL_AUTO_APPROVE_PERMISSIONS: "true" });
+  });
+
   test("approved prompts stay approved after the agent's turn ends", async ({
     testPage,
     apiClient,
