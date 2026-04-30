@@ -127,18 +127,20 @@ func TestNormalizeRecoverSessionError(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected mapped error")
 		}
-		if got := err.Error(); got != "the agent profile used by this session was deleted; start a new session and choose an available agent profile" {
+		want := "the agent profile used by this session was deleted; start a new session and choose an available agent profile: " + in.Error()
+		if got := err.Error(); got != want {
 			t.Fatalf("unexpected error: %q", got)
 		}
 	})
 
-	t.Run("maps agent profile no rows errors to actionable profile guidance", func(t *testing.T) {
-		in := errors.New("failed to launch agent: agent profile lookup failed: sql: no rows in result set")
+	t.Run("maps agent profile not found errors to actionable profile guidance", func(t *testing.T) {
+		in := errors.New("agent profile not found")
 		err := normalizeRecoverSessionError(in)
 		if err == nil {
 			t.Fatal("expected mapped error")
 		}
-		if got := err.Error(); got != "the agent profile used by this session was deleted; start a new session and choose an available agent profile" {
+		want := "the agent profile used by this session was deleted; start a new session and choose an available agent profile: " + in.Error()
+		if got := err.Error(); got != want {
 			t.Fatalf("unexpected error: %q", got)
 		}
 	})

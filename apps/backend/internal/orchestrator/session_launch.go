@@ -291,7 +291,7 @@ func normalizeRecoverSessionError(err error) error {
 		return nil
 	}
 	if isMissingProfileResumeError(err) {
-		return fmt.Errorf("the agent profile used by this session was deleted; start a new session and choose an available agent profile")
+		return fmt.Errorf("the agent profile used by this session was deleted; start a new session and choose an available agent profile: %w", err)
 	}
 	return err
 }
@@ -299,8 +299,7 @@ func normalizeRecoverSessionError(err error) error {
 func isMissingProfileResumeError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to resolve agent profile") ||
-		strings.Contains(msg, "agent profile not found") ||
-		(strings.Contains(msg, "agent profile") && strings.Contains(msg, "no rows in result set"))
+		strings.Contains(msg, "agent profile not found")
 }
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.
