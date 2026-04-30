@@ -67,7 +67,12 @@ export type SystemHealthState = {
 
 export type QuickChatState = {
   isOpen: boolean;
-  sessions: Array<{ sessionId: string; workspaceId: string; name?: string }>;
+  sessions: Array<{
+    sessionId: string;
+    workspaceId: string;
+    name?: string;
+    agentProfileId?: string;
+  }>;
   activeSessionId: string | null;
 };
 
@@ -133,7 +138,7 @@ export type UISliceActions = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (sessionId: string, workspaceId: string) => void;
+  openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;

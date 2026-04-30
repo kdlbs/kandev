@@ -87,6 +87,7 @@ export async function listQuickChatSessions(workspaceId: string, options?: ApiRe
       title: string;
       workspace_id: string;
       primary_session_id?: string | null;
+      metadata?: Record<string, unknown> | null;
     }>;
   }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true&exclude_config=true`, options);
 }

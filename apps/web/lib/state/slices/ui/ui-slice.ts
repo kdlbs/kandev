@@ -514,7 +514,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
       draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
       setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
     }),
-  openQuickChat: (sessionId, workspaceId) =>
+  openQuickChat: (sessionId, workspaceId, agentProfileId) =>
     set((draft) => {
       draft.quickChat.isOpen = true;
       // If sessionId is empty, create a placeholder tab for agent selection
@@ -527,10 +527,11 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
         draft.quickChat.activeSessionId = "";
         return;
       }
-      // Add session if not already in list
-      const exists = draft.quickChat.sessions.some((s) => s.sessionId === sessionId);
-      if (!exists) {
-        draft.quickChat.sessions.push({ sessionId, workspaceId });
+      const existing = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
+      if (existing) {
+        if (agentProfileId) existing.agentProfileId = agentProfileId;
+      } else {
+        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId });
       }
       draft.quickChat.activeSessionId = sessionId;
     }),

@@ -62,7 +62,7 @@ export function useQuickChatModal(workspaceId: string) {
           title: initialName,
         });
         if (store.activeSessionId === "") store.closeQuickChatSession("");
-        store.openQuickChat(response.session_id, workspaceId);
+        store.openQuickChat(response.session_id, workspaceId, agentId);
         store.renameQuickChatSession(response.session_id, initialName);
         setShowAgentPicker(false);
       } catch (error) {
