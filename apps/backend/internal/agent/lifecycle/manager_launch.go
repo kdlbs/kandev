@@ -307,6 +307,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		InstanceID:          executionID,
 		TaskID:              reqWithWorktree.TaskID,
 		SessionID:           reqWithWorktree.SessionID,
+		TaskEnvironmentID:   reqWithWorktree.TaskEnvironmentID,
 		AgentProfileID:      reqWithWorktree.AgentProfileID,
 		WorkspacePath:       reqWithWorktree.WorkspacePath,
 		Protocol:            string(agentConfig.Runtime().Protocol),

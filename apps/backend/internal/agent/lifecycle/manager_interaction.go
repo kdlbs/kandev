@@ -627,6 +627,21 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
+// ResolveScopeKey returns a stable scope key for env-keyed resources (user
+// shells, etc.) given a sessionID. Returns the session's TaskEnvironmentID
+// when an active execution carries it, otherwise falls back to the sessionID
+// itself so callers always get a non-empty key.
+//
+// This is the seam that makes terminals task-keyed: two sessions in the
+// same task share an env, so they resolve to the same scope key and the
+// runner returns one shared shell list instead of duplicating per-session.
+func (m *Manager) ResolveScopeKey(sessionID string) string {
+	if exec, ok := m.executionStore.GetBySessionID(sessionID); ok && exec.TaskEnvironmentID != "" {
+		return exec.TaskEnvironmentID
+	}
+	return sessionID
+}
+
 // IsRemoteSession checks whether a session is associated with a remote executor
 // (e.g., sprites). It first checks the in-memory execution store, then falls back
 // to the database via WorkspaceInfoProvider. This is useful when the execution

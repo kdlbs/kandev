@@ -283,7 +283,8 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 	// scripts and dev_script) would open empty in containerized sessions.
 	if initialCommand == "" {
 		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
-			initialCommand = runner.LookupShellInitialCommand(sessionID, terminalID)
+			scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
+			initialCommand = runner.LookupShellInitialCommand(scopeID, terminalID)
 		}
 	}
 
@@ -934,8 +935,9 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("label", opts.Label),
 		zap.String("initial_command", opts.InitialCommand))
 
+	scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
 	info, err := interactiveRunner.StartUserShell(
-		c.Request.Context(), sessionID, terminalID, workingDir, preferredShell, opts,
+		c.Request.Context(), scopeID, sessionID, terminalID, workingDir, preferredShell, opts,
 	)
 	if err != nil {
 		h.logger.Error("failed to start user shell",
@@ -1001,7 +1003,8 @@ func (h *TerminalHandler) runUserShellBridge(
 		// Clean up WebSocket resources but DON'T stop the process
 		// The process should only be stopped via explicit user_shell.stop message from frontend
 		// This allows reconnection after React remounts or temporary disconnects
-		interactiveRunner.ClearUserShellDirectOutput(sessionID, terminalID)
+		scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
+		interactiveRunner.ClearUserShellDirectOutput(scopeID, terminalID)
 
 		_ = wsw.Close()
 		_ = conn.Close()
@@ -1156,8 +1159,9 @@ func (h *TerminalHandler) setupUserShellPtyAccess(
 	wsw *wsWriter,
 	ptyWriter *io.Writer,
 ) bool {
+	scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
 	getWriter := func() (io.Writer, error) {
-		writer, _, err := interactiveRunner.GetUserShellPtyWriter(sessionID, terminalID)
+		writer, _, err := interactiveRunner.GetUserShellPtyWriter(scopeID, terminalID)
 		return writer, err
 	}
 	return h.setupPtyAccessCommon(sessionID, processID, interactiveRunner, wsw, ptyWriter, getWriter)
@@ -1269,8 +1273,8 @@ func (h *TerminalHandler) handleUserShellResize(
 		return
 	}
 
-	// Resize the user shell PTY
-	if err := interactiveRunner.ResizeUserShell(sessionID, terminalID, resize.Cols, resize.Rows); err != nil {
+	scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
+	if err := interactiveRunner.ResizeUserShell(scopeID, terminalID, resize.Cols, resize.Rows); err != nil {
 		h.logger.Warn("failed to resize user shell PTY",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),

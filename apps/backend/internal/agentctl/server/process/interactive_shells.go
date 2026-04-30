@@ -38,42 +38,42 @@ type UserShellInfo struct {
 }
 
 // CreateUserShell creates a new user shell terminal with auto-assigned ID and label.
-// The first shell for a session is labeled "Terminal" and is not closable.
+// The first shell for a scope is labeled "Terminal" and is not closable.
 // Subsequent shells are labeled "Terminal 2", "Terminal 3", etc. and are closable.
 // The entry is registered atomically to prevent races with ListUserShells.
-func (r *InteractiveRunner) CreateUserShell(sessionID string) CreateUserShellResult {
+//
+// `scopeID` groups shells. Callers should pass `taskEnvironmentID` so sessions
+// in the same task share one shell list. Falls back to sessionID is preserved
+// at the caller boundary (lifecycle.Manager.ResolveScopeKey).
+func (r *InteractiveRunner) CreateUserShell(scopeID string) CreateUserShellResult {
 	r.userShellsMu.Lock()
 	defer r.userShellsMu.Unlock()
 
-	// Count existing plain shell terminals for this session
-	prefix := sessionID + ":"
+	prefix := scopeID + ":"
 	shellCount := 0
 	for key, entry := range r.userShells {
 		if strings.HasPrefix(key, prefix) {
 			terminalID := key[len(prefix):]
-			// Only count plain shells (not script terminals)
 			if strings.HasPrefix(terminalID, "shell-") && entry.InitialCommand == "" {
 				shellCount++
 			}
 		}
 	}
 
-	// Generate terminal ID and label
 	terminalID := "shell-" + uuid.New().String()
 
 	var label string
 	var closable bool
 	if shellCount == 0 {
 		label = "Terminal"
-		closable = false // First terminal is not closable
+		closable = false
 	} else {
 		label = fmt.Sprintf("Terminal %d", shellCount+1)
 		closable = true
 	}
 
-	// Register the entry so ListUserShells includes it immediately
 	r.userShells[prefix+terminalID] = &userShellEntry{
-		ProcessID:      "", // No process yet - will be started when WebSocket connects
+		ProcessID:      "",
 		Label:          label,
 		InitialCommand: "",
 		Closable:       closable,
@@ -89,8 +89,8 @@ func (r *InteractiveRunner) CreateUserShell(sessionID string) CreateUserShellRes
 
 // RegisterScriptShell registers a script terminal entry so ListUserShells returns it.
 // The actual process is not started until the WebSocket connects (StartUserShell handles that).
-func (r *InteractiveRunner) RegisterScriptShell(sessionID, terminalID, label, initialCommand string) {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) RegisterScriptShell(scopeID, terminalID, label, initialCommand string) {
+	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.Lock()
 	defer r.userShellsMu.Unlock()
@@ -108,8 +108,8 @@ func (r *InteractiveRunner) RegisterScriptShell(sessionID, terminalID, label, in
 // shell entry, or "" when no entry exists. Used by remote-shell handlers to recover
 // the script command across the WS-handshake boundary, since the per-terminal WS URL
 // only carries terminalId — not script_id or command.
-func (r *InteractiveRunner) LookupShellInitialCommand(sessionID, terminalID string) string {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) LookupShellInitialCommand(scopeID, terminalID string) string {
+	key := scopeID + ":" + terminalID
 	r.userShellsMu.RLock()
 	defer r.userShellsMu.RUnlock()
 	if entry, ok := r.userShells[key]; ok {
@@ -119,12 +119,15 @@ func (r *InteractiveRunner) LookupShellInitialCommand(sessionID, terminalID stri
 }
 
 // StartUserShell starts or returns an existing user shell for a terminal tab.
-// Each terminal tab gets its own independent shell process.
-// If opts.InitialCommand is provided, it will be written to stdin after the shell starts.
-func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, terminalID, workingDir, preferredShell string, opts *UserShellOptions) (*InteractiveProcessInfo, error) {
-	key := sessionID + ":" + terminalID
+// Each terminal tab gets its own independent shell process. The shell is keyed
+// in the userShells map by `scopeID` (taskEnvironmentID when known) so that
+// sessions sharing an env share the same shell. The underlying process is
+// still started under `processSessionID` for InteractiveStartRequest purposes
+// (ring-buffer accounting, etc.) but `IsUserShell: true` excludes it from
+// session-level routing.
+func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, processSessionID, terminalID, workingDir, preferredShell string, opts *UserShellOptions) (*InteractiveProcessInfo, error) {
+	key := scopeID + ":" + terminalID
 
-	// Normalize options
 	if opts == nil {
 		opts = &UserShellOptions{}
 	}
@@ -132,38 +135,32 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 		opts.Label = "Terminal"
 	}
 
-	// Check if shell entry already exists (auto-created by ListUserShells or RegisterScriptShell)
 	var existingEntry *userShellEntry
 	r.userShellsMu.RLock()
 	entry, exists := r.userShells[key]
 	if exists {
-		// If entry has a process, check if it's still alive
 		if entry.ProcessID != "" {
 			if info, ok := r.Get(entry.ProcessID, false); ok {
 				r.userShellsMu.RUnlock()
 				return info, nil
 			}
-			// Process died - we'll start a new one below
 		}
-		// Entry exists but no process (pre-registered) or process died
-		// Keep the existing metadata (label, closable, createdAt, initialCommand)
 		existingEntry = entry
 	}
 	r.userShellsMu.RUnlock()
 
-	// Use initial command from pre-registered entry if not provided in opts
 	initialCommand := opts.InitialCommand
 	if initialCommand == "" && existingEntry != nil {
 		initialCommand = existingEntry.InitialCommand
 	}
 
 	req := InteractiveStartRequest{
-		SessionID:            sessionID,
+		SessionID:            processSessionID,
 		Command:              defaultShellCommand(preferredShell),
 		WorkingDir:           workingDir,
 		InitialCommand:       initialCommand,
-		DisableTurnDetection: true, // User shells must not trigger turn complete / MarkReady
-		IsUserShell:          true, // Exclude from session-level lookups (ResizeBySession, GetPtyWriterBySession)
+		DisableTurnDetection: true,
+		IsUserShell:          true,
 	}
 
 	info, err := r.Start(ctx, req)
@@ -171,16 +168,12 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 		return nil, err
 	}
 
-	// Track the user shell with metadata
-	// If entry already exists (auto-created by ListUserShells), preserve its metadata
 	r.userShellsMu.Lock()
 	if existingEntry != nil {
-		// Update existing entry with the new process ID
 		existingEntry.ProcessID = info.ID
 		r.userShells[key] = existingEntry
 	} else {
-		// Create new entry
-		closable := true // Default: closable
+		closable := true
 		if opts.Closable != nil {
 			closable = *opts.Closable
 		}
@@ -195,7 +188,8 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 	r.userShellsMu.Unlock()
 
 	r.logger.Info("started user shell",
-		zap.String("session_id", sessionID),
+		zap.String("scope_id", scopeID),
+		zap.String("session_id", processSessionID),
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", info.ID),
 		zap.String("shell", req.Command[0]),
@@ -206,13 +200,13 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 	return info, nil
 }
 
-// ListUserShells returns all user shells for a session, sorted by creation time.
+// ListUserShells returns all user shells for a scope, sorted by creation time.
 // If no plain shell terminals exist, automatically creates the first "Terminal" entry.
-func (r *InteractiveRunner) ListUserShells(sessionID string) []UserShellInfo {
+func (r *InteractiveRunner) ListUserShells(scopeID string) []UserShellInfo {
 	r.userShellsMu.Lock()
 	defer r.userShellsMu.Unlock()
 
-	prefix := sessionID + ":"
+	prefix := scopeID + ":"
 	var shells []UserShellInfo
 	hasPlainShell := false
 
@@ -270,8 +264,8 @@ func (r *InteractiveRunner) ListUserShells(sessionID string) []UserShellInfo {
 }
 
 // StopUserShell stops a user shell for a terminal tab.
-func (r *InteractiveRunner) StopUserShell(ctx context.Context, sessionID, terminalID string) error {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) StopUserShell(ctx context.Context, scopeID, terminalID string) error {
+	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.Lock()
 	entry, exists := r.userShells[key]
@@ -285,7 +279,7 @@ func (r *InteractiveRunner) StopUserShell(ctx context.Context, sessionID, termin
 	}
 
 	r.logger.Info("stopping user shell",
-		zap.String("session_id", sessionID),
+		zap.String("scope_id", scopeID),
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", entry.ProcessID))
 
@@ -293,15 +287,15 @@ func (r *InteractiveRunner) StopUserShell(ctx context.Context, sessionID, termin
 }
 
 // ResizeUserShell resizes the PTY for a user shell.
-func (r *InteractiveRunner) ResizeUserShell(sessionID, terminalID string, cols, rows uint16) error {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) ResizeUserShell(scopeID, terminalID string, cols, rows uint16) error {
+	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.RLock()
 	entry, exists := r.userShells[key]
 	r.userShellsMu.RUnlock()
 
 	if !exists {
-		return fmt.Errorf("no user shell found for session %s terminal %s", sessionID, terminalID)
+		return fmt.Errorf("no user shell found for scope %s terminal %s", scopeID, terminalID)
 	}
 
 	proc, ok := r.get(entry.ProcessID)
@@ -310,21 +304,21 @@ func (r *InteractiveRunner) ResizeUserShell(sessionID, terminalID string, cols, 
 	}
 
 	return r.lazyStartAndResize(proc, cols, rows,
-		zap.String("session_id", sessionID),
+		zap.String("scope_id", scopeID),
 		zap.String("terminal_id", terminalID),
 	)
 }
 
 // GetUserShellPtyWriter returns the PTY writer for a user shell.
-func (r *InteractiveRunner) GetUserShellPtyWriter(sessionID, terminalID string) (io.Writer, string, error) {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) GetUserShellPtyWriter(scopeID, terminalID string) (io.Writer, string, error) {
+	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.RLock()
 	entry, exists := r.userShells[key]
 	r.userShellsMu.RUnlock()
 
 	if !exists {
-		return nil, "", fmt.Errorf("no user shell found for session %s terminal %s", sessionID, terminalID)
+		return nil, "", fmt.Errorf("no user shell found for scope %s terminal %s", scopeID, terminalID)
 	}
 
 	writer, err := r.GetPtyWriter(entry.ProcessID)
@@ -336,8 +330,8 @@ func (r *InteractiveRunner) GetUserShellPtyWriter(sessionID, terminalID string) 
 }
 
 // ClearUserShellDirectOutput clears the direct output for a user shell.
-func (r *InteractiveRunner) ClearUserShellDirectOutput(sessionID, terminalID string) {
-	key := sessionID + ":" + terminalID
+func (r *InteractiveRunner) ClearUserShellDirectOutput(scopeID, terminalID string) {
+	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.RLock()
 	entry, exists := r.userShells[key]
@@ -358,6 +352,6 @@ func (r *InteractiveRunner) ClearUserShellDirectOutput(sessionID, terminalID str
 	proc.directOutputMu.Unlock()
 
 	r.logger.Info("direct output cleared for user shell",
-		zap.String("session_id", sessionID),
+		zap.String("scope_id", scopeID),
 		zap.String("terminal_id", terminalID))
 }

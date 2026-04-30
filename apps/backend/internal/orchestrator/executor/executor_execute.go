@@ -504,13 +504,14 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  agentProfileID,
-		TaskDescription: prompt,
-		Priority:        task.Priority,
-		SessionID:       sessionID,
-		IsEphemeral:     task.IsEphemeral,
+		TaskID:            task.ID,
+		TaskTitle:         task.Title,
+		AgentProfileID:    agentProfileID,
+		TaskDescription:   prompt,
+		Priority:          task.Priority,
+		SessionID:         sessionID,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+		IsEphemeral:       task.IsEphemeral,
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)

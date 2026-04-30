@@ -223,6 +223,7 @@ type AgentProfileInfo struct {
 type LaunchAgentRequest struct {
 	TaskID              string
 	SessionID           string
+	TaskEnvironmentID   string // Env owning this session (shared across sessions in the same task)
 	TaskTitle           string // Human-readable task title for semantic worktree naming
 	AgentProfileID      string
 	RepositoryURL       string

@@ -23,10 +23,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID              string
-	TaskID          string
-	SessionID       string
-	AgentProfileID  string
+	ID                string
+	TaskID            string
+	SessionID         string
+	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
+	AgentProfileID    string
 	AgentID         string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID     string
 	ContainerIP     string // IP address of the container for agentctl communication
@@ -251,10 +252,11 @@ func (ae *AgentExecution) EndSessionSpan() {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID          string
-	SessionID       string
-	TaskTitle       string // Human-readable task title for semantic worktree naming
-	AgentProfileID  string
+	TaskID            string
+	SessionID         string
+	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskTitle         string // Human-readable task title for semantic worktree naming
+	AgentProfileID    string
 	WorkspacePath   string              // Host path to workspace (original repository path)
 	TaskDescription string              // Task description to send via ACP prompt
 	Attachments     []MessageAttachment // Attachments (images/files) for the initial prompt

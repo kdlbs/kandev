@@ -204,7 +204,6 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the interactive runner
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -212,11 +211,12 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 		})
 	}
 
-	// Get list of user shells
-	shells := interactiveRunner.ListUserShells(req.SessionID)
+	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+	shells := interactiveRunner.ListUserShells(scopeID)
 
 	h.logger.Debug("listing user shells",
 		zap.String("session_id", req.SessionID),
+		zap.String("scope_id", scopeID),
 		zap.Int("count", len(shells)))
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -255,11 +255,14 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 		return nil, err
 	}
 
+	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+
 	if command != "" {
 		terminalID := "script-" + uuid.New().String()
-		interactiveRunner.RegisterScriptShell(req.SessionID, terminalID, label, command)
+		interactiveRunner.RegisterScriptShell(scopeID, terminalID, label, command)
 		h.logger.Info("created script terminal",
 			zap.String("session_id", req.SessionID),
+			zap.String("scope_id", scopeID),
 			zap.String("terminal_id", terminalID),
 			zap.String("label", label),
 			zap.String("initial_command", command))
@@ -271,9 +274,10 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 		})
 	}
 
-	result := interactiveRunner.CreateUserShell(req.SessionID)
+	result := interactiveRunner.CreateUserShell(scopeID)
 	h.logger.Info("created user shell",
 		zap.String("session_id", req.SessionID),
+		zap.String("scope_id", scopeID),
 		zap.String("terminal_id", result.TerminalID),
 		zap.String("label", result.Label),
 		zap.Bool("closable", result.Closable))
@@ -338,8 +342,8 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("interactive runner not available")
 	}
 
-	// Stop the user shell
-	if err := interactiveRunner.StopUserShell(ctx, req.SessionID, req.TerminalID); err != nil {
+	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+	if err := interactiveRunner.StopUserShell(ctx, scopeID, req.TerminalID); err != nil {
 		h.logger.Warn("failed to stop user shell",
 			zap.String("session_id", req.SessionID),
 			zap.String("terminal_id", req.TerminalID),
@@ -379,11 +383,12 @@ func (h *ShellHandlers) httpListTerminals(c *gin.Context) {
 		return
 	}
 
-	// Get list of user shells
-	shells := interactiveRunner.ListUserShells(sessionID)
+	scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
+	shells := interactiveRunner.ListUserShells(scopeID)
 
 	h.logger.Debug("listing terminals via HTTP",
 		zap.String("session_id", sessionID),
+		zap.String("scope_id", scopeID),
 		zap.Int("count", len(shells)))
 
 	// Transform to response format
