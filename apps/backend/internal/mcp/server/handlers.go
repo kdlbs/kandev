@@ -173,6 +173,29 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		prompt, err := req.RequireString("prompt")
+		if err != nil {
+			return mcp.NewToolResultError("prompt is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id": taskID,
+			"prompt":  prompt,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		prompt, err := req.RequireString("prompt")

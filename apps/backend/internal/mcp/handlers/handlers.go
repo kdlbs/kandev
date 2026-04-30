@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -56,9 +57,14 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
-// SessionLauncher provides session launch capability for auto-starting tasks.
+// SessionLauncher provides session launch and prompt-dispatch capabilities.
+// Both methods are implemented by *orchestrator.Service.
 type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
+	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
+	GetMessageQueue() *messagequeue.Service
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
@@ -141,13 +147,14 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 12
+	count := 13
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -599,6 +606,134 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+// handleMessageTask sends a prompt to an existing task. The dispatch path depends
+// on the primary session's state: RUNNING/STARTING messages are queued and drained
+// at turn end; idle sessions are prompted directly; CREATED sessions are started.
+func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.Prompt == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
+	}
+
+	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found or has no session: "+err.Error(), nil)
+	}
+	if session == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no active session — use create_task_kandev to start one", nil)
+	}
+
+	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, req.Prompt)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"task_id":    req.TaskID,
+		"session_id": session.ID,
+		"status":     status,
+	})
+}
+
+// dispatchTaskMessage routes a message to the right delivery path based on session state.
+// Returns the action taken: "queued", "sent", or "started".
+func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string) (string, error) {
+	if h.sessionLauncher == nil {
+		return "", errors.New("orchestrator not available")
+	}
+
+	switch session.State {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return "", fmt.Errorf("session is %s — cannot send message", session.State)
+
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		queue := h.sessionLauncher.GetMessageQueue()
+		if queue == nil {
+			return "", errors.New("message queue not available")
+		}
+		if _, err := queue.QueueMessage(ctx, session.ID, taskID, prompt, "", "agent", false, nil); err != nil {
+			return "", fmt.Errorf("failed to queue message: %w", err)
+		}
+		h.publishQueueStatusEvent(ctx, session.ID, queue)
+		return "queued", nil
+
+	case models.TaskSessionStateCreated:
+		if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, false, false, nil); err != nil {
+			return "", fmt.Errorf("failed to start session: %w", err)
+		}
+		return "started", nil
+
+	default: // WAITING_FOR_INPUT, COMPLETED, or any other promptable state
+		h.recordUserMessage(ctx, taskID, session.ID, prompt)
+		return h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
+	}
+}
+
+// recordUserMessage writes the prompt to the task's chat as a user message so it
+// is visible in the conversation. Mirrors the message.add path used by the UI.
+func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, prompt string) {
+	if h.taskSvc == nil {
+		return
+	}
+	if _, err := h.taskSvc.CreateMessage(ctx, &service.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       prompt,
+		AuthorType:    "user",
+	}); err != nil {
+		h.logger.Warn("failed to record user message for message_task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// promptWithAutoResume sends a prompt to a session and resumes the agent
+// transparently if it has been torn down (mirrors message.add behaviour).
+func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
+	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil)
+	if err == nil {
+		return "sent", nil
+	}
+	if !errors.Is(err, executor.ErrExecutionNotFound) {
+		return "", fmt.Errorf("failed to send prompt: %w", err)
+	}
+	if _, resumeErr := h.sessionLauncher.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
+		return "", fmt.Errorf("failed to resume session: %w", resumeErr)
+	}
+	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil); retryErr != nil {
+		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
+	}
+	return "sent", nil
+}
+
+// publishQueueStatusEvent fires a queue.status_changed event so the frontend
+// can update the queue indicator.
+func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string, queue *messagequeue.Service) {
+	if h.eventBus == nil {
+		return
+	}
+	status := queue.GetStatus(ctx, sessionID)
+	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
+		events.MessageQueueStatusChanged,
+		"mcp-handlers",
+		map[string]interface{}{
+			"session_id": sessionID,
+			"is_queued":  status.IsQueued,
+			"message":    status.Message,
+		},
+	))
 }
 
 // handleAskUserQuestion creates a clarification request and blocks until the user responds.

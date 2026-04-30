@@ -350,6 +350,7 @@ const (
 	ActionMCPDeleteTask      = "mcp.delete_task"
 	ActionMCPArchiveTask     = "mcp.archive_task"
 	ActionMCPUpdateTaskState = "mcp.update_task_state"
+	ActionMCPMessageTask     = "mcp.message_task"
 )
 
 // GitHub integration actions

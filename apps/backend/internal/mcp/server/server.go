@@ -390,6 +390,24 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("message_task_kandev",
+			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session.
+
+Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward.
+
+Behaviour by session state:
+- Running/starting: the message is queued and delivered when the current turn ends.
+- Idle (waiting for input or completed): the message is sent immediately as a new turn.
+- Created (not yet started): the agent is started with this message as its first prompt.
+- Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
+
+Returns the dispatch status: "queued", "sent", or "started".`),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task ID")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
+		),
+		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
 }
 
 // registerCreateTaskTool registers the create_task_kandev tool. Shared between

@@ -43,6 +43,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "update_task_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "message_task_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -258,6 +259,9 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 
 	// External mode does NOT include kanban update_task_kandev (config has its own update_task_state)
 	assert.NotContains(t, tools, "update_task_kandev")
+
+	// External mode does NOT include message_task_kandev (no live session context)
+	assert.NotContains(t, tools, "message_task_kandev")
 }
 
 func TestServerModeExternal_ToolCount(t *testing.T) {

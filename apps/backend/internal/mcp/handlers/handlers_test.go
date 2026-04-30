@@ -13,11 +13,14 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -149,6 +152,20 @@ func (m *mockSessionLauncher) getRequest() *orchestrator.LaunchSessionRequest {
 	defer m.mu.Unlock()
 	return m.req
 }
+
+// The following methods satisfy the SessionLauncher interface but are not used by
+// the autoStartTask tests. handleMessageTask tests use a dedicated fakeOrchestrator
+// (see message_task_test.go) that exercises these paths.
+func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string, string, bool, []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return nil, nil
+}
+func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, []v1.MessageAttachment) (*executor.TaskExecution, error) {
+	return nil, nil
+}
+func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
+	return nil, nil
+}
+func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	launcher := newMockSessionLauncher()

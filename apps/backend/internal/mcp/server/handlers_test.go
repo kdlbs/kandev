@@ -264,3 +264,49 @@ func TestCreateTask_RepositoryURL_RejectedForSubtasks(t *testing.T) {
 
 	assert.True(t, result.IsError, "repository_url should be rejected for subtasks")
 }
+
+func TestMessageTask_ForwardsToBackend(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{
+			"task_id":    "task-target",
+			"session_id": "sess-1",
+			"status":     "queued",
+		},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
+		"task_id": "task-target",
+		"prompt":  "follow up",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPMessageTask, backend.lastAction)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "follow up", payload["prompt"])
+}
+
+func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
+		"prompt": "follow up",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestMessageTask_MissingPrompt_ReturnsError(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
+		"task_id": "task-target",
+	})
+
+	assert.True(t, result.IsError)
+}
