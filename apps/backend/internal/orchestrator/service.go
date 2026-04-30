@@ -332,6 +332,7 @@ func NewService(
 	handlers := watcher.EventHandlers{
 		OnTaskDeleted:          s.handleTaskDeleted,
 		OnAgentRunning:         s.handleAgentRunning,
+		OnAgentBootReady:       s.handleAgentBootReady,
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,

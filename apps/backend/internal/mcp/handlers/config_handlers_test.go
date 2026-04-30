@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -339,6 +340,84 @@ func TestHandleMoveTask_InvalidPayload(t *testing.T) {
 	resp, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+}
+
+// recordingMessageQueuer captures QueueMessage calls for assertion.
+type recordingMessageQueuer struct {
+	calls []messagequeue.QueuedMessage
+}
+
+func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+	msg := messagequeue.QueuedMessage{
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Content:   content,
+		Model:     model,
+		PlanMode:  planMode,
+		QueuedBy:  userID,
+	}
+	r.calls = append(r.calls, msg)
+	return &msg, nil
+}
+
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+}
+
+// TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
+// they just exercise QueueMessage. Returning (nil, false) is consistent with
+// "nothing to take", which is what the rollback path checks before logging.
+func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
+	return nil, false
+}
+
+// TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
+// and surfaces a descriptive error so callers can fail fast instead of silently
+// dropping the user-supplied prompt.
+func TestQueueMoveTaskPrompt_NilQueueReturnsError(t *testing.T) {
+	h := &Handlers{logger: testLogger(t).WithFields()}
+
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "message queue")
+}
+
+// TestQueueMoveTaskPrompt_EmptySessionIDReturnsError ensures a missing session ID
+// surfaces an error rather than silently no-op'ing — without a session there's
+// nowhere to deliver the prompt.
+func TestQueueMoveTaskPrompt_EmptySessionIDReturnsError(t *testing.T) {
+	queue := &recordingMessageQueuer{}
+	h := &Handlers{
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "primary session")
+	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
+}
+
+// TestQueueMoveTaskPrompt_QueuesWithExpectedFields verifies the happy-path
+// invocation: the prompt is queued on the resolved session with the expected
+// metadata (sender = "mcp-move-task", plan mode disabled, no model override).
+func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
+	queue := &recordingMessageQueuer{}
+	h := &Handlers{
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+
+	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+	require.NoError(t, err)
+
+	require.Len(t, queue.calls, 1)
+	got := queue.calls[0]
+	assert.Equal(t, "session-99", got.SessionID)
+	assert.Equal(t, "task-1", got.TaskID)
+	assert.Equal(t, "Please fix the failing test in foo_test.go", got.Content)
+	assert.Equal(t, "mcp-move-task", got.QueuedBy)
+	assert.False(t, got.PlanMode)
+	assert.Equal(t, "", got.Model)
 }
 
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {

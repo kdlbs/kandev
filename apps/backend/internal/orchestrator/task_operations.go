@@ -48,6 +48,13 @@ func isSessionResetInProgressError(err error) bool {
 	return err != nil && (errors.Is(err, ErrSessionResetInProgress) || strings.Contains(err.Error(), ErrSessionResetInProgress.Error()))
 }
 
+// isTransientPromptError reports whether a prompt error is worth retrying via
+// the queue. ErrExecutionNotFound is intentionally NOT included here:
+// callers that can recover (autoStartStepPrompt → fallbackFreshLaunchOnMissingExecution)
+// detect it explicitly via errors.Is and route differently; callers that
+// can't (executeQueuedMessage) should not infinite-requeue on it. Treating
+// "execution not found" as transient blanket-applies a retry that loops
+// forever when the execution is genuinely gone.
 func isTransientPromptError(err error) bool {
 	if err == nil {
 		return false
@@ -350,23 +357,26 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		effectivePrompt = task.Description
 	}
 
-	// Process on_turn_start before launching the agent, just like user-initiated messages.
-	// This allows workflow transitions (e.g. move_to_next) to fire on the initial prompt.
-	// If the target step has a different agent profile, executeStepTransition switches
-	// the session — so we need to pick up the new session afterwards.
-	s.processOnTurnStartViaEngine(ctx, taskID, session)
-
-	// Re-read the session after on_turn_start may have switched it (agent profile change).
-	// The original session may have been completed; use the active session for this task.
+	// NOTE: on_turn_start is intentionally NOT processed here.
+	//   - User-initiated path: dispatchPromptAsync (message_handlers.go) already
+	//     calls ProcessOnTurnStart before invoking StartCreatedSession via
+	//     forwardMessageAsPrompt, so on_turn_start has already fired.
+	//   - Workflow auto-start path: autoStartStepPrompt calls us because the
+	//     workflow just transitioned us into this step (via on_turn_complete or
+	//     on_enter). Firing on_turn_start again here cascades the workflow back
+	//     out before the step's auto-start prompt can be delivered to its agent.
+	//
+	// However, for the user-initiated path, on_turn_start may have switched the
+	// session profile already, in which case the session ID we were called with
+	// is now COMPLETED and we need to redirect to the new active session.
 	session, err = s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
+		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
 	if session.State == models.TaskSessionStateCompleted {
-		// on_turn_start switched the agent profile — find the new active session.
 		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if activeErr != nil || activeSession == nil {
-			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
+			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
 		sessionID = activeSession.ID
@@ -889,6 +899,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+	// The lifecycle layer publishes events.AgentBootReady (handled by handleAgentBootReady)
+	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
+	// no flag-tracking needed.
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
@@ -923,6 +936,10 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", session.AgentExecutionID))
 
+	// Boot ready is published as events.AgentBootReady by the lifecycle layer
+	// and routed to handleAgentBootReady, which flips the session to
+	// WAITING_FOR_INPUT — that's what waitForSessionReady polls for. No flag
+	// tracking required here.
 	launchCtx := context.WithoutCancel(ctx)
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
@@ -1612,6 +1629,17 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
+	}
+
+	// Reload session after ensureSessionRunning. If a resume happened, ResumeSession
+	// updated the session's AgentExecutionID via persistResumeState — but only on the
+	// pointer it received. If anything along the way swapped the pointer or the
+	// caller's struct is otherwise stale (e.g. a concurrent write), executor.Prompt
+	// would call PromptAgent with the OLD execution ID and get ErrExecutionNotFound.
+	// Re-reading from the DB after ensureSessionRunning guarantees we use the
+	// freshly-persisted AgentExecutionID.
+	if reloaded, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && reloaded != nil {
+		session = reloaded
 	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)

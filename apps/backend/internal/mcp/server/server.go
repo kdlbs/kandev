@@ -307,7 +307,7 @@ func (s *Server) registerTools() {
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 8
+		count += 9
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -378,6 +378,17 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("move_task_kandev",
+			mcp.WithDescription("Move a task to a different workflow step. Optionally send a hand-off prompt to the receiving agent — required only when handing the task off mid-turn (e.g. QA → review) with specific instructions. Plain admin/config moves can omit prompt."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
+			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
+			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
+			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent. When supplied AND the source session is mid-turn, the move is deferred to the agent's turn-end and the prompt is delivered at the new step (concatenated after the step's own auto_start prompt, if any). Omit for plain admin/config moves where there's no agent to address.")),
+		),
+		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
 }
 

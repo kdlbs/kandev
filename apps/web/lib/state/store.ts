@@ -369,6 +369,7 @@ export type AppState = {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
   clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;

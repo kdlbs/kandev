@@ -27,3 +27,15 @@ type QueueStatus struct {
 	IsQueued bool           `json:"is_queued"` // Whether a message is queued
 	Message  *QueuedMessage `json:"message"`   // The queued message (nil if not queued)
 }
+
+// PendingMove represents a workflow step move requested by an agent (via
+// move_task_kandev) while its turn is still active. Applied by handleAgentReady
+// once the turn ends, to avoid racing the on_enter processing against the
+// agent's running turn.
+type PendingMove struct {
+	TaskID         string    `json:"task_id"`
+	WorkflowID     string    `json:"workflow_id"`
+	WorkflowStepID string    `json:"workflow_step_id"`
+	Position       int       `json:"position"`
+	QueuedAt       time.Time `json:"queued_at"`
+}

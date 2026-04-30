@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -60,6 +61,16 @@ type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 }
 
+// MessageQueuer queues a prompt message for delivery to a session on its next turn.
+// TakeQueued is exposed so move_task can roll back the hand-off prompt when the
+// underlying MoveTask call fails — without it, a queued "you were moved..."
+// message would survive a failed move and be delivered on the next agent turn.
+type MessageQueuer interface {
+	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
+	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
+	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	taskSvc          *service.Service
@@ -71,6 +82,7 @@ type Handlers struct {
 	eventBus         EventBus
 	planService      *service.PlanService
 	sessionLauncher  SessionLauncher
+	messageQueue     MessageQueuer
 	logger           *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
@@ -90,6 +102,7 @@ func NewHandlers(
 	eventBus EventBus,
 	planService *service.PlanService,
 	sessionLauncher SessionLauncher,
+	messageQueue MessageQueuer,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
@@ -102,6 +115,7 @@ func NewHandlers(
 		eventBus:         eventBus,
 		planService:      planService,
 		sessionLauncher:  sessionLauncher,
+		messageQueue:     messageQueue,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }

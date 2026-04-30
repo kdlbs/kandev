@@ -16,16 +16,73 @@ import (
 type Service struct {
 	// In-memory storage: sessionID -> QueuedMessage
 	queued map[string]*QueuedMessage
-	mu     sync.RWMutex
-	logger *logger.Logger
+	// In-memory storage: sessionID -> PendingMove (deferred move_task_kandev moves)
+	pendingMoves map[string]*PendingMove
+	mu           sync.RWMutex
+	logger       *logger.Logger
 }
 
 // NewService creates a new message queue service
 func NewService(log *logger.Logger) *Service {
 	return &Service{
-		queued: make(map[string]*QueuedMessage),
-		logger: log.WithFields(zap.String("component", "message-queue")),
+		queued:       make(map[string]*QueuedMessage),
+		pendingMoves: make(map[string]*PendingMove),
+		logger:       log.WithFields(zap.String("component", "message-queue")),
 	}
+}
+
+// TransferSession moves any queued message and pending move from one session
+// to another. Used by workflow session switches (when a target step has a
+// different agent profile and switchSessionForStep creates a new session) so
+// a prompt queued by move_task_kandev on the old session reaches the new one.
+// Existing entries on the destination session are preserved if no source entry
+// is present; otherwise the source entry replaces the destination entry.
+func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if msg, ok := s.queued[oldSessionID]; ok {
+		msg.SessionID = newSessionID
+		s.queued[newSessionID] = msg
+		delete(s.queued, oldSessionID)
+		s.logger.Info("transferred queued message between sessions",
+			zap.String("from_session_id", oldSessionID),
+			zap.String("to_session_id", newSessionID),
+			zap.String("queue_id", msg.ID))
+	}
+
+	if move, ok := s.pendingMoves[oldSessionID]; ok {
+		s.pendingMoves[newSessionID] = move
+		delete(s.pendingMoves, oldSessionID)
+		s.logger.Info("transferred pending move between sessions",
+			zap.String("from_session_id", oldSessionID),
+			zap.String("to_session_id", newSessionID))
+	}
+}
+
+// SetPendingMove records a pending move for a session (replaces any existing one).
+// The move is applied by handleAgentReady when the agent's current turn completes.
+func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	move.QueuedAt = time.Now()
+	s.pendingMoves[sessionID] = move
+	s.logger.Info("pending move recorded",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", move.TaskID),
+		zap.String("workflow_step_id", move.WorkflowStepID))
+}
+
+// TakePendingMove retrieves and removes the pending move for a session.
+func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	move, exists := s.pendingMoves[sessionID]
+	if !exists {
+		return nil, false
+	}
+	delete(s.pendingMoves, sessionID)
+	return move, true
 }
 
 // QueueMessage queues a message for a session (replaces existing queued message)
