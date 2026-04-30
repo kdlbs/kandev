@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 
@@ -29,6 +29,7 @@ export function usePlanPanelAutoOpen() {
   const setTaskPlanLoading = useAppStore((s) => s.setTaskPlanLoading);
   const markTaskPlanSeen = useAppStore((s) => s.markTaskPlanSeen);
   const connectionStatus = useAppStore((s) => s.connection.status);
+  const storeApi = useAppStoreApi();
   const api = useDockviewStore((s) => s.api);
   const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
@@ -50,13 +51,20 @@ export function usePlanPanelAutoOpen() {
     attemptedRef.current.add(taskId);
     setTaskPlanLoading(taskId, true);
     getTaskPlan(taskId)
-      .then((fetched) => setTaskPlan(taskId, fetched))
+      .then((fetched) => {
+        // Race guard: if a WS event populated the store while our HTTP
+        // request was in flight, don't overwrite a real plan with a
+        // stale `null` (server didn't have it yet at fetch time).
+        const live = storeApi.getState().taskPlans.byTaskId[taskId];
+        if (fetched === null && live) return;
+        setTaskPlan(taskId, fetched);
+      })
       .catch(() => {
         /* swallow — the disconnect/reconnect effect clears `attemptedRef`
          * so a transient failure retries automatically after recovery. */
       })
       .finally(() => setTaskPlanLoading(taskId, false));
-  }, [activeTaskId, connectionStatus, isLoaded, setTaskPlan, setTaskPlanLoading]);
+  }, [activeTaskId, connectionStatus, isLoaded, setTaskPlan, setTaskPlanLoading, storeApi]);
 
   // Drop the attempt mark when the WS reconnects so a transient failure can
   // be retried after recovery.

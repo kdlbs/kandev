@@ -17,23 +17,25 @@ let mockConnectionStatus = "connected";
 let mockIsRestoringLayout = false;
 let mockApi: { getPanel: typeof mockGetPanel } | null = { getPanel: mockGetPanel };
 
+function buildState() {
+  return {
+    tasks: { activeTaskId: mockActiveTaskId },
+    taskPlans: {
+      byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
+      loadedByTaskId: mockActiveTaskId ? { [mockActiveTaskId]: mockIsLoaded } : {},
+      lastSeenUpdatedAtByTaskId:
+        mockActiveTaskId && mockLastSeen !== undefined ? { [mockActiveTaskId]: mockLastSeen } : {},
+    },
+    connection: { status: mockConnectionStatus },
+    setTaskPlan: mockSetTaskPlan,
+    setTaskPlanLoading: mockSetTaskPlanLoading,
+    markTaskPlanSeen: mockMarkTaskPlanSeen,
+  };
+}
+
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      tasks: { activeTaskId: mockActiveTaskId },
-      taskPlans: {
-        byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
-        loadedByTaskId: mockActiveTaskId ? { [mockActiveTaskId]: mockIsLoaded } : {},
-        lastSeenUpdatedAtByTaskId:
-          mockActiveTaskId && mockLastSeen !== undefined
-            ? { [mockActiveTaskId]: mockLastSeen }
-            : {},
-      },
-      connection: { status: mockConnectionStatus },
-      setTaskPlan: mockSetTaskPlan,
-      setTaskPlanLoading: mockSetTaskPlanLoading,
-      markTaskPlanSeen: mockMarkTaskPlanSeen,
-    }),
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(buildState()),
+  useAppStoreApi: () => ({ getState: () => buildState() }),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -192,6 +194,24 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     rerender();
     rerender();
     expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not overwrite a WS-delivered plan when the fetch resolves with null", async () => {
+    mockIsLoaded = false;
+    mockPlan = null;
+    let resolveFn: (v: TaskPlan | null) => void = () => {};
+    mockGetTaskPlan.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFn = resolve;
+        }),
+    );
+    renderHook(() => usePlanPanelAutoOpen());
+    // Simulate a WS event populating the store while the HTTP fetch is in flight.
+    mockPlan = agentPlan();
+    resolveFn(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetTaskPlan).not.toHaveBeenCalled();
   });
 
   it("retries the eager fetch after WS reconnects following a failure", async () => {
