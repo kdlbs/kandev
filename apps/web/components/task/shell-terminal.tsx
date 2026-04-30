@@ -335,9 +335,8 @@ function useShellInputHandler(opts: {
   isReadOnlyMode: boolean;
   taskId: string | null;
   sessionId: string | null | undefined;
-  send: (action: string, payload: Record<string, unknown>) => void;
 }) {
-  const { xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send } = opts;
+  const { xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId } = opts;
   useEffect(() => {
     if (!xtermRef.current || isReadOnlyMode) return;
     onDataDisposableRef.current?.dispose();
@@ -351,7 +350,7 @@ function useShellInputHandler(opts: {
       onDataDisposableRef.current?.dispose();
       onDataDisposableRef.current = null;
     };
-  }, [taskId, sessionId, send, isReadOnlyMode, xtermRef, onDataDisposableRef]);
+  }, [taskId, sessionId, isReadOnlyMode, xtermRef, onDataDisposableRef]);
 }
 
 function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode: boolean) {
@@ -432,7 +431,7 @@ export function ShellTerminal({
     onClose: search.close,
   });
 
-  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send });
+  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId });
   useShellTerminalKeyHandler({
     xtermRef,
     isReadOnlyMode,

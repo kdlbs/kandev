@@ -1,4 +1,11 @@
-/** ANSI escape / control sequences for common terminal keys. */
+/**
+ * ANSI escape / control sequences for common terminal keys.
+ *
+ * Note: `home` / `end` send readline shortcuts (Ctrl+A / Ctrl+E) rather than
+ * the VT sequences (`\x1b[H` / `\x1b[F`). This matches what most shells expect
+ * for line-start / line-end navigation; full-screen apps like vim/nano that
+ * key off VT sequences will not interpret these as Home/End.
+ */
 export const KEY_SEQUENCES = {
   esc: "\x1b",
   tab: "\t",
@@ -14,14 +21,3 @@ export const KEY_SEQUENCES = {
   ctrlD: "\x04",
   ctrlZ: "\x1a",
 } as const;
-
-/**
- * Return the Ctrl+<letter> control byte for a given character (A–Z, a–z).
- * Non-letters return null — callers should then emit the raw char instead.
- */
-export function ctrlChord(char: string): string | null {
-  if (char.length !== 1) return null;
-  const code = char.toLowerCase().charCodeAt(0);
-  if (code < 97 || code > 122) return null;
-  return String.fromCharCode(code - 96);
-}

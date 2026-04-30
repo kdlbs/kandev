@@ -12,18 +12,17 @@ import { useShellModifiersStore, isActive } from "./shell-modifiers";
  */
 export function sendShellInput(sessionId: string, data: string): void {
   if (!data) return;
+  const client = getWebSocketClient();
+  if (!client) return; // keep modifiers armed; the user can retry once reconnected
   const store = useShellModifiersStore.getState();
   const ctrlActive = isActive(store.ctrl);
   const shiftActive = isActive(store.shift);
   const transformed = applyShellModifiers(data, { ctrl: ctrlActive, shift: shiftActive });
-  const client = getWebSocketClient();
-  if (client) {
-    client.send({
-      type: "request",
-      action: "shell.input",
-      payload: { session_id: sessionId, data: transformed },
-    });
-  }
+  client.send({
+    type: "request",
+    action: "shell.input",
+    payload: { session_id: sessionId, data: transformed },
+  });
   if (ctrlActive) store.consumeCtrl();
   if (shiftActive) store.consumeShift();
 }
