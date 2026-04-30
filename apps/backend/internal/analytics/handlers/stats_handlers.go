@@ -154,6 +154,8 @@ func taskStatsToDTOs(taskStats []*models.TaskStats) []dto.TaskStatsDTO {
 			UserMessageCount: ts.UserMessageCount,
 			ToolCallCount:    ts.ToolCallCount,
 			TotalDurationMs:  ts.TotalDurationMs,
+			ActiveDurationMs: ts.ActiveDurationMs,
+			ElapsedSpanMs:    ts.ElapsedSpanMs,
 			CreatedAt:        ts.CreatedAt.UTC().Format(time.RFC3339),
 		}
 		if ts.CompletedAt != nil {

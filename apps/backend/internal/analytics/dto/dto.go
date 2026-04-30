@@ -13,6 +13,8 @@ type TaskStatsDTO struct {
 	UserMessageCount int     `json:"user_message_count"`
 	ToolCallCount    int     `json:"tool_call_count"`
 	TotalDurationMs  int64   `json:"total_duration_ms"`
+	ActiveDurationMs int64   `json:"active_duration_ms"`
+	ElapsedSpanMs    int64   `json:"elapsed_span_ms"`
 	CreatedAt        string  `json:"created_at"`
 	CompletedAt      *string `json:"completed_at,omitempty"`
 }

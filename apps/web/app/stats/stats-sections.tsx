@@ -223,6 +223,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Longest Tasks</CardTitle>
+          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -239,6 +240,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
           <CardTitle className="text-sm font-medium text-muted-foreground">
             Quickest Tasks
           </CardTitle>
+          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -433,11 +435,11 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 }
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
-  const filtered = [...tasks].filter((t) => t.total_duration_ms > 0);
+  const filtered = [...tasks].filter((t) => t.active_duration_ms > 0 || t.elapsed_span_ms > 0);
   const sorted =
     sortDirection === "desc"
-      ? filtered.sort((a, b) => b.total_duration_ms - a.total_duration_ms)
-      : filtered.sort((a, b) => a.total_duration_ms - b.total_duration_ms);
+      ? filtered.sort((a, b) => b.elapsed_span_ms - a.elapsed_span_ms)
+      : filtered.sort((a, b) => a.elapsed_span_ms - b.elapsed_span_ms);
   const top3 = sorted.slice(0, 3);
 
   return (
@@ -454,7 +456,10 @@ function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationList
             </div>
           </div>
           <div className="text-sm font-medium tabular-nums text-right">
-            {formatDuration(task.total_duration_ms)}
+            <div>{formatDuration(task.active_duration_ms)}</div>
+            <div className="text-[11px] text-muted-foreground">
+              span {formatDuration(task.elapsed_span_ms)}
+            </div>
           </div>
         </div>
       ))}
