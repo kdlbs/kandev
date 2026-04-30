@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -129,6 +130,15 @@ func execOrFatal(t *testing.T, dbConn *sqlx.DB, query string, args ...any) {
 	t.Helper()
 	if _, err := dbConn.Exec(query, args...); err != nil {
 		t.Fatalf("exec failed: %v", err)
+	}
+}
+
+func assertDurationAlmostEqual(t *testing.T, got, want int64, label string) {
+	t.Helper()
+	const toleranceMs = int64(2)
+	diff := int64(math.Abs(float64(got - want)))
+	if diff > toleranceMs {
+		t.Errorf("expected %s %dms (+/-%dms), got %dms", label, want, toleranceMs, got)
 	}
 }
 
@@ -370,6 +380,44 @@ func TestGetTaskStats_ExcludesEphemeralTasks(t *testing.T) {
 	if results[0].TaskID != "task-regular" {
 		t.Errorf("expected task-regular, got %s", results[0].TaskID)
 	}
+}
+
+func TestGetTaskStats_IncludesActiveAndElapsedDurations(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'Task 1', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	// Two 10-minute turns with a 60-minute idle gap in between.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-1', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:10:00Z', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-2', 'sess-1', 'task-1', '2026-01-01T11:10:00Z', '2026-01-01T11:20:00Z', ?, ?)`, nowStr, nowStr)
+
+	results, err := repo.GetTaskStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetTaskStats failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 task stat, got %d", len(results))
+	}
+
+	// Active duration = 20m, elapsed span = 80m.
+	const (
+		wantActiveMs  = int64(20 * 60 * 1000)
+		wantElapsedMs = int64(80 * 60 * 1000)
+	)
+	assertDurationAlmostEqual(t, results[0].ActiveDurationMs, wantActiveMs, "active duration")
+	assertDurationAlmostEqual(t, results[0].ElapsedSpanMs, wantElapsedMs, "elapsed span")
+	assertDurationAlmostEqual(t, results[0].TotalDurationMs, wantActiveMs, "total duration")
 }
 
 func TestGetDailyActivity_ExcludesEphemeralTasks(t *testing.T) {

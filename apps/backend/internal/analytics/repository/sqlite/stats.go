@@ -52,6 +52,8 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 			COALESCE(session_stats.user_message_count, 0) as user_message_count,
 			COALESCE(session_stats.tool_call_count, 0) as tool_call_count,
 			COALESCE(turn_stats.total_duration_ms, 0) as total_duration_ms,
+			COALESCE(turn_stats.total_duration_ms, 0) as active_duration_ms,
+			COALESCE(turn_stats.elapsed_span_ms, 0) as elapsed_span_ms,
 			t.created_at, session_stats.last_completed_at
 		FROM tasks t
 		LEFT JOIN (
@@ -70,7 +72,8 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		) session_stats ON session_stats.task_id = t.id
 		LEFT JOIN (
 			SELECT s.task_id,
-				SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END) as total_duration_ms
+				SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END) as total_duration_ms,
+				%s as elapsed_span_ms
 			FROM task_sessions s
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			WHERE (? IS NULL OR s.started_at >= ?)
@@ -78,7 +81,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		) turn_stats ON turn_stats.task_id = t.id
 		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
 		ORDER BY t.updated_at DESC
-	`, dur)
+	`, dur, dialect.DurationMs(drv, "MAX(turn.completed_at)", "MIN(turn.started_at)"))
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		startArg, startArg, startArg, startArg,
@@ -99,16 +102,21 @@ func (r *Repository) scanTaskStats(rows *sql.Rows) ([]*models.TaskStats, error) 
 		var completedAtStr sql.NullString
 		var createdAtStr string
 		var totalDurationMs float64
+		var activeDurationMs float64
+		var elapsedSpanMs float64
 		err := rows.Scan(
 			&stat.TaskID, &stat.TaskTitle, &stat.WorkspaceID, &stat.WorkflowID, &stat.State,
 			&stat.SessionCount, &stat.TurnCount, &stat.MessageCount,
 			&stat.UserMessageCount, &stat.ToolCallCount, &totalDurationMs,
+			&activeDurationMs, &elapsedSpanMs,
 			&createdAtStr, &completedAtStr,
 		)
 		if err != nil {
 			return nil, err
 		}
 		stat.TotalDurationMs = int64(totalDurationMs)
+		stat.ActiveDurationMs = int64(activeDurationMs)
+		stat.ElapsedSpanMs = int64(elapsedSpanMs)
 		stat.CreatedAt = parseTimeString(createdAtStr)
 		if completedAtStr.Valid && completedAtStr.String != "" {
 			parsedTime := parseTimeString(completedAtStr.String)

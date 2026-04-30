@@ -297,6 +297,8 @@ export type TaskStatsDTO = {
   user_message_count: number;
   tool_call_count: number;
   total_duration_ms: number;
+  active_duration_ms: number;
+  elapsed_span_ms: number;
   created_at: string;
   completed_at?: string;
 };
