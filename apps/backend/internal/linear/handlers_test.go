@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -65,7 +66,7 @@ func TestWriteClientError_NotConfigured_Returns503WithCode(t *testing.T) {
 	}
 	body := w.Body.String()
 	// errCodeLinearNotConfigured is private — assert on the wire constant.
-	if !contains(body, `"code":"LINEAR_NOT_CONFIGURED"`) {
+	if !strings.Contains(body, `"code":"LINEAR_NOT_CONFIGURED"`) {
 		t.Errorf("body does not surface code: %s", body)
 	}
 }
@@ -190,13 +191,4 @@ func TestRegisterRoutes_RegistersWSHandlers(t *testing.T) {
 			t.Errorf("WS action %q not registered", action)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

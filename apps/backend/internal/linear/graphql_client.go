@@ -405,6 +405,12 @@ func (c *GraphQLClient) GetIssue(ctx context.Context, identifier string) (*Linea
 	issue := issueNodeToIssue(data.Issue)
 	states, err := c.ListStates(ctx, issue.TeamKey)
 	if err != nil {
+		// Caller cancellation / deadline must propagate — returning a
+		// partial-success response after the request was abandoned would
+		// break downstream correctness.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 {
 			return nil, err

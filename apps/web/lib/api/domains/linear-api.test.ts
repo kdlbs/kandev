@@ -9,6 +9,7 @@ vi.mock("@/lib/config", () => ({
 import {
   deleteLinearConfig,
   getLinearConfig,
+  getLinearIssue,
   listLinearStates,
   listLinearTeams,
   searchLinearIssues,
@@ -158,6 +159,16 @@ describe("searchLinearIssues", () => {
     const { url } = lastCall();
     // URLSearchParams uses + for spaces, %26 for & — both indicate proper encoding.
     expect(url).toContain("query=fix+login+%26+signup");
+  });
+});
+
+describe("getLinearIssue", () => {
+  it("URL-encodes the identifier as a path segment and workspaceId as a query param", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "i1", identifier: "ENG/1" }));
+    await getLinearIssue("ws/space", "ENG/1");
+    expect(lastCall().url).toBe(
+      "http://api.test/api/v1/linear/issues/ENG%2F1?workspace_id=ws%2Fspace",
+    );
   });
 });
 
