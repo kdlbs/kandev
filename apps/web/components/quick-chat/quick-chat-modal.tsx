@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconMessageCircle, IconPlus, IconX } from "@tabler/icons-react";
@@ -78,17 +79,17 @@ function QuickChatTabs({
 }
 
 function useIsQuickChatPassthrough(sessionId: string) {
-  const sessionPassthrough = useAppStore((s) => s.taskSessions.items[sessionId]?.is_passthrough);
-  const profileId = useAppStore((s) => {
-    const fromSession = s.taskSessions.items[sessionId]?.agent_profile_id;
-    if (fromSession) return fromSession;
-    return s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId;
-  });
-  const profilePassthrough = useAppStore(
-    (s) => s.agentProfiles.items.find((p) => p.id === profileId)?.cli_passthrough,
+  return useAppStore(
+    useShallow((s) => {
+      const session = s.taskSessions.items[sessionId];
+      if (typeof session?.is_passthrough === "boolean") return session.is_passthrough;
+      const profileId =
+        session?.agent_profile_id ??
+        s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId;
+      if (!profileId) return false;
+      return s.agentProfiles.items.find((p) => p.id === profileId)?.cli_passthrough === true;
+    }),
   );
-  if (typeof sessionPassthrough === "boolean") return sessionPassthrough;
-  return profilePassthrough === true;
 }
 
 function QuickChatSessionView({ sessionId }: { sessionId: string }) {
