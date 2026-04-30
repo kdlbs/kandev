@@ -57,13 +57,12 @@ export function usePlanPanelAutoOpen() {
     if (!api || isRestoringLayout) return;
     if (!plan || plan.created_by !== "agent") return;
     if (lastSeen === plan.updated_at) return;
-    // Page-reload case: panel restored from saved layout AND we have no
-    // recorded `lastSeen` for this task (cold hydrate). The plan was already
-    // acknowledged before the reload — mark seen so the stale-indicator
-    // doesn't flash. Live updates keep `lastSeen` populated and re-arm
-    // normally.
-    if (api.getPanel("plan") && lastSeen === undefined) {
-      if (activeTaskId) markTaskPlanSeen(activeTaskId);
+    if (api.getPanel("plan")) {
+      // Page-reload case: panel restored from saved layout AND we have no
+      // recorded `lastSeen` (cold hydrate). The plan was already acknowledged
+      // before the reload — mark seen so a stale indicator doesn't flash.
+      // Live updates keep `lastSeen` populated and re-arm normally.
+      if (lastSeen === undefined && activeTaskId) markTaskPlanSeen(activeTaskId);
       return;
     }
 
