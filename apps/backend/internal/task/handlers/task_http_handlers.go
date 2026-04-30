@@ -978,22 +978,30 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		return
 	}
 
+	// Eager-init: launch the agent process up-front so ACP `initialize` + `session/new`
+	// fire and the agent emits available_commands/modes/models. This populates the
+	// slash menu, mode dropdown, and model selector before the user sends any prompt.
 	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:          task.ID,
-		Intent:          orchestrator.IntentPrepare,
-		AgentProfileID:  params.agentProfileID,
-		ExecutorID:      params.executorID,
-		LaunchWorkspace: true,
+		TaskID:         task.ID,
+		Intent:         orchestrator.IntentStart,
+		AgentProfileID: params.agentProfileID,
+		ExecutorID:     params.executorID,
 	})
 	if err != nil {
-		// Rollback: delete the ephemeral task to prevent orphans
-		if deleteErr := h.service.DeleteTask(ctx, task.ID); deleteErr != nil {
+		// Rollback: delete the ephemeral task to prevent orphans. Use a fresh
+		// background context — the request context may already be cancelled
+		// (e.g. client aborted, deadline exceeded), and we still want cleanup
+		// to run. TaskDeleteTimeout matches the other DeleteTask call sites
+		// in this file so a future change to the constant covers this path too.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
+		defer cancel()
+		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Error("failed to rollback quick chat task",
 				zap.String("task_id", task.ID),
 				zap.Error(deleteErr))
 		}
-		h.logger.Error("failed to prepare quick chat session", zap.Error(err), zap.String("task_id", task.ID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare session"})
+		h.logger.Error("failed to start quick chat session", zap.Error(err), zap.String("task_id", task.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
 		return
 	}
 

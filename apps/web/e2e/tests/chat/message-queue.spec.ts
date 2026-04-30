@@ -60,7 +60,12 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   await expect(agentCard).toBeVisible({ timeout: 5_000 });
   await agentCard.click();
 
-  await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 15_000 });
+  // Wait for chat input to appear AND become editable. Eager init means the
+  // agent starts during the picker → tab transition; the input is briefly
+  // disabled while the FE store catches up to the RUNNING session state.
+  const editor = dialog.locator(".tiptap.ProseMirror");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
   return dialog;
 }
 
