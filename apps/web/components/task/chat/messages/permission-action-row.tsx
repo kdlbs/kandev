@@ -17,7 +17,10 @@ export const PermissionActionRow = memo(function PermissionActionRow({
   isResponding = false,
 }: PermissionActionRowProps) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2  rounded-sm bg-amber-500/10">
+    <div
+      className="flex items-center gap-2 px-3 py-2  rounded-sm bg-amber-500/10"
+      data-testid="permission-action-row"
+    >
       <span className="text-xs text-amber-600 dark:text-amber-400 flex-1">
         Approve this action?
       </span>
@@ -26,6 +29,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
         variant="outline"
         onClick={onReject}
         disabled={isResponding}
+        data-testid="permission-reject"
         className="h-6 px-3 text-foreground border-border bg-background hover:bg-muted hover:border-foreground/40 transition-colors cursor-pointer"
       >
         <IconX className="h-4 w-4 mr-1 text-red-500" />
@@ -36,6 +40,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
         variant="outline"
         onClick={onApprove}
         disabled={isResponding}
+        data-testid="permission-approve"
         className="h-6 px-3 text-foreground border-border bg-background hover:bg-muted hover:border-foreground/40 transition-colors cursor-pointer"
       >
         {isResponding ? (

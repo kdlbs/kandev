@@ -243,6 +243,11 @@ exec git "$@"
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
+        // Force-disable the agentctl auto-approve default. A developer may have
+        // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true in their shell for local dev,
+        // and inheriting it here silently bypasses the permission UI in tests
+        // that exercise the approve/reject flow.
+        AGENTCTL_AUTO_APPROVE_PERMISSIONS: "false",
         // Short window makes coalesce-boundary tests practical without wall-clock waits.
         KANDEV_PLAN_COALESCE_WINDOW_MS: process.env.KANDEV_PLAN_COALESCE_WINDOW_MS ?? "2000",
         GIT_AUTHOR_NAME: "E2E Test",

@@ -242,6 +242,16 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-option-description");
   }
 
+  /** All visible "Approve / Deny" rows for pending permission requests. */
+  permissionActionRows(): Locator {
+    return this.chat.getByTestId("permission-action-row");
+  }
+
+  /** All "Approve" buttons for pending permission requests. */
+  permissionApproveButtons(): Locator {
+    return this.chat.getByTestId("permission-approve");
+  }
+
   /** Reset context button in the chat input toolbar. */
   resetContextButton(): Locator {
     return this.page.getByTestId("reset-context-button");
