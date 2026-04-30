@@ -178,4 +178,24 @@ describe("usePlanPanelAutoOpen", () => {
     rerender();
     expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
   });
+
+  it("retries the eager fetch after WS reconnects following a failure", async () => {
+    mockIsLoaded = false;
+    mockPlan = null;
+    mockGetTaskPlan.mockRejectedValueOnce(new Error("boom"));
+    mockGetTaskPlan.mockResolvedValueOnce(null);
+
+    const { rerender } = renderHook(() => usePlanPanelAutoOpen());
+    expect(mockGetTaskPlan).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // WS disconnect — clears the attempted set
+    mockConnectionStatus = "connecting";
+    rerender();
+
+    // WS reconnect — fetches again
+    mockConnectionStatus = "connected";
+    rerender();
+    expect(mockGetTaskPlan).toHaveBeenCalledTimes(2);
+  });
 });
