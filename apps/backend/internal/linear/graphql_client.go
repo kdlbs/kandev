@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -277,11 +278,14 @@ func (c *GraphQLClient) ListStates(ctx context.Context, teamKey string) ([]Linea
 	out := make([]LinearWorkflowState, 0, len(data.WorkflowStates.Nodes))
 	for _, s := range data.WorkflowStates.Nodes {
 		out = append(out, LinearWorkflowState{
-			ID:       s.ID,
-			Name:     s.Name,
-			Type:     s.Type,
+			ID:   s.ID,
+			Name: s.Name,
+			Type: s.Type,
+			// Linear uses fractional indexing for state ordering — round
+			// rather than truncate so adjacent fractional positions don't
+			// collapse onto the same int.
 			Color:    s.Color,
-			Position: int(s.Position),
+			Position: int(math.Round(s.Position)),
 		})
 	}
 	return out, nil

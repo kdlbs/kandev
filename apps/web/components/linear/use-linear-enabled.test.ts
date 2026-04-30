@@ -25,12 +25,15 @@ describe("useLinearEnabled", () => {
     expect(result.current.enabled).toBe(false);
   });
 
-  it('treats any non-"false" string (incl. legacy values) as enabled', async () => {
-    window.localStorage.setItem(STORAGE_KEY("ws-1"), "true");
-    const { result } = renderHook(() => useLinearEnabled("ws-1"));
-    await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(result.current.enabled).toBe(true);
-  });
+  it.each(["true", "1", "yes", "legacy"])(
+    'treats persisted value %p as enabled — only the literal "false" disables',
+    async (storedValue) => {
+      window.localStorage.setItem(STORAGE_KEY("ws-1"), storedValue);
+      const { result } = renderHook(() => useLinearEnabled("ws-1"));
+      await waitFor(() => expect(result.current.loaded).toBe(true));
+      expect(result.current.enabled).toBe(true);
+    },
+  );
 
   it("setEnabled persists to localStorage and updates state", async () => {
     const { result } = renderHook(() => useLinearEnabled("ws-1"));
