@@ -9,7 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import type { UseEnsureTaskSessionResult } from "@/hooks/use-ensure-task-session";
+import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";

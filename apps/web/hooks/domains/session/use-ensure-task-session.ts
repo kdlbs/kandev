@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureTaskSession } from "@/lib/services/session-launch-service";
-import { useTaskSessions } from "./use-task-sessions";
+import { useTaskSessions } from "@/hooks/use-task-sessions";
 
 /** Minimal task shape consumed by useEnsureTaskSession. */
 export type EnsureTaskInput = {

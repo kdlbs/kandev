@@ -22,17 +22,17 @@ type EnsureSessionResponse struct {
 
 // ensureLocks serializes EnsureSession calls per task id so concurrent callers
 // observe the same session rather than racing to create duplicates. Entries are
-// deleted on release so the map does not grow unbounded over the server lifetime.
+// not deleted on release: deletion would race with a concurrent waiter
+// (it could acquire the about-to-be-discarded mutex while a new caller LoadOrStores
+// a fresh one, putting two goroutines in the critical section for the same task).
+// Growth is bounded by the number of distinct task IDs (~160 B per entry).
 var ensureLocks sync.Map // map[taskID]*sync.Mutex
 
 func acquireEnsureLock(taskID string) func() {
 	v, _ := ensureLocks.LoadOrStore(taskID, &sync.Mutex{})
 	mu := v.(*sync.Mutex)
 	mu.Lock()
-	return func() {
-		mu.Unlock()
-		ensureLocks.Delete(taskID)
-	}
+	return mu.Unlock
 }
 
 // EnsureSession is the server-authoritative idempotent entry point for opening

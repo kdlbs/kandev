@@ -2,7 +2,7 @@
 
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import type { UseEnsureTaskSessionResult } from "@/hooks/use-ensure-task-session";
+import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
 

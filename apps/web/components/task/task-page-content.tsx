@@ -15,7 +15,7 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
-import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
+import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";

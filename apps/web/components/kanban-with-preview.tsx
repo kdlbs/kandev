@@ -25,7 +25,7 @@ import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
-} from "@/hooks/use-ensure-task-session";
+} from "@/hooks/domains/session/use-ensure-task-session";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;

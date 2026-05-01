@@ -11,7 +11,7 @@ vi.mock("@/lib/services/session-launch-service", () => ({
   ensureTaskSession: (taskId: string) => mockEnsureTaskSession(taskId),
 }));
 
-vi.mock("./use-task-sessions", () => ({
+vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => mockSessionsResult,
 }));
 
