@@ -44,6 +44,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "update_task_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
 	assert.Contains(t, tools, "message_task_kandev")
+	assert.Contains(t, tools, "get_task_conversation_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -129,6 +130,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "delete_task_kandev")
 	assert.Contains(t, tools, "archive_task_kandev")
 	assert.Contains(t, tools, "update_task_state_kandev")
+	assert.Contains(t, tools, "get_task_conversation_kandev")
 
 	// Config mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question_kandev")
@@ -194,8 +196,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 10 kanban + 1 interaction + 4 plan = 15
-	assert.Equal(t, 15, len(tools))
+	// 11 kanban + 1 interaction + 4 plan = 16
+	assert.Equal(t, 16, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -205,8 +207,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 10 workflow + 4 agent + 4 mcp + 5 executor + 5 task + 1 interaction = 29
-	assert.Equal(t, 29, len(tools))
+	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 30
+	assert.Equal(t, 30, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -271,8 +273,8 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 10 workflow + 4 agent + 4 mcp + 5 executor + 5 task + 1 create_task = 29
-	assert.Equal(t, 29, len(tools))
+	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 30
+	assert.Equal(t, 30, len(tools))
 }
 
 func TestNewExternal_Constructs(t *testing.T) {
