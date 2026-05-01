@@ -34,6 +34,21 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-running: var(--running);
+  --color-running-foreground: var(--running-foreground);
+  --color-pending: var(--pending);
+  --color-pending-foreground: var(--pending-foreground);
+  --color-remote: var(--remote);
+  --color-remote-foreground: var(--remote-foreground);
+  --color-archived: var(--archived);
+  --color-archived-foreground: var(--archived-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -61,87 +76,114 @@
   --font-geist-mono:
     "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.51 0.23 277);
-  --primary-foreground: oklch(0.96 0.02 272);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.68 0.18 276);
-  --accent-foreground: oklch(0.98 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.79 0.1 275);
-  --chart-2: oklch(0.68 0.16 277);
-  --chart-3: oklch(0.59 0.2 277);
-  --chart-4: oklch(0.51 0.23 277);
-  --chart-5: oklch(0.46 0.21 277);
+  --background: oklch(0.982 0.006 232);
+  --foreground: oklch(0.205 0.018 238);
+  --card: oklch(0.992 0.004 232);
+  --card-foreground: oklch(0.205 0.018 238);
+  --popover: oklch(0.992 0.004 232);
+  --popover-foreground: oklch(0.205 0.018 238);
+  --primary: oklch(0.54 0.13 225);
+  --primary-foreground: oklch(0.976 0.008 225);
+  --secondary: oklch(0.94 0.008 232);
+  --secondary-foreground: oklch(0.255 0.02 238);
+  --muted: oklch(0.948 0.007 232);
+  --muted-foreground: oklch(0.495 0.022 236);
+  --accent: oklch(0.925 0.032 225);
+  --accent-foreground: oklch(0.245 0.035 230);
+  --destructive: oklch(0.57 0.18 28);
+  --destructive-foreground: oklch(0.976 0.01 28);
+  --success: oklch(0.58 0.12 150);
+  --success-foreground: oklch(0.982 0.01 150);
+  --warning: oklch(0.7 0.13 78);
+  --warning-foreground: oklch(0.23 0.035 72);
+  --info: oklch(0.58 0.12 205);
+  --info-foreground: oklch(0.982 0.01 205);
+  --running: var(--primary);
+  --running-foreground: var(--primary-foreground);
+  --pending: oklch(0.62 0.045 235);
+  --pending-foreground: oklch(0.982 0.008 235);
+  --remote: oklch(0.57 0.11 185);
+  --remote-foreground: oklch(0.982 0.01 185);
+  --archived: oklch(0.52 0.018 238);
+  --archived-foreground: oklch(0.982 0.006 238);
+  --border: oklch(0.872 0.012 232);
+  --input: oklch(0.902 0.011 232);
+  --ring: oklch(0.58 0.13 225);
+  --chart-1: var(--primary);
+  --chart-2: var(--success);
+  --chart-3: var(--warning);
+  --chart-4: var(--info);
+  --chart-5: var(--destructive);
   --radius: 0.375rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.51 0.23 277);
-  --sidebar-primary-foreground: oklch(0.96 0.02 272);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --scrollbar-thumb: oklch(0.78 0 0);
-  --scrollbar-thumb-hover: oklch(0.66 0 0);
+  --sidebar: oklch(0.958 0.008 232);
+  --sidebar-foreground: oklch(0.205 0.018 238);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.918 0.018 225);
+  --sidebar-accent-foreground: oklch(0.245 0.035 230);
+  --sidebar-border: oklch(0.858 0.012 232);
+  --scrollbar-thumb: oklch(0.64 0.015 232 / 0.55);
+  --scrollbar-thumb-hover: oklch(0.54 0.018 232 / 0.72);
   --scrollbar-track: var(--background);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: var(--ring);
 
-  /* Git diff colors - centralized for easy maintenance */
-  --git-addition: 63 185 80; /* #3fb950 - GitHub addition green */
-  --git-deletion: 244 112 103; /* #f47067 - GitHub deletion red */
+  --git-addition: 58 157 92;
+  --git-deletion: 210 88 76;
 }
 
 .dark {
-  /* Grey scale: #181818 bg → #1F1F1F card → #2a2a2a borders → #333 hover */
-  --background: #181818;
-  --foreground: #d4d4d4;
-  --card: #1f1f1f;
-  --card-foreground: #d4d4d4;
-  --popover: #222222;
-  --popover-foreground: #d4d4d4;
-  --primary: oklch(0.59 0.2 277);
-  --primary-foreground: oklch(0.96 0.02 272);
-  --secondary: #2a2a2a;
-  --secondary-foreground: #d4d4d4;
-  --muted: #2a2a2a;
-  --muted-foreground: #888888;
-  --accent: oklch(0.62 0.18 276);
-  --accent-foreground: #d4d4d4;
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: #2a2a2a;
-  --input: #2a2a2a;
-  --ring: #555555;
-  --chart-1: oklch(0.79 0.1 275);
-  --chart-2: oklch(0.68 0.16 277);
-  --chart-3: oklch(0.59 0.2 277);
-  --chart-4: oklch(0.51 0.23 277);
-  --chart-5: oklch(0.46 0.21 277);
-  --sidebar: #171717;
-  --sidebar-foreground: #d4d4d4;
-  --sidebar-primary: oklch(0.68 0.16 277);
-  --sidebar-primary-foreground: oklch(0.96 0.02 272);
-  --sidebar-accent: #2a2a2a;
-  --sidebar-accent-foreground: #d4d4d4;
-  --sidebar-border: #262626;
-  --scrollbar-thumb: rgba(100, 100, 100, 0.5);
-  --scrollbar-thumb-hover: rgba(130, 130, 130, 0.6);
+  --background: oklch(0.185 0.014 238);
+  --foreground: oklch(0.91 0.014 230);
+  --card: oklch(0.215 0.014 238);
+  --card-foreground: oklch(0.91 0.014 230);
+  --popover: oklch(0.235 0.014 238);
+  --popover-foreground: oklch(0.91 0.014 230);
+  --primary: oklch(0.68 0.12 225);
+  --primary-foreground: oklch(0.16 0.025 235);
+  --secondary: oklch(0.275 0.015 238);
+  --secondary-foreground: oklch(0.885 0.014 230);
+  --muted: oklch(0.265 0.013 238);
+  --muted-foreground: oklch(0.68 0.018 232);
+  --accent: oklch(0.3 0.032 225);
+  --accent-foreground: oklch(0.91 0.018 225);
+  --destructive: oklch(0.68 0.16 25);
+  --destructive-foreground: oklch(0.17 0.02 25);
+  --success: oklch(0.68 0.12 150);
+  --success-foreground: oklch(0.16 0.025 150);
+  --warning: oklch(0.78 0.12 78);
+  --warning-foreground: oklch(0.19 0.035 72);
+  --info: oklch(0.7 0.11 205);
+  --info-foreground: oklch(0.16 0.025 205);
+  --running: var(--primary);
+  --running-foreground: var(--primary-foreground);
+  --pending: oklch(0.66 0.045 235);
+  --pending-foreground: oklch(0.16 0.02 235);
+  --remote: oklch(0.68 0.11 185);
+  --remote-foreground: oklch(0.16 0.025 185);
+  --archived: oklch(0.66 0.018 238);
+  --archived-foreground: oklch(0.16 0.016 238);
+  --border: oklch(0.32 0.016 238);
+  --input: oklch(0.3 0.016 238);
+  --ring: var(--primary);
+  --chart-1: var(--primary);
+  --chart-2: var(--success);
+  --chart-3: var(--warning);
+  --chart-4: var(--info);
+  --chart-5: var(--destructive);
+  --sidebar: oklch(0.17 0.014 238);
+  --sidebar-foreground: oklch(0.89 0.014 230);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.285 0.026 225);
+  --sidebar-accent-foreground: oklch(0.91 0.018 225);
+  --sidebar-border: oklch(0.29 0.016 238);
+  --scrollbar-thumb: oklch(0.58 0.018 232 / 0.55);
+  --scrollbar-thumb-hover: oklch(0.68 0.018 232 / 0.72);
   --scrollbar-track: var(--background);
-  --sidebar-ring: #555555;
+  --sidebar-ring: var(--ring);
 
-  /* Git diff colors - same as light mode for consistency */
-  --git-addition: 63 185 80; /* #3fb950 - GitHub addition green */
-  --git-deletion: 244 112 103; /* #f47067 - GitHub deletion red */
+  --git-addition: 85 181 112;
+  --git-deletion: 229 115 100;
 }
 
 @layer base {
@@ -162,12 +204,12 @@
 
 *::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 *::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 999px;
+  border-radius: 8px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -186,7 +228,7 @@
 
 .xterm .xterm-scrollable-element > .scrollbar > .slider {
   background: var(--scrollbar-thumb) !important;
-  border-radius: 999px !important;
+  border-radius: 8px !important;
   width: 6px !important;
   left: 2px !important;
 }
@@ -386,16 +428,16 @@
 @keyframes chat-input-running-plan {
   0%,
   100% {
-    border-color: color-mix(in oklab, oklch(0.65 0.2 300) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
     box-shadow:
-      0 0 6px 1px color-mix(in oklab, oklch(0.65 0.2 300) 12%, transparent),
-      0 0 15px 3px color-mix(in oklab, oklch(0.65 0.2 300) 6%, transparent);
+      0 0 6px 1px color-mix(in oklab, var(--primary) 12%, transparent),
+      0 0 15px 3px color-mix(in oklab, var(--primary) 6%, transparent);
   }
   50% {
-    border-color: color-mix(in oklab, oklch(0.65 0.2 300) 70%, var(--border));
+    border-color: color-mix(in oklab, var(--primary) 70%, var(--border));
     box-shadow:
-      0 0 20px 4px color-mix(in oklab, oklch(0.65 0.2 300) 20%, transparent),
-      0 0 50px 8px color-mix(in oklab, oklch(0.65 0.2 300) 10%, transparent);
+      0 0 20px 4px color-mix(in oklab, var(--primary) 20%, transparent),
+      0 0 50px 8px color-mix(in oklab, var(--primary) 10%, transparent);
   }
 }
 
@@ -452,9 +494,9 @@
 .cm-tooltip {
   border: 1px solid var(--border) !important;
   background: var(--popover, oklch(0.205 0 0)) !important;
-  color: var(--popover-foreground, oklch(0.985 0 0)) !important;
+  color: var(--popover-foreground, oklch(0.91 0.014 230)) !important;
   border-radius: calc(var(--radius) + 2px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 12px 32px color-mix(in oklab, var(--foreground) 18%, transparent);
   padding: 8px;
 }
 
@@ -479,7 +521,7 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
-  color: var(--popover-foreground, oklch(0.985 0 0));
+  color: var(--popover-foreground, oklch(0.91 0.014 230));
 }
 
 .cm-tooltip-autocomplete li[aria-selected="true"] {
@@ -537,13 +579,13 @@
 }
 
 .cm-completionIcon-slash {
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
 }
 
 .cm-completionIcon-mention {
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
 }
 
 .cm-completionIcon-prompt {
@@ -594,7 +636,7 @@
 
 /* Legacy Milkdown styles removed - plan editor now uses TipTap */
 
-/* ── Shared markdown body styles ──
+/* Shared markdown body styles
    Single source of truth for rendered markdown across TipTap (plan editor)
    and ReactMarkdown (chat, PR, changelog, etc.). */
 .markdown-body {
@@ -673,7 +715,7 @@
   margin-bottom: 0.25rem;
 }
 
-/* Inline code — accent (indigo) color */
+/* Inline code accent color */
 .markdown-body :not(pre) > code,
 .markdown-body code:not(pre code) {
   background: var(--muted);
@@ -749,7 +791,7 @@
   font-weight: 700;
 }
 
-/* User message markdown overrides — adjust for primary background */
+/* User message markdown overrides for primary background */
 .markdown-body-user :not(pre) > code,
 .markdown-body-user code:not(pre code) {
   background: color-mix(in oklch, var(--primary) 20%, transparent);
@@ -780,7 +822,7 @@
 
 /* Code blocks */
 .tiptap pre {
-  background-color: color-mix(in oklch, var(--card) 80%, black 20%);
+  background-color: color-mix(in oklch, var(--card) 92%, var(--foreground) 8%);
   border: 1px solid var(--border);
   border-radius: 0.375rem;
   padding: 0.5rem 0.75rem;
@@ -831,7 +873,7 @@
 .tiptap pre code .hljs-keyword,
 .tiptap pre code .hljs-selector-tag,
 .tiptap pre code .hljs-built_in {
-  color: oklch(0.65 0.2 300);
+  color: var(--primary);
 }
 
 .tiptap pre code .hljs-string,
@@ -848,17 +890,17 @@
 .tiptap pre code .hljs-title,
 .tiptap pre code .hljs-section,
 .tiptap pre code .hljs-type {
-  color: oklch(0.75 0.15 80);
+  color: oklch(0.62 0.11 198);
 }
 
 .tiptap pre code .hljs-name,
 .tiptap pre code .hljs-tag {
-  color: oklch(0.65 0.2 20);
+  color: var(--destructive);
 }
 
 .tiptap pre code .hljs-variable,
 .tiptap pre code .hljs-template-variable {
-  color: oklch(0.65 0.2 20);
+  color: oklch(0.62 0.12 48);
 }
 
 .tiptap pre code .hljs-regexp,
@@ -876,7 +918,7 @@
 }
 
 .tiptap pre code .hljs-deletion {
-  color: oklch(0.65 0.2 20);
+  color: var(--destructive);
 }
 
 .tiptap pre code .hljs-emphasis {
@@ -889,28 +931,28 @@
 
 /* Monaco Editor - Comment decorations */
 .monaco-comment-line {
-  background-color: rgba(99, 102, 241, 0.12) !important;
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent) !important;
 }
 
-/* Lines-decoration lane for commented lines — clickable bar */
+/* Lines-decoration lane for commented lines, clickable bar */
 .monaco-comment-bar {
   cursor: pointer !important;
-  background-color: rgba(99, 102, 241, 0.12) !important;
-  border-left: 3px solid rgba(99, 102, 241, 0.6) !important;
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent) !important;
+  border-left: 3px solid color-mix(in oklab, var(--primary) 58%, transparent) !important;
 }
 .monaco-comment-bar:hover {
-  background-color: rgba(99, 102, 241, 0.25) !important;
+  background-color: color-mix(in oklab, var(--primary) 20%, transparent) !important;
 }
 
 /* Chat bubble icon on the bar (first line of a comment only) */
 .monaco-comment-bar-icon {
   cursor: pointer !important;
   position: relative !important;
-  background-color: rgba(99, 102, 241, 0.12) !important;
-  border-left: 3px solid rgba(99, 102, 241, 0.6) !important;
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent) !important;
+  border-left: 3px solid color-mix(in oklab, var(--primary) 58%, transparent) !important;
 }
 .monaco-comment-bar-icon:hover {
-  background-color: rgba(99, 102, 241, 0.25) !important;
+  background-color: color-mix(in oklab, var(--primary) 20%, transparent) !important;
 }
 .monaco-comment-bar-icon::after {
   content: "";
@@ -920,16 +962,16 @@
   transform: translate(-50%, -50%);
   width: 12px;
   height: 12px;
-  background: rgba(99, 102, 241, 0.9);
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
+  background: var(--primary);
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
   mask-size: contain;
   -webkit-mask-size: contain;
 }
 
 /* Line number bg tint for commented lines */
 .monaco-comment-line-number {
-  background-color: rgba(99, 102, 241, 0.12) !important;
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent) !important;
 }
 
 /* TipTap Plan Editor Styles
@@ -942,7 +984,7 @@
 }
 
 .tiptap-plan-wrapper:not(.dark) {
-  background: #ffffff;
+  background: var(--background);
 }
 
 .tiptap-plan-wrapper .tiptap {
@@ -983,29 +1025,29 @@
 }
 
 .tiptap-plan-wrapper:not(.dark) .tiptap pre {
-  background: #f5f5f5 !important;
+  background: var(--muted) !important;
 }
 
 .tiptap-plan-wrapper .tiptap pre code {
   background: transparent !important;
-  color: #d4d4d4;
+  color: var(--foreground);
   padding: 0 !important;
   font-size: var(--font-mono-size) !important;
   font-family: var(--font-mono) !important;
 }
 
 .tiptap-plan-wrapper:not(.dark) .tiptap pre code {
-  color: #1e1e1e;
+  color: var(--foreground);
 }
 
 /* Highlight marks */
 .tiptap-plan-wrapper mark {
-  background-color: rgba(255, 212, 0, 0.3);
+  background-color: color-mix(in oklab, oklch(0.84 0.12 92) 38%, transparent);
   border-radius: 2px;
   padding: 1px 0;
 }
 
-/* Comment highlights — inline mark spans (like Highlight extension) */
+/* Comment highlights, inline mark spans like Highlight extension */
 .tiptap-plan-wrapper .comment-highlight {
   background-color: color-mix(in oklch, var(--accent) 70%, transparent);
   border-radius: 3px;
@@ -1021,7 +1063,7 @@
   background-color: color-mix(in oklch, var(--accent) 90%, transparent);
 }
 
-/* Comment badge — single widget decoration at end of mark range */
+/* Comment badge, single widget decoration at end of mark range */
 .tiptap-plan-wrapper .comment-badge {
   position: relative;
   display: inline-block;
@@ -1037,14 +1079,14 @@
   left: 2px;
   width: 11px;
   height: 11px;
-  color: rgba(99, 102, 241, 0.8);
+  color: color-mix(in oklab, var(--primary) 80%, var(--foreground));
   cursor: pointer;
   transition: color 0.15s ease;
   pointer-events: auto;
 }
 
 .tiptap-plan-wrapper .comment-badge:hover svg {
-  color: rgba(99, 102, 241, 1);
+  color: var(--primary);
 }
 
 /* Drag handle */
@@ -1091,7 +1133,7 @@
 }
 
 .tiptap-plan-wrapper .mermaid-error {
-  color: #ef4444 !important;
+  color: var(--destructive) !important;
   font-size: 0.75rem !important;
   padding: 0.5rem !important;
   white-space: pre-wrap !important;
@@ -1114,7 +1156,7 @@
 }
 
 .tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-keyword {
-  color: oklch(0.65 0.2 300);
+  color: var(--primary);
 }
 
 .tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-arrow {
@@ -1130,7 +1172,7 @@
 }
 
 .tiptap-plan-wrapper:not(.dark) .tiptap pre.mermaid-code-view .mm-keyword {
-  color: oklch(0.45 0.2 280);
+  color: var(--primary);
 }
 
 .tiptap-plan-wrapper:not(.dark) .tiptap pre.mermaid-code-view .mm-arrow {
@@ -1151,8 +1193,7 @@
   padding: 0.125rem 0.375rem;
   border-radius: 0.375rem;
   border: 1px solid oklch(from var(--border) l c h / 0.5);
-  background: oklch(from var(--background) l c h / 0.8);
-  backdrop-filter: blur(4px);
+  background: var(--popover);
   opacity: 0;
   transition: opacity 0.15s;
   z-index: 10;
@@ -1249,17 +1290,17 @@
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
-  color: #fff;
+  color: var(--primary-foreground);
   border-radius: 3px;
-  background-color: rgb(99 102 241); /* indigo-500 */
+  background-color: var(--primary);
 }
 
 /* Monaco Editor - Gutter line selection highlight */
 .monaco-gutter-selected-line {
-  background-color: rgb(139 92 246 / 0.15) !important;
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
 }
 .monaco-gutter-selected-deco {
-  background-color: rgb(139 92 246 / 0.15) !important;
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
 }
 
 /* Monaco Editor - Peek view / references widget overrides */
@@ -1301,48 +1342,23 @@
 }
 
 /* Pipeline node rotating border for running tasks */
-@property --border-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-@keyframes node-border-rotate {
-  to {
-    --border-angle: 360deg;
+@keyframes node-border-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary) 42%, var(--border)),
+      0 0 0 0 color-mix(in oklab, var(--primary) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary) 68%, var(--border)),
+      0 0 0 3px color-mix(in oklab, var(--primary) 12%, transparent);
   }
 }
 
 .node-border-running {
   position: relative;
-}
-
-.node-border-running::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(
-    from var(--border-angle),
-    hsl(var(--muted-foreground) / 0.4) 0%,
-    transparent 12%,
-    transparent 38%,
-    hsl(var(--muted-foreground) / 0.4) 50%,
-    transparent 62%,
-    transparent 88%,
-    hsl(var(--muted-foreground) / 0.4) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: node-border-rotate 3s linear infinite;
-  pointer-events: none;
+  animation: node-border-pulse 2.8s ease-in-out infinite;
 }
 
 .chat-message-list {
@@ -1368,17 +1384,17 @@
 }
 
 .debug {
-  border: 1px solid red !important;
+  border: 1px solid var(--destructive) !important;
 }
 
 /* Panel search highlights */
 .search-highlight {
-  background: color-mix(in srgb, var(--color-yellow-300, #fde047) 65%, transparent);
+  background: color-mix(in oklab, oklch(0.86 0.13 92) 42%, transparent);
   border-radius: 2px;
 }
 .search-highlight-current {
-  background: var(--color-orange-400, #fb923c);
-  outline: 1px solid var(--color-orange-600, #ea580c);
+  background: color-mix(in oklab, var(--warning) 56%, transparent);
+  outline: 1px solid color-mix(in oklab, var(--warning) 78%, var(--border));
   border-radius: 2px;
 }
 .search-flash {
@@ -1386,7 +1402,7 @@
 }
 @keyframes search-flash {
   0% {
-    background-color: color-mix(in srgb, var(--color-orange-300, #fdba74) 70%, transparent);
+    background-color: color-mix(in oklab, var(--warning) 48%, transparent);
   }
   100% {
     background-color: transparent;
