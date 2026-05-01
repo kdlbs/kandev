@@ -63,4 +63,21 @@ describe("sanitizeMermaidCode", () => {
     expect(out).toContain(`E["router.push('/github')"]`);
     expect(out).toContain(`B["Types 'github' / 'pr' / 'dashboard'"]`);
   });
+
+  it("quotes a stadium node next to a bracket-with-parens on the same line", () => {
+    // Pass 1 quotes `[fn(x)]` (parens inside bracket). Pass 3 must still quote
+    // the adjacent stadium `(/api/v1)` — the new quoted range from pass 1 must
+    // not leak past its actual close and suppress the unrelated stadium node.
+    const input = `A[fn(x)] --> B(/api/v1)`;
+    expect(sanitizeMermaidCode(input)).toBe(`A["fn(x)"] --> B("/api/v1")`);
+  });
+
+  it("does not let an unterminated quote leak across lines", () => {
+    // Line 1 has a stray `"` with no closing pair on the same line. The newline
+    // guard in findQuotedRanges discards that opener instead of pairing it with
+    // a `"` on a later line, so the bracket label on line 2 still gets quoted.
+    const input = `%% stray " comment\nB[/api/x]`;
+    const out = sanitizeMermaidCode(input);
+    expect(out).toContain(`B["/api/x"]`);
+  });
 });

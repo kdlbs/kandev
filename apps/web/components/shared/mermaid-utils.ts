@@ -47,7 +47,11 @@ const SPECIAL_CHARS_RE = /[$#&/\\<>{}]/;
  */
 const BRACKET_TRIGGER_RE = /[$#&/\\<>{}()]/;
 
-/** Index ranges of every top-level `"..."` span (start = opening `"`, end = closing `"`). */
+/**
+ * Index ranges of every top-level `"..."` span (start = opening `"`, end = closing `"`).
+ * Scan stops at newline so an unterminated `"` on one line cannot pair with a
+ * `"` on a later line and silently suppress sanitization of unrelated content.
+ */
 function findQuotedRanges(s: string): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   let i = 0;
@@ -55,8 +59,8 @@ function findQuotedRanges(s: string): Array<[number, number]> {
     if (s[i] === '"' && s[i - 1] !== "\\") {
       const start = i;
       i++;
-      while (i < s.length && !(s[i] === '"' && s[i - 1] !== "\\")) i++;
-      out.push([start, i]);
+      while (i < s.length && s[i] !== "\n" && !(s[i] === '"' && s[i - 1] !== "\\")) i++;
+      if (i < s.length && s[i] === '"') out.push([start, i]);
     }
     i++;
   }
