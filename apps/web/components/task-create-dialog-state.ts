@@ -441,6 +441,26 @@ export { useTaskCreateDialogEffects } from "@/components/task-create-dialog-effe
 
 export { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 
+function computeSingleWorkflowFallbackId(
+  selectedWorkflowId: string | null,
+  workflowId: string | null,
+  workflows: DialogComputedArgs["workflows"],
+): string | null {
+  if (selectedWorkflowId || workflowId || workflows.length !== 1) return null;
+  return workflows[0]?.id ?? null;
+}
+
+function computeSnapshotDefaultStepId(
+  workflowId: string | null,
+  snapshots: DialogComputedArgs["snapshots"],
+): string | null {
+  if (!workflowId) return null;
+  const steps = snapshots[workflowId]?.steps ?? [];
+  const startStep = steps.find((step) => step.is_start_step);
+  if (startStep) return startStep.id;
+  return [...steps].sort((a, b) => a.position - b.position)[0]?.id ?? null;
+}
+
 export function useDialogComputed({
   fs,
   open,
@@ -454,8 +474,14 @@ export function useDialogComputed({
   executors,
   repositories,
   workflows,
+  snapshots,
 }: DialogComputedArgs): DialogComputedValues {
-  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId;
+  const singleWorkflowId = computeSingleWorkflowFallbackId(
+    fs.selectedWorkflowId,
+    workflowId,
+    workflows,
+  );
+  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId ?? singleWorkflowId;
   // Compute workflow agent lock directly from data — avoids effect timing issues.
   const workflowAgentProfileId = (() => {
     const wfId = effectiveWorkflowId;
@@ -471,12 +497,9 @@ export function useDialogComputed({
     () => computePassthroughProfile(effectiveAgentProfileId, agentProfiles),
     [effectiveAgentProfileId, agentProfiles],
   );
-  const effectiveDefaultStepId = computeEffectiveStepId(
-    fs.selectedWorkflowId,
-    workflowId,
-    fs.fetchedSteps,
-    defaultStepId,
-  );
+  const effectiveDefaultStepId =
+    computeEffectiveStepId(fs.selectedWorkflowId, workflowId, fs.fetchedSteps, defaultStepId) ??
+    computeSnapshotDefaultStepId(singleWorkflowId, snapshots);
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
@@ -578,6 +601,7 @@ export function useTaskCreateDialogData(
     executors,
     repositories,
     workflows,
+    snapshots,
   });
   return {
     workflows,

@@ -348,8 +348,21 @@ export const WorkflowSection = memo(function WorkflowSection({
 
   if (!isCreateMode || isTaskStarted) return null;
 
-  // Single workflow — show agent override info if any overrides exist
-  if (workflows.length <= 1) {
+  if (!effectiveWorkflowId || workflows.length > 1) {
+    return (
+      <WorkflowSelectorRow
+        workflows={workflows}
+        snapshots={snapshots}
+        selectedWorkflowId={effectiveWorkflowId ?? null}
+        onWorkflowChange={handleWorkflowChange}
+        lastUsedWorkflowId={lastUsedWorkflowId}
+        agentProfiles={agentProfiles}
+      />
+    );
+  }
+
+  // Single selected workflow — show agent override info if any overrides exist
+  if (workflows.length === 1) {
     const singleWorkflow = workflows[0];
     if (!singleWorkflow) return null;
     const snapshot = snapshots[singleWorkflow.id];
@@ -386,16 +399,7 @@ export const WorkflowSection = memo(function WorkflowSection({
     );
   }
 
-  return (
-    <WorkflowSelectorRow
-      workflows={workflows}
-      snapshots={snapshots}
-      selectedWorkflowId={effectiveWorkflowId ?? null}
-      onWorkflowChange={handleWorkflowChange}
-      lastUsedWorkflowId={lastUsedWorkflowId}
-      agentProfiles={agentProfiles}
-    />
-  );
+  return null;
 });
 
 export type DialogPromptSectionProps = {

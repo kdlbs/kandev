@@ -7,6 +7,7 @@ import type {
   Task,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type {
   useRepositoryOptions,
   useBranchOptions,
@@ -79,6 +80,7 @@ export type DialogComputedArgs = {
   executors: Executor[];
   repositories: Repository[];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  snapshots: Record<string, WorkflowSnapshotData>;
 };
 
 export type TaskCreateEffectsArgs = {
