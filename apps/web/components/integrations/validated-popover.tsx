@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -105,6 +105,10 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Submission token: bumped on every submit and on close, so an in-flight
+  // request whose promise resolves after the popover was closed (or
+  // re-opened) cannot leak loading/error state into the next session.
+  const submissionRef = useRef(0);
 
   const submit = useCallback(async () => {
     const key = extractKey(value.trim());
@@ -112,25 +116,33 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
       setError(validationHint);
       return;
     }
+    const submission = ++submissionRef.current;
     setLoading(true);
     setError(null);
     try {
       const result = await fetch(key);
+      if (submission !== submissionRef.current) return;
       onSuccess(key, result);
       setOpen(false);
       setValue("");
     } catch (err) {
+      if (submission !== submissionRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (submission === submissionRef.current) setLoading(false);
     }
   }, [value, extractKey, validationHint, fetch, onSuccess]);
 
-  // Closing discards any stale validation/error so the next open starts
-  // clean rather than rehydrating yesterday's failure.
+  // Closing invalidates any in-flight submit (so a late rejection can't
+  // re-populate `error` after the user dismissed the popover) and clears
+  // local submit state so the next open starts clean.
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) setError(null);
+    if (!next) {
+      submissionRef.current += 1;
+      setLoading(false);
+      setError(null);
+    }
   };
 
   return (
