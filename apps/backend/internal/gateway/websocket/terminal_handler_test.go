@@ -157,7 +157,7 @@ func TestParseTerminalRoute(t *testing.T) {
 	}{
 		{name: "environment route", target: "/environment/env-1", wantKind: terminalRouteEnvironment, wantID: "env-1"},
 		{name: "session route", target: "/session/session-1", wantKind: terminalRouteSession, wantID: "session-1"},
-		{name: "legacy route", target: "/session-legacy", wantKind: terminalRouteLegacy, wantID: "session-legacy"},
+		{name: "unknown route", target: "/unknown-target", wantKind: "", wantID: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

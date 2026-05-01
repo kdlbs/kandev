@@ -162,15 +162,11 @@ type terminalRoute struct {
 const (
 	terminalRouteEnvironment = "environment"
 	terminalRouteSession     = "session"
-	terminalRouteLegacy      = "legacy"
 )
 
 func parseTerminalRoute(c *gin.Context) terminalRoute {
 	target := strings.Trim(c.Param("target"), "/")
 	if target == "" {
-		if sessionID := c.Param("sessionId"); sessionID != "" {
-			return terminalRoute{kind: terminalRouteLegacy, id: sessionID}
-		}
 		return terminalRoute{}
 	}
 	if id, ok := strings.CutPrefix(target, "environment/"); ok {
@@ -179,18 +175,17 @@ func parseTerminalRoute(c *gin.Context) terminalRoute {
 	if id, ok := strings.CutPrefix(target, "session/"); ok {
 		return terminalRoute{kind: terminalRouteSession, id: id}
 	}
-	return terminalRoute{kind: terminalRouteLegacy, id: target}
+	return terminalRoute{}
 }
 
 // HandleTerminalWS handles terminal WebSocket connections.
 // Explicit routes:
 // - /terminal/session/:sessionId?mode=agent for agent passthrough terminals
 // - /terminal/environment/:environmentId?terminalId=... for user shell terminals
-// Legacy /terminal/:sessionId is accepted only as a boundary shim.
 func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 	route := parseTerminalRoute(c)
 	if route.id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal target is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal target must be /session/:sessionId or /environment/:environmentId"})
 		return
 	}
 
@@ -199,8 +194,6 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		h.handleEnvironmentTerminalRoute(c, route.id)
 	case terminalRouteSession:
 		h.handleSessionTerminalRoute(c, route.id)
-	case terminalRouteLegacy:
-		h.handleLegacyTerminalRoute(c, route.id)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid terminal route"})
 	}
@@ -227,32 +220,6 @@ func (h *TerminalHandler) handleEnvironmentTerminalRoute(c *gin.Context, environ
 		return
 	}
 	h.handleEnvironmentUserShellWS(c, environmentID, terminalID)
-}
-
-func (h *TerminalHandler) handleLegacyTerminalRoute(c *gin.Context, sessionID string) {
-	mode := c.Query("mode")
-	switch mode {
-	case "agent":
-		h.handleAgentTerminalRoute(c, sessionID)
-
-	case "shell":
-		terminalID := c.Query("terminalId")
-		if terminalID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId required for shell mode"})
-			return
-		}
-		// Compatibility shim for old clients that still send /terminal/:sessionId.
-		// The session is only a lookup handle; the shell itself is routed by env.
-		environmentID, err := h.lifecycleMgr.ResolveTaskEnvironmentID(c.Request.Context(), sessionID)
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-			return
-		}
-		h.handleEnvironmentUserShellWS(c, environmentID, terminalID)
-
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode query param required: agent or shell"})
-	}
 }
 
 func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID string) {
