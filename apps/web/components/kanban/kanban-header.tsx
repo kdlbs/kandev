@@ -321,7 +321,6 @@ function DesktopHeader({
               className="w-64"
             />
           )}
-          <IntegrationsMenu workspaceId={workspaceId} />
           <Button
             onClick={onCreateTask}
             className="cursor-pointer"
@@ -335,6 +334,7 @@ function DesktopHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           </TooltipProvider>
           <KanbanDisplayDropdown />
+          <IntegrationsMenu workspaceId={workspaceId} />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}

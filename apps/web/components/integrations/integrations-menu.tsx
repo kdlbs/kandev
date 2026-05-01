@@ -50,7 +50,7 @@ const INTEGRATION_ICONS = {
   linear: IconHexagon,
 } satisfies Record<IntegrationId, typeof IconBrandGithub>;
 
-const HOVER_CLOSE_DELAY_MS = 120;
+const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
   githubReady,
@@ -107,7 +107,7 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
 
   const openOnHover = () => {
     clearCloseTimeout();
-    setOpen(true);
+    setOpen((current) => (current ? current : true));
   };
 
   const closeAfterHover = () => {
@@ -115,10 +115,15 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
     closeTimeoutRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    clearCloseTimeout();
+    setOpen(nextOpen);
+  };
+
   if (links.length === 0) return null;
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={handleOpenChange} modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -134,6 +139,7 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
       <DropdownMenuContent
         align="end"
         className="w-48"
+        onCloseAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={openOnHover}
         onPointerLeave={closeAfterHover}
       >
