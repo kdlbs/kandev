@@ -183,12 +183,7 @@ function ImproveKandevTopbarButton({
 function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
-      <Button
-        asChild
-        variant="ghost"
-        size="lg"
-        className="cursor-pointer text-muted-foreground hover:text-foreground"
-      >
+      <Button asChild variant="outline" size="lg" className="cursor-pointer">
         <Link href="/stats" aria-label="Stats">
           <IconChartBar className="h-4 w-4" />
           Stats
