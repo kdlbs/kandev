@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { forwardRef } from "react";
 import type { ReactNode } from "react";
 import { IconArrowLeft } from "@tabler/icons-react";
 import {
@@ -36,31 +37,33 @@ type PageTopbarProps = {
   actionsClassName?: string;
 };
 
-export function PageTopbar({
-  title,
-  subtitle,
-  icon,
-  backHref = "/",
-  backLabel = "KanDev",
-  leading,
-  center,
-  leftActions,
-  actions,
-  variant = "breadcrumb",
-  className,
-  centerClassName,
-  actionsClassName,
-}: PageTopbarProps) {
-  const rootLabel = backLabel;
-
+export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function PageTopbar(
+  {
+    title,
+    subtitle,
+    icon,
+    backHref = "/",
+    backLabel = "KanDev",
+    leading,
+    center,
+    leftActions,
+    actions,
+    variant = "breadcrumb",
+    className,
+    centerClassName,
+    actionsClassName,
+  },
+  ref,
+) {
   return (
     <header
+      ref={ref}
       className={cn("relative flex h-14 shrink-0 items-center gap-3 border-b px-4", className)}
     >
       {leading}
       {variant === "root" ? (
         <div className="relative z-10 flex min-w-0 items-center">
-          <span className="truncate text-[15px] font-semibold leading-none">{rootLabel}</span>
+          <span className="truncate text-[15px] font-semibold leading-none">{backLabel}</span>
         </div>
       ) : (
         <Breadcrumb className="relative z-10 min-w-0">
@@ -115,4 +118,4 @@ export function PageTopbar({
       )}
     </header>
   );
-}
+});

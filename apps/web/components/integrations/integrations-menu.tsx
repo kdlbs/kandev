@@ -64,15 +64,14 @@ export function getAvailableIntegrationLinks({
   });
 }
 
-function getStatusLabel(connected: boolean, loading: boolean | undefined): string {
-  if (loading) return "Checking";
-  return connected ? "Connected" : "Setup";
+function getStatusLabel(loading: boolean | undefined): string {
+  return loading ? "Checking" : "Setup";
 }
 
 export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading: boolean) {
   if (status?.authenticated) return { ready: true, label: "Connected" };
   if (status?.token_configured) return { ready: true, label: "Configured" };
-  return { ready: false, label: getStatusLabel(false, loading) };
+  return { ready: false, label: getStatusLabel(loading) };
 }
 
 function useConfiguredIntegrationLinks(workspaceId: string | undefined): IntegrationLink[] {

@@ -4,16 +4,10 @@ import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
-  IconMessagePlus,
   IconDeviceDesktop,
   IconTerminal2,
-  IconFileText,
-  IconFolder,
-  IconGitBranch,
-  IconGitPullRequest,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
-  IconBrandVscode,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -21,23 +15,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { prPanelLabel } from "@/components/github/pr-utils";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
+import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
-import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./repository-scripts-menu";
-import { SessionReopenMenuItems } from "./session-reopen-menu";
+import { useActiveSessionDevScript } from "./repository-scripts-menu";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 
 const HEADER_ACTION_BUTTON_CLASS =
@@ -91,88 +83,6 @@ function useLeftHeaderState(
     hasChanges,
     hasFiles,
   };
-}
-
-function AddPanelMenuItems({
-  groupId,
-  state,
-  onNewSession,
-  onAddTerminal,
-  onRunScript,
-  onRunDevScript,
-}: {
-  groupId: string;
-  state: ReturnType<typeof useLeftHeaderState>;
-  onNewSession: () => void;
-  onAddTerminal: () => void;
-  onRunScript: (scriptId: string) => void;
-  onRunDevScript: () => void;
-}) {
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
-  const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
-  const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
-  const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-
-  return (
-    <>
-      {state.taskId && (
-        <>
-          <DropdownMenuItem
-            onClick={onNewSession}
-            className={MENU_ITEM_CLASS}
-            data-testid="new-session-button"
-          >
-            <IconMessagePlus className={MENU_ICON_CLASS} />
-            New Agent
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
-        </>
-      )}
-      <DropdownMenuItem onClick={onAddTerminal} className={MENU_ITEM_CLASS}>
-        <IconTerminal2 className={MENU_ICON_CLASS} />
-        Terminal
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => addBrowserPanel(undefined, groupId)}
-        className={MENU_ITEM_CLASS}
-      >
-        <IconDeviceDesktop className={MENU_ICON_CLASS} />
-        Browser
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => addVscodePanel()} className={MENU_ITEM_CLASS}>
-        <IconBrandVscode className={MENU_ICON_CLASS} />
-        VS Code
-      </DropdownMenuItem>
-      {!state.isPassthrough && (
-        <DropdownMenuItem onClick={() => addPlanPanel({ groupId })} className={MENU_ITEM_CLASS}>
-          <IconFileText className={MENU_ICON_CLASS} />
-          Plan
-        </DropdownMenuItem>
-      )}
-      {!state.hasChanges && (
-        <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
-          <IconGitBranch className={MENU_ICON_CLASS} />
-          Changes
-        </DropdownMenuItem>
-      )}
-      {!state.hasFiles && (
-        <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className={MENU_ITEM_CLASS}>
-          <IconFolder className={MENU_ICON_CLASS} />
-          Files
-        </DropdownMenuItem>
-      )}
-      {state.pr && (
-        <DropdownMenuItem onClick={() => addPRPanel()} className={MENU_ITEM_CLASS}>
-          <IconGitPullRequest className={MENU_ICON_CLASS} />
-          {prPanelLabel(state.pr.pr_number)}
-        </DropdownMenuItem>
-      )}
-      <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
-    </>
-  );
 }
 
 export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {

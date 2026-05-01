@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
 import {
@@ -32,7 +32,7 @@ import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
-import { HealthIssuesDialog } from "../system-health/health-indicator";
+import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
@@ -43,7 +43,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
-import type { ComponentProps } from "react";
+import type { ComponentProps, RefObject } from "react";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -76,6 +76,7 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
 ];
 
 const WORKBENCH_TOPBAR_CLASSNAME = "h-10 px-3 py-1";
+const DESKTOP_HEADER_NARROW_PX = 1100;
 
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
@@ -252,6 +253,22 @@ function getToggleValue(currentPage: string, kanbanViewMode: string | null): str
   return "kanban";
 }
 
+function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setIsNarrow(el.clientWidth < DESKTOP_HEADER_NARROW_PX);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return isNarrow;
+}
+
 function TabletHeader({
   onCreateTask,
   workspaceId,
@@ -263,6 +280,8 @@ function TabletHeader({
   toggleValue,
   handleViewChange,
   setMenuOpen,
+  showHealthIndicator,
+  onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
   workspaceId?: string;
@@ -274,6 +293,8 @@ function TabletHeader({
   toggleValue: string;
   handleViewChange: (value: string) => void;
   setMenuOpen: (open: boolean) => void;
+  showHealthIndicator: boolean;
+  onOpenHealthDialog: () => void;
 }) {
   const isHome = title === "Home";
 
@@ -316,6 +337,11 @@ function TabletHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
           <KanbanDisplayDropdown triggerSize="icon-lg" />
+          <HealthIndicatorButton
+            hasIssues={showHealthIndicator}
+            onClick={onOpenHealthDialog}
+            size="icon-lg"
+          />
           <Button
             variant="outline"
             size="icon-lg"
@@ -360,6 +386,8 @@ function DesktopHeader({
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 }) {
+  const headerRef = useRef<HTMLElement>(null);
+  const isNarrow = useIsHeaderNarrow(headerRef);
   const searchInput = onSearchChange ? (
     <TaskSearchInput
       value={searchQuery}
@@ -370,7 +398,10 @@ function DesktopHeader({
     />
   ) : null;
   const isHome = title === "Home";
-  const centerSearch = isHome ? searchInput : null;
+  const centerSearch =
+    isHome && searchInput && !isNarrow ? (
+      <div data-testid="kanban-header-search">{searchInput}</div>
+    ) : null;
   const leftActions = isHome ? (
     <HomeLeftActions workspaceId={workspaceId} />
   ) : (
@@ -379,6 +410,7 @@ function DesktopHeader({
 
   return (
     <PageTopbar
+      ref={headerRef}
       title={title}
       subtitle={workspaceLabel}
       center={centerSearch}
@@ -387,7 +419,7 @@ function DesktopHeader({
       leftActions={leftActions}
       actions={
         <>
-          {!centerSearch && searchInput}
+          {!isHome && searchInput}
           <Button
             onClick={onCreateTask}
             size="lg"
@@ -402,6 +434,11 @@ function DesktopHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
           <KanbanDisplayDropdown triggerSize="icon-lg" />
+          <HealthIndicatorButton
+            hasIssues={showHealthIndicator}
+            onClick={onOpenHealthDialog}
+            size="icon-lg"
+          />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}
             onOpenReleaseNotes={onOpenReleaseNotes}
@@ -488,6 +525,7 @@ export function KanbanHeader({
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
             setMenuOpen={setMenuOpen}
+            {...indicatorProps}
           />
           <MobileMenuSheet
             open={isMenuOpen}
