@@ -461,6 +461,29 @@ function computeSnapshotDefaultStepId(
   return [...steps].sort((a, b) => a.position - b.position)[0]?.id ?? null;
 }
 
+type ComputeDialogDefaultStepIdArgs = {
+  selectedWorkflowId: string | null;
+  workflowId: string | null;
+  fetchedSteps: StepType[] | null;
+  defaultStepId: string | null;
+  effectiveWorkflowId: string | null;
+  snapshots: DialogComputedArgs["snapshots"];
+};
+
+export function computeDialogDefaultStepId({
+  selectedWorkflowId,
+  workflowId,
+  fetchedSteps,
+  defaultStepId,
+  effectiveWorkflowId,
+  snapshots,
+}: ComputeDialogDefaultStepIdArgs): string | null {
+  return (
+    computeEffectiveStepId(selectedWorkflowId, workflowId, fetchedSteps, defaultStepId) ??
+    computeSnapshotDefaultStepId(effectiveWorkflowId, snapshots)
+  );
+}
+
 export function useDialogComputed({
   fs,
   open,
@@ -497,9 +520,14 @@ export function useDialogComputed({
     () => computePassthroughProfile(effectiveAgentProfileId, agentProfiles),
     [effectiveAgentProfileId, agentProfiles],
   );
-  const effectiveDefaultStepId =
-    computeEffectiveStepId(fs.selectedWorkflowId, workflowId, fs.fetchedSteps, defaultStepId) ??
-    computeSnapshotDefaultStepId(singleWorkflowId, snapshots);
+  const effectiveDefaultStepId = computeDialogDefaultStepId({
+    selectedWorkflowId: fs.selectedWorkflowId,
+    workflowId,
+    fetchedSteps: fs.fetchedSteps,
+    defaultStepId,
+    effectiveWorkflowId,
+    snapshots,
+  });
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;

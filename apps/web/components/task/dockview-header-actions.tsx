@@ -477,26 +477,102 @@ function TerminalGroupRightActions() {
     return state.taskSessions.items[sessionId]?.repository_id ?? null;
   });
   const hasDevScript = Boolean(useActiveSessionDevScript());
-
   const { scripts } = useRepositoryScripts(repositoryId);
-  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
-  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
+
+  if (scripts.length === 0 && !hasDevScript) return null;
+
+  return (
+    <>
+      <TerminalScriptsDropdown
+        scripts={scripts}
+        activeSessionId={activeSessionId}
+        rightBottomGroupId={rightBottomGroupId}
+      />
+      <TerminalDevPreviewButton
+        activeSessionId={activeSessionId}
+        rightBottomGroupId={rightBottomGroupId}
+        visible={hasDevScript}
+      />
+    </>
+  );
+}
+
+type TerminalScriptsDropdownProps = {
+  scripts: ReturnType<typeof useRepositoryScripts>["scripts"];
+  activeSessionId: string | null;
+  rightBottomGroupId: string | null;
+};
+
+function TerminalScriptsDropdown({
+  scripts,
+  activeSessionId,
+  rightBottomGroupId,
+}: TerminalScriptsDropdownProps) {
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!activeSessionId) return;
       try {
         const result = await createUserShell(activeSessionId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId);
+        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
     [activeSessionId, addTerminalPanel, rightBottomGroupId],
   );
+
+  if (scripts.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={HEADER_ACTION_BUTTON_CLASS}
+          aria-label="Run script"
+          title="Run script"
+        >
+          <IconPlayerPlay className={HEADER_ICON_CLASS} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {scripts.map((script) => (
+          <DropdownMenuItem
+            key={script.id}
+            onClick={() => handleRunScript(script.id)}
+            className={MENU_ITEM_CLASS}
+          >
+            <IconTerminal2 className={MENU_ICON_CLASS} />
+            <span className="truncate">{script.name}</span>
+            <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
+              {script.command}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type TerminalDevPreviewButtonProps = {
+  activeSessionId: string | null;
+  rightBottomGroupId: string | null;
+  visible: boolean;
+};
+
+function TerminalDevPreviewButton({
+  activeSessionId,
+  rightBottomGroupId,
+  visible,
+}: TerminalDevPreviewButtonProps) {
+  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
+  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
 
   const handleStartPreview = useCallback(async () => {
     if (!activeSessionId) return;
@@ -512,7 +588,7 @@ function TerminalGroupRightActions() {
     }
     try {
       const shell = await createUserShell(activeSessionId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId);
+      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined);
     } catch {
       // Terminal creation is best-effort
     }
@@ -525,52 +601,18 @@ function TerminalGroupRightActions() {
     rightBottomGroupId,
   ]);
 
-  if (scripts.length === 0 && !hasDevScript) return null;
+  if (!visible) return null;
 
   return (
-    <>
-      {scripts.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={HEADER_ACTION_BUTTON_CLASS}
-              aria-label="Run script"
-              title="Run script"
-            >
-              <IconPlayerPlay className={HEADER_ICON_CLASS} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {scripts.map((script) => (
-              <DropdownMenuItem
-                key={script.id}
-                onClick={() => handleRunScript(script.id)}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconTerminal2 className={MENU_ICON_CLASS} />
-                <span className="truncate">{script.name}</span>
-                <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
-                  {script.command}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {hasDevScript && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className={HEADER_ACTION_BUTTON_CLASS}
-          onClick={handleStartPreview}
-          aria-label="Start dev server preview"
-          title="Start dev server preview"
-        >
-          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
-        </Button>
-      )}
-    </>
+    <Button
+      size="sm"
+      variant="ghost"
+      className={HEADER_ACTION_BUTTON_CLASS}
+      onClick={handleStartPreview}
+      aria-label="Start dev server preview"
+      title="Start dev server preview"
+    >
+      <IconDeviceDesktop className={HEADER_ICON_CLASS} />
+    </Button>
   );
 }

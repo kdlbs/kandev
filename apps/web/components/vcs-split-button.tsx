@@ -331,6 +331,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handlePush: () => handlePush(false),
     handleRebase,
   });
+  const showDivergencePills = primaryAction !== "commit";
 
   return (
     <div className={cn("inline-flex", className)}>
@@ -351,7 +352,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
                 {primaryButtonConfig.badge}
               </span>
             )}
-            <GitDivergencePills ahead={aheadCount} behind={behindCount} />
+            {showDivergencePills && <GitDivergencePills ahead={aheadCount} behind={behindCount} />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{primaryButtonConfig.tooltip}</TooltipContent>
@@ -362,6 +363,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
             size={buttonSize}
             variant="outline"
             className="-ml-px rounded-l-none px-2 cursor-pointer"
+            aria-label="Open VCS options"
             disabled={isDisabled}
           >
             {isGitLoading ? (

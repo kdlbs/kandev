@@ -6,7 +6,7 @@ import { cn } from "@kandev/ui/lib/utils";
  *
  * PanelRoot - outermost wrapper, fills the dockview content area
  * PanelBody - scrollable (or non-scrollable) content region
- * PanelToolbar - fixed strip at the top/bottom of a panel
+ * PanelToolbar - fixed header strip for panel actions
  */
 
 const PANEL_ROOT_CLASS = "h-full min-h-0 flex flex-col bg-card text-card-foreground";
@@ -35,7 +35,7 @@ export const PanelRoot = forwardRef<HTMLDivElement, PanelRootProps>(function Pan
 type PanelBodyProps = Omit<HTMLAttributes<HTMLDivElement>, "className"> & {
   children: ReactNode;
   className?: string;
-  /** Add default p-3 padding. Default true. */
+  /** Add default p-2.5 padding. Default true. */
   padding?: boolean;
   /** Enable overflow scrolling. Default true. */
   scroll?: boolean;
@@ -81,7 +81,7 @@ function PanelBar({ children, className, borderClassName }: PanelBarProps) {
   );
 }
 
-/** Fixed toolbar strip. Doesn't scroll with content. */
+/** Fixed header toolbar strip. Doesn't scroll with content. */
 export function PanelToolbar({ children, className }: PanelToolbarProps) {
   return <PanelHeaderBar className={className}>{children}</PanelHeaderBar>;
 }

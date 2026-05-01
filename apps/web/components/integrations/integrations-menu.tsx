@@ -139,7 +139,6 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
       <DropdownMenuContent
         align="end"
         className="w-48"
-        onCloseAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={openOnHover}
         onPointerLeave={closeAfterHover}
       >
