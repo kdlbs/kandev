@@ -9,19 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import {
   IconAlertTriangle,
-  IconBrandGithub,
   IconChartBar,
   IconLayoutKanban,
   IconList,
   IconSettings,
   IconSparkles,
-  IconTicket,
   IconTimeline,
 } from "@tabler/icons-react";
+import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { linkToTasks } from "@/lib/links";
 import type { Workspace, Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
@@ -236,22 +233,18 @@ function MobileViewSection({
 }
 
 function MobileUtilityActions({
-  workspaceId,
   showReleaseNotesButton,
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
   onOpenChange,
 }: {
-  workspaceId?: string;
   showReleaseNotesButton: boolean;
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { status } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable(workspaceId);
   const closeSheet = () => onOpenChange(false);
   const openReleaseNotes = () => {
     closeSheet();
@@ -265,22 +258,6 @@ function MobileUtilityActions({
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <div className="text-sm font-medium">Utilities</div>
-      {status?.authenticated && (
-        <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-          <Link href="/github" onClick={closeSheet}>
-            <IconBrandGithub className="h-4 w-4" />
-            GitHub
-          </Link>
-        </Button>
-      )}
-      {jiraAvailable && (
-        <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-          <Link href="/jira" onClick={closeSheet}>
-            <IconTicket className="h-4 w-4" />
-            Jira
-          </Link>
-        </Button>
-      )}
       {showReleaseNotesButton && (
         <Button
           type="button"
@@ -399,8 +376,12 @@ export function MobileMenuSheet({
             onTogglePreviewOnClick={onTogglePreviewOnClick}
           />
 
-          <MobileUtilityActions
+          <MobileIntegrationsSection
             workspaceId={workspaceId}
+            onNavigate={() => onOpenChange(false)}
+          />
+
+          <MobileUtilityActions
             showReleaseNotesButton={showReleaseNotesButton}
             onOpenReleaseNotes={onOpenReleaseNotes}
             showHealthIndicator={showHealthIndicator}

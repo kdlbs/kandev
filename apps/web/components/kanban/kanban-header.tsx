@@ -22,17 +22,13 @@ import {
   IconMenu2,
   IconChartBar,
   IconTimeline,
-  IconBrandGithub,
-  IconTicket,
-  IconHexagon,
   IconStethoscope,
   IconDots,
   IconSparkles,
   IconAlertTriangle,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
-import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -45,7 +41,6 @@ import { linkToTask, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 
@@ -65,7 +60,6 @@ type ViewToggleItem = {
 };
 
 type HeaderUtilityMenuProps = {
-  workspaceId?: string;
   showReleaseNotesButton: boolean;
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
@@ -91,17 +85,11 @@ function getHeaderTitle(currentPage: string): string {
 }
 
 function BoardUtilitiesMenu({
-  workspaceId,
   showReleaseNotesButton,
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
 }: HeaderUtilityMenuProps) {
-  const { status } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable(workspaceId);
-  const linearAvailable = useLinearAvailable(workspaceId);
-  const hasIntegrations = status?.authenticated || jiraAvailable || linearAvailable;
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -111,31 +99,6 @@ function BoardUtilitiesMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>Utilities</DropdownMenuLabel>
-        {status?.authenticated && (
-          <DropdownMenuItem asChild className="cursor-pointer">
-            <Link href="/github">
-              <IconBrandGithub className="h-4 w-4" />
-              GitHub
-            </Link>
-          </DropdownMenuItem>
-        )}
-        {jiraAvailable && (
-          <DropdownMenuItem asChild className="cursor-pointer">
-            <Link href="/jira">
-              <IconTicket className="h-4 w-4" />
-              Jira
-            </Link>
-          </DropdownMenuItem>
-        )}
-        {linearAvailable && (
-          <DropdownMenuItem asChild className="cursor-pointer">
-            <Link href="/linear">
-              <IconHexagon className="h-4 w-4" />
-              Linear
-            </Link>
-          </DropdownMenuItem>
-        )}
-        {hasIntegrations && <DropdownMenuSeparator />}
         {showReleaseNotesButton && (
           <DropdownMenuItem onClick={onOpenReleaseNotes} className="cursor-pointer">
             <IconSparkles className="h-4 w-4" />
@@ -371,9 +334,9 @@ function DesktopHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           </TooltipProvider>
           <KanbanDisplayDropdown />
+          <IntegrationsMenu workspaceId={workspaceId} />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
-            workspaceId={workspaceId}
             showReleaseNotesButton={showReleaseNotesButton}
             onOpenReleaseNotes={onOpenReleaseNotes}
             showHealthIndicator={showHealthIndicator}
