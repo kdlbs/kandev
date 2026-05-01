@@ -439,6 +439,8 @@ export function KanbanCard({
     disabled: isMultiSelectMode,
   });
 
+  const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
+
   const style = {
     transform: CSS.Translate.toString(transform),
     transition: "none",
@@ -471,6 +473,7 @@ export function KanbanCard({
         needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
         isSelected && "ring-1 ring-primary/60 border-primary/60",
+        isPreviewed && !isSelected && "ring-2 ring-primary border-primary",
       )}
       onClick={handleClick}
       {...(!isMultiSelectMode ? listeners : {})}

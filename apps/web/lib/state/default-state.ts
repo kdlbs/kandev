@@ -78,6 +78,7 @@ export const defaultState = {
   bottomTerminal: defaultUIState.bottomTerminal,
   sidebarViews: defaultUIState.sidebarViews,
   collapsedSubtaskParents: defaultUIState.collapsedSubtaskParents,
+  kanbanPreviewedTaskId: defaultUIState.kanbanPreviewedTaskId,
 };
 
 export type DefaultState = typeof defaultState;

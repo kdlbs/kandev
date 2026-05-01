@@ -229,6 +229,7 @@ export type AppState = {
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
+  kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -478,6 +479,7 @@ export type AppState = {
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
+  setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;

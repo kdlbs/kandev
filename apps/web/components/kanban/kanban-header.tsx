@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -269,6 +269,25 @@ function TabletHeader({
   );
 }
 
+// Width below which the centered search input no longer fits between the
+// left ("KanDev" + GitHub/Jira/Stats) and right (Add task + chat + view
+// toggle + indicators + display + settings) action groups.
+const DESKTOP_HEADER_NARROW_PX = 1100;
+
+function useIsHeaderNarrow(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setIsNarrow(el.clientWidth < DESKTOP_HEADER_NARROW_PX);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return isNarrow;
+}
+
 function DesktopHeader({
   onCreateTask,
   workspaceId,
@@ -294,8 +313,15 @@ function DesktopHeader({
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 }) {
+  // The search input is absolutely centered, so the left/right action groups
+  // can grow into it and overlap. Hide the search when the header gets too
+  // narrow to fit all three regions side-by-side (e.g. when the kanban preview
+  // panel is open and squeezes the board area).
+  const headerRef = useRef<HTMLElement>(null);
+  const isNarrow = useIsHeaderNarrow(headerRef);
+  const showSearch = !!onSearchChange && !isNarrow;
   return (
-    <header className="relative flex items-center justify-between p-4 pb-3">
+    <header ref={headerRef} className="relative flex items-center justify-between p-4 pb-3">
       <div className="flex items-center gap-5">
         <Link href="/" className="text-2xl font-bold hover:opacity-80">
           KanDev
@@ -319,8 +345,8 @@ function DesktopHeader({
           </TooltipProvider>
         </div>
       </div>
-      {onSearchChange && (
-        <div className="absolute left-1/2 -translate-x-1/2">
+      {showSearch && (
+        <div className="absolute left-1/2 -translate-x-1/2" data-testid="kanban-header-search">
           <TaskSearchInput
             value={searchQuery}
             onChange={onSearchChange}

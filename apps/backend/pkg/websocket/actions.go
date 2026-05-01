@@ -80,6 +80,7 @@ const (
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
+	ActionSessionEnsure       = "session.ensure"
 	ActionSessionRecover      = "session.recover"
 	ActionSessionResetContext = "session.reset_context"
 	ActionSessionStop         = "session.stop"
