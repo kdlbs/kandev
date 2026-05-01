@@ -75,6 +75,28 @@ type BootstrapRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+// ForkStatus reports the result of the bootstrap fork-capability probe. The
+// frontend uses it to surface a clear error before the user invests time in
+// drafting a contribution that the GitHub side will block.
+type ForkStatus string
+
+const (
+	// ForkStatusWritable: user has push access on the upstream repo, no fork
+	// is needed.
+	ForkStatusWritable ForkStatus = "writable"
+	// ForkStatusReady: user already has a fork at github.com/{login}/kandev,
+	// so the PR step can push to it without forking again.
+	ForkStatusReady ForkStatus = "ready"
+	// ForkStatusBlockedEMU: the authenticated user looks like an Enterprise
+	// Managed User. EMU accounts cannot fork repositories outside their
+	// owning enterprise, so the contribution flow will fail at the PR step.
+	ForkStatusBlockedEMU ForkStatus = "blocked_emu"
+	// ForkStatusUnknown: bootstrap could not determine fork eligibility
+	// (e.g., gh CLI lookup failed). Frontend should proceed and rely on the
+	// PR step to surface any errors.
+	ForkStatusUnknown ForkStatus = "unknown"
+)
+
 // BootstrapResponse describes the artifacts the dialog needs to submit a task.
 type BootstrapResponse struct {
 	RepositoryID   string            `json:"repository_id"`
@@ -84,6 +106,8 @@ type BootstrapResponse struct {
 	BundleFiles    map[string]string `json:"bundle_files"`
 	GitHubLogin    string            `json:"github_login"`
 	HasWriteAccess bool              `json:"has_write_access"`
+	ForkStatus     ForkStatus        `json:"fork_status"`
+	ForkMessage    string            `json:"fork_message,omitempty"`
 }
 
 func (h *Handler) httpBootstrap(c *gin.Context) {
@@ -139,7 +163,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		return
 	}
 
-	login, hasWrite := h.resolveGitHubAccess(ctx)
+	access := h.resolveGitHubAccess(ctx)
 
 	c.JSON(http.StatusOK, BootstrapResponse{
 		RepositoryID: repo.ID,
@@ -151,29 +175,68 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 			"backend_log":  filepath.Join(dir, "backend.log"),
 			"frontend_log": filepath.Join(dir, "frontend.log"),
 		},
-		GitHubLogin:    login,
-		HasWriteAccess: hasWrite,
+		GitHubLogin:    access.login,
+		HasWriteAccess: access.hasWrite,
+		ForkStatus:     access.forkStatus,
+		ForkMessage:    access.forkMessage,
 	})
 }
 
-// resolveGitHubAccess resolves the authenticated user's login and whether
-// they can push to kdlbs/kandev. Failures are logged at debug level and
-// return zero values so bootstrap never fails on gh issues.
-func (h *Handler) resolveGitHubAccess(ctx context.Context) (string, bool) {
+// emuBlockedMessage explains the EMU-restriction case to the contributor in
+// terms they can act on. Surfaced in the dialog when ForkStatusBlockedEMU is
+// returned.
+const emuBlockedMessage = "Your GitHub account appears to be an Enterprise Managed User (EMU) account, " +
+	"which typically cannot fork repositories outside your owning enterprise. " +
+	"The PR step would fail when forking kdlbs/kandev. Contact your GitHub admin " +
+	"if you'd like to enable this, or contribute via another account."
+
+// githubAccess is the resolved bootstrap GitHub state.
+type githubAccess struct {
+	login       string
+	hasWrite    bool
+	forkStatus  ForkStatus
+	forkMessage string
+}
+
+// resolveGitHubAccess resolves the authenticated user's login, push access,
+// and a fork-capability hint. Failures are logged at debug level and return
+// safe defaults so bootstrap never fails on gh issues; the frontend treats
+// ForkStatusUnknown as "proceed and rely on the PR step".
+func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
+	out := githubAccess{forkStatus: ForkStatusUnknown}
 	if h.gh == nil {
-		return "", false
+		return out
 	}
 	login, err := h.gh.GetAuthenticatedLogin(ctx)
 	if err != nil {
 		h.log.Debug("improve-kandev: gh login lookup failed", zap.Error(err))
-		return "", false
+		return out
 	}
+	out.login = login
 	hasWrite, err := h.gh.HasRepoWriteAccess(ctx, repoOwner, repoName)
 	if err != nil {
 		h.log.Debug("improve-kandev: gh write-access check failed", zap.Error(err))
-		return login, false
+		return out
 	}
-	return login, hasWrite
+	out.hasWrite = hasWrite
+	if hasWrite {
+		out.forkStatus = ForkStatusWritable
+		return out
+	}
+	hasFork, err := h.gh.UserHasFork(ctx, login, repoName)
+	if err != nil {
+		h.log.Debug("improve-kandev: gh fork lookup failed", zap.Error(err))
+		return out
+	}
+	if hasFork {
+		out.forkStatus = ForkStatusReady
+		return out
+	}
+	if isEMULogin(login) {
+		out.forkStatus = ForkStatusBlockedEMU
+		out.forkMessage = emuBlockedMessage
+	}
+	return out
 }
 
 // ensureWorkflow finds or creates the hidden improve-kandev workflow in the

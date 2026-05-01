@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
+import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
@@ -13,6 +15,7 @@ import {
   IconChevronDown,
   IconBrandGithub,
   IconGitFork,
+  IconStethoscope,
 } from "@tabler/icons-react";
 
 import { TaskCreateDialog } from "@/components/task-create-dialog";
@@ -23,7 +26,8 @@ export type BootstrapState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ready"; data: ImproveKandevBootstrapResponse; steps: WorkflowStep[] }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  | { kind: "blocked"; message: string };
 
 type ImproveKind = "bug" | "feature";
 
@@ -54,6 +58,20 @@ export function CreateModeView(props: CreateModeViewProps) {
     setKind(next);
     setCaptureLogs(next === "bug");
   };
+
+  // Hard-block the contribution flow if the bootstrap probe detected the
+  // user can't fork kdlbs/kandev (e.g., EMU enterprise restriction). Showing
+  // the task form here would only let them fill out a task that fails at
+  // the PR step.
+  if (bootstrap.kind === "blocked") {
+    return (
+      <BlockedDialog
+        open={props.open}
+        onOpenChange={props.onOpenChange}
+        message={bootstrap.message}
+      />
+    );
+  }
 
   return (
     <TaskCreateDialog
@@ -269,7 +287,7 @@ function BootstrapBanner({ bootstrap }: { bootstrap: BootstrapState }) {
       </div>
     );
   }
-  if (bootstrap.kind === "error") {
+  if (bootstrap.kind === "error" || bootstrap.kind === "blocked") {
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -278,6 +296,45 @@ function BootstrapBanner({ bootstrap }: { bootstrap: BootstrapState }) {
     );
   }
   return <ContributorBanner data={bootstrap.data} />;
+}
+
+function BlockedDialog({
+  open,
+  onOpenChange,
+  message,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  message: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <IconStethoscope className="h-5 w-5" />
+            Improve Kandev
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <IconAlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{message}</span>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              data-testid="improve-kandev-blocked-close"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="cursor-pointer"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function ContributorBanner({ data }: { data: ImproveKandevBootstrapResponse }) {

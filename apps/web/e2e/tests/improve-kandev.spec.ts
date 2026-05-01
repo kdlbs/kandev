@@ -12,9 +12,13 @@ const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
 const FRONTEND_LOG_URL = "**/api/v1/system/improve-kandev/bundle/frontend-log";
 const HEALTH_URL = "**/api/v1/system/health";
 
+type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
+
 type BootstrapOverrides = {
   github_login?: string;
   has_write_access?: boolean;
+  fork_status?: ForkStatus;
+  fork_message?: string;
 };
 
 async function mockImproveKandevApis(
@@ -23,6 +27,11 @@ async function mockImproveKandevApis(
   overrides: BootstrapOverrides = {},
 ): Promise<void> {
   const bundleDir = "/tmp/kandev-improve-e2e";
+  const hasWrite = overrides.has_write_access ?? false;
+  // Default fork_status mirrors how the backend would respond for the given
+  // write-access value: writable when the user has push access, otherwise
+  // unknown (the safe fall-through that lets the dialog proceed normally).
+  const forkStatus: ForkStatus = overrides.fork_status ?? (hasWrite ? "writable" : "unknown");
 
   await page.route(HEALTH_URL, (route) =>
     route.fulfill({
@@ -47,7 +56,9 @@ async function mockImproveKandevApis(
           frontend_log: `${bundleDir}/frontend.log`,
         },
         github_login: overrides.github_login ?? "octocat",
-        has_write_access: overrides.has_write_access ?? false,
+        has_write_access: hasWrite,
+        fork_status: forkStatus,
+        ...(overrides.fork_message ? { fork_message: overrides.fork_message } : {}),
       }),
     }),
   );
@@ -136,5 +147,43 @@ test.describe("Improve Kandev dialog", () => {
     await expect(
       createDialog.getByText(/push directly to a branch on the upstream repo/i),
     ).toBeVisible();
+  });
+
+  test("blocks contribution when account is detected as Enterprise Managed User", async ({
+    testPage,
+    seedData,
+  }) => {
+    const blockedMessage =
+      "Your GitHub account appears to be an Enterprise Managed User (EMU) account, " +
+      "which typically cannot fork repositories outside your owning enterprise. " +
+      "The PR step would fail when forking kdlbs/kandev. Contact your GitHub admin " +
+      "if you'd like to enable this, or contribute via another account.";
+    await mockImproveKandevApis(testPage, seedData, {
+      github_login: "alice_corp",
+      has_write_access: false,
+      fork_status: "blocked_emu",
+      fork_message: blockedMessage,
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("improve-kandev-button").first().click();
+
+    const contribute = testPage.getByTestId("improve-kandev-proceed");
+    await expect(contribute).toBeEnabled({ timeout: 10_000 });
+    await contribute.click();
+
+    // Blocked dialog mounts in place of the task-create form. The message
+    // also fires as a toast, so scope the assertion to the dialog body.
+    const blockedDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    await expect(blockedDialog).toBeVisible({ timeout: 10_000 });
+    await expect(blockedDialog.getByText(blockedMessage)).toBeVisible();
+
+    // The task-create form must NOT mount: there is nothing to submit and
+    // no fork should be attempted.
+    await expect(testPage.getByTestId("create-task-dialog")).toHaveCount(0);
+
+    // Close button is the only action; clicking it dismisses the dialog.
+    await testPage.getByTestId("improve-kandev-blocked-close").click();
+    await expect(blockedDialog).toBeHidden();
   });
 });

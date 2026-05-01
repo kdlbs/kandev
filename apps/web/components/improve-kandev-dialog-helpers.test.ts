@@ -27,6 +27,7 @@ const bootstrap: ImproveKandevBootstrapResponse = {
   },
   github_login: "octocat",
   has_write_access: false,
+  fork_status: "unknown",
 };
 
 describe("buildImproveKandevDescription", () => {

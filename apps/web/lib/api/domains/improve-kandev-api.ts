@@ -1,6 +1,15 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type { LogEntry } from "@/lib/logger/buffer";
 
+// Result of the bootstrap fork-capability probe; mirrors backend ForkStatus.
+// "writable": user has push access to upstream, no fork needed.
+// "ready":    a fork already exists at github.com/{login}/kandev.
+// "blocked_emu": user looks like an Enterprise Managed User and likely
+//              cannot fork repositories outside their owning enterprise.
+// "unknown":  bootstrap could not determine fork eligibility; proceed and
+//             rely on the PR step to surface any errors.
+export type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
+
 export type ImproveKandevBootstrapResponse = {
   repository_id: string;
   workflow_id: string;
@@ -13,6 +22,8 @@ export type ImproveKandevBootstrapResponse = {
   };
   github_login: string;
   has_write_access: boolean;
+  fork_status: ForkStatus;
+  fork_message?: string;
 };
 
 export async function bootstrapImproveKandev(

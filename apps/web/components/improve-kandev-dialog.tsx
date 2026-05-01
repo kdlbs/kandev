@@ -150,6 +150,20 @@ function useBootstrapKandev(
     (async () => {
       try {
         const data = await bootstrapImproveKandev(workspaceId);
+        // Surface the EMU fork-restriction case before any further setup so
+        // the user sees a clear error and can't submit a contribution that
+        // would only fail at the PR step.
+        if (data.fork_status === "blocked_emu") {
+          if (cancelled) return;
+          const message = data.fork_message || "Your account cannot fork kdlbs/kandev.";
+          setBootstrap({ kind: "blocked", message });
+          toast({
+            title: "Cannot contribute from this account",
+            description: message,
+            variant: "error",
+          });
+          return;
+        }
         // Refresh the workspace repository list so the newly-created kandev
         // repo is in the store; otherwise the locked repo dropdown can't
         // resolve a label for the bootstrapped repository_id.
