@@ -20,6 +20,7 @@ import {
 
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-kandev-api";
+import { cn } from "@/lib/utils";
 import type { Task, WorkflowStep } from "@/lib/types/http";
 
 export type BootstrapState =
@@ -135,10 +136,10 @@ function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
                 <TooltipTrigger asChild>
                   <span className="flex cursor-help items-center gap-1.5">
                     <span
-                      className="h-1.5 w-1.5 rounded-full shrink-0"
-                      style={{
-                        backgroundColor: s.color || "hsl(var(--muted-foreground))",
-                      }}
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full shrink-0",
+                        s.color || "bg-muted-foreground",
+                      )}
                     />
                     <span className="text-foreground">{s.name}</span>
                   </span>

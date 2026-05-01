@@ -103,7 +103,8 @@ function useWorkflowSteps(workflowId: string) {
 function useFormData(workspaceId: string) {
   useSettingsData(true);
   useWorkflows(workspaceId, true);
-  const workflows = useAppStore((s) => s.workflows.items);
+  const allWorkflows = useAppStore((s) => s.workflows.items);
+  const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const executors = useAppStore((s) => s.executors.items);
   const allExecutorProfiles = useMemo(
