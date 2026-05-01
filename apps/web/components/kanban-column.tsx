@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { KanbanCard, Task } from "./kanban-card";
+import { KanbanCard, resolveTaskRepositoryNames, Task } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
-import { cn, getRepositoryDisplayName } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
 
@@ -66,13 +66,6 @@ export function KanbanColumn({
     [repositoriesByWorkspace],
   );
 
-  // Helper function to get repository name for a task
-  const getRepositoryName = (repositoryId?: string): string | null => {
-    if (!repositoryId) return null;
-    const repository = repositories.find((repo) => repo.id === repositoryId);
-    return repository ? getRepositoryDisplayName(repository.local_path) : null;
-  };
-
   return (
     <div
       ref={setNodeRef}
@@ -102,7 +95,7 @@ export function KanbanColumn({
           <KanbanCard
             key={task.id}
             task={task}
-            repositoryName={getRepositoryName(task.repositoryId)}
+            repositoryNames={resolveTaskRepositoryNames(task, repositories)}
             onClick={onPreviewTask}
             onOpenFullPage={onOpenTask}
             onEdit={onEditTask}

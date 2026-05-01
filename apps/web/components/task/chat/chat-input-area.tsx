@@ -209,7 +209,7 @@ export function useChatPanelHandlers(
 }
 
 function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPR = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
   const [dismissed, setDismissed] = useState(false);
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
@@ -223,7 +223,15 @@ function PRMergedBanner({ taskId }: { taskId: string }) {
     }
   }, [taskId, archiveAndSwitch, toast]);
 
-  if (taskPR?.state !== "merged" || dismissed) return null;
+  // Multi-repo: only show "ready to archive" once every PR is merged. A
+  // single merged repo with others still open means the task isn't done yet.
+  const allMerged = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
+  if (!allMerged || dismissed) return null;
+
+  const bannerText =
+    taskPRs.length === 1
+      ? `PR #${taskPRs[0].pr_number} has been merged. You can archive this task.`
+      : `All ${taskPRs.length} PRs have been merged. You can archive this task.`;
 
   return (
     <div
@@ -231,9 +239,7 @@ function PRMergedBanner({ taskId }: { taskId: string }) {
       className="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 px-2 py-1 text-purple-600 dark:text-purple-400"
     >
       <IconGitMerge className="h-3.5 w-3.5 shrink-0" />
-      <span className="flex-1">
-        PR #{taskPR.pr_number} has been merged. You can archive this task.
-      </span>
+      <span className="flex-1">{bannerText}</span>
       <button
         type="button"
         data-testid="pr-merged-archive-button"

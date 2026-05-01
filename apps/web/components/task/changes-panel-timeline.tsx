@@ -134,7 +134,7 @@ function TimelineSection({
 type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
-  onOpenCommitDetail?: (sha: string) => void;
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
   // Handlers receive the commit's repository_name so amend/revert/reset land
   // in the right git repo. The empty string routes to the workspace root for
   // single-repo workspaces.

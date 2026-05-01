@@ -136,6 +136,8 @@ type UseDiffViewerStateOpts = {
   enableExpansion?: boolean;
   /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
   baseRef?: string;
+  /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
+  repo?: string;
 };
 
 function useDiffViewerAnnotations({
@@ -320,6 +322,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     onRevertBlock,
     enableExpansion = false,
     baseRef,
+    repo,
   } = opts;
 
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
@@ -348,6 +351,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     baseRef,
     fileDiffMetadata: baseDiffMetadata,
     enableExpansion,
+    repo,
   });
 
   const { revertInfoRef, handleRevertBlock } = useRevertBlock(data.filePath, onRevertBlock);

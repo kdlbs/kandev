@@ -15,6 +15,18 @@ import {
   useIsLocalExecutor,
 } from "@/components/task-create-dialog-options";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
+
+/**
+ * Multi-repo tasks currently only run on the git-worktree executor —
+ * Docker/Sprites/etc. don't yet know how to provision N sibling repos under
+ * one task root. Returning a non-null reason marks the option as disabled in
+ * the executor selector and surfaces this string as a tooltip. The dialog
+ * only applies this when 2+ repos are selected (see isMultiRepoSelection).
+ */
+function nonWorktreeDisabledReason(profile: ExecutorProfile): string | null {
+  if ((profile.executor_type ?? "") === "worktree") return null;
+  return "Multi-repo tasks only support the git-worktree executor.";
+}
 import type {
   StepType,
   TaskCreateDialogInitialValues,
@@ -455,7 +467,7 @@ export function useDialogComputed({
   // takes care of branch state per row; there is no global branch.
   const hasRepositorySelection = Boolean(
     fs.repositories.some((r) => r.repositoryId || r.localPath) ||
-      (fs.useGitHubUrl && fs.githubUrl.trim()),
+    (fs.useGitHubUrl && fs.githubUrl.trim()),
   );
   // Branch options are only used by the URL-mode flow now (the chip's branch
   // pill loads branches per-repo). Keep the computed value but always feed it
@@ -471,7 +483,15 @@ export function useDialogComputed({
       })),
     );
   }, [executors]);
-  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
+  // Multi-repo tasks only run on the git-worktree executor today — Docker /
+  // Sprites / standalone don't yet know how to provision N sibling repos. Gate
+  // non-worktree options only when 2+ repos are selected; single-repo tasks
+  // keep the full executor catalogue.
+  const isMultiRepoSelection =
+    fs.repositories.filter((r) => r.repositoryId || r.localPath).length > 1;
+  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
+    disabledReasonFor: isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
+  });
   const executorHint = useExecutorHint(executors, fs.executorId);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);

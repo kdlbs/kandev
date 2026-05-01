@@ -116,35 +116,45 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsCumulativeDiff)
 }
 
-// GitPullRequest for worktree.pull action
+// GitPullRequest for worktree.pull action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 type GitPullRequest struct {
 	SessionID string `json:"session_id"`
 	Rebase    bool   `json:"rebase"`
+	Repo      string `json:"repo,omitempty"`
 }
 
-// GitPushRequest for worktree.push action
+// GitPushRequest for worktree.push action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 type GitPushRequest struct {
 	SessionID   string `json:"session_id"`
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
+	Repo        string `json:"repo,omitempty"`
 }
 
-// GitRebaseRequest for worktree.rebase action
+// GitRebaseRequest for worktree.rebase action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 type GitRebaseRequest struct {
 	SessionID  string `json:"session_id"`
 	BaseBranch string `json:"base_branch"`
+	Repo       string `json:"repo,omitempty"`
 }
 
-// GitMergeRequest for worktree.merge action
+// GitMergeRequest for worktree.merge action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 type GitMergeRequest struct {
 	SessionID  string `json:"session_id"`
 	BaseBranch string `json:"base_branch"`
+	Repo       string `json:"repo,omitempty"`
 }
 
-// GitAbortRequest for worktree.abort action
+// GitAbortRequest for worktree.abort action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 type GitAbortRequest struct {
 	SessionID string `json:"session_id"`
 	Operation string `json:"operation"` // "merge" or "rebase"
+	Repo      string `json:"repo,omitempty"`
 }
 
 // GitCommitRequest for worktree.commit action
@@ -214,6 +224,7 @@ type GitResetRequest struct {
 type GitShowCommitRequest struct {
 	SessionID string `json:"session_id"`
 	CommitSHA string `json:"commit_sha"`
+	Repo      string `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
 // wsPull handles worktree.pull action
@@ -232,7 +243,7 @@ func (h *GitHandlers) wsPull(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, err
 	}
 
-	result, err := client.GitPull(ctx, req.Rebase)
+	result, err := client.GitPull(ctx, req.Rebase, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("pull failed: %w", err)
 	}
@@ -257,7 +268,7 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, err
 	}
 
-	result, err := client.GitPush(ctx, req.Force, req.SetUpstream)
+	result, err := client.GitPush(ctx, req.Force, req.SetUpstream, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
 	}
@@ -285,7 +296,7 @@ func (h *GitHandlers) wsRebase(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, err
 	}
 
-	result, err := client.GitRebase(ctx, req.BaseBranch)
+	result, err := client.GitRebase(ctx, req.BaseBranch, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("rebase failed: %w", err)
 	}
@@ -313,7 +324,7 @@ func (h *GitHandlers) wsMerge(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, err
 	}
 
-	result, err := client.GitMerge(ctx, req.BaseBranch)
+	result, err := client.GitMerge(ctx, req.BaseBranch, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("merge failed: %w", err)
 	}
@@ -341,7 +352,7 @@ func (h *GitHandlers) wsAbort(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, err
 	}
 
-	result, err := client.GitAbort(ctx, req.Operation)
+	result, err := client.GitAbort(ctx, req.Operation, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("abort failed: %w", err)
 	}
@@ -612,7 +623,7 @@ func (h *GitHandlers) wsCommitDiff(ctx context.Context, msg *ws.Message) (*ws.Me
 		return nil, err
 	}
 
-	result, err := client.GitShowCommit(ctx, req.CommitSHA)
+	result, err := client.GitShowCommit(ctx, req.CommitSHA, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("show commit failed: %w", err)
 	}

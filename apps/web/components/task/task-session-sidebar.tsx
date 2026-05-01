@@ -94,7 +94,7 @@ type SidebarCtx = {
   gitStatusByEnvId: Record<string, GitStatusEntry>;
   envIdBySessionId: Record<string, string>;
   repositorySlugById: Map<string, string | undefined>;
-  taskPRsByTaskId: Record<string, TaskPR | undefined>;
+  taskPRsByTaskId: Record<string, TaskPR[] | undefined>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
@@ -122,7 +122,8 @@ function toSidebarItem(
   const resolvedSessionState =
     sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
-  const pr = ctx.taskPRsByTaskId[task.id];
+  // Sidebar shows just one slot; pick the primary PR (first by created_at).
+  const pr = ctx.taskPRsByTaskId[task.id]?.[0];
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
@@ -251,7 +252,7 @@ function useSidebarData(workspaceId: string | null) {
       gitStatusByEnvId,
       envIdBySessionId,
       repositorySlugById,
-      taskPRsByTaskId: taskPRsByTaskId as Record<string, TaskPR | undefined>,
+      taskPRsByTaskId,
       titleById,
       workflowNameById,
       stepTitleById,

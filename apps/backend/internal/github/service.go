@@ -549,25 +549,36 @@ func (s *Service) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error)
 	return s.store.GetTaskPR(ctx, taskID)
 }
 
-// ListTaskPRs returns PR associations for multiple tasks.
-func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string]*TaskPR, error) {
+// ListTaskPRs returns PR associations for multiple tasks, grouped by task_id.
+// Multi-repo tasks may have more than one PR per task.
+func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*TaskPR, error) {
 	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
 }
 
-// ListWorkspaceTaskPRs returns all PR associations for a workspace.
-// It returns cached data immediately and triggers background refresh for stale entries.
-func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) (map[string]*TaskPR, error) {
+// ListWorkspaceTaskPRs returns all PR associations for a workspace, grouped by
+// task_id. Multi-repo tasks may have more than one PR per task. It returns
+// cached data immediately and triggers background refresh for stale entries.
+func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) (map[string][]*TaskPR, error) {
 	result, err := s.store.ListTaskPRsByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Collect stale task IDs for background refresh
-	var staleTaskIDs []string
-	for _, tp := range result {
-		if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= prSyncFreshnessWindow {
-			staleTaskIDs = append(staleTaskIDs, tp.TaskID)
+	// Collect stale task IDs for background refresh. A task is considered stale
+	// if any of its PRs are stale; the sync is per-task so we only need to
+	// queue each task once.
+	staleTasks := make(map[string]struct{})
+	for taskID, prs := range result {
+		for _, tp := range prs {
+			if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= prSyncFreshnessWindow {
+				staleTasks[taskID] = struct{}{}
+				break
+			}
 		}
+	}
+	staleTaskIDs := make([]string, 0, len(staleTasks))
+	for id := range staleTasks {
+		staleTaskIDs = append(staleTaskIDs, id)
 	}
 
 	// Background refresh with bounded concurrency

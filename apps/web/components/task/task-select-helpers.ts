@@ -88,7 +88,7 @@ export async function prepareAndSwitchTask(
     const resp = await launchSession(request);
     if (resp.session_id) {
       switchToSession(taskId, resp.session_id, oldSessionId);
-      if (store.getState().taskPRs.byTaskId[taskId]) {
+      if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
         const { api, buildDefaultLayout } = useDockviewStore.getState();
         if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
       }

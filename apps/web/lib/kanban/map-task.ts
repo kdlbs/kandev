@@ -25,7 +25,13 @@ export type TaskLike = {
   description?: string | null;
   position?: number;
   state?: TaskState;
-  repositories?: Array<{ repository_id: string }>;
+  repositories?: Array<{
+    id?: string;
+    repository_id: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    position?: number;
+  }>;
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
@@ -49,6 +55,19 @@ function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
 }
 
+type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
+
+function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined {
+  if (!source.repositories) return undefined;
+  return source.repositories.map((r, idx) => ({
+    id: r.id ?? "",
+    repository_id: r.repository_id,
+    base_branch: r.base_branch ?? "",
+    checkout_branch: r.checkout_branch,
+    position: r.position ?? idx,
+  }));
+}
+
 /**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
@@ -64,6 +83,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
+    repositories: pickRepositories(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     sessionCount: source.session_count ?? undefined,

@@ -77,6 +77,16 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		Files:          make(map[string]types.FileInfo),
 	}
 
+	// Bare trackers (multi-repo task roots) sit on a directory that isn't
+	// itself a git repo. Without this guard, `git status` would ascend the
+	// directory tree until it found a `.git` — for tasks nested inside a
+	// developer's own kandev checkout that lands on the OUTER worktree and
+	// silently emits its branch/ahead/behind as if it were the task. Bail
+	// out early to keep the bare tracker's `currentStatus` zero-valued.
+	if wt.gitIndexPath == "" {
+		return update, nil
+	}
+
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
 		return update, err
 	}

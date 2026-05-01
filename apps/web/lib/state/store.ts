@@ -233,7 +233,7 @@ export type AppState = {
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
   setGitHubStatusLoading: (loading: boolean) => void;
-  setTaskPRs: (prs: Record<string, TaskPR>) => void;
+  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
   removeTaskPR: (taskId: string) => void;
   setTaskPRsLoading: (loading: boolean) => void;

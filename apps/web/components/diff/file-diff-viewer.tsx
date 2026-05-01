@@ -33,6 +33,8 @@ interface FileDiffViewerProps {
   expandUnchanged?: boolean;
   /** Callback when expand-unchanged is toggled (controlled mode) */
   onToggleExpandUnchanged?: () => void;
+  /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
+  repo?: string;
 }
 
 /**
@@ -67,6 +69,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   baseRef,
   expandUnchanged,
   onToggleExpandUnchanged,
+  repo,
 }: FileDiffViewerProps) {
   const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
@@ -92,6 +95,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       baseRef={baseRef}
       expandUnchanged={expandUnchanged}
       onToggleExpandUnchanged={onToggleExpandUnchanged}
+      repo={repo}
     />
   );
 });

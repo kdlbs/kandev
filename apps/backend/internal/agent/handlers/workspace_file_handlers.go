@@ -80,6 +80,7 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	var req struct {
 		SessionID string `json:"session_id"`
 		Path      string `json:"path"`
+		Repo      string `json:"repo,omitempty"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -106,7 +107,7 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	}
 
 	// Request file content from agentctl
-	response, err := client.RequestFileContent(ctx, req.Path)
+	response, err := client.RequestFileContent(ctx, req.Path, req.Repo)
 	if err != nil {
 		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
@@ -121,6 +122,7 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 		SessionID string `json:"session_id"`
 		Path      string `json:"path"`
 		Ref       string `json:"ref"`
+		Repo      string `json:"repo,omitempty"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -150,7 +152,7 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 	}
 
 	// Request file content at ref from agentctl
-	response, err := client.RequestFileContentAtRef(ctx, req.Path, req.Ref)
+	response, err := client.RequestFileContentAtRef(ctx, req.Path, req.Ref, req.Repo)
 	if err != nil {
 		// "File not found at ref" is expected for new files - log as debug, not error
 		errMsg := err.Error()
@@ -173,6 +175,7 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 		Diff           string  `json:"diff"`
 		OriginalHash   string  `json:"original_hash"`
 		DesiredContent *string `json:"desired_content"`
+		Repo           string  `json:"repo,omitempty"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -202,7 +205,7 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	}
 
 	// Apply file diff via agentctl
-	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
+	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash, req.Repo, req.DesiredContent)
 	if err != nil {
 		h.logger.Error("failed to apply file diff", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to apply file diff: %v", err), nil)

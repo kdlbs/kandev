@@ -13,6 +13,7 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import {
   DropdownMenu,
@@ -65,7 +66,8 @@ export interface WorkflowStep {
 
 interface KanbanCardProps {
   task: Task;
-  repositoryName?: string | null;
+  /** Display names of every repository linked to the task, primary first. */
+  repositoryNames?: string[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
@@ -81,32 +83,58 @@ interface KanbanCardProps {
   isMultiSelectMode?: boolean;
 }
 
+const REPO_CHIPS_VISIBLE = 2;
+
+function RepoChipRow({ repoNames }: { repoNames: string[] }) {
+  if (repoNames.length === 0) return null;
+  const visible = repoNames.slice(0, REPO_CHIPS_VISIBLE);
+  const overflow = repoNames.slice(REPO_CHIPS_VISIBLE);
+  const row = (
+    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
+      {visible.map((name) => (
+        <span
+          key={name}
+          className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
+        >
+          {name}
+        </span>
+      ))}
+      {overflow.length > 0 && (
+        <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
+          +{overflow.length}
+        </span>
+      )}
+    </div>
+  );
+  if (repoNames.length <= 1) return row;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{row}</TooltipTrigger>
+      <TooltipContent side="top" align="start">
+        <div className="flex flex-col gap-0.5 text-xs">
+          {repoNames.map((name) => (
+            <span key={name}>{name}</span>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function KanbanCardBody({
   task,
-  repoName,
+  repoNames,
   actions,
 }: {
   task: Task;
-  repoName: string | null;
+  repoNames: string[];
   actions?: React.ReactNode;
 }) {
   return (
     <>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          {repoName && (
-            <p className="text-[10px] mb-1 text-muted-foreground leading-tight truncate flex items-center gap-1">
-              <span className="truncate">{repoName}</span>
-              {task.repositories && task.repositories.length > 1 && (
-                <span
-                  className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80"
-                  title={`Task spans ${task.repositories.length} repositories`}
-                >
-                  +{task.repositories.length - 1}
-                </span>
-              )}
-            </p>
-          )}
+          <RepoChipRow repoNames={repoNames} />
           <div className="flex items-center gap-1 min-w-0">
             <p
               data-testid="task-card-title"
@@ -183,13 +211,13 @@ function KanbanCardBadges({ task }: { task: Task }) {
 
 function KanbanCardLayout({
   task,
-  repositoryName,
+  repositoryNames,
   className,
 }: KanbanCardProps & { className?: string }) {
   return (
     <Card size="sm" className={cn("w-full py-0", className)}>
       <CardContent className="px-2 py-1">
-        <KanbanCardBody task={task} repoName={repositoryName ?? null} />
+        <KanbanCardBody task={task} repoNames={repositoryNames ?? []} />
       </CardContent>
     </Card>
   );
@@ -429,7 +457,7 @@ function KanbanCardCheckbox({
 
 export function KanbanCard({
   task,
-  repositoryName,
+  repositoryNames,
   onClick,
   onEdit,
   onDelete,
@@ -499,7 +527,7 @@ export function KanbanCard({
           <div className="min-w-0 flex-1">
             <KanbanCardBody
               task={task}
-              repoName={repositoryName ?? null}
+              repoNames={repositoryNames ?? []}
               actions={
                 !isMultiSelectMode ? (
                   <KanbanCardActions
@@ -525,22 +553,42 @@ export function KanbanCard({
 }
 
 export function KanbanCardPreview({ task }: KanbanCardProps) {
-  // Access store to get repository name for the drag preview
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repository = useMemo(
-    () =>
-      (Object.values(repositoriesByWorkspace).flat() as Repository[]).find(
-        (repo) => repo.id === task.repositoryId,
-      ) ?? null,
-    [repositoriesByWorkspace, task.repositoryId],
+  const repositoryNames = useMemo(
+    () => resolveTaskRepositoryNames(task, Object.values(repositoriesByWorkspace).flat()),
+    [repositoriesByWorkspace, task],
   );
-  const repositoryName = repository ? getRepositoryDisplayName(repository.local_path) : null;
 
   return (
     <KanbanCardLayout
       task={task}
-      repositoryName={repositoryName}
+      repositoryNames={repositoryNames}
       className="cursor-grabbing shadow-lg ring-0 pointer-events-none border border-border"
     />
   );
+}
+
+/**
+ * Resolves a task's linked repositories to display names. Primary first
+ * (`task.repositoryId`), then any others ordered by `task.repositories[].position`.
+ * Skips unresolved IDs (repo deleted / not yet hydrated).
+ */
+export function resolveTaskRepositoryNames(task: Task, repositories: Repository[]): string[] {
+  const byId = new Map(repositories.map((repo) => [repo.id, repo]));
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  const push = (id: string | undefined) => {
+    if (!id || seen.has(id)) return;
+    const repo = byId.get(id);
+    if (!repo) return;
+    seen.add(id);
+    const display = getRepositoryDisplayName(repo.local_path);
+    if (display) names.push(display);
+  };
+
+  push(task.repositoryId);
+  const ordered = [...(task.repositories ?? [])].sort((a, b) => a.position - b.position);
+  for (const link of ordered) push(link.repository_id);
+  return names;
 }

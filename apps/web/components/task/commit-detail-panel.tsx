@@ -46,6 +46,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
   params,
 }: CommitDetailPanelProps) {
   const commitSha = params.commitSha as string;
+  const repo = (params.repo as string | undefined) ?? undefined;
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const sessionTaskId = useAppStore((state) =>
@@ -91,6 +92,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
         taskId: sessionTaskId ?? activeTaskId ?? null,
         commitSha,
         agentctlReady,
+        repo,
       });
       if (response?.success && response.files) {
         setFiles(response.files);
@@ -104,7 +106,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
     } finally {
       setLoading(false);
     }
-  }, [activeSessionId, activeTaskId, agentctlReady, commitSha, sessionTaskId, toast]);
+  }, [activeSessionId, activeTaskId, agentctlReady, commitSha, repo, sessionTaskId, toast]);
 
   useEffect(() => {
     fetchDiff();
@@ -139,6 +141,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
           loading={loading}
           onOpenFile={openFile}
           baseRef={`${commitSha}^`}
+          repo={repo}
         />
       </PanelBody>
     </PanelRoot>
@@ -182,11 +185,13 @@ function CommitFileList({
   loading,
   onOpenFile,
   baseRef,
+  repo,
 }: {
   fileEntries: [string, FileInfo][];
   loading: boolean;
   onOpenFile: (path: string) => void;
   baseRef: string;
+  repo?: string;
 }) {
   if (fileEntries.length === 0 && !loading) {
     return (
@@ -206,6 +211,7 @@ function CommitFileList({
               onOpenFile={onOpenFile}
               enableExpansion={true}
               baseRef={baseRef}
+              repo={repo}
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">

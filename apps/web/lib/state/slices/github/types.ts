@@ -14,7 +14,8 @@ export type GitHubStatusState = {
 };
 
 export type TaskPRsState = {
-  byTaskId: Record<string, TaskPR>;
+  /** Each task may have multiple PRs (one per repository for multi-repo tasks). */
+  byTaskId: Record<string, TaskPR[]>;
   loaded: boolean;
   loading: boolean;
 };
@@ -54,7 +55,7 @@ export type GitHubSliceState = {
 export type GitHubSliceActions = {
   setGitHubStatus: (status: GitHubStatus | null) => void;
   setGitHubStatusLoading: (loading: boolean) => void;
-  setTaskPRs: (prs: Record<string, TaskPR>) => void;
+  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
   removeTaskPR: (taskId: string) => void;
   setTaskPRsLoading: (loading: boolean) => void;

@@ -79,9 +79,13 @@ func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*Fil
 	return &result, nil
 }
 
-// RequestFileContent requests file content via HTTP GET
-func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
+// RequestFileContent requests file content via HTTP GET.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) RequestFileContent(ctx context.Context, path, repo string) (*FileContentResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, url.QueryEscape(path))
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -110,9 +114,13 @@ func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileCont
 	return &response, nil
 }
 
-// RequestFileContentAtRef requests file content at a specific git ref via HTTP GET
-func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref string) (*FileContentResponse, error) {
+// RequestFileContentAtRef requests file content at a specific git ref via HTTP GET.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) RequestFileContentAtRef(ctx context.Context, path, ref, repo string) (*FileContentResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content-at-ref?path=%s&ref=%s", c.baseURL, url.QueryEscape(path), url.QueryEscape(ref))
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -141,10 +149,12 @@ func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref s
 	return &response, nil
 }
 
-// ApplyFileDiff applies a unified diff to a file via HTTP POST
-func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+// ApplyFileDiff applies a unified diff to a file via HTTP POST.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
 	reqBody := streams.FileUpdateRequest{
 		Path:           path,
+		Repo:           repo,
 		Diff:           diff,
 		OriginalHash:   originalHash,
 		DesiredContent: desiredContent,

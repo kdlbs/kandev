@@ -128,7 +128,7 @@ func TestSpritesE2E_FullFlow(t *testing.T) {
 		require.NotEmpty(t, results.Files)
 		t.Logf("found %d files matching 'gin.go'", len(results.Files))
 
-		content, err := client.RequestFileContent(ctx, "go.mod")
+		content, err := client.RequestFileContent(ctx, "go.mod", "")
 		require.NoError(t, err)
 		require.Contains(t, content.Content, "github.com/gin-gonic/gin")
 		t.Logf("go.mod: %d bytes", len(content.Content))

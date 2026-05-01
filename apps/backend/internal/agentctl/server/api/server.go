@@ -155,6 +155,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/git/log", s.handleGitLog)
 		api.GET("/git/cumulative-diff", s.handleGitCumulativeDiff)
 		api.GET("/git/status", s.handleGitStatus)
+		api.GET("/git/status/multi", s.handleGitStatusMulti)
 	}
 
 	// Utility agent routes

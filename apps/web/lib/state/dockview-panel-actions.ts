@@ -275,15 +275,19 @@ function buildFileDiffAction(get: StoreGet) {
 }
 
 function buildCommitDetailAction(get: StoreGet) {
-  return (sha: string, opts?: OpenPanelOpts & { groupId?: string }) => {
+  return (sha: string, opts?: OpenPanelOpts & { groupId?: string; repo?: string }) => {
     const { api, centerGroupId } = get();
     if (!api) return;
+    // Multi-repo: scope the panel id by repo so the same SHA from two repos
+    // (rare in practice, but cheap to be correct) doesn't collide and so the
+    // existing-tab dedup doesn't reuse the wrong-repo's panel.
+    const itemId = opts?.repo ? `${opts.repo}:${sha}` : sha;
     openOrReplacePreview({
       api,
       type: "commit-detail",
-      itemId: sha,
+      itemId,
       title: sha.slice(0, 7),
-      params: { commitSha: sha },
+      params: { commitSha: sha, repo: opts?.repo },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,

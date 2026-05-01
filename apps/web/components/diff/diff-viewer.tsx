@@ -43,6 +43,8 @@ interface DiffViewerProps {
   expandUnchanged?: boolean;
   /** Callback when expand-unchanged is toggled (controlled mode) */
   onToggleExpandUnchanged?: () => void;
+  /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
+  repo?: string;
 }
 
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
@@ -61,6 +63,7 @@ const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "baseRef",
   "expandUnchanged",
   "onToggleExpandUnchanged",
+  "repo",
 ];
 
 const DATA_KEYS: (keyof FileDiffData)[] = ["filePath", "diff", "oldContent", "newContent"];
@@ -116,6 +119,71 @@ function NoDiffPlaceholder({ className }: { className?: string }) {
   );
 }
 
+type WiringArgs = {
+  data: FileDiffData;
+  state: ReturnType<typeof useDiffViewerState>;
+  onCommentRun?: (comment: DiffComment) => void;
+  onOpenFile?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string) => void;
+  onRevert?: (filePath: string) => void;
+  enableComments: boolean;
+  enableExpansion: boolean;
+  hideHeader: boolean;
+  compact: boolean;
+  wordWrap: boolean;
+  setWordWrap: React.Dispatch<React.SetStateAction<boolean>>;
+  expandUnchanged: boolean;
+  toggleExpandUnchanged: () => void;
+  wrapperRef: React.RefObject<HTMLDivElement | null>;
+};
+
+/**
+ * Bundles the hover/annotation/options wiring for DiffViewer so the top-level
+ * component body stays under the 100-line cap. Equivalent to inlining the
+ * three calls — extracted only for size, no behavior change.
+ */
+function useDiffViewerWiring(args: WiringArgs) {
+  const { data, state, onCommentRun, wrapperRef, hideHeader, compact, enableExpansion } = args;
+  const { onLineEnter, onLineLeave, onButtonEnter, onButtonLeave } = useHunkHover({
+    wrapperRef,
+    changeLineMapRef: state.changeLineMapRef,
+    hideTimeoutRef: state.hideTimeoutRef,
+  });
+  const renderAnnotation = useAnnotationRenderer({
+    handleRevertBlock: state.handleRevertBlock,
+    onButtonEnter,
+    onButtonLeave,
+    handleCommentSubmit: state.handleCommentSubmit,
+    handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
+    handleCommentUpdate: state.handleCommentUpdate,
+    handleCommentDelete: state.handleCommentDelete,
+    handleCommentRun: onCommentRun,
+    setShowCommentForm: state.setShowCommentForm,
+    setSelectedLines: state.setSelectedLines,
+    setEditingComment: state.setEditingComment,
+  });
+  const showHeader = !hideHeader && !compact;
+  const canUseExpansion = useAutoLoadExpansion(enableExpansion, state);
+  const opts = useDiffOptions({
+    filePath: data.filePath,
+    diff: data.diff,
+    enableComments: args.enableComments,
+    showHeader,
+    wordWrap: args.wordWrap,
+    setWordWrap: args.setWordWrap,
+    handleLineSelectionEnd: state.handleLineSelectionEnd,
+    onLineEnter,
+    onLineLeave,
+    onOpenFile: args.onOpenFile,
+    onPreviewMarkdown: args.onPreviewMarkdown,
+    onRevert: args.onRevert,
+    enableExpansion: canUseExpansion,
+    expandUnchanged: args.expandUnchanged,
+    onToggleExpandUnchanged: canUseExpansion ? args.toggleExpandUnchanged : undefined,
+  });
+  return { ...opts, renderAnnotation };
+}
+
 export const DiffViewer = memo(function DiffViewer({
   data,
   enableComments = false,
@@ -137,6 +205,7 @@ export const DiffViewer = memo(function DiffViewer({
   baseRef,
   expandUnchanged: expandUnchangedProp,
   onToggleExpandUnchanged: onToggleExpandUnchangedProp,
+  repo,
 }: DiffViewerProps) {
   const [wordWrapLocal, setWordWrap] = useState(false);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
@@ -160,48 +229,27 @@ export const DiffViewer = memo(function DiffViewer({
     onRevertBlock,
     enableExpansion,
     baseRef,
+    repo,
   });
 
-  const { onLineEnter, onLineLeave, onButtonEnter, onButtonLeave } = useHunkHover({
-    wrapperRef,
-    changeLineMapRef: state.changeLineMapRef,
-    hideTimeoutRef: state.hideTimeoutRef,
-  });
-
-  const renderAnnotation = useAnnotationRenderer({
-    handleRevertBlock: state.handleRevertBlock,
-    onButtonEnter,
-    onButtonLeave,
-    handleCommentSubmit: state.handleCommentSubmit,
-    handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
-    handleCommentUpdate: state.handleCommentUpdate,
-    handleCommentDelete: state.handleCommentDelete,
-    handleCommentRun: onCommentRun,
-    setShowCommentForm: state.setShowCommentForm,
-    setSelectedLines: state.setSelectedLines,
-    setEditingComment: state.setEditingComment,
-  });
-
-  const showHeader = !hideHeader && !compact;
-  const canUseExpansion = useAutoLoadExpansion(enableExpansion, state);
-
-  const { options, renderHeaderMetadata, renderHoverUtility } = useDiffOptions({
-    filePath: data.filePath,
-    diff: data.diff,
-    enableComments,
-    showHeader,
-    wordWrap,
-    setWordWrap,
-    handleLineSelectionEnd: state.handleLineSelectionEnd,
-    onLineEnter,
-    onLineLeave,
-    onOpenFile,
-    onPreviewMarkdown,
-    onRevert,
-    enableExpansion: canUseExpansion,
-    expandUnchanged,
-    onToggleExpandUnchanged: canUseExpansion ? toggleExpandUnchanged : undefined,
-  });
+  const { options, renderHeaderMetadata, renderHoverUtility, renderAnnotation } =
+    useDiffViewerWiring({
+      data,
+      state,
+      onCommentRun,
+      onOpenFile,
+      onPreviewMarkdown,
+      onRevert,
+      enableComments,
+      enableExpansion,
+      hideHeader,
+      compact,
+      wordWrap,
+      setWordWrap,
+      expandUnchanged,
+      toggleExpandUnchanged,
+      wrapperRef,
+    });
 
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;
 

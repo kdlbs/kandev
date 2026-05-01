@@ -325,12 +325,17 @@ func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR
 	return out, nil
 }
 
-// ListTaskPRsByTaskIDs returns PR associations for multiple tasks.
-func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*TaskPR, error) {
+// ListTaskPRsByTaskIDs returns PR associations for multiple tasks. Each task
+// may have multiple PRs (one per repository for multi-repo tasks); rows are
+// returned grouped by task_id, ordered by created_at ascending within a group.
+func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskPR, error) {
 	if len(taskIDs) == 0 {
-		return make(map[string]*TaskPR), nil
+		return make(map[string][]*TaskPR), nil
 	}
-	query, args, err := sqlx.In(`SELECT * FROM github_task_prs WHERE task_id IN (?)`, taskIDs)
+	query, args, err := sqlx.In(
+		`SELECT * FROM github_task_prs WHERE task_id IN (?) ORDER BY created_at ASC`,
+		taskIDs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -339,27 +344,31 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 	if err := s.ro.SelectContext(ctx, &prs, query, args...); err != nil {
 		return nil, err
 	}
-	result := make(map[string]*TaskPR, len(prs))
-	for i := range prs {
-		result[prs[i].TaskID] = &prs[i]
-	}
-	return result, nil
+	return groupTaskPRsByTask(prs), nil
 }
 
 // ListTaskPRsByWorkspaceID returns all PR associations for tasks in a workspace.
-func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string]*TaskPR, error) {
+// Each task may have multiple PRs (one per repository for multi-repo tasks);
+// rows are returned grouped by task_id, ordered by created_at ascending.
+func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string][]*TaskPR, error) {
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
 		`SELECT gtp.* FROM github_task_prs gtp
 		 INNER JOIN tasks t ON gtp.task_id = t.id
-		 WHERE t.workspace_id = ?`, workspaceID); err != nil {
+		 WHERE t.workspace_id = ?
+		 ORDER BY gtp.created_at ASC`, workspaceID); err != nil {
 		return nil, err
 	}
-	result := make(map[string]*TaskPR, len(prs))
+	return groupTaskPRsByTask(prs), nil
+}
+
+func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
+	result := make(map[string][]*TaskPR)
 	for i := range prs {
-		result[prs[i].TaskID] = &prs[i]
+		taskID := prs[i].TaskID
+		result[taskID] = append(result[taskID], &prs[i])
 	}
-	return result, nil
+	return result
 }
 
 // ReplaceTaskPR atomically replaces the task→PR association for a task: any

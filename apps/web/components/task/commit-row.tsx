@@ -172,7 +172,10 @@ export function CommitRow({
 }: {
   commit: CommitItem;
   isLatest: boolean;
-  onOpenCommitDetail?: (sha: string) => void;
+  // Multi-repo: opening the diff for a non-primary repo's commit needs the
+  // repo subpath, otherwise the agentctl looks up the SHA at the workspace
+  // root and finds nothing (each repo has its own commit graph).
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
   // Multi-repo: handlers receive the commit's repository_name so the
   // amend/revert/reset op runs in the right git repo. Without it, ops hit
   // the workspace root which fails on multi-repo task workspaces.
@@ -195,11 +198,11 @@ export function CommitRow({
         tabIndex={0}
         data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
         className="group relative flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-        onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
+        onClick={() => onOpenCommitDetail?.(commit.commit_sha, commit.repository_name)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onOpenCommitDetail?.(commit.commit_sha);
+            onOpenCommitDetail?.(commit.commit_sha, commit.repository_name);
           }
         }}
       >

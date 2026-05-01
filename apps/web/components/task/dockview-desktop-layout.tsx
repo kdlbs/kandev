@@ -307,7 +307,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string) => addCommitDetailPanel(sha),
+    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -552,7 +552,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
           baseBranch={review.baseBranch}
           onSendComments={review.handleReviewSendComments}
           onOpenFile={review.reviewOpenFile}
-          gitStatusFiles={review.reviewGitStatus?.files ?? null}
+          gitStatusFiles={review.reviewGitStatusFiles}
           cumulativeDiff={review.reviewCumulativeDiff}
           prDiffFiles={review.reviewPRDiffFiles}
         />

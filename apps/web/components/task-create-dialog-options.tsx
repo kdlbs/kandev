@@ -21,6 +21,8 @@ type OptionItem = {
   value: string;
   label: string;
   renderLabel: () => React.ReactNode;
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 export function useRepositoryOptions(
@@ -188,17 +190,31 @@ export type ExecutorProfileOptionItem = OptionItem & {
   executorName?: string;
 };
 
+export type ExecutorProfileOptionsConfig = {
+  /**
+   * Returns a tooltip string when the given profile should render disabled.
+   * Used by the kanban task-create dialog to gate non-worktree executors
+   * (only worktree-based execution is currently supported there).
+   */
+  disabledReasonFor?: (profile: ExecutorProfile) => string | null;
+};
+
 export function useExecutorProfileOptions(
   allProfiles: ExecutorProfile[],
+  config?: ExecutorProfileOptionsConfig,
 ): ExecutorProfileOptionItem[] {
+  const disabledReasonFor = config?.disabledReasonFor;
   return useMemo(() => {
     return allProfiles.map((profile) => {
       const Icon = getExecutorIcon(profile.executor_type ?? "local");
+      const disabledReason = disabledReasonFor?.(profile) ?? null;
       return {
         value: profile.id,
         label: profile.name,
         executorType: profile.executor_type,
         executorName: profile.executor_name,
+        disabled: !!disabledReason,
+        disabledReason: disabledReason ?? undefined,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
@@ -214,5 +230,5 @@ export function useExecutorProfileOptions(
         ),
       };
     });
-  }, [allProfiles]);
+  }, [allProfiles, disabledReasonFor]);
 }

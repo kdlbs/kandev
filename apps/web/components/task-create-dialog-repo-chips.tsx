@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { IconPlus, IconX, IconCode, IconGitBranch } from "@tabler/icons-react";
+import { IconPlus, IconX, IconCode, IconGitBranch, IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {
@@ -44,6 +44,15 @@ type RepoChipsRowProps = {
   /** GitHub URL flow lives alongside the chips so users can switch in place. */
   onToggleGitHubUrl?: () => void;
   onGitHubUrlChange?: (value: string) => void;
+  /**
+   * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
+   * renders inline at the right edge of the chip row so it sits next to the
+   * branch pills it affects, instead of taking its own row under the
+   * agent/executor selectors.
+   */
+  freshBranchAvailable?: boolean;
+  freshBranchEnabled?: boolean;
+  onToggleFreshBranch?: (enabled: boolean) => void;
 };
 
 export function RepoChipsRow({
@@ -55,6 +64,9 @@ export function RepoChipsRow({
   onRowBranchChange,
   onToggleGitHubUrl,
   onGitHubUrlChange,
+  freshBranchAvailable,
+  freshBranchEnabled,
+  onToggleFreshBranch,
 }: RepoChipsRowProps) {
   // No early returns above hooks. URL mode and started-state checks happen below.
   const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
@@ -107,6 +119,28 @@ export function RepoChipsRow({
             <IconPlus className="h-3.5 w-3.5" />
           </button>
         </>
+      )}
+      {freshBranchAvailable && onToggleFreshBranch && (
+        <button
+          type="button"
+          onClick={() => onToggleFreshBranch(!freshBranchEnabled)}
+          data-testid="fresh-branch-toggle"
+          aria-pressed={!!freshBranchEnabled}
+          aria-label={freshBranchEnabled ? "Fork a new branch" : "Use current branch"}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
+            freshBranchEnabled
+              ? "bg-muted text-foreground"
+              : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/60",
+          )}
+          title={
+            freshBranchEnabled
+              ? "Will fork a new branch from the selected base"
+              : "Use the current branch (no fork)"
+          }
+        >
+          <IconGitFork className="h-3.5 w-3.5" />
+        </button>
       )}
       {onToggleGitHubUrl && (
         <button

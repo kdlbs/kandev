@@ -172,8 +172,13 @@ type FileSearchResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/content
 type FileUpdateRequest struct {
-	// Path is the file path (relative to workspace root).
+	// Path is the file path (relative to the per-repo subpath when Repo is
+	// set, otherwise relative to the workspace root).
 	Path string `json:"path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. When set, Path is interpreted relative to <workDir>/<Repo>.
+	Repo string `json:"repo,omitempty"`
 
 	// Diff is the unified diff to apply to the file.
 	Diff string `json:"diff"`

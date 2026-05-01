@@ -22,33 +22,40 @@ export async function requestFileTree(
 }
 
 /**
- * Request file content from the backend
+ * Request file content from the backend.
+ * `repo` is the multi-repo subpath (e.g. "kandev"); omit for single-repo
+ * workspaces. When set, `path` is interpreted relative to that repo.
  */
 export async function requestFileContent(
   client: WebSocketClient,
   sessionId: string,
   path: string,
+  repo?: string,
 ): Promise<FileContentResponse> {
   return client.request<FileContentResponse>("workspace.file.get", {
     session_id: sessionId,
     path,
+    ...(repo ? { repo } : {}),
   });
 }
 
 /**
  * Request file content at a specific git ref (branch, commit, HEAD, etc.)
  * Used for diff expansion to fetch old/base version of a file.
+ * `repo` scopes to a per-repo subdirectory for multi-repo workspaces.
  */
 export async function requestFileContentAtRef(
   client: WebSocketClient,
   sessionId: string,
   path: string,
   ref: string,
+  repo?: string,
 ): Promise<FileContentResponse> {
   return client.request<FileContentResponse>("workspace.file.get_at_ref", {
     session_id: sessionId,
     path,
     ref,
+    ...(repo ? { repo } : {}),
   });
 }
 
@@ -80,12 +87,19 @@ export type FileUpdateResponse = {
 };
 
 /**
- * Update file content using a diff
+ * Update file content using a diff. `repo` scopes to a per-repo subdirectory
+ * for multi-repo workspaces; omit for single-repo.
  */
 export async function updateFileContent(
   client: WebSocketClient,
   sessionId: string,
-  params: { path: string; diff: string; originalHash: string; desiredContent?: string },
+  params: {
+    path: string;
+    diff: string;
+    originalHash: string;
+    desiredContent?: string;
+    repo?: string;
+  },
 ): Promise<FileUpdateResponse> {
   return client.request<FileUpdateResponse>("workspace.file.update", {
     session_id: sessionId,
@@ -95,6 +109,7 @@ export async function updateFileContent(
     ...(params.desiredContent !== undefined && {
       desired_content: params.desiredContent,
     }),
+    ...(params.repo ? { repo: params.repo } : {}),
   });
 }
 

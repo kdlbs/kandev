@@ -413,11 +413,20 @@ function useMultiRepoSummary(
   // for single-repo. Components render the same per-repo group structure in
   // both modes — the empty name routes ops to the workspace root, named
   // entries route to their respective subdirectories.
+  //
+  // Defensive filter: when there are named entries (multi-repo), drop the
+  // empty entry. The bare task-root tracker is supposed to stay quiet for
+  // multi-repo (see workspace_tracker.go's gitIndexPath guard) but a stale
+  // entry can linger from older builds or a bugged code path; without this
+  // filter the dropdown would show an extra "Repository" / primary-name row
+  // alongside the real per-repo entries.
   const repoNamesForControls = useMemo(() => {
     const seen = new Set<string>();
     for (const { repository_name } of statusByRepo) seen.add(repository_name);
     for (const r of reposInFiles) seen.add(r);
-    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+    const all = Array.from(seen).sort((a, b) => a.localeCompare(b));
+    const named = all.filter((r) => r !== "");
+    return named.length > 0 ? named : all;
   }, [statusByRepo, reposInFiles]);
 
   const perRepoStatus = useMemo(() => {
@@ -429,7 +438,9 @@ function useMultiRepoSummary(
       if (f.staged) stagedByRepo.set(r, true);
       else unstagedByRepo.set(r, true);
     }
-    return statusByRepo.map(({ repository_name, status }) => ({
+    const hasNamed = statusByRepo.some((s) => s.repository_name !== "");
+    const filtered = hasNamed ? statusByRepo.filter((s) => s.repository_name !== "") : statusByRepo;
+    return filtered.map(({ repository_name, status }) => ({
       repository_name,
       branch: status?.branch ?? null,
       ahead: status?.ahead ?? 0,

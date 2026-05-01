@@ -103,7 +103,10 @@ type DockviewStore = {
     path: string,
     opts?: OpenPanelOpts & { content?: string; groupId?: string },
   ) => void;
-  addCommitDetailPanel: (sha: string, opts?: OpenPanelOpts & { groupId?: string }) => void;
+  addCommitDetailPanel: (
+    sha: string,
+    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+  ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;

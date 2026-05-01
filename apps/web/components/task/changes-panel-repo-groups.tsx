@@ -184,7 +184,7 @@ export function CommitsRepoGroup({
   groupCommits: CommitItem[];
   aheadCount?: number;
   existingPrUrl?: string;
-  onOpenCommitDetail?: (sha: string) => void;
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;

@@ -787,7 +787,20 @@ func (s *Server) handleGitLogMultiRepo(
 ) {
 	outcomes := make([]perRepoLogOutcome, 0, len(subpaths))
 	for _, sub := range subpaths {
-		result, err := s.runGitLogForRepo(c, req, limit, sub)
+		// Multi-repo: the caller-supplied `since` is a SHA that only exists in
+		// the primary repo, and `target_branch` is the primary repo's base
+		// branch (e.g. "main"). Both can be wrong for sibling repos — running
+		// `git log <foreign-sha>..HEAD` in lvc fails outright and the repo's
+		// commits silently disappear from the merged response. Compute a
+		// per-repo base via merge-base against `origin/main` (with
+		// `origin/master` fallback) so each repo's commits show up.
+		perRepoReq := req
+		perRepoReq.Since = ""
+		perRepoReq.TargetBranch = ""
+		if base := s.resolvePerRepoBase(c, sub); base != "" {
+			perRepoReq.Since = base
+		}
+		result, err := s.runGitLogForRepo(c, perRepoReq, limit, sub)
 		if err != nil {
 			s.logger.Warn("git log for repo failed",
 				zap.String("repo", sub), zap.Error(err))
@@ -805,7 +818,16 @@ func (s *Server) handleGitLogMultiRepo(
 	c.JSON(http.StatusOK, mergeGitLogResults(outcomes, limit))
 }
 
-// handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff
+// handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff.
+//
+// Multi-repo: when the caller doesn't pin a repo (?repo= empty) and the
+// workspace contains per-repo subdirs, fan out one cumulative diff per repo
+// and merge results, prefixing each file key with the repo subpath and
+// stamping repository_name onto each file's payload. Without this the call
+// would land on the workspace root which for multi-repo task workspaces
+// isn't a git repo — and `git diff` would silently ascend to whatever .git
+// encloses the task root (e.g. the user's outer kandev checkout) and return
+// hundreds of unrelated files.
 func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 	var req GitCumulativeDiffRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -816,25 +838,127 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 		return
 	}
 
-	gitOp, gitOpErr := s.procMgr.GitOperatorFor(req.Repo)
+	if req.Repo == "" {
+		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
+			s.handleGitCumulativeDiffMultiRepo(c, req, subs)
+			return
+		}
+	}
+
+	result := s.runGitCumulativeDiffForRepo(c, req.Base, req.Repo)
+	if result == nil {
+		return // gitOp lookup error already wrote the response
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// runGitCumulativeDiffForRepo runs cumulative diff against a single repo
+// subpath. Returns nil after writing an error response on lookup failures;
+// otherwise returns the (possibly success=false) result for the caller.
+func (s *Server) runGitCumulativeDiffForRepo(
+	c *gin.Context,
+	base, repo string,
+) *process.CumulativeDiffResult {
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
 		c.JSON(http.StatusBadRequest, process.CumulativeDiffResult{
 			Success: false,
 			Error:   gitOpErr.Error(),
 		})
-		return
+		return nil
 	}
-	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), req.Base)
+	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), base)
 	if err != nil {
-		s.logger.Error("git cumulative diff failed", zap.String("base", req.Base), zap.Error(err))
+		s.logger.Error("git cumulative diff failed",
+			zap.String("base", base),
+			zap.String("repo", repo),
+			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, process.CumulativeDiffResult{
 			Success: false,
 			Error:   err.Error(),
 		})
-		return
+		return nil
 	}
+	return result
+}
 
-	c.JSON(http.StatusOK, result)
+// handleGitCumulativeDiffMultiRepo fans cumulative diff out across every
+// per-repo tracker. Each repo's base commit is computed locally via
+// merge-base against the integration branch — the caller-supplied base only
+// makes sense for one repo at a time, since each repo has its own commit
+// graph. Files from each repo are merged into a single map, keyed by
+// `<repoSubpath>/<path>` so paths that exist in multiple repos don't clash,
+// and tagged with `repository_name` so the frontend can group them.
+func (s *Server) handleGitCumulativeDiffMultiRepo(
+	c *gin.Context,
+	req GitCumulativeDiffRequest,
+	subpaths []string,
+) {
+	merged := process.CumulativeDiffResult{
+		Files:   make(map[string]interface{}),
+		Success: true,
+	}
+	anyOK := false
+	for _, sub := range subpaths {
+		base := s.resolvePerRepoBase(c, sub)
+		if base == "" {
+			s.logger.Warn("cumulative diff: no per-repo base, skipping",
+				zap.String("repo", sub))
+			continue
+		}
+		result := s.runGitCumulativeDiffForRepo(c, base, sub)
+		if result == nil {
+			return // response already written
+		}
+		if !result.Success {
+			s.logger.Warn("cumulative diff for repo returned failure",
+				zap.String("repo", sub),
+				zap.String("error", result.Error))
+			continue
+		}
+		anyOK = true
+		merged.TotalCommits += result.TotalCommits
+		mergeCumulativeFiles(merged.Files, result.Files, sub)
+	}
+	if !anyOK {
+		merged.Success = false
+		merged.Error = fmt.Sprintf("cumulative diff failed for all %d repositories", len(subpaths))
+	}
+	c.JSON(http.StatusOK, merged)
+}
+
+// resolvePerRepoBase returns the merge-base of HEAD against the integration
+// branch (origin/main, with origin/master fallback). Multi-repo tasks share
+// no single base commit across repos, so each repo computes its own.
+func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
+	gitOp, err := s.procMgr.GitOperatorFor(repo)
+	if err != nil {
+		return ""
+	}
+	for _, candidate := range []string{"origin/main", "origin/master"} {
+		base, mbErr := gitOp.GetMergeBase(c.Request.Context(), "HEAD", candidate)
+		if mbErr == nil && base != "" {
+			return base
+		}
+	}
+	return ""
+}
+
+// mergeCumulativeFiles copies per-repo files into the merged map under the
+// `<repo>/<path>` key and decorates each file payload with `repository_name`
+// + a `path` field carrying the repo-relative path. The composite key keeps
+// `README.md` in two repos from clashing; the frontend reads `path` and
+// `repository_name` off the payload so the file tree groups under the repo
+// without the prefix appearing in the displayed path.
+func mergeCumulativeFiles(dst, src map[string]interface{}, repo string) {
+	for path, payload := range src {
+		if m, ok := payload.(map[string]interface{}); ok {
+			m["repository_name"] = repo
+			m["path"] = path
+			payload = m
+		}
+		dst[fmt.Sprintf("%s/%s", repo, path)] = payload
+	}
 }
 
 // GitStatusResult represents the result of a git status query.
@@ -856,6 +980,99 @@ type GitStatusResult struct {
 	BranchAdditions int                    `json:"branch_additions,omitempty"`
 	BranchDeletions int                    `json:"branch_deletions,omitempty"`
 	Error           string                 `json:"error,omitempty"`
+}
+
+// PerRepoGitStatus pairs a repository_name with its current status. Used by
+// the multi-repo status fan-out so callers (notably the gateway's session
+// subscribe handler) can deliver one stamped GitStatusUpdate per repo on
+// reconnect — without it the frontend would only see the workspace-root
+// (untagged) status and miss the per-repo grouping.
+type PerRepoGitStatus struct {
+	RepositoryName string          `json:"repository_name"`
+	Status         GitStatusResult `json:"status"`
+}
+
+// MultiRepoGitStatusResult is the response shape for /api/v1/git/status/multi.
+// For multi-repo task workspaces the response carries one entry per repo,
+// stamped with its name. Single-repo workspaces return a single entry with an
+// empty repository_name so callers can treat both shapes uniformly.
+type MultiRepoGitStatusResult struct {
+	Success bool               `json:"success"`
+	Repos   []PerRepoGitStatus `json:"repos"`
+	Error   string             `json:"error,omitempty"`
+}
+
+// handleGitStatusMulti returns one git status entry per repo for multi-repo
+// task workspaces (or one untagged entry for single-repo). Used by the
+// session-subscribe handler in the main backend to seed per-repo state on
+// page reload — the legacy single GET /api/v1/git/status endpoint returns
+// only the workspace-root status, which is empty for multi-repo task roots
+// (the root isn't itself a git repo).
+func (s *Server) handleGitStatusMulti(c *gin.Context) {
+	subpaths := s.procMgr.RepoSubpaths()
+	// Single-repo: fall back to the workspace-root status with an empty repo
+	// name so the response shape stays uniform.
+	if len(subpaths) == 0 {
+		subpaths = []string{""}
+	}
+	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, 0, len(subpaths))}
+	for _, sub := range subpaths {
+		entry := s.collectStatusForRepo(c, sub)
+		result.Repos = append(result.Repos, entry)
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// collectStatusForRepo runs the status query for a single subpath and packs
+// it into a PerRepoGitStatus. Failures land in Status.Error / Status.Success
+// so the caller can render partial results instead of erroring out the whole
+// fan-out when one repo is misconfigured.
+func (s *Server) collectStatusForRepo(c *gin.Context, sub string) PerRepoGitStatus {
+	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(sub)
+	if wtErr != nil {
+		return PerRepoGitStatus{
+			RepositoryName: sub,
+			Status:         GitStatusResult{Success: false, Error: wtErr.Error()},
+		}
+	}
+	if wt == nil {
+		return PerRepoGitStatus{
+			RepositoryName: sub,
+			Status:         GitStatusResult{Success: false, Error: "workspace tracker not available"},
+		}
+	}
+	status, err := wt.GetCurrentGitStatus(c.Request.Context())
+	if err != nil {
+		return PerRepoGitStatus{
+			RepositoryName: sub,
+			Status:         GitStatusResult{Success: false, Error: err.Error()},
+		}
+	}
+	filesMap := make(map[string]interface{}, len(status.Files))
+	for k, v := range status.Files {
+		filesMap[k] = v
+	}
+	return PerRepoGitStatus{
+		RepositoryName: sub,
+		Status: GitStatusResult{
+			Success:         true,
+			Branch:          status.Branch,
+			RemoteBranch:    status.RemoteBranch,
+			HeadCommit:      status.HeadCommit,
+			BaseCommit:      status.BaseCommit,
+			Ahead:           status.Ahead,
+			Behind:          status.Behind,
+			Modified:        status.Modified,
+			Added:           status.Added,
+			Deleted:         status.Deleted,
+			Untracked:       status.Untracked,
+			Renamed:         status.Renamed,
+			Files:           filesMap,
+			Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+			BranchAdditions: status.BranchAdditions,
+			BranchDeletions: status.BranchDeletions,
+		},
+	}
 }
 
 // handleGitStatus handles GET /api/v1/git/status. Accepts an optional

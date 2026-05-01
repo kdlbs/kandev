@@ -71,10 +71,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Find index of selected file - we need to force-load all files up to it
   const selectedIndex = selectedFile ? files.findIndex((f) => f.path === selectedFile) : -1;
-  const groups = useMemo(
-    () => groupByRepositoryName(files, (f) => f.repository_name),
-    [files],
-  );
+  const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repository_name), [files]);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
     <div ref={scrollContainerRef} className="overflow-y-auto h-full">
@@ -434,11 +431,16 @@ function useCommentRunHandler(sessionId: string) {
   );
 }
 
-async function revertBlock(sessionId: string, filePath: string, info: RevertBlockInfo) {
+async function revertBlock(
+  sessionId: string,
+  filePath: string,
+  info: RevertBlockInfo,
+  repo?: string,
+) {
   const client = getWebSocketClient();
   if (!client) return;
   try {
-    const response = await requestFileContent(client, sessionId, filePath);
+    const response = await requestFileContent(client, sessionId, filePath, repo);
     if (response.error) return;
     const currentContent = response.content;
     const hash = await calculateHash(currentContent);
@@ -452,6 +454,7 @@ async function revertBlock(sessionId: string, filePath: string, info: RevertBloc
       path: filePath,
       diff: patch,
       originalHash: hash,
+      repo,
     });
   } catch (err) {
     console.error("Failed to revert change block:", err);
@@ -513,6 +516,7 @@ function renderDiffContent(opts: {
           hideHeader
           expandUnchanged={expandUnchanged}
           onToggleExpandUnchanged={onToggleExpandUnchanged}
+          repo={file.repository_name}
         />
         {file.diff_skip_reason === "truncated" && (
           <div className="py-1 text-center text-xs text-muted-foreground border-t">
@@ -578,8 +582,9 @@ function FileDiffSection({
   }, [file.path, onDiscard]);
 
   const handleRevertBlock = useCallback(
-    (filePath: string, info: RevertBlockInfo) => revertBlock(sessionId, filePath, info),
-    [sessionId],
+    (filePath: string, info: RevertBlockInfo) =>
+      revertBlock(sessionId, filePath, info, file.repository_name),
+    [sessionId, file.repository_name],
   );
 
   const handleCommentRun = useCommentRunHandler(sessionId);

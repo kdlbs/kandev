@@ -28,8 +28,12 @@ import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
+import { MultiRepoVcsButton } from "@/components/vcs-multi-repo-menu";
 
 import type { ReactNode } from "react";
+
+const DEFAULT_BASE_BRANCH = "origin/main";
 
 function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -97,7 +101,7 @@ function buildRebaseConfig(
     icon: <IconGitCherryPick className="h-4 w-4" />,
     label: "Rebase",
     badge: behindCount > 0 ? behindCount : null,
-    tooltip: `Rebase onto ${baseBranch || "origin/main"} (${behindCount} behind)`,
+    tooltip: `Rebase onto ${baseBranch || DEFAULT_BASE_BRANCH} (${behindCount} behind)`,
     onClick: handleRebase,
   };
 }
@@ -205,12 +209,16 @@ function VcsDropdownItems({
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
         <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Rebase</span>
-        <span className="text-xs text-muted-foreground">onto {baseBranch || "origin/main"}</span>
+        <span className="text-xs text-muted-foreground">
+          onto {baseBranch || DEFAULT_BASE_BRANCH}
+        </span>
       </DropdownMenuItem>
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
         <IconGitMerge className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Merge</span>
-        <span className="text-xs text-muted-foreground">from {baseBranch || "origin/main"}</span>
+        <span className="text-xs text-muted-foreground">
+          from {baseBranch || DEFAULT_BASE_BRANCH}
+        </span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   );
@@ -224,26 +232,40 @@ type VcsSplitButtonProps = {
 function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
   const gitWithFeedback = useGitWithFeedback();
 
-  const handlePull = useCallback(() => {
-    gitWithFeedback(() => git.pull(), "Pull");
-  }, [gitWithFeedback, git]);
-
-  const handlePush = useCallback(
-    (force = false) => {
-      gitWithFeedback(() => git.push({ force }), force ? "Force Push" : "Push");
+  const handlePull = useCallback(
+    (repo?: string) => {
+      const label = repo ? `Pull (${repo})` : "Pull";
+      gitWithFeedback(() => git.pull(false, repo), label);
     },
     [gitWithFeedback, git],
   );
 
-  const handleRebase = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    gitWithFeedback(() => git.rebase(targetBranch), "Rebase");
-  }, [gitWithFeedback, git, baseBranch]);
+  const handlePush = useCallback(
+    (force = false, repo?: string) => {
+      const baseLabel = force ? "Force Push" : "Push";
+      const label = repo ? `${baseLabel} (${repo})` : baseLabel;
+      gitWithFeedback(() => git.push({ force }, repo), label);
+    },
+    [gitWithFeedback, git],
+  );
 
-  const handleMerge = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    gitWithFeedback(() => git.merge(targetBranch), "Merge");
-  }, [gitWithFeedback, git, baseBranch]);
+  const handleRebase = useCallback(
+    (repo?: string) => {
+      const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+      const label = repo ? `Rebase (${repo})` : "Rebase";
+      gitWithFeedback(() => git.rebase(targetBranch, repo), label);
+    },
+    [gitWithFeedback, git, baseBranch],
+  );
+
+  const handleMerge = useCallback(
+    (repo?: string) => {
+      const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+      const label = repo ? `Merge (${repo})` : "Merge";
+      gitWithFeedback(() => git.merge(targetBranch, repo), label);
+    },
+    [gitWithFeedback, git, baseBranch],
+  );
 
   return { handlePull, handlePush, handleRebase, handleMerge };
 }
@@ -257,6 +279,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const activePR = useActiveTaskPR();
   const hasOpenPR = activePR?.state === "open";
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
+  const repoDisplayName = useRepoDisplayName(sessionId);
 
   const currentBranch = git.branch;
   const remoteBranch = git.remoteBranch;
@@ -267,6 +290,9 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const behindCount = git.behind;
   const isDisabled = git.isLoading || !sessionId;
   const isGitLoading = git.isLoading;
+  // Multi-repo when there's more than one named repo. Single-repo workspaces
+  // get either a single empty-name entry or no entries at all in repoNames.
+  const isMultiRepo = git.repoNames.filter((r) => r !== "").length > 1;
 
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
@@ -286,6 +312,77 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handleRebase,
   });
 
+  if (isMultiRepo) {
+    return (
+      <MultiRepoVcsButton
+        primaryButtonConfig={primaryButtonConfig}
+        primaryAction={primaryAction}
+        isDisabled={isDisabled}
+        isGitLoading={isGitLoading}
+        baseBranch={baseBranch || DEFAULT_BASE_BRANCH}
+        repoNames={git.repoNames}
+        perRepoStatus={git.perRepoStatus}
+        repoDisplayName={repoDisplayName}
+        callbacks={{
+          onCommit: (repo) => openCommitDialog(repo),
+          onPR: (repo) => openPRDialog(repo),
+          onPull: handlePull,
+          onPush: handlePush,
+          onRebase: handleRebase,
+          onMerge: handleMerge,
+        }}
+      />
+    );
+  }
+
+  return (
+    <SingleRepoVcsButton
+      primaryButtonConfig={primaryButtonConfig}
+      primaryAction={primaryAction}
+      isDisabled={isDisabled}
+      isGitLoading={isGitLoading}
+      baseBranch={baseBranch}
+      hasMatchingUpstream={hasMatchingUpstream}
+      behindCount={behindCount}
+      aheadCount={aheadCount}
+      onPR={() => openPRDialog()}
+      onPull={() => handlePull()}
+      onPush={(force) => handlePush(force)}
+      onRebase={() => handleRebase()}
+      onMerge={() => handleMerge()}
+    />
+  );
+});
+
+function SingleRepoVcsButton({
+  primaryButtonConfig,
+  primaryAction,
+  isDisabled,
+  isGitLoading,
+  baseBranch,
+  hasMatchingUpstream,
+  behindCount,
+  aheadCount,
+  onPR,
+  onPull,
+  onPush,
+  onRebase,
+  onMerge,
+}: {
+  primaryButtonConfig: PrimaryButtonConfig;
+  primaryAction: "commit" | "push" | "pr" | "rebase";
+  isDisabled: boolean;
+  isGitLoading: boolean;
+  baseBranch?: string;
+  hasMatchingUpstream: boolean | "" | null | undefined;
+  behindCount: number;
+  aheadCount: number;
+  onPR: () => void;
+  onPull: () => void;
+  onPush: (force: boolean) => void;
+  onRebase: () => void;
+  onMerge: () => void;
+}) {
   return (
     <div className="inline-flex rounded-md border border-border overflow-hidden">
       <Tooltip>
@@ -330,15 +427,15 @@ const VcsSplitButton = memo(function VcsSplitButton({
           hasMatchingUpstream={hasMatchingUpstream}
           behindCount={behindCount}
           aheadCount={aheadCount}
-          onPR={openPRDialog}
-          onPull={handlePull}
-          onPush={handlePush}
-          onRebase={handleRebase}
-          onMerge={handleMerge}
+          onPR={onPR}
+          onPull={onPull}
+          onPush={onPush}
+          onRebase={onRebase}
+          onMerge={onMerge}
         />
       </DropdownMenu>
     </div>
   );
-});
+}
 
 export { VcsSplitButton };

@@ -145,6 +145,7 @@ const TaskTopBar = memo(function TaskTopBar({
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
         gitStatus={git}
+        isMultiRepo={git.repoNames.filter((r) => r !== "").length > 1}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -320,10 +321,19 @@ function TopBarLeft({
 function GitAheadBehindBadges({
   gitStatus,
   baseBranch,
+  isMultiRepo,
 }: {
   gitStatus: { ahead: number; behind: number };
   baseBranch?: string;
+  isMultiRepo: boolean;
 }) {
+  // Multi-repo: a single ahead/behind badge is meaningless — each repo has
+  // its own counts (and one repo could be ahead while another is behind).
+  // The Pull dropdown surfaces per-repo behind counts; the per-repo Push
+  // buttons surface ahead counts. So we suppress the global badge here to
+  // avoid showing whichever value the legacy single-status slot last
+  // received (which conflated repos).
+  if (isMultiRepo) return null;
   const ahead = gitStatus?.ahead ?? 0;
   const behind = gitStatus?.behind ?? 0;
   if (ahead === 0 && behind === 0) return null;
@@ -364,6 +374,7 @@ function TopBarRight({
   activeSessionId,
   baseBranch,
   gitStatus,
+  isMultiRepo,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -376,6 +387,7 @@ function TopBarRight({
   activeSessionId?: string | null;
   baseBranch?: string;
   gitStatus: { ahead: number; behind: number };
+  isMultiRepo: boolean;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -403,7 +415,11 @@ function TopBarRight({
           </TooltipContent>
         </Tooltip>
       )}
-      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
+      <GitAheadBehindBadges
+        gitStatus={gitStatus}
+        baseBranch={baseBranch}
+        isMultiRepo={isMultiRepo}
+      />
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>

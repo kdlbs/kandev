@@ -281,6 +281,31 @@ export function useDefaultSelectionsEffect(
       }
     }
   }, [executorProfileId, executors, setExecutorId]);
+
+  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
+  // run the task (Docker / Sprites / standalone don't yet provision sibling
+  // repos under one task root). If the current profile is non-worktree, swap
+  // to a worktree profile — preferring the last-used worktree, otherwise the
+  // first one available. Single-repo selections leave the profile alone.
+  useEffect(() => {
+    if (!open || !executorProfileId || executors.length === 0) return;
+    const namedRepos = fs.repositories.filter((r) => r.repositoryId || r.localPath);
+    if (namedRepos.length <= 1) return;
+    const profileToType = new Map<string, string | undefined>();
+    const worktreeProfileIds: string[] = [];
+    for (const e of executors) {
+      for (const p of e.profiles ?? []) {
+        const type = p.executor_type ?? e.type;
+        profileToType.set(p.id, type);
+        if (type === "worktree") worktreeProfileIds.push(p.id);
+      }
+    }
+    if (worktreeProfileIds.length === 0) return;
+    if (profileToType.get(executorProfileId) === "worktree") return;
+    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
+    void Promise.resolve().then(() => setExecutorProfileId(pick));
+  }, [open, executorProfileId, executors, fs.repositories, setExecutorProfileId]);
 }
 
 /**

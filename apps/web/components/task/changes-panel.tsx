@@ -20,6 +20,7 @@ import {
 import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
+import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
@@ -39,7 +40,7 @@ export { filterUnpushedCommits, mergeCommits };
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string) => void;
   onEditFile: (path: string) => void;
-  onOpenCommitDetail?: (sha: string) => void;
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
 };
@@ -59,7 +60,9 @@ function useChangesPanelStoreData() {
   const existingPrUrl = useAppStore((state) => {
     const taskId = state.tasks.activeTaskId;
     if (!taskId) return undefined;
-    return state.taskPRs.byTaskId[taskId]?.pr_url ?? undefined;
+    // Single-PR consumer: surface the primary PR's URL. Multi-repo cases get
+    // per-repo PR URLs via the timeline's prByRepo map elsewhere.
+    return state.taskPRs.byTaskId[taskId]?.[0]?.pr_url ?? undefined;
   });
   return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
@@ -103,7 +106,7 @@ type ChangesPanelBodyProps = {
   dialogs: DialogsType;
   onOpenDiffFile: (path: string) => void;
   onEditFile: (path: string) => void;
-  onOpenCommitDetail?: (sha: string) => void;
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
   // Multi-repo: handlers carry the commit's repository_name so revert/amend/
   // reset target the right git repo. Without it the op runs at the workspace
@@ -434,7 +437,8 @@ function useChangesPanelPRData() {
 }
 
 function useChangesPanelData() {
-  const { activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
@@ -462,6 +466,7 @@ function useChangesPanelData() {
   return {
     git,
     baseBranchDisplay,
+    baseBranchByRepo,
     unstagedFiles,
     stagedFiles,
     reviewedCount,
@@ -549,6 +554,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         hasPRFiles={data.hasPRFiles}
         displayBranch={data.git.branch}
         baseBranchDisplay={data.baseBranchDisplay}
+        baseBranchByRepo={data.baseBranchByRepo}
         behindCount={data.git.behind}
         isLoading={data.git.isLoading}
         loadingOperation={data.git.loadingOperation}

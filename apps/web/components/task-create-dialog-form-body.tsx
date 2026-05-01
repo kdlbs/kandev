@@ -9,7 +9,6 @@ import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
-import { FreshBranchToggle } from "@/components/task-create-dialog-fresh-branch";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 
@@ -52,11 +51,6 @@ type CreateEditSelectorsProps = {
     triggerClassName?: string;
   }>;
   workflowAgentLocked: boolean;
-  /** When true, render the FreshBranchToggle row beneath the selectors. */
-  freshBranchAvailable: boolean;
-  freshBranchEnabled: boolean;
-  onToggleFreshBranch: (enabled: boolean) => void;
-  currentLocalBranch: string;
 };
 
 type AgentColumnProps = Pick<
@@ -108,11 +102,6 @@ function AgentColumn({
   );
 }
 
-function freshBranchHint(enabled: boolean, currentBranch: string): string {
-  if (enabled) return "Will fork a new branch from the selected base";
-  return currentBranch ? `Uses current branch: ${currentBranch}` : "Uses current branch";
-}
-
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
@@ -123,39 +112,25 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     onExecutorProfileChange,
     executorsLoading,
     ExecutorProfileSelectorComponent,
-    freshBranchAvailable,
-    freshBranchEnabled,
-    onToggleFreshBranch,
-    currentLocalBranch,
   } = props;
 
-  // Branch + repo selection moved into the chip row above the description;
-  // this row carries only agent and executor profile selectors. The
-  // fresh-branch opt-in lives below as a small row, gated by the parent.
+  // Branch + repo selection (and the FreshBranchToggle, which is per-task
+  // branch strategy) live in the chip row above the description; this row
+  // carries only agent and executor profile selectors.
   return (
-    <div className="space-y-2">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-        <div>
-          <AgentColumn {...props} />
-        </div>
-        <div>
-          <ExecutorProfileSelectorComponent
-            options={executorProfileOptions}
-            value={executorProfileId}
-            onValueChange={onExecutorProfileChange}
-            placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
-            disabled={executorsLoading}
-          />
-        </div>
+    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+      <div>
+        <AgentColumn {...props} />
       </div>
-      {freshBranchAvailable && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
-          <span className="truncate">
-            {freshBranchHint(freshBranchEnabled, currentLocalBranch)}
-          </span>
-        </div>
-      )}
+      <div>
+        <ExecutorProfileSelectorComponent
+          options={executorProfileOptions}
+          value={executorProfileId}
+          onValueChange={onExecutorProfileChange}
+          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+          disabled={executorsLoading}
+        />
+      </div>
     </div>
   );
 });

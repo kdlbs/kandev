@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  aggregatePRStatusColor,
   getPRStatusColor,
   getPRTooltip,
   isPRAwaitingReview,
@@ -266,6 +267,43 @@ describe("isPRAwaitingReview", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("aggregatePRStatusColor", () => {
+  it("returns muted for empty list", () => {
+    expect(aggregatePRStatusColor([])).toBe("text-muted-foreground");
+  });
+
+  it("surfaces the worst-of state — one red dominates a green sibling", () => {
+    const green = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    const red = makePR({
+      state: "open",
+      review_state: "changes_requested",
+      checks_state: "success",
+    });
+    expect(aggregatePRStatusColor([green, red])).toBe("text-red-500");
+  });
+
+  it("returns emerald only when all PRs are ready to merge", () => {
+    const ready = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    expect(aggregatePRStatusColor([ready, ready])).toBe("text-emerald-400");
+  });
+
+  it("yellow CI pending beats merged purple", () => {
+    const pending = makePR({ state: "open", checks_state: "pending" });
+    const merged = makePR({ state: "merged" });
+    expect(aggregatePRStatusColor([merged, pending])).toBe("text-yellow-500");
   });
 });
 

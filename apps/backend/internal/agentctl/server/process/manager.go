@@ -436,6 +436,22 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	return cleaned, full, nil
 }
 
+// JoinRepoPath validates a repo subpath and returns the workspace-relative
+// path obtained by joining `subpath` and `path`. Empty `subpath` returns
+// `path` unchanged (single-repo workspaces). Used by file content / update
+// handlers to scope a per-repo path under the right repository directory
+// before delegating to the workspace tracker.
+func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
+	cleaned, _, err := m.resolveSubpath(subpath)
+	if err != nil {
+		return "", err
+	}
+	if cleaned == "" {
+		return path, nil
+	}
+	return filepath.Join(cleaned, path), nil
+}
+
 // Start starts the agent process
 func (m *Manager) Start(ctx context.Context) error {
 	m.startMu.Lock()

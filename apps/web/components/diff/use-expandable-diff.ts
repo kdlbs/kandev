@@ -12,6 +12,8 @@ type UseExpandableDiffOptions = {
   baseRef: string | undefined;
   fileDiffMetadata: FileDiffMetadata | null;
   enableExpansion?: boolean;
+  /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
+  repo?: string;
 };
 
 type UseExpandableDiffResult = {
@@ -36,9 +38,10 @@ async function fetchOldContent(
   sessionId: string,
   filePath: string,
   baseRef: string,
+  repo?: string,
 ): Promise<string> {
   try {
-    const res = await requestFileContentAtRef(client, sessionId, filePath, baseRef);
+    const res = await requestFileContentAtRef(client, sessionId, filePath, baseRef, repo);
     if (res.is_binary) throw new Error("Cannot expand binary files");
     if (!res.error) return res.content;
     // File not found at ref is expected for new files - return empty string
@@ -57,11 +60,12 @@ async function fetchNewContent(
   client: WsClient,
   sessionId: string,
   filePath: string,
+  repo?: string,
 ): Promise<string> {
   try {
     // Fetch from working tree (current file on disk), not HEAD.
     // The diff shows working tree changes, so newLines must match.
-    const res = await requestFileContent(client, sessionId, filePath);
+    const res = await requestFileContent(client, sessionId, filePath, repo);
     if (res.is_binary) throw new Error("Cannot expand binary files");
     if (!res.error) return res.content;
     // File not found is expected for deleted files - return empty string
@@ -80,11 +84,14 @@ async function fetchExpansionLines(
   sessionId: string,
   filePath: string,
   baseRef: string | undefined,
+  repo: string | undefined,
 ) {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
-  const newContent = await fetchNewContent(client, sessionId, filePath);
-  const oldContent = baseRef ? await fetchOldContent(client, sessionId, filePath, baseRef) : "";
+  const newContent = await fetchNewContent(client, sessionId, filePath, repo);
+  const oldContent = baseRef
+    ? await fetchOldContent(client, sessionId, filePath, baseRef, repo)
+    : "";
   return {
     oldLines: oldContent.split(SPLIT_WITH_NEWLINES),
     newLines: newContent.split(SPLIT_WITH_NEWLINES),
@@ -104,6 +111,7 @@ export function useExpandableDiff({
   baseRef,
   fileDiffMetadata,
   enableExpansion = false,
+  repo,
 }: UseExpandableDiffOptions): UseExpandableDiffResult {
   const requestVersionRef = useRef(0);
   const [loadedContent, setLoadedContent] = useState<{
@@ -121,7 +129,7 @@ export function useExpandableDiff({
     requestVersionRef.current += 1;
     setLoadedContent(null);
     setError(null);
-  }, [sessionId, filePath, baseRef, fileDiffMetadata]);
+  }, [sessionId, filePath, baseRef, repo, fileDiffMetadata]);
 
   const loadContent = useCallback(async () => {
     if (!sessionId || !enableExpansion || loadedContent || isLoading) return;
@@ -131,7 +139,7 @@ export function useExpandableDiff({
     setError(null);
 
     try {
-      const lines = await fetchExpansionLines(sessionId, filePath, baseRef);
+      const lines = await fetchExpansionLines(sessionId, filePath, baseRef, repo);
       if (version === requestVersionRef.current) setLoadedContent(lines);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load file content";
@@ -140,7 +148,7 @@ export function useExpandableDiff({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, filePath, baseRef, enableExpansion, loadedContent, isLoading]);
+  }, [sessionId, filePath, baseRef, repo, enableExpansion, loadedContent, isLoading]);
 
   const metadata = useMemo<FileDiffMetadata | null>(() => {
     if (!fileDiffMetadata) return null;

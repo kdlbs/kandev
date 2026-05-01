@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
@@ -101,21 +102,22 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	return result
 }
 
-// appendLiveGitStatusMessage adds a git status notification by querying agentctl for live status.
-// Falls back to DB snapshot if no execution exists (for archived sessions).
+// appendLiveGitStatusMessage adds git status notification(s) by querying
+// agentctl for live status. Multi-repo workspaces emit one notification per
+// repo (stamped with repository_name); single-repo emits a single untagged
+// notification. Falls back to DB snapshot if no execution exists (archived
+// sessions only — the snapshot is workspace-wide, not per-repo).
 func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, sessionID string, session *models.TaskSession, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	// Try to get live git status from agentctl
-	if msg := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, log); msg != nil {
-		return append(result, msg)
+	if msgs := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, log); len(msgs) > 0 {
+		return append(result, msgs...)
 	}
-
-	// Fallback: try to load from DB snapshot (for archived sessions)
 	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, result, log)
 }
 
 // tryGetLiveGitStatus attempts to get live git status from agentctl.
-// Returns a notification message if successful, nil otherwise.
-func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, sessionID string, log *logger.Logger) *ws.Message {
+// Returns one notification per repo (one entry for single-repo workspaces).
+// Returns nil when the session has no live execution or agentctl is stuck.
+func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, sessionID string, log *logger.Logger) []*ws.Message {
 	if lifecycleMgr == nil {
 		return nil
 	}
@@ -137,41 +139,63 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 	// Use bounded timeout to prevent blocking session hydration if agentctl is stuck.
 	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	status, err := agentClient.GetGitStatus(rpcCtx)
+	multi, err := agentClient.GetGitStatusMulti(rpcCtx)
 	if err != nil {
 		log.Debug("failed to get live git status, will fall back to DB snapshot",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return nil
 	}
-
-	if !status.Success {
+	if multi == nil || !multi.Success || len(multi.Repos) == 0 {
 		return nil
 	}
 
+	out := make([]*ws.Message, 0, len(multi.Repos))
+	for _, repo := range multi.Repos {
+		if !repo.Status.Success {
+			continue
+		}
+		notification := buildGitStatusNotification(sessionID, repo.RepositoryName, repo.Status)
+		if notification != nil {
+			out = append(out, notification)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	log.Debug("got live git status from agentctl",
 		zap.String("session_id", sessionID),
-		zap.String("branch", status.Branch),
-		zap.Int("files_count", len(status.Files)))
+		zap.Int("repos", len(out)))
+	return out
+}
 
+// buildGitStatusNotification packages a single repo's status as a WS event
+// the frontend can route through its existing git-status handler. The
+// repository_name is stamped on the inner status payload so the frontend
+// stores it under byEnvironmentRepo[envKey][repository_name].
+func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
+	statusPayload := map[string]interface{}{
+		"branch":           status.Branch,
+		"remote_branch":    status.RemoteBranch,
+		"ahead":            status.Ahead,
+		"behind":           status.Behind,
+		"files":            status.Files,
+		"modified":         status.Modified,
+		"added":            status.Added,
+		"deleted":          status.Deleted,
+		"untracked":        status.Untracked,
+		"renamed":          status.Renamed,
+		"branch_additions": status.BranchAdditions,
+		"branch_deletions": status.BranchDeletions,
+	}
+	if repositoryName != "" {
+		statusPayload["repository_name"] = repositoryName
+	}
 	gitEventData := map[string]interface{}{
 		"type":       "status_update",
 		"session_id": sessionID,
 		"timestamp":  status.Timestamp,
-		"status": map[string]interface{}{
-			"branch":           status.Branch,
-			"remote_branch":    status.RemoteBranch,
-			"ahead":            status.Ahead,
-			"behind":           status.Behind,
-			"files":            status.Files,
-			"modified":         status.Modified,
-			"added":            status.Added,
-			"deleted":          status.Deleted,
-			"untracked":        status.Untracked,
-			"renamed":          status.Renamed,
-			"branch_additions": status.BranchAdditions,
-			"branch_deletions": status.BranchDeletions,
-		},
+		"status":     statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {

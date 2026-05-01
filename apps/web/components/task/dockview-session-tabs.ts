@@ -126,7 +126,7 @@ export function useAutoPRPanel() {
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const hasPR = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
-    return tid ? !!s.taskPRs.byTaskId[tid] : false;
+    return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
   });
   const hasApi = useDockviewStore((s) => !!s.api);
 

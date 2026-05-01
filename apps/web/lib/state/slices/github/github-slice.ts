@@ -41,7 +41,15 @@ function createTaskPRActions(
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {
-        draft.taskPRs.byTaskId[taskId] = pr;
+        // Upsert by repository_id so multi-repo PRs coexist for the same task.
+        // For legacy rows without a repository_id, match on the empty key (one
+        // such row per task max), preserving prior single-PR semantics.
+        const existing = draft.taskPRs.byTaskId[taskId] ?? [];
+        const repoKey = pr.repository_id ?? "";
+        const idx = existing.findIndex((p) => (p.repository_id ?? "") === repoKey);
+        if (idx >= 0) existing[idx] = pr;
+        else existing.push(pr);
+        draft.taskPRs.byTaskId[taskId] = existing;
       }),
     removeTaskPR: (taskId) =>
       set((draft) => {

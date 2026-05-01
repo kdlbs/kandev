@@ -47,7 +47,10 @@ function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
     task_id: "task-1",
     workflow_id: "wf-1",
     ...BASE_SCALARS,
+    // Backend WS task.updated emits both the primary repository_id *and* the
+    // full repositories array so multi-repo state survives WS-driven updates.
     repository_id: "repo-a",
+    repositories: [{ repository_id: "repo-a" }],
     primary_session_id: "session-p",
     primary_session_state: "RUNNING",
     session_count: 2,
@@ -95,7 +98,7 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
 
   it("missing repository on either shape: repositoryId is undefined", () => {
     const http = httpDTO({ repositories: undefined });
-    const ws = wsPayload({ repository_id: undefined });
+    const ws = wsPayload({ repository_id: undefined, repositories: undefined });
     expect(toKanbanTask(http).repositoryId).toBeUndefined();
     expect(toKanbanTask(ws).repositoryId).toBeUndefined();
   });

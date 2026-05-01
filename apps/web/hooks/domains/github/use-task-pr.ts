@@ -45,9 +45,18 @@ export function useWorkspacePRs(workspaceId: string | null) {
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
 const SYNC_MAX_RETRIES = 6; // Up to 30 seconds of retries
 
-/** Fetch a single task's PR association, with on-demand sync via WS. */
+/**
+ * Returns the primary PR (first by created_at) for a task. Multi-repo tasks
+ * may have additional PRs — use `useTaskPRs` to get the full list.
+ */
+export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
+  return prs && prs.length > 0 ? prs[0] : null;
+}
+
+/** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
-  const pr = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
   const retryRef = useRef(0);
 
@@ -97,13 +106,18 @@ export function useTaskPR(taskId: string | null) {
     return () => clearInterval(interval);
   }, [taskId, pr, refresh]);
 
-  return { pr, refresh } as { pr: TaskPR | null; refresh: () => void };
+  return { pr, prs: prs ?? [], refresh } as {
+    pr: TaskPR | null;
+    prs: TaskPR[];
+    refresh: () => void;
+  };
 }
 
-/** Read the active task's PR from the store (no fetching). */
+/** Read the active task's primary PR from the store (no fetching). */
 export function useActiveTaskPR(): TaskPR | null {
   return useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
-    return taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null;
+    if (!taskId) return null;
+    return getPrimaryTaskPR(s.taskPRs.byTaskId[taskId]);
   });
 }

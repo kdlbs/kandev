@@ -188,7 +188,21 @@ func preferGitRepoChildIfRootIsBare(workDir string, log *logger.Logger) string {
 // resolveGitIndexPath returns the validated path to the git index file.
 // Returns empty string if the path cannot be resolved or validated.
 // This handles worktrees where .git is a file pointing elsewhere.
+//
+// Multi-repo task roots are NOT git repos themselves (they hold per-repo
+// child worktrees as siblings), but `git rev-parse` ascends until it finds
+// a `.git` — for tasks nested under a developer's own kandev checkout this
+// would land on the OUTER worktree and silently emit its status as if it
+// were the task. We guard against that by requiring the resolved git
+// top-level to be the same path as workDir (or, for repo subdirs called
+// here from `scanRepositorySubdirs`, an absolute git-dir reachable from the
+// dir's own `.git` file). In practice this means: workDir must contain its
+// own `.git` entry — file or directory — for the path to be considered a
+// valid git repo for tracking.
 func resolveGitIndexPath(workDir string) string {
+	if !workDirHasOwnGitEntry(workDir) {
+		return ""
+	}
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
@@ -208,6 +222,20 @@ func resolveGitIndexPath(workDir string) string {
 		return ""
 	}
 	return indexPath
+}
+
+// workDirHasOwnGitEntry returns true when workDir contains a `.git` entry of
+// its own (file for worktrees, directory for plain repos). This is what
+// makes a directory "a git repo" from a tracker's perspective — without it,
+// git would ascend up the tree to the nearest ancestor `.git`, which is the
+// wrong scope for nested layouts (e.g. a multi-repo task root sitting
+// inside the developer's kandev checkout).
+func workDirHasOwnGitEntry(workDir string) bool {
+	if workDir == "" {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(workDir, ".git"))
+	return err == nil
 }
 
 // workDirExists checks whether the workspace directory still exists on disk.

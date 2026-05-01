@@ -114,6 +114,9 @@ export type MergeableState =
 export type TaskPR = {
   id: string;
   task_id: string;
+  /** ID of the task repository this PR belongs to. Empty for legacy single-repo
+   *  tasks persisted before multi-repo support. */
+  repository_id?: string;
   owner: string;
   repo: string;
   pr_number: number;
@@ -209,7 +212,8 @@ export type PRStats = {
 export type GitHubStatusResponse = GitHubStatus;
 
 export type TaskPRsResponse = {
-  task_prs: Record<string, TaskPR>;
+  /** Each task may have multiple PRs (one per repository for multi-repo tasks). */
+  task_prs: Record<string, TaskPR[]>;
 };
 
 export type PRWatchesResponse = {

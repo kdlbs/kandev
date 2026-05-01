@@ -6,6 +6,18 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
+const STATUS_RANK: Record<string, number> = {
+  // Higher = more attention-worthy. Drives the aggregated icon color when a
+  // task has multiple PRs (we surface the worst state).
+  "text-red-500": 5,
+  "text-yellow-500": 4,
+  "text-sky-400": 3,
+  "text-emerald-400": 2,
+  "text-green-500": 1,
+  "text-purple-500": 0,
+  "text-muted-foreground": 0,
+};
+
 // Requires checks_state === "success" (not just "") so repos with no CI configured
 // won't trigger ready-to-merge on mergeable_state=clean alone.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
@@ -62,17 +74,41 @@ export function getPRTooltip(pr: TaskPR): string {
   return parts.join(" | ");
 }
 
+/**
+ * Picks the most attention-worthy color across N PRs. For multi-repo tasks one
+ * red PR should dominate the visual even if the others are green.
+ */
+export function aggregatePRStatusColor(prs: TaskPR[]): string {
+  if (prs.length === 0) return "text-muted-foreground";
+  let bestColor = "text-muted-foreground";
+  let bestRank = -1;
+  for (const pr of prs) {
+    const color = getPRStatusColor(pr);
+    const rank = STATUS_RANK[color] ?? 0;
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestColor = color;
+    }
+  }
+  return bestColor;
+}
+
 export function PRTaskIcon({ taskId }: { taskId: string }) {
-  const pr = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+  const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
 
-  if (!pr) return null;
+  if (!prs || prs.length === 0) return null;
+  if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
+  return <MultiPRIcon taskId={taskId} prs={prs} />;
+}
 
+function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
           data-pr-state={pr.state}
+          data-pr-count="1"
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
         >
@@ -80,6 +116,38 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
         </span>
       </TooltipTrigger>
       <TooltipContent>{getPRTooltip(pr)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
+  const aggregateColor = aggregatePRStatusColor(prs);
+  const allReady = prs.every(isPRReadyToMerge);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid={`pr-task-icon-${taskId}`}
+          data-pr-count={prs.length}
+          data-pr-ready-to-merge={allReady ? "true" : "false"}
+          className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
+        >
+          <IconGitPullRequest className="h-3.5 w-3.5" />
+          <span className="text-[9px] font-semibold leading-none">{prs.length}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="flex flex-col gap-1 text-xs">
+          {prs.map((pr) => (
+            <div key={pr.id} className="flex items-center gap-2">
+              <span className={cn("inline-flex shrink-0", getPRStatusColor(pr))}>
+                <IconGitPullRequest className="h-3 w-3" />
+              </span>
+              <span>{getPRTooltip(pr)}</span>
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
     </Tooltip>
   );
 }

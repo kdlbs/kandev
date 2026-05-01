@@ -27,6 +27,15 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	wt.workspaceSubMu.Unlock()
 	wt.logger.Info("workspace stream subscriber added", zap.Int("subscribers", count))
 
+	// Bare trackers (multi-repo task roots) don't track their own git state —
+	// `gitIndexPath == ""` means the workDir isn't itself a git repo, so any
+	// `currentStatus` here is either empty (initial) or stale from a previous
+	// shape of the tracker. Skip the replay so the subscriber doesn't see a
+	// ghost entry under the empty `repository_name`.
+	if wt.gitIndexPath == "" {
+		return
+	}
+
 	// Replay current git status so the new subscriber doesn't have to wait for
 	// the next poll tick.
 	wt.mu.RLock()

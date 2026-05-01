@@ -186,8 +186,8 @@ function TaskPRIcon({
   taskId?: string;
   prInfo?: { number: number; state: string };
 }) {
-  const storePr = useAppStore((s) => (taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null));
-  if (storePr) return <PRTaskIcon taskId={taskId!} />;
+  const hasStorePR = useAppStore((s) => !!taskId && (s.taskPRs.byTaskId[taskId]?.length ?? 0) > 0);
+  if (hasStorePR) return <PRTaskIcon taskId={taskId!} />;
   if (!prInfo) return null;
   const state = prInfo.state.toLowerCase();
   let color = "text-muted-foreground";

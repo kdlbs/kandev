@@ -14,12 +14,17 @@ import {
   CommandList,
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ComboboxOption = {
   value: string;
   label: string;
   description?: string;
   renderLabel?: () => React.ReactNode;
+  /** When true the option renders dimmed and isn't selectable. */
+  disabled?: boolean;
+  /** Tooltip shown on hover when disabled is true. */
+  disabledReason?: string;
 };
 
 interface ComboboxProps {
@@ -56,6 +61,34 @@ function TriggerLabel({
   return <span className="truncate">{selectedOption?.label || placeholder}</span>;
 }
 
+function DisabledOptionItem({ option }: { option: ComboboxOption }) {
+  // cmdk's CommandItem swallows pointer events with no native tooltip slot, so
+  // we wrap the disabled item in a Tooltip trigger. The trigger is a plain
+  // div; CommandItem still owns keyboard nav and rendering.
+  const item = (
+    <CommandItem
+      key={option.value}
+      value={option.value}
+      keywords={[option.label, option.description ?? ""]}
+      disabled
+      className="relative pr-7 opacity-50 cursor-not-allowed"
+    >
+      <div className="flex min-w-0 flex-1 items-center">
+        {option.renderLabel ? option.renderLabel() : option.label}
+      </div>
+    </CommandItem>
+  );
+  if (!option.disabledReason) return item;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div>{item}</div>
+      </TooltipTrigger>
+      <TooltipContent side="right">{option.disabledReason}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function OptionsList({
   options,
   value,
@@ -67,25 +100,29 @@ function OptionsList({
 }) {
   return (
     <CommandGroup>
-      {options.map((option) => (
-        <CommandItem
-          key={option.value}
-          value={option.value}
-          keywords={[option.label, option.description ?? ""]}
-          onSelect={() => onSelect(option.value)}
-          className="relative pr-7"
-        >
-          <div className="flex min-w-0 flex-1 items-center">
-            {option.renderLabel ? option.renderLabel() : option.label}
-          </div>
-          <IconCheck
-            className={cn(
-              "absolute right-2 h-4 w-4",
-              value === option.value ? "opacity-100" : "opacity-0",
-            )}
-          />
-        </CommandItem>
-      ))}
+      {options.map((option) =>
+        option.disabled ? (
+          <DisabledOptionItem key={option.value} option={option} />
+        ) : (
+          <CommandItem
+            key={option.value}
+            value={option.value}
+            keywords={[option.label, option.description ?? ""]}
+            onSelect={() => onSelect(option.value)}
+            className="relative pr-7"
+          >
+            <div className="flex min-w-0 flex-1 items-center">
+              {option.renderLabel ? option.renderLabel() : option.label}
+            </div>
+            <IconCheck
+              className={cn(
+                "absolute right-2 h-4 w-4",
+                value === option.value ? "opacity-100" : "opacity-0",
+              )}
+            />
+          </CommandItem>
+        ),
+      )}
     </CommandGroup>
   );
 }

@@ -32,8 +32,11 @@ export async function requestCommitDiff(params: {
   taskId: string | null;
   commitSha: string;
   agentctlReady: boolean;
+  /** Multi-repo subpath; required for non-primary repo commits since each
+   *  repo has its own commit graph and the SHA only resolves there. */
+  repo?: string;
 }): Promise<CommitDiffResponse | null> {
-  const { sessionId, taskId, commitSha, agentctlReady } = params;
+  const { sessionId, taskId, commitSha, agentctlReady, repo } = params;
   const ws = getWebSocketClient();
   if (!ws) return null;
 
@@ -65,7 +68,7 @@ export async function requestCommitDiff(params: {
 
   const response = await ws.request<CommitDiffResponse>(
     "session.commit_diff",
-    { session_id: sessionId, commit_sha: commitSha },
+    { session_id: sessionId, commit_sha: commitSha, ...(repo ? { repo } : {}) },
     10000,
   );
   if (response?.success) {

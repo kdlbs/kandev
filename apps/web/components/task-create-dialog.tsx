@@ -155,6 +155,9 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onRowBranchChange={onRowBranchChange}
         onToggleGitHubUrl={onToggleGitHubUrl}
         onGitHubUrlChange={onGitHubUrlChange}
+        freshBranchAvailable={freshBranchAvailable}
+        freshBranchEnabled={fs.freshBranchEnabled}
+        onToggleFreshBranch={onToggleFreshBranch}
       />
       {showTaskName && (
         <InlineTaskName
@@ -187,9 +190,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         fs={fs}
         onAgentProfileChange={onAgentProfileChange}
         onExecutorProfileChange={onExecutorProfileChange}
-        onToggleFreshBranch={onToggleFreshBranch}
         workflowAgentLocked={workflowAgentLocked}
-        freshBranchAvailable={freshBranchAvailable}
       />
     </>
   );

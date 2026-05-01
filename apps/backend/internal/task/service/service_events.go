@@ -50,11 +50,14 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}
 	// Orchestrator-originated events fetch the task via the raw repo.GetTask,
-	// which does not populate Repositories. Load the primary on demand so the
-	// payload always carries repository_id — matching the HTTP DTO and
-	// preventing the frontend from losing repositoryId on WS updates.
-	if repoID := primaryRepositoryID(ctx, s, task); repoID != "" {
-		data["repository_id"] = repoID
+	// which does not populate Repositories. Load on demand so the payload
+	// carries the full per-task repository list — matching the HTTP DTO and
+	// preventing the frontend from collapsing multi-repo tasks down to the
+	// primary repo on WS updates.
+	repos := taskRepositoriesForEvent(ctx, s, task)
+	if len(repos) > 0 {
+		data["repository_id"] = repos[0].RepositoryID
+		data["repositories"] = serializeTaskRepositories(repos)
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
@@ -116,19 +119,37 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 }
 
-// primaryRepositoryID returns the primary repository_id for the task. Prefers
-// the already-loaded Task.Repositories slice; falls back to a lookup so
-// publishers that pass a task without eagerly loaded repositories (e.g. the
-// orchestrator's raw repo.GetTask) still emit repository_id.
-func primaryRepositoryID(ctx context.Context, s *Service, task *models.Task) string {
+// taskRepositoriesForEvent returns the task's full repository list, ordered by
+// position. Prefers Task.Repositories when already loaded; falls back to a
+// lookup so publishers that pass a task without eagerly loaded repositories
+// (e.g. the orchestrator's raw repo.GetTask) still emit per-repo data.
+func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task) []*models.TaskRepository {
 	if len(task.Repositories) > 0 {
-		return task.Repositories[0].RepositoryID
+		return task.Repositories
 	}
-	repo, err := s.taskRepos.GetPrimaryTaskRepository(ctx, task.ID)
-	if err != nil || repo == nil {
-		return ""
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		return nil
 	}
-	return repo.RepositoryID
+	return repos
+}
+
+// serializeTaskRepositories returns the WS-shaped repositories array. Mirrors
+// the HTTP DTO's TaskRepositoryDTO so the frontend can use the same parser
+// across SSR snapshot and WS update paths.
+func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(repos))
+	for _, r := range repos {
+		out = append(out, map[string]interface{}{
+			"id":              r.ID,
+			"task_id":         r.TaskID,
+			"repository_id":   r.RepositoryID,
+			"base_branch":     r.BaseBranch,
+			"checkout_branch": r.CheckoutBranch,
+			"position":        r.Position,
+		})
+	}
+	return out
 }
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process

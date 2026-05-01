@@ -111,7 +111,9 @@ func (s *Server) handleFileTree(c *gin.Context) {
 	c.JSON(200, types.FileTreeResponse{Root: tree})
 }
 
-// handleFileContent handles file content requests via HTTP GET
+// handleFileContent handles file content requests via HTTP GET.
+// Optional `repo` query param scopes the read to a per-repo subdirectory for
+// multi-repo task workspaces; `path` is treated as repo-relative when set.
 func (s *Server) handleFileContent(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -119,16 +121,26 @@ func (s *Server) handleFileContent(c *gin.Context) {
 		return
 	}
 
-	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
+	scopedPath, err := s.procMgr.JoinRepoPath(c.Query("repo"), path)
+	if err != nil {
+		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error()})
+		return
+	}
+
+	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(scopedPath)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 
+	// Return the repo-relative `path` to the caller — the `repo` scoping is an
+	// internal detail; the frontend tracks repository_name separately.
 	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary, ResolvedPath: resolvedPath})
 }
 
-// handleFileContentAtRef handles file content requests at a specific git ref via HTTP GET
+// handleFileContentAtRef handles file content requests at a specific git ref via HTTP GET.
+// Optional `repo` query param scopes the read to a per-repo subdirectory for
+// multi-repo task workspaces.
 func (s *Server) handleFileContentAtRef(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -142,7 +154,13 @@ func (s *Server) handleFileContentAtRef(c *gin.Context) {
 		return
 	}
 
-	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContentAtRef(c.Request.Context(), path, ref)
+	scopedPath, err := s.procMgr.JoinRepoPath(c.Query("repo"), path)
+	if err != nil {
+		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error()})
+		return
+	}
+
+	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContentAtRef(c.Request.Context(), scopedPath, ref)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
@@ -169,8 +187,18 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 		return
 	}
 
+	scopedPath, err := s.procMgr.JoinRepoPath(req.Repo, req.Path)
+	if err != nil {
+		c.JSON(400, streams.FileUpdateResponse{
+			Path:    req.Path,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
 	// Apply the diff
-	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
+	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(scopedPath, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		c.JSON(400, streams.FileUpdateResponse{
 			Path:    req.Path,

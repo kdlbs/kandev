@@ -30,11 +30,14 @@ type PRCreateResult struct {
 
 // GitPull performs a git pull operation on the worktree.
 // If rebase is true, uses git pull --rebase.
-func (c *Client) GitPull(ctx context.Context, rebase bool) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitPull(ctx context.Context, rebase bool, repo string) (*GitOperationResult, error) {
 	payload := struct {
-		Rebase bool `json:"rebase"`
+		Rebase bool   `json:"rebase"`
+		Repo   string `json:"repo,omitempty"`
 	}{
 		Rebase: rebase,
+		Repo:   repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/pull", payload)
 }
@@ -42,46 +45,58 @@ func (c *Client) GitPull(ctx context.Context, rebase bool) (*GitOperationResult,
 // GitPush performs a git push operation on the worktree.
 // If force is true, uses --force-with-lease.
 // If setUpstream is true, uses --set-upstream.
-func (c *Client) GitPush(ctx context.Context, force, setUpstream bool) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo string) (*GitOperationResult, error) {
 	payload := struct {
-		Force       bool `json:"force"`
-		SetUpstream bool `json:"set_upstream"`
+		Force       bool   `json:"force"`
+		SetUpstream bool   `json:"set_upstream"`
+		Repo        string `json:"repo,omitempty"`
 	}{
 		Force:       force,
 		SetUpstream: setUpstream,
+		Repo:        repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/push", payload)
 }
 
 // GitRebase rebases the worktree branch onto the specified base branch.
 // It first fetches origin/<baseBranch>, then rebases onto it.
-func (c *Client) GitRebase(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitRebase(ctx context.Context, baseBranch, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		BaseBranch string `json:"base_branch"`
+		Repo       string `json:"repo,omitempty"`
 	}{
 		BaseBranch: baseBranch,
+		Repo:       repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/rebase", payload)
 }
 
 // GitMerge merges the specified base branch into the worktree branch.
 // It first fetches origin/<baseBranch>, then merges it.
-func (c *Client) GitMerge(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitMerge(ctx context.Context, baseBranch, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		BaseBranch string `json:"base_branch"`
+		Repo       string `json:"repo,omitempty"`
 	}{
 		BaseBranch: baseBranch,
+		Repo:       repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/merge", payload)
 }
 
 // GitAbort aborts an in-progress merge or rebase operation.
 // The operation parameter must be "merge" or "rebase".
-func (c *Client) GitAbort(ctx context.Context, operation string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitAbort(ctx context.Context, operation, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		Operation string `json:"operation"`
+		Repo      string `json:"repo,omitempty"`
 	}{
 		Operation: operation,
+		Repo:      repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/abort", payload)
 }
@@ -291,8 +306,15 @@ type CommitDiffResult struct {
 }
 
 // GitShowCommit gets the diff for a specific commit.
-func (c *Client) GitShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/git/commit/"+commitSHA, nil)
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+// Multi-repo tasks must pass the owning repo because a SHA from one repo's
+// commit graph isn't resolvable in any other repo.
+func (c *Client) GitShowCommit(ctx context.Context, commitSHA, repo string) (*CommitDiffResult, error) {
+	reqURL := c.baseURL + "/api/v1/git/commit/" + commitSHA
+	if repo != "" {
+		reqURL += "?repo=" + url.QueryEscape(repo)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -465,33 +487,73 @@ type GitStatusResult struct {
 	Error           string                 `json:"error,omitempty"`
 }
 
-// GetGitStatus gets the current git status from the workspace.
-func (c *Client) GetGitStatus(ctx context.Context) (*GitStatusResult, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/git/status", nil)
+// fetchJSONResult performs a GET against `path` and decodes the response into
+// `out`. Returns the HTTP status code so callers can decide whether to wrap
+// any structured-error body into the typed result. Centralises the boilerplate
+// shared between the status endpoints (which is what triggers `dupl`).
+func (c *Client) fetchJSONResult(ctx context.Context, path string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
+		return 0, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	respBody, err := readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 	}
-
-	var result GitStatusResult
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return resp.StatusCode, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
 			resp.StatusCode, truncateBody(respBody), err)
 	}
+	return resp.StatusCode, nil
+}
 
-	if resp.StatusCode >= 400 {
-		return &result, fmt.Errorf("git status failed with status %d: %s", resp.StatusCode, result.Error)
+// GetGitStatus gets the current git status from the workspace.
+func (c *Client) GetGitStatus(ctx context.Context) (*GitStatusResult, error) {
+	var result GitStatusResult
+	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status", &result)
+	if err != nil {
+		return nil, err
 	}
+	if status >= 400 {
+		return &result, fmt.Errorf("git status failed with status %d: %s", status, result.Error)
+	}
+	return &result, nil
+}
 
+// PerRepoGitStatus pairs a repository_name with its status. Mirrors the
+// server-side shape so the gateway can fan a single subscribe out into one
+// notification per repo (multi-repo workspaces) without re-running git
+// commands once per call.
+type PerRepoGitStatus struct {
+	RepositoryName string          `json:"repository_name"`
+	Status         GitStatusResult `json:"status"`
+}
+
+// MultiRepoGitStatusResult is the response shape for /api/v1/git/status/multi.
+type MultiRepoGitStatusResult struct {
+	Success bool               `json:"success"`
+	Repos   []PerRepoGitStatus `json:"repos"`
+	Error   string             `json:"error,omitempty"`
+}
+
+// GetGitStatusMulti returns one status entry per repo (multi-repo) or a
+// single untagged entry (single-repo). Used by the session-subscribe handler
+// in the main backend to seed the frontend's per-repo state on page reload —
+// without it, the frontend never sees per-repo grouping until something else
+// (a file change, a poll) pushes a stamped notification.
+func (c *Client) GetGitStatusMulti(ctx context.Context) (*MultiRepoGitStatusResult, error) {
+	var result MultiRepoGitStatusResult
+	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status/multi", &result)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return &result, fmt.Errorf("git status multi failed with status %d: %s", status, result.Error)
+	}
 	return &result, nil
 }
