@@ -41,10 +41,11 @@ export function KanbanHeaderMobile({
       <PageTopbar
         title={title}
         subtitle={workspaceLabel}
+        className="h-10 px-3 py-1"
         actions={
           <Button
             variant="outline"
-            size="icon"
+            size="icon-lg"
             onClick={() => setMenuOpen(true)}
             className="cursor-pointer"
           >

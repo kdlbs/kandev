@@ -74,6 +74,8 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "list", icon: IconList, label: "List" },
 ];
 
+const WORKBENCH_TOPBAR_CLASSNAME = "h-10 px-3 py-1";
+
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
   activeWorkspaceId: string | null,
@@ -241,6 +243,7 @@ function TabletHeader({
     <PageTopbar
       title={title}
       subtitle={workspaceLabel}
+      className={WORKBENCH_TOPBAR_CLASSNAME}
       actionsClassName="gap-2"
       actions={
         <>
@@ -328,6 +331,7 @@ function DesktopHeader({
       title={title}
       subtitle={workspaceLabel}
       center={centerSearch}
+      className={WORKBENCH_TOPBAR_CLASSNAME}
       actions={
         <>
           {!centerSearch && searchInput}
