@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -303,10 +304,23 @@ func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnviro
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions for task environment %s: %w", taskEnvironmentID, err)
 	}
+	matching := make([]*models.TaskSession, 0, len(sessions))
 	for _, session := range sessions {
 		if session.TaskEnvironmentID == taskEnvironmentID {
-			return s.GetWorkspaceInfoForSession(ctx, env.TaskID, session.ID)
+			matching = append(matching, session)
 		}
+	}
+	if len(matching) > 0 {
+		sort.SliceStable(matching, func(i, j int) bool {
+			if !matching[i].StartedAt.Equal(matching[j].StartedAt) {
+				return matching[i].StartedAt.After(matching[j].StartedAt)
+			}
+			if !matching[i].UpdatedAt.Equal(matching[j].UpdatedAt) {
+				return matching[i].UpdatedAt.After(matching[j].UpdatedAt)
+			}
+			return matching[i].ID > matching[j].ID
+		})
+		return s.GetWorkspaceInfoForSession(ctx, env.TaskID, matching[0].ID)
 	}
 	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
 }

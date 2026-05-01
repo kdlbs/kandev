@@ -285,6 +285,44 @@ func (h *TerminalHandler) waitForRemoteExecutionWithTimeout(
 	}
 }
 
+func (h *TerminalHandler) waitForRemoteExecutionClientWithTimeout(
+	ctx context.Context,
+	sessionID string,
+	timeout time.Duration,
+) (*lifecycle.AgentExecution, bool) {
+	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists && execution.GetAgentCtlClient() != nil {
+		return execution, true
+	}
+
+	h.logger.Info("waiting for remote execution client to become available",
+		zap.String("session_id", sessionID),
+		zap.Duration("timeout", timeout))
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-timer.C:
+			h.logger.Warn("timed out waiting for remote execution client",
+				zap.String("session_id", sessionID),
+				zap.Duration("timeout", timeout))
+			return nil, false
+		case <-ticker.C:
+			if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists && execution.GetAgentCtlClient() != nil {
+				h.logger.Info("remote execution client became available",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", execution.ID))
+				return execution, true
+			}
+		}
+	}
+}
+
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
 	if err != nil {
@@ -295,15 +333,15 @@ func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environme
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	if execution.TaskEnvironmentID == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "execution has no task environment ID"})
-		return
-	}
-	if execution.TaskEnvironmentID != environmentID {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "execution task environment mismatch"})
-		return
-	}
 	if h.shouldUseWorkspaceShell(c.Request.Context(), execution.SessionID) {
+		remoteExecution, ok := h.waitForRemoteExecutionClientWithTimeout(
+			c.Request.Context(), execution.SessionID, passthroughReadyTimeout,
+		)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "remote execution not available"})
+			return
+		}
+		execution = remoteExecution
 		h.handleRemoteUserShellWS(c, execution, environmentID, terminalID)
 		return
 	}
@@ -953,11 +991,11 @@ func (h *TerminalHandler) startUserShellProcess(
 	scopeID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
-) (string, string, int, string) {
+) (string, int, string) {
 	sessionID := execution.SessionID
 	label, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
-		return "", "", http.StatusBadRequest, httpErr
+		return "", http.StatusBadRequest, httpErr
 	}
 
 	h.logger.Info("handleUserShellWS: starting user shell handling",
@@ -972,7 +1010,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		h.logger.Warn("handleUserShellWS: workspace path not ready",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return "", "", http.StatusServiceUnavailable, err.Error()
+		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
 	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
@@ -993,7 +1031,7 @@ func (h *TerminalHandler) startUserShellProcess(
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
-		return "", "", http.StatusServiceUnavailable, err.Error()
+		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
 	h.logger.Info("handleUserShellWS: user shell started successfully",
@@ -1001,7 +1039,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", info.ID))
 
-	return info.ID, scopeID, 0, ""
+	return info.ID, 0, ""
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.
@@ -1014,7 +1052,7 @@ func (h *TerminalHandler) handleUserShellWS(
 	interactiveRunner *process.InteractiveRunner,
 ) {
 	sessionID := execution.SessionID
-	processID, scopeID, httpStatus, errMsg := h.startUserShellProcess(
+	processID, httpStatus, errMsg := h.startUserShellProcess(
 		c, execution, scopeID, terminalID, interactiveRunner,
 	)
 	if errMsg != "" {

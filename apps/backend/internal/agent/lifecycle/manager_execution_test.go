@@ -4,11 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -304,6 +312,93 @@ func TestGetOrEnsureExecutionForEnvironment(t *testing.T) {
 		}
 	})
 
+	t.Run("creates execution from provider and caches it", func(t *testing.T) {
+		mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+			envInfos: map[string]*WorkspaceInfo{
+				"env-new": {
+					TaskID:            "task-1",
+					SessionID:         "session-1",
+					TaskEnvironmentID: "env-new",
+					WorkspacePath:     "/workspace/task-1",
+					AgentID:           "auggie",
+				},
+			},
+		})
+
+		got, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-new")
+		if err != nil {
+			t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+		}
+		if got.TaskEnvironmentID != "env-new" {
+			t.Errorf("TaskEnvironmentID = %q, want env-new", got.TaskEnvironmentID)
+		}
+		if got.WorkspacePath != "/workspace/task-1" {
+			t.Errorf("WorkspacePath = %q, want /workspace/task-1", got.WorkspacePath)
+		}
+
+		got2, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-new")
+		if err != nil {
+			t.Fatalf("second GetOrEnsureExecutionForEnvironment returned error: %v", err)
+		}
+		if got2.ID != got.ID {
+			t.Errorf("cached execution ID = %q, want %q", got2.ID, got.ID)
+		}
+		if backend.createCount.Load() != 1 {
+			t.Errorf("CreateInstance calls = %d, want 1", backend.createCount.Load())
+		}
+	})
+
+	t.Run("concurrent creates use singleflight", func(t *testing.T) {
+		mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+			envInfos: map[string]*WorkspaceInfo{
+				"env-new": {
+					TaskID:            "task-1",
+					SessionID:         "session-1",
+					TaskEnvironmentID: "env-new",
+					WorkspacePath:     "/workspace/task-1",
+					AgentID:           "auggie",
+				},
+			},
+		})
+		backend.delay = 50 * time.Millisecond
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		ids := make(chan string, 2)
+		for range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				execution, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-new")
+				if err != nil {
+					errs <- err
+					return
+				}
+				ids <- execution.ID
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		close(ids)
+
+		for err := range errs {
+			t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+		}
+		var firstID string
+		for id := range ids {
+			if firstID == "" {
+				firstID = id
+				continue
+			}
+			if id != firstID {
+				t.Errorf("execution ID = %q, want %q", id, firstID)
+			}
+		}
+		if backend.createCount.Load() != 1 {
+			t.Errorf("CreateInstance calls = %d, want 1", backend.createCount.Load())
+		}
+	})
+
 	t.Run("empty environment ID returns error", func(t *testing.T) {
 		mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
 
@@ -444,6 +539,77 @@ func TestEnsureWorkspaceExecutionForSession_EmptyTaskID(t *testing.T) {
 }
 
 // --- test helpers ---
+
+type createInstanceExecutor struct {
+	MockExecutor
+	client      *agentctl.Client
+	createCount atomic.Int32
+	delay       time.Duration
+}
+
+func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if e.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(e.delay):
+		}
+	}
+	e.createCount.Add(1)
+	return &ExecutorInstance{
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   string(e.Name()),
+		Client:        e.client,
+		WorkspacePath: req.WorkspacePath,
+	}, nil
+}
+
+func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {
+	t.Helper()
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		client:       newReadyAgentctlClient(t, log),
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.workspaceInfoProvider = provider
+	t.Cleanup(func() { close(mgr.stopCh) })
+	return mgr, backend
+}
+
+func newReadyAgentctlClient(t *testing.T, log *logger.Logger) *agentctl.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	host, portString, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		t.Fatalf("split test server host: %v", err)
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	return agentctl.NewClient(host, port, log)
+}
 
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
