@@ -1,13 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { IconLockExclamation } from "@tabler/icons-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
-import { Button } from "@kandev/ui/button";
 import { getJiraTicket, transitionJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraStatusCategory, JiraTicket } from "@/lib/types/jira";
+import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
 
 // Matches PROJECT-123 anywhere in the string. Jira keys start with letters and
 // include an uppercase prefix, followed by a dash and one or more digits.
@@ -154,13 +152,7 @@ export function isJiraAuthError(error: string): boolean {
   return AUTH_STATUS_RE.test(error) || STEP_UP_RE.test(error);
 }
 
-// Drops support URLs Atlassian inlines into 3xx response bodies — they're
-// noise once the user has a clear CTA.
-const URL_RE = /\bhttps?:\/\/\S+/g;
-
-export function cleanJiraErrorMessage(error: string): string {
-  return error.replace(URL_RE, "").replace(/\s+/g, " ").trim();
-}
+export { cleanIntegrationErrorMessage as cleanJiraErrorMessage } from "@/components/integrations/auth-error-message";
 
 type JiraErrorMessageProps = {
   error: string;
@@ -170,43 +162,14 @@ type JiraErrorMessageProps = {
 };
 
 export function JiraErrorMessage({ error, workspaceId, compact }: JiraErrorMessageProps) {
-  const isAuth = isJiraAuthError(error);
-  const settingsHref = workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings";
-
-  if (compact) {
-    return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className={isAuth ? "text-muted-foreground" : "text-destructive"}>
-          {isAuth ? "Jira authentication required." : cleanJiraErrorMessage(error)}
-        </span>
-        {isAuth && (
-          <Button asChild size="sm" variant="outline" className="cursor-pointer h-7 text-xs">
-            <Link href={settingsHref}>Reconnect Jira</Link>
-          </Button>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-md text-center space-y-4">
-      {isAuth ? (
-        <>
-          <IconLockExclamation className="h-10 w-10 mx-auto text-muted-foreground" />
-          <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">Jira authentication required</h2>
-            <p className="text-sm text-muted-foreground">
-              Your Jira session expired or needs step-up authentication. Reconnect to view this
-              ticket.
-            </p>
-          </div>
-          <Button asChild size="sm" className="cursor-pointer">
-            <Link href={settingsHref}>Reconnect Jira</Link>
-          </Button>
-        </>
-      ) : (
-        <p className="text-sm text-destructive">{cleanJiraErrorMessage(error)}</p>
-      )}
-    </div>
+    <IntegrationAuthErrorMessage
+      error={error}
+      name="Jira"
+      reconnectHref={workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings"}
+      isAuthError={isJiraAuthError}
+      authErrorBody="Your Jira session expired or needs step-up authentication. Reconnect to view this ticket."
+      compact={compact}
+    />
   );
 }

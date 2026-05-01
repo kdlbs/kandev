@@ -2,13 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/secrets"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -112,83 +109,6 @@ func TestMessageCreatorAdapter_StructFields(t *testing.T) {
 	}
 }
 
-// fakeJiraSecretStore is a minimal SecretStore for exercising
-// jiraSecretAdapter.Set's branching. Get is the only method whose return
-// value drives behaviour; the rest record whether they were called so
-// tests can assert that a Get failure does not cascade into Create.
-type fakeJiraSecretStore struct {
-	getErr  error
-	created bool
-	updated bool
-}
-
-func (f *fakeJiraSecretStore) Create(_ context.Context, _ *secrets.SecretWithValue) error {
-	f.created = true
-	return nil
-}
-
-func (f *fakeJiraSecretStore) Get(_ context.Context, _ string) (*secrets.Secret, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
-	}
-	return &secrets.Secret{}, nil
-}
-
-func (f *fakeJiraSecretStore) Reveal(_ context.Context, _ string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeJiraSecretStore) Update(_ context.Context, _ string, _ *secrets.UpdateSecretRequest) error {
-	f.updated = true
-	return nil
-}
-
-func (f *fakeJiraSecretStore) Delete(_ context.Context, _ string) error { return nil }
-func (f *fakeJiraSecretStore) List(_ context.Context) ([]*secrets.SecretListItem, error) {
-	return nil, nil
-}
-func (f *fakeJiraSecretStore) Close() error { return nil }
-
-func TestJiraSecretAdapter_Set_PropagatesRealDBError(t *testing.T) {
-	dbErr := errors.New("connection timeout")
-	store := &fakeJiraSecretStore{getErr: dbErr}
-	adapter := &jiraSecretAdapter{store: store}
-
-	err := adapter.Set(context.Background(), "id", "name", "value")
-	if !errors.Is(err, dbErr) {
-		t.Fatalf("expected wrapped DB error, got %v", err)
-	}
-	if store.created || store.updated {
-		t.Fatal("Create/Update must not run when Get returns a real error")
-	}
-}
-
-func TestJiraSecretAdapter_Set_CreatesWhenNotFound(t *testing.T) {
-	store := &fakeJiraSecretStore{getErr: fmt.Errorf("secret not found: id")}
-	adapter := &jiraSecretAdapter{store: store}
-
-	if err := adapter.Set(context.Background(), "id", "name", "value"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !store.created {
-		t.Fatal("expected Create when secret is missing")
-	}
-	if store.updated {
-		t.Fatal("Update must not run when secret is missing")
-	}
-}
-
-func TestJiraSecretAdapter_Set_UpdatesWhenExists(t *testing.T) {
-	store := &fakeJiraSecretStore{getErr: nil}
-	adapter := &jiraSecretAdapter{store: store}
-
-	if err := adapter.Set(context.Background(), "id", "name", "value"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !store.updated {
-		t.Fatal("expected Update when secret exists")
-	}
-	if store.created {
-		t.Fatal("Create must not run when secret exists")
-	}
-}
+// jiraSecretAdapter Set/Exists branching is tested in
+// internal/integrations/secretadapter/secretadapter_test.go now that the
+// upsert helper lives there.

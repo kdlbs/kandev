@@ -1,13 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { IconLockExclamation } from "@tabler/icons-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
-import { Button } from "@kandev/ui/button";
 import { getLinearIssue, setLinearIssueState } from "@/lib/api/domains/linear-api";
 import type { LinearIssue, LinearStateCategory } from "@/lib/types/linear";
+import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
 
 // Matches Linear identifiers like ENG-123. Linear team keys are always
 // uppercase and 1+ chars; we require a leading capital letter to avoid catching
@@ -157,11 +155,7 @@ export function isLinearAuthError(error: string): boolean {
   return AUTH_STATUS_RE.test(error);
 }
 
-const URL_RE = /\bhttps?:\/\/\S+/g;
-
-export function cleanLinearErrorMessage(error: string): string {
-  return error.replace(URL_RE, "").replace(/\s+/g, " ").trim();
-}
+export { cleanIntegrationErrorMessage as cleanLinearErrorMessage } from "@/components/integrations/auth-error-message";
 
 type LinearErrorMessageProps = {
   error: string;
@@ -170,42 +164,14 @@ type LinearErrorMessageProps = {
 };
 
 export function LinearErrorMessage({ error, workspaceId, compact }: LinearErrorMessageProps) {
-  const isAuth = isLinearAuthError(error);
-  const settingsHref = workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings";
-
-  if (compact) {
-    return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className={isAuth ? "text-muted-foreground" : "text-destructive"}>
-          {isAuth ? "Linear authentication required." : cleanLinearErrorMessage(error)}
-        </span>
-        {isAuth && (
-          <Button asChild size="sm" variant="outline" className="cursor-pointer h-7 text-xs">
-            <Link href={settingsHref}>Reconnect Linear</Link>
-          </Button>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-md text-center space-y-4">
-      {isAuth ? (
-        <>
-          <IconLockExclamation className="h-10 w-10 mx-auto text-muted-foreground" />
-          <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">Linear authentication required</h2>
-            <p className="text-sm text-muted-foreground">
-              Your Linear API key is invalid or has been revoked. Reconnect to view this issue.
-            </p>
-          </div>
-          <Button asChild size="sm" className="cursor-pointer">
-            <Link href={settingsHref}>Reconnect Linear</Link>
-          </Button>
-        </>
-      ) : (
-        <p className="text-sm text-destructive">{cleanLinearErrorMessage(error)}</p>
-      )}
-    </div>
+    <IntegrationAuthErrorMessage
+      error={error}
+      name="Linear"
+      reconnectHref={workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings"}
+      isAuthError={isLinearAuthError}
+      authErrorBody="Your Linear API key is invalid or has been revoked. Reconnect to view this issue."
+      compact={compact}
+    />
   );
 }

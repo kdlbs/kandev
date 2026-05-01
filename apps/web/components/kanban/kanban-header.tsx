@@ -17,8 +17,8 @@ import {
   IconTicket,
   IconHexagon,
 } from "@tabler/icons-react";
-import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
-import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
+import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";

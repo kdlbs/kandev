@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
-import { IconHexagon, IconCheck, IconAlertTriangle } from "@tabler/icons-react";
+import { IconHexagon } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -13,7 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { useLinearEnabled } from "./use-linear-enabled";
+import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
+import {
+  IntegrationAuthStatusBanner,
+  type IntegrationAuthHealth,
+} from "@/components/integrations/auth-status-banner";
 import {
   getLinearConfig,
   setLinearConfig,
@@ -130,13 +133,7 @@ function TestResultAlert({ result }: { result: TestLinearConnectionResult | null
   );
 }
 
-type AuthHealth = {
-  ok: boolean;
-  error: string;
-  checkedAt: Date | null;
-};
-
-function configToHealth(config: LinearConfig | null): AuthHealth | null {
+function configToHealth(config: LinearConfig | null): IntegrationAuthHealth | null {
   if (!config?.hasSecret) return null;
   if (!config.lastCheckedAt) return { ok: false, error: "", checkedAt: null };
   return {
@@ -144,57 +141,6 @@ function configToHealth(config: LinearConfig | null): AuthHealth | null {
     error: config.lastError ?? "",
     checkedAt: new Date(config.lastCheckedAt),
   };
-}
-
-function useTick(intervalMs: number) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-}
-
-function LastCheckedLabel({ checkedAt }: { checkedAt: Date | null }) {
-  useTick(30_000);
-  if (!checkedAt) return null;
-  return (
-    <span className="text-xs text-muted-foreground ml-2">
-      · checked {formatDistanceToNow(checkedAt, { addSuffix: true })}
-    </span>
-  );
-}
-
-function AuthStatusBanner({ health }: { health: AuthHealth | null }) {
-  if (!health) return null;
-  if (!health.checkedAt) {
-    return (
-      <Alert>
-        <AlertDescription className="text-sm">
-          Waiting for the next backend health check…
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (health.ok) {
-    return (
-      <Alert className="border-green-500/40 bg-green-500/10 dark:border-green-400/30 dark:bg-green-400/10">
-        <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
-        <AlertDescription className="text-sm font-medium">
-          Authenticated
-          <LastCheckedLabel checkedAt={health.checkedAt} />
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  return (
-    <Alert variant="destructive">
-      <IconAlertTriangle className="h-4 w-4" />
-      <AlertDescription className="text-sm">
-        Authentication failed: {health.error || "unknown error"}
-        <LastCheckedLabel checkedAt={health.checkedAt} />
-      </AlertDescription>
-    </Alert>
-  );
 }
 
 type ActionBarProps = {
@@ -458,7 +404,7 @@ export function LinearSettings({ workspaceId }: LinearSettingsProps) {
       >
         <Card>
           <CardContent className="space-y-4 pt-6">
-            <AuthStatusBanner health={s.health} />
+            <IntegrationAuthStatusBanner health={s.health} />
             <SecretField
               form={s.form}
               loading={s.loading}

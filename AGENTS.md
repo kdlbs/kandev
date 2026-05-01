@@ -87,6 +87,9 @@ apps/backend/
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
 │   ├── integration/      # External integrations
+│   ├── integrations/     # Shared shapes for third-party integrations
+│   │   ├── healthpoll/   # Reusable 90s auth-health Poller (used by jira, linear)
+│   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
@@ -324,6 +327,28 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
+### Adding a new third-party integration
+
+Jira and Linear are the model: per-workspace credentials, a 90s auth-health poller, a settings page with status banner + reconnect CTA, link/import buttons that gate on availability. New integrations should reuse the shared shapes rather than copying either.
+
+**Backend** (`apps/backend/internal/<name>/`):
+- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, log *logger.Logger) (*Service, func() error, error)` (add `eventBus bus.EventBus` only if the integration actually publishes events — Linear does not).
+- Use `internal/integrations/secretadapter` instead of writing your own upsert wrapper around `secrets.SecretStore`. The adapter satisfies any per-integration `SecretStore` interface shaped as `{Reveal, Set, Delete, Exists}`.
+- Use `internal/integrations/healthpoll` for the auth-health loop. Implement the `Prober` interface (`ListConfiguredWorkspaces` + `RecordAuthHealth`) on a small adapter and let `healthpoll.New("name", prober, log)` own Start/Stop/ticker. Keep integration-specific loops (JQL polling, webhook reconciliation, etc.) separate, like jira's issue-watch loop.
+- Wire the service via a per-domain `init<Name>Service(...)` helper in `cmd/kandev/services.go`, not inline in `provideServices`.
+
+**Frontend**:
+- Hooks live under `hooks/domains/<name>/`, **not** `components/<name>/`.
+- Use `hooks/domains/integrations/use-integration-availability.ts` and `use-integration-enabled.ts` — each integration's `useXAvailable` / `useXEnabled` should be a one-line wrapper passing the storage key + sync event + config-fetch function.
+- Settings page reuses `<IntegrationAuthStatusBanner>` (`components/integrations/auth-status-banner.tsx`).
+- "Auth required / reconnect" UI reuses `<IntegrationAuthErrorMessage>` (`components/integrations/auth-error-message.tsx`) — supply the integration's display name, regex check, and reconnect href.
+- Link / import popovers reuse `<ValidatedPopover>` (`components/integrations/validated-popover.tsx`) — supply the icon, label, key regex, fetch function, and success callback.
+
+**Where Jira and Linear deliberately diverge:**
+- Issue model: Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.
+- Event publishing: only Jira accepts `eventBus` and emits `NewJiraIssueEvent` from its issue-watch loop. Linear has no equivalent feature today.
+- Health column extras: Linear's `linear_configs` row carries an `org_slug` captured from successful probes; Jira's row does not.
+
 ---
 
 ## Maintaining This File
@@ -332,4 +357,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-03-05
+**Last Updated**: 2026-05-01
