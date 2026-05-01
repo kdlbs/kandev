@@ -17,6 +17,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getLinearConfig,
   setLinearConfig,
@@ -25,10 +26,6 @@ import {
   listLinearTeams,
 } from "@/lib/api/domains/linear-api";
 import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib/types/linear";
-
-// How often to re-fetch the config so the auth-health indicator picks up new
-// probe results from the backend poller (which runs every 90s).
-const STATUS_REFRESH_MS = 90_000;
 
 type FormState = {
   defaultTeamKey: string;
@@ -336,7 +333,7 @@ function useLinearSettings(workspaceId: string) {
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
-    }, STATUS_REFRESH_MS);
+    }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
   }, [workspaceId]);
 

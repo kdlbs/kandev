@@ -103,7 +103,7 @@ func (p *Poller) loop(ctx context.Context) {
 	defer p.wg.Done()
 	// Run an initial probe immediately so the UI gets a status without
 	// waiting the full interval after backend startup.
-	p.ProbeAll(ctx)
+	p.probeAll(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
@@ -111,14 +111,14 @@ func (p *Poller) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			p.ProbeAll(ctx)
+			p.probeAll(ctx)
 		}
 	}
 }
 
-// ProbeAll runs one probe pass across every configured workspace. Exposed so
-// tests can drive it deterministically without having to wait for a tick.
-func (p *Poller) ProbeAll(ctx context.Context) {
+// probeAll runs one probe pass across every configured workspace. Used by the
+// loop and by in-package tests that want to drive a probe deterministically.
+func (p *Poller) probeAll(ctx context.Context) {
 	ids, err := p.prober.ListConfiguredWorkspaces(ctx)
 	if err != nil {
 		p.logger.Warn(p.name+" poller: list workspaces failed", zap.Error(err))

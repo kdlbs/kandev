@@ -46,7 +46,7 @@ func TestProbeAll_RecordsEachWorkspace(t *testing.T) {
 	}
 	poller := New("test", p, logger.Default())
 
-	poller.ProbeAll(context.Background())
+	poller.probeAll(context.Background())
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -63,7 +63,7 @@ func TestProbeAll_ListError_DoesNotPanic(t *testing.T) {
 	}
 	poller := New("test", p, logger.Default())
 
-	poller.ProbeAll(context.Background()) // expect: silent recovery + warning log
+	poller.probeAll(context.Background()) // expect: silent recovery + warning log
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -82,7 +82,7 @@ func TestProbeAll_StopsWhenContextCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the loop runs
-	poller.ProbeAll(ctx)
+	poller.probeAll(ctx)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()

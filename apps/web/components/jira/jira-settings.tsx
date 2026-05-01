@@ -19,6 +19,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
   setJiraConfig,
@@ -26,10 +27,6 @@ import {
   testJiraConnection,
 } from "@/lib/api/domains/jira-api";
 import type { JiraAuthMethod, JiraConfig, TestJiraConnectionResult } from "@/lib/types/jira";
-
-// How often to re-fetch the config so the auth-health indicator picks up new
-// probe results from the backend poller (which runs every 90s).
-const STATUS_REFRESH_MS = 90_000;
 
 // Session cookies are HttpOnly so document.cookie can't read them, but
 // DevTools → Application → Cookies surfaces them in plain text. Users copy
@@ -368,7 +365,7 @@ function useJiraSettings(workspaceId: string) {
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
-    }, STATUS_REFRESH_MS);
+    }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
   }, [workspaceId]);
 
