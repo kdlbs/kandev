@@ -127,7 +127,7 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
         <Button
           variant="ghost"
           size="icon-lg"
-          className="text-muted-foreground hover:text-foreground"
+          className="cursor-pointer text-muted-foreground hover:text-foreground"
           aria-label="Integrations"
           onPointerEnter={openOnHover}
           onPointerLeave={closeAfterHover}
@@ -172,7 +172,12 @@ export function MobileIntegrationsSection({
       {links.map((link) => {
         const Icon = INTEGRATION_ICONS[link.id];
         return (
-          <Button key={link.id} asChild variant="outline" className="w-full justify-start gap-2">
+          <Button
+            key={link.id}
+            asChild
+            variant="outline"
+            className="w-full cursor-pointer justify-start gap-2"
+          >
             <Link href={link.href} onClick={onNavigate}>
               <Icon className="h-4 w-4" />
               <span className="flex-1 text-left">{link.label}</span>

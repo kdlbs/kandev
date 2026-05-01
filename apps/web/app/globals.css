@@ -156,12 +156,12 @@
   --info-foreground: oklch(0.16 0.025 205);
   --running: var(--primary);
   --running-foreground: var(--primary-foreground);
-  --pending: #888888;
-  --pending-foreground: #181818;
+  --pending: oklch(0.708 0 0);
+  --pending-foreground: oklch(0.145 0 0);
   --remote: oklch(0.68 0.11 185);
   --remote-foreground: oklch(0.16 0.025 185);
-  --archived: #888888;
-  --archived-foreground: #181818;
+  --archived: oklch(0.708 0 0);
+  --archived-foreground: oklch(0.145 0 0);
   --border: #2a2a2a;
   --input: #2a2a2a;
   --ring: #555555;

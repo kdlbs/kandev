@@ -23,16 +23,18 @@ import type {
   DialogComputedValues,
   DialogComputedArgs,
 } from "@/components/task-create-dialog-types";
+import { computePassthroughProfile } from "@/components/task-create-dialog-helpers";
 import {
-  computePassthroughProfile,
-  computeEffectiveStepId,
-} from "@/components/task-create-dialog-helpers";
+  computeDialogDefaultStepId,
+  computeSingleWorkflowFallbackId,
+} from "@/components/task-create-dialog-defaults";
 
 export type {
   StepType,
   TaskCreateDialogInitialValues,
 } from "@/components/task-create-dialog-types";
 export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
+export { useLockedFieldSync } from "@/components/task-create-dialog-locked-fields";
 
 type FormResetters = {
   setTaskName: (v: string) => void;
@@ -405,32 +407,6 @@ export function useDialogFormState(
   return { ...form, ...discovery, ...ghUrl, ...wfAgent, ...freshBranch, clearDraft };
 }
 
-// Pushes late-arriving locked field values (workflow id, repository id, branch)
-// into form state when they change after the dialog is already open. Used by
-// feature wrappers like Improve Kandev that resolve these values asynchronously.
-export function useLockedFieldSync(
-  open: boolean,
-  workflowId: string | null,
-  initialValues: TaskCreateDialogInitialValues | undefined,
-  fs: ReturnType<typeof useDialogFormState>,
-) {
-  const repoId = initialValues?.repositoryId;
-  const branch = initialValues?.branch;
-  useEffect(() => {
-    if (!open) return;
-    if (workflowId && workflowId !== fs.selectedWorkflowId) {
-      fs.setSelectedWorkflowId(workflowId);
-    }
-    if (repoId && repoId !== fs.repositoryId) {
-      fs.setRepositoryId(repoId);
-    }
-    if (branch && branch !== fs.branch) {
-      fs.setBranch(branch);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workflowId, repoId, branch]);
-}
-
 export type { DialogFormState } from "@/components/task-create-dialog-types";
 export {
   computePassthroughProfile,
@@ -440,49 +416,6 @@ export {
 export { useTaskCreateDialogEffects } from "@/components/task-create-dialog-effects";
 
 export { useDialogHandlers } from "@/components/task-create-dialog-handlers";
-
-function computeSingleWorkflowFallbackId(
-  selectedWorkflowId: string | null,
-  workflowId: string | null,
-  workflows: DialogComputedArgs["workflows"],
-): string | null {
-  if (selectedWorkflowId || workflowId || workflows.length !== 1) return null;
-  return workflows[0]?.id ?? null;
-}
-
-function computeSnapshotDefaultStepId(
-  workflowId: string | null,
-  snapshots: DialogComputedArgs["snapshots"],
-): string | null {
-  if (!workflowId) return null;
-  const steps = snapshots[workflowId]?.steps ?? [];
-  const startStep = steps.find((step) => step.is_start_step);
-  if (startStep) return startStep.id;
-  return [...steps].sort((a, b) => a.position - b.position)[0]?.id ?? null;
-}
-
-type ComputeDialogDefaultStepIdArgs = {
-  selectedWorkflowId: string | null;
-  workflowId: string | null;
-  fetchedSteps: StepType[] | null;
-  defaultStepId: string | null;
-  effectiveWorkflowId: string | null;
-  snapshots: DialogComputedArgs["snapshots"];
-};
-
-export function computeDialogDefaultStepId({
-  selectedWorkflowId,
-  workflowId,
-  fetchedSteps,
-  defaultStepId,
-  effectiveWorkflowId,
-  snapshots,
-}: ComputeDialogDefaultStepIdArgs): string | null {
-  return (
-    computeEffectiveStepId(selectedWorkflowId, workflowId, fetchedSteps, defaultStepId) ??
-    computeSnapshotDefaultStepId(effectiveWorkflowId, snapshots)
-  );
-}
 
 export function useDialogComputed({
   fs,

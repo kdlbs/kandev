@@ -34,8 +34,8 @@ type AddPanelMenuItemsProps = {
   onRunDevScript: () => void;
 };
 
-const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
-const MENU_ITEM_CLASS = "cursor-pointer text-xs";
+export const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
+export const MENU_ITEM_CLASS = "cursor-pointer text-xs";
 
 export function AddPanelMenuItems({
   groupId,

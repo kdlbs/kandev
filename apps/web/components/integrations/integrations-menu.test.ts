@@ -58,6 +58,13 @@ afterEach(() => {
 });
 
 describe("getGitHubIntegrationStatus", () => {
+  it("shows checking while GitHub status is loading and not configured", () => {
+    expect(getGitHubIntegrationStatus(status({}), true)).toEqual({
+      ready: false,
+      label: "Checking",
+    });
+  });
+
   it("treats a configured token as ready even before live auth is green", () => {
     expect(getGitHubIntegrationStatus(status({ token_configured: true }), false)).toEqual({
       ready: true,

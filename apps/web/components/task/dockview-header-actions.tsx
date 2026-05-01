@@ -26,7 +26,7 @@ import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-s
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
-import { AddPanelMenuItems } from "./dockview-add-panel-items";
+import { AddPanelMenuItems, MENU_ICON_CLASS, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -37,8 +37,6 @@ const HEADER_ACTION_BUTTON_CLASS =
 const RAW_HEADER_ACTION_BUTTON_CLASS =
   "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
 const HEADER_ICON_CLASS = "h-3.5 w-3.5";
-const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
-const MENU_ITEM_CLASS = "cursor-pointer text-xs";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {

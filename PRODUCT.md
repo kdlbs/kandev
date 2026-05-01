@@ -1,9 +1,5 @@
 # Product
 
-## Register
-
-product
-
 ## Users
 
 Kandev is for developers and engineering teams using AI agents for code work, reviews, workflows, and repository automation. Users arrive with active engineering context: tasks in flight, sessions running, worktrees diverging, repositories changing, integrations reporting state, and follow-up decisions waiting on them.
