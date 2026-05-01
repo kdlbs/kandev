@@ -357,7 +357,7 @@ function TopbarCluster({
   return (
     <div
       aria-label={label}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 bg-background/80 p-0.5 [&:empty]:hidden ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 [&:empty]:hidden ${className}`}
     >
       {children}
     </div>
