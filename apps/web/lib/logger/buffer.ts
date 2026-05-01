@@ -35,7 +35,12 @@ class RingBuffer {
   }
 
   snapshot(): LogEntry[] {
-    return this.entries.map((e) => ({ ...e }));
+    // Shallow-copy each entry and the args slice so callers cannot mutate
+    // buffered state (e.g. when the snapshot is later JSON-serialized in place).
+    return this.entries.map((e) => ({
+      ...e,
+      args: e.args ? [...e.args] : undefined,
+    }));
   }
 
   clear(): void {

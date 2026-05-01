@@ -39,6 +39,20 @@ describe("frontend log buffer", () => {
     expect(snapshotLogs()[0].message).toBe("x");
   });
 
+  it("snapshot deep-copies the args array", () => {
+    const buf = getLogBuffer();
+    buf.push({
+      timestamp: "t",
+      level: "info",
+      source: "console",
+      message: "x",
+      args: ["a", "b"],
+    });
+    const snap = snapshotLogs();
+    snap[0].args!.push("mutated");
+    expect(snapshotLogs()[0].args).toEqual(["a", "b"]);
+  });
+
   it("clearLogs empties the buffer", () => {
     const buf = getLogBuffer();
     buf.push({ timestamp: "t", level: "info", source: "console", message: "x" });

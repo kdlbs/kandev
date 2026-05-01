@@ -52,11 +52,21 @@ func (b *RingBuffer) Push(e Entry) {
 }
 
 // Snapshot returns a copy of the current entries in chronological order.
+// Each entry is deep-copied so callers cannot mutate buffered Fields maps.
 func (b *RingBuffer) Snapshot() []Entry {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]Entry, len(b.entries))
-	copy(out, b.entries)
+	for i, e := range b.entries {
+		out[i] = e
+		if e.Fields != nil {
+			fields := make(map[string]any, len(e.Fields))
+			for k, v := range e.Fields {
+				fields[k] = v
+			}
+			out[i].Fields = fields
+		}
+	}
 	return out
 }
 

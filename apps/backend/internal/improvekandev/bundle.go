@@ -134,6 +134,49 @@ func flattenFields(fields map[string]any) string {
 	return b.String()
 }
 
+// staleBundleAge is the minimum age before a leftover bundle dir is removed
+// by CleanupStaleBundles. Recent dirs are preserved in case a task is still
+// being created and references them.
+const staleBundleAge = 24 * time.Hour
+
+// CleanupStaleBundles removes kandev-improve-* directories under the OS temp
+// dir that are older than staleBundleAge. Errors are logged via onError but
+// do not abort the sweep. Safe to call concurrently with active bundles —
+// fresh dirs are skipped by the mtime check.
+func CleanupStaleBundles(onError func(path string, err error)) {
+	cleanupStaleBundlesIn(os.TempDir(), staleBundleAge, onError)
+}
+
+func cleanupStaleBundlesIn(tempDir string, maxAge time.Duration, onError func(path string, err error)) {
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		if onError != nil {
+			onError(tempDir, err)
+		}
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), bundlePrefix) {
+			continue
+		}
+		path := filepath.Join(tempDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			if onError != nil {
+				onError(path, err)
+			}
+			continue
+		}
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil && onError != nil {
+			onError(path, err)
+		}
+	}
+}
+
 // validateBundleDir refuses paths that do not match the kandev-improve-* temp
 // pattern under the OS temp dir. Returns the cleaned absolute path on success.
 func validateBundleDir(dir string) (string, error) {

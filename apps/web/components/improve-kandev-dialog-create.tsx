@@ -287,6 +287,9 @@ function BootstrapBanner({ bootstrap }: { bootstrap: BootstrapState }) {
       </div>
     );
   }
+  // The "blocked" kind is intercepted earlier in CreateModeView and routed to
+  // BlockedDialog, so the form (and this banner) are not rendered for it. It
+  // is still listed here to keep the union exhaustive for the type narrower.
   if (bootstrap.kind === "error" || bootstrap.kind === "blocked") {
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

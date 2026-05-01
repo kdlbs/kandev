@@ -122,6 +122,23 @@ func TestCore_CapturesEntriesWithFields(t *testing.T) {
 	}
 }
 
+func TestRingBuffer_SnapshotDeepCopiesFields(t *testing.T) {
+	b := New(3)
+	b.Push(Entry{Message: "m", Fields: map[string]any{"k": "v1"}})
+
+	snap1 := b.Snapshot()
+	snap1[0].Fields["k"] = "mutated"
+	snap1[0].Fields["new"] = "added"
+
+	snap2 := b.Snapshot()
+	if got := snap2[0].Fields["k"]; got != "v1" {
+		t.Errorf("buffered field mutated: got %v", got)
+	}
+	if _, ok := snap2[0].Fields["new"]; ok {
+		t.Errorf("buffered field map had extra key added")
+	}
+}
+
 func TestCore_RespectsLevelEnabler(t *testing.T) {
 	buf := New(10)
 	core := NewCore(buf, zapcore.WarnLevel)
