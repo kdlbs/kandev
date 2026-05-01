@@ -155,6 +155,7 @@ test.describe("Sidebar filter — view ordering", () => {
     await saveTitleView(filters, "Beta View", "beta");
     await saveTitleView(filters, "Gamma View", "gamma");
     await filters.dragViewBefore("Gamma View", "All tasks");
+    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Beta View"]);
 
     await filters.selectViewByName("Alpha View");
     await filters.expectActiveViewChip("Alpha View");

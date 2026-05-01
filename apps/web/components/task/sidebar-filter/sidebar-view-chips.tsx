@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -15,12 +15,16 @@ import { useAppStore } from "@/components/state-provider";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 
+const DRAG_ACTIVATION_DISTANCE = 8;
+
 export function SidebarViewChips() {
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -67,19 +71,49 @@ function SidebarViewChip({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: view.id,
   });
+  const sortableAttributes = {
+    ...attributes,
+    role: undefined,
+    "aria-roledescription": undefined,
+  };
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerMovedRef = useRef(false);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : undefined,
   };
+  const resetPointerState = useCallback(() => {
+    pointerStartRef.current = null;
+    pointerMovedRef.current = false;
+  }, []);
+  const handlePointerDownCapture = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerMovedRef.current = false;
+  }, []);
+  const handlePointerMoveCapture = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    const start = pointerStartRef.current;
+    if (!start) return;
+    const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    if (distance >= DRAG_ACTIVATION_DISTANCE) pointerMovedRef.current = true;
+  }, []);
+  const handlePointerUpCapture = useCallback(() => {
+    const shouldSelect = pointerStartRef.current && !pointerMovedRef.current;
+    resetPointerState();
+    if (shouldSelect) onSelect();
+  }, [onSelect, resetPointerState]);
 
   return (
     <button
       ref={setNodeRef}
       style={style}
       type="button"
-      {...attributes}
+      {...sortableAttributes}
       {...listeners}
+      onPointerDownCapture={handlePointerDownCapture}
+      onPointerMoveCapture={handlePointerMoveCapture}
+      onPointerUpCapture={handlePointerUpCapture}
+      onPointerCancelCapture={resetPointerState}
       data-testid="sidebar-view-chip"
       data-view-id={view.id}
       data-active={active}

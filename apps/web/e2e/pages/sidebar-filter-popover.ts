@@ -63,24 +63,23 @@ export class SidebarFilterPopoverPage {
     const sourceBox = await source.boundingBox();
     const targetBox = await target.boundingBox();
     if (!sourceBox || !targetBox) throw new Error("Missing sidebar view chip drag geometry");
+    const targetLeftHalfX = targetBox.x + targetBox.width * 0.25;
 
     await this.page.mouse.move(
       sourceBox.x + sourceBox.width / 2,
       sourceBox.y + sourceBox.height / 2,
     );
     await this.page.mouse.down();
+    // Move far enough to exceed the 8px PointerSensor activation threshold,
+    // then slide toward the target.
     await this.page.mouse.move(
       sourceBox.x + sourceBox.width / 2 - 16,
       sourceBox.y + sourceBox.height / 2,
       { steps: 4 },
     );
-    await this.page.mouse.move(
-      targetBox.x + Math.min(4, targetBox.width / 4),
-      targetBox.y + targetBox.height / 2,
-      {
-        steps: 20,
-      },
-    );
+    await this.page.mouse.move(targetLeftHalfX, targetBox.y + targetBox.height / 2, {
+      steps: 20,
+    });
     await this.page.mouse.up();
   }
 
