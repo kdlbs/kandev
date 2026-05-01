@@ -81,7 +81,7 @@ function getWorkspaceLabel(
 }
 
 function getHeaderTitle(currentPage: string): string {
-  return currentPage === "tasks" ? "Tasks" : "Board";
+  return currentPage === "tasks" ? "Tasks" : "Home";
 }
 
 function BoardUtilitiesMenu({
@@ -306,21 +306,25 @@ function DesktopHeader({
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 }) {
+  const searchInput = onSearchChange ? (
+    <TaskSearchInput
+      value={searchQuery}
+      onChange={onSearchChange}
+      placeholder="Search tasks..."
+      isLoading={isSearchLoading}
+      className="w-72 xl:w-80"
+    />
+  ) : null;
+  const centerSearch = title === "Home" ? searchInput : null;
+
   return (
     <PageTopbar
       title={title}
       subtitle={workspaceLabel}
+      center={centerSearch}
       actions={
         <>
-          {onSearchChange && (
-            <TaskSearchInput
-              value={searchQuery}
-              onChange={onSearchChange}
-              placeholder="Search tasks..."
-              isLoading={isSearchLoading}
-              className="w-64"
-            />
-          )}
+          {!centerSearch && searchInput}
           <Button
             onClick={onCreateTask}
             className="cursor-pointer"
@@ -329,12 +333,12 @@ function DesktopHeader({
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
+          <IntegrationsMenu workspaceId={workspaceId} />
           <QuickChatButton workspaceId={workspaceId} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           </TooltipProvider>
           <KanbanDisplayDropdown />
-          <IntegrationsMenu workspaceId={workspaceId} />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}

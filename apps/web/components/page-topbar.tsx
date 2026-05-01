@@ -24,9 +24,12 @@ type PageTopbarProps = {
   backLabel?: string;
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
+  /** Optional content rendered at the visual center of the topbar */
+  center?: ReactNode;
   /** Optional content rendered on the right side of the topbar */
   actions?: ReactNode;
   className?: string;
+  centerClassName?: string;
   actionsClassName?: string;
 };
 
@@ -37,14 +40,18 @@ export function PageTopbar({
   backHref = "/",
   backLabel = "KanDev",
   leading,
+  center,
   actions,
   className,
+  centerClassName,
   actionsClassName,
 }: PageTopbarProps) {
   return (
-    <header className={cn("flex h-14 shrink-0 items-center gap-3 border-b px-4", className)}>
+    <header
+      className={cn("relative flex h-14 shrink-0 items-center gap-3 border-b px-4", className)}
+    >
       {leading}
-      <Breadcrumb className="min-w-0">
+      <Breadcrumb className="relative z-10 min-w-0">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="shrink-0">
             <BreadcrumbLink asChild className="flex items-center gap-1.5 cursor-pointer">
@@ -71,8 +78,20 @@ export function PageTopbar({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+      {center && (
+        <div
+          className={cn(
+            "pointer-events-none absolute left-1/2 top-1/2 z-0 -translate-x-1/2 -translate-y-1/2",
+            centerClassName,
+          )}
+        >
+          <div className="pointer-events-auto">{center}</div>
+        </div>
+      )}
       {actions && (
-        <div className={cn("ml-auto flex shrink-0 items-center gap-2", actionsClassName)}>
+        <div
+          className={cn("relative z-10 ml-auto flex shrink-0 items-center gap-2", actionsClassName)}
+        >
           {actions}
         </div>
       )}

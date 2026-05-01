@@ -39,6 +39,7 @@ import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
+import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -511,6 +512,7 @@ function TopBarRight({
 }) {
   return (
     <div className="flex min-w-0 items-center justify-end gap-2">
+      <IntegrationsMenu workspaceId={workspaceId ?? undefined} />
       {!isArchived && (
         <TopbarCluster label="Primary version control action">
           <VcsSplitButton
