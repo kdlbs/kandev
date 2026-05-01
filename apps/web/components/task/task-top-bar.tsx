@@ -38,6 +38,10 @@ import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
+import {
+  TopbarActionOverflow,
+  type TopbarOverflowItem,
+} from "@/components/task/topbar-action-overflow";
 import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
@@ -136,7 +140,10 @@ const TaskTopBar = memo(function TaskTopBar({
   );
 
   return (
-    <header className="@container/topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
+    <header
+      data-testid="task-topbar"
+      className="@container/topbar grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
+    >
       <TopBarLeft
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -155,15 +162,17 @@ const TaskTopBar = memo(function TaskTopBar({
         workspaceId={workspaceId}
         onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
-      {workflowSteps && workflowSteps.length > 0 && (
-        <WorkflowStepper
-          steps={workflowSteps}
-          currentStepId={currentStepId ?? null}
-          taskId={taskId ?? null}
-          workflowId={workflowId ?? null}
-          isArchived={isArchived}
-        />
-      )}
+      <div className="min-w-0 justify-self-center overflow-hidden">
+        {workflowSteps && workflowSteps.length > 0 && (
+          <WorkflowStepper
+            steps={workflowSteps}
+            currentStepId={currentStepId ?? null}
+            taskId={taskId ?? null}
+            workflowId={workflowId ?? null}
+            isArchived={isArchived}
+          />
+        )}
+      </div>
       <TopBarRight
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -479,14 +488,28 @@ function TopBarRight({
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
-  return (
-    <div className="flex min-w-0 items-center justify-end gap-2">
-      {!isArchived && (
+  const items: TopbarOverflowItem[] = [];
+
+  if (!isArchived && workspaceId) {
+    items.push({
+      id: "quick-chat",
+      label: "Quick chat",
+      priority: 20,
+      content: (
         <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
           <QuickChatButton workspaceId={workspaceId} />
         </TopbarCluster>
-      )}
-      {!isArchived && (
+      ),
+    });
+  }
+
+  if (!isArchived) {
+    items.push({
+      id: "vcs",
+      label: "Primary version control action",
+      priority: 100,
+      required: true,
+      content: (
         <TopbarCluster label="Primary version control action">
           <VcsSplitButton
             sessionId={activeSessionId ?? null}
@@ -494,7 +517,15 @@ function TopBarRight({
             buttonSize="lg"
           />
         </TopbarCluster>
-      )}
+      ),
+    });
+  }
+
+  items.push({
+    id: "attention",
+    label: "Task status and attention",
+    priority: 80,
+    content: (
       <AttentionStatusGroup
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -504,13 +535,25 @@ function TopBarRight({
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
+    ),
+  });
+
+  items.push({
+    id: "tools",
+    label: "Task tools",
+    priority: 10,
+    content: (
       <TopbarToolsGroup
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
       />
-    </div>
+    ),
+  });
+
+  return (
+    <TopbarActionOverflow items={items} className="justify-self-end [&_button]:whitespace-nowrap" />
   );
 }
 
