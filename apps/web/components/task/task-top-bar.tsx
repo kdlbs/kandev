@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import Link from "next/link";
-import { IconBug, IconHome, IconSettings } from "@tabler/icons-react";
+import { IconBug, IconDots, IconHome, IconSettings } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Breadcrumb,
@@ -12,8 +12,15 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { CommitStatBadge } from "@/components/diff-stat";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { BranchPathPopover } from "@/components/task/branch-path-popover";
@@ -31,6 +38,11 @@ import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
+import {
+  TopbarActionOverflow,
+  type TopbarOverflowItem,
+} from "@/components/task/topbar-action-overflow";
+import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -62,6 +74,25 @@ type TaskTopBarProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+};
+
+type TopBarLeftProps = {
+  taskId?: string | null;
+  activeSessionId?: string | null;
+  taskTitle?: string;
+  repositoryName?: string | null;
+  displayBranch?: string;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  isRemoteExecutor?: boolean;
+  remoteExecutorName?: string | null;
+  remoteExecutorType?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
+  workspaceId?: string | null;
+  onRenameBranch?: (newName: string) => Promise<void>;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -109,7 +140,10 @@ const TaskTopBar = memo(function TaskTopBar({
   );
 
   return (
-    <header className="@container/topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
+    <header
+      data-testid="task-topbar"
+      className="@container/topbar grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
+    >
       <TopBarLeft
         taskId={taskId}
         activeSessionId={activeSessionId}
@@ -125,22 +159,24 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        workspaceId={workspaceId}
         onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
-      {workflowSteps && workflowSteps.length > 0 && (
-        <WorkflowStepper
-          steps={workflowSteps}
-          currentStepId={currentStepId ?? null}
-          taskId={taskId ?? null}
-          workflowId={workflowId ?? null}
-          isArchived={isArchived}
-        />
-      )}
+      <div className="min-w-0 justify-self-center overflow-hidden">
+        {workflowSteps && workflowSteps.length > 0 && (
+          <WorkflowStepper
+            steps={workflowSteps}
+            currentStepId={currentStepId ?? null}
+            taskId={taskId ?? null}
+            workflowId={workflowId ?? null}
+            isArchived={isArchived}
+          />
+        )}
+      </div>
       <TopBarRight
         taskId={taskId}
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
-        gitStatus={git}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -203,24 +239,9 @@ function TopBarLeft({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  workspaceId,
   onRenameBranch,
-}: {
-  taskId?: string | null;
-  activeSessionId?: string | null;
-  taskTitle?: string;
-  repositoryName?: string | null;
-  displayBranch?: string;
-  repositoryPath?: string | null;
-  worktreePath?: string | null;
-  isRemoteExecutor?: boolean;
-  remoteExecutorName?: string | null;
-  remoteExecutorType?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
-  onRenameBranch?: (newName: string) => Promise<void>;
-}) {
+}: TopBarLeftProps) {
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -262,6 +283,8 @@ function TopBarLeft({
         </BreadcrumbList>
       </Breadcrumb>
 
+      <IntegrationsMenu workspaceId={workspaceId ?? undefined} />
+
       <div className="shrink-0 @max-[1352px]/topbar:hidden">
         <BranchPathPopover
           displayBranch={displayBranch}
@@ -290,54 +313,162 @@ function TopBarLeft({
   );
 }
 
-/** Ahead/Behind commit status badges */
-function GitAheadBehindBadges({
-  gitStatus,
-  baseBranch,
+function TopbarCluster({
+  label,
+  className = "",
+  children,
 }: {
-  gitStatus: { ahead: number; behind: number };
-  baseBranch?: string;
+  label: string;
+  className?: string;
+  children: ReactNode;
 }) {
-  const ahead = gitStatus?.ahead ?? 0;
-  const behind = gitStatus?.behind ?? 0;
-  if (ahead === 0 && behind === 0) return null;
-  const compareRef = baseBranch || "main";
   return (
-    <div className="flex items-center gap-1">
-      {ahead > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              <CommitStatBadge label={`${ahead} ahead`} tone="ahead" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of {compareRef}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      {behind > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              <CommitStatBadge label={`${behind} behind`} tone="behind" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {behind} commit{behind !== 1 ? "s" : ""} behind {compareRef}
-          </TooltipContent>
-        </Tooltip>
-      )}
+    <div
+      aria-label={label}
+      className={`inline-flex shrink-0 items-center gap-1 [&:empty]:hidden ${className}`}
+    >
+      {children}
     </div>
   );
 }
 
-/** Right section: git badges, debug toggle, document controls, editors, VCS, settings */
+function MoreToolsMenu({
+  showDebugOverlay,
+  onToggleDebugOverlay,
+}: {
+  showDebugOverlay?: boolean;
+  onToggleDebugOverlay?: () => void;
+}) {
+  const showDebugItem = DEBUG_UI && onToggleDebugOverlay;
+  const debugLabel = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 cursor-pointer px-2"
+              aria-label="More task tools"
+            >
+              <IconDots className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>More tools</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel className="text-xs">More tools</DropdownMenuLabel>
+        {showDebugItem && (
+          <>
+            <DropdownMenuItem className="cursor-pointer gap-2" onClick={onToggleDebugOverlay}>
+              <IconBug className="h-4 w-4 text-muted-foreground" />
+              <span>{debugLabel}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem asChild className="cursor-pointer gap-2">
+          <Link href="/settings/general">
+            <IconSettings className="h-4 w-4 text-muted-foreground" />
+            <span>Settings</span>
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SettingsButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+          <Link href="/settings/general" aria-label="Settings">
+            <IconSettings className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function AttentionStatusGroup({
+  taskId,
+  activeSessionId,
+  isArchived,
+  workspaceId,
+  isRemoteExecutor,
+  isAgentctlReady,
+  taskTitle,
+}: {
+  taskId?: string | null;
+  activeSessionId?: string | null;
+  isArchived?: boolean;
+  workspaceId?: string | null;
+  isRemoteExecutor?: boolean;
+  isAgentctlReady?: boolean;
+  taskTitle?: string;
+}) {
+  return (
+    <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
+      <DocumentControls activeSessionId={activeSessionId ?? null} />
+      {!isArchived && (
+        <>
+          <PortForwardButton
+            isRemoteExecutor={isRemoteExecutor}
+            sessionId={activeSessionId}
+            isAgentctlReady={isAgentctlReady}
+          />
+          <PRTopbarButton />
+          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+        </>
+      )}
+    </TopbarCluster>
+  );
+}
+
+function TopbarToolsGroup({
+  activeSessionId,
+  showDebugOverlay,
+  onToggleDebugOverlay,
+  isArchived,
+}: {
+  activeSessionId?: string | null;
+  showDebugOverlay?: boolean;
+  onToggleDebugOverlay?: () => void;
+  isArchived?: boolean;
+}) {
+  const showDebugMenu = DEBUG_UI && onToggleDebugOverlay;
+
+  return (
+    <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">
+      {!isArchived && (
+        <>
+          <LayoutPresetSelector />
+          <EditorsMenu activeSessionId={activeSessionId ?? null} />
+        </>
+      )}
+      {showDebugMenu ? (
+        <MoreToolsMenu
+          showDebugOverlay={showDebugOverlay}
+          onToggleDebugOverlay={onToggleDebugOverlay}
+        />
+      ) : (
+        <SettingsButton />
+      )}
+    </TopbarCluster>
+  );
+}
+
+/** Right section: primary VCS action, status/attention, tools menu */
 function TopBarRight({
   taskId,
   activeSessionId,
   baseBranch,
-  gitStatus,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -349,7 +480,6 @@ function TopBarRight({
   taskId?: string | null;
   activeSessionId?: string | null;
   baseBranch?: string;
-  gitStatus: { ahead: number; behind: number };
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -358,53 +488,72 @@ function TopBarRight({
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
-  return (
-    <div className="flex items-center gap-2 justify-end">
-      {DEBUG_UI && onToggleDebugOverlay && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant={showDebugOverlay ? "default" : "outline"}
-              className="cursor-pointer px-2"
-              onClick={onToggleDebugOverlay}
-            >
-              <IconBug className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {showDebugOverlay ? "Hide Debug Info" : "Show Debug Info"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
-      <DocumentControls activeSessionId={activeSessionId ?? null} />
-      {!isArchived && (
-        <>
-          <PortForwardButton
-            isRemoteExecutor={isRemoteExecutor}
-            sessionId={activeSessionId}
-            isAgentctlReady={isAgentctlReady}
-          />
-          <PRTopbarButton />
-          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+  const items: TopbarOverflowItem[] = [];
+
+  if (!isArchived && workspaceId) {
+    items.push({
+      id: "quick-chat",
+      label: "Quick chat",
+      priority: 20,
+      content: (
+        <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
           <QuickChatButton workspaceId={workspaceId} />
-          <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
-          <LayoutPresetSelector />
-          <EditorsMenu activeSessionId={activeSessionId ?? null} />
-        </>
-      )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>
-            <Link href="/settings/general">
-              <IconSettings className="h-4 w-4" />
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Settings</TooltipContent>
-      </Tooltip>
-    </div>
+        </TopbarCluster>
+      ),
+    });
+  }
+
+  if (!isArchived) {
+    items.push({
+      id: "vcs",
+      label: "Primary version control action",
+      priority: 100,
+      required: true,
+      content: (
+        <TopbarCluster label="Primary version control action">
+          <VcsSplitButton
+            sessionId={activeSessionId ?? null}
+            baseBranch={baseBranch}
+            buttonSize="lg"
+          />
+        </TopbarCluster>
+      ),
+    });
+  }
+
+  items.push({
+    id: "attention",
+    label: "Task status and attention",
+    priority: 80,
+    content: (
+      <AttentionStatusGroup
+        taskId={taskId}
+        activeSessionId={activeSessionId}
+        isArchived={isArchived}
+        workspaceId={workspaceId}
+        isRemoteExecutor={isRemoteExecutor}
+        isAgentctlReady={isAgentctlReady}
+        taskTitle={taskTitle}
+      />
+    ),
+  });
+
+  items.push({
+    id: "tools",
+    label: "Task tools",
+    priority: 10,
+    content: (
+      <TopbarToolsGroup
+        activeSessionId={activeSessionId}
+        showDebugOverlay={showDebugOverlay}
+        onToggleDebugOverlay={onToggleDebugOverlay}
+        isArchived={isArchived}
+      />
+    ),
+  });
+
+  return (
+    <TopbarActionOverflow items={items} className="justify-self-end [&_button]:whitespace-nowrap" />
   );
 }
 

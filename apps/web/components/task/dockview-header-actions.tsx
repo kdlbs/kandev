@@ -4,16 +4,10 @@ import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
-  IconMessagePlus,
   IconDeviceDesktop,
   IconTerminal2,
-  IconFileText,
-  IconFolder,
-  IconGitBranch,
-  IconGitPullRequest,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
-  IconBrandVscode,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -21,24 +15,28 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { prPanelLabel } from "@/components/github/pr-utils";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
+import { AddPanelMenuItems, MENU_ICON_CLASS, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
-import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./repository-scripts-menu";
-import { SessionReopenMenuItems } from "./session-reopen-menu";
+import { useActiveSessionDevScript } from "./repository-scripts-menu";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
+
+const HEADER_ACTION_BUTTON_CLASS =
+  "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+const RAW_HEADER_ACTION_BUTTON_CLASS =
+  "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
+const HEADER_ICON_CLASS = "h-3.5 w-3.5";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
@@ -83,94 +81,6 @@ function useLeftHeaderState(
     hasChanges,
     hasFiles,
   };
-}
-
-function AddPanelMenuItems({
-  groupId,
-  state,
-  onNewSession,
-  onAddTerminal,
-  onRunScript,
-  onRunDevScript,
-}: {
-  groupId: string;
-  state: ReturnType<typeof useLeftHeaderState>;
-  onNewSession: () => void;
-  onAddTerminal: () => void;
-  onRunScript: (scriptId: string) => void;
-  onRunDevScript: () => void;
-}) {
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
-  const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
-  const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
-  const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-
-  return (
-    <>
-      {state.taskId && (
-        <>
-          <DropdownMenuItem
-            onClick={onNewSession}
-            className="cursor-pointer text-xs"
-            data-testid="new-session-button"
-          >
-            <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
-            New Agent
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
-        </>
-      )}
-      <DropdownMenuItem onClick={onAddTerminal} className="cursor-pointer text-xs">
-        <IconTerminal2 className="h-3.5 w-3.5 mr-1.5" />
-        Terminal
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => addBrowserPanel(undefined, groupId)}
-        className="cursor-pointer text-xs"
-      >
-        <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
-        Browser
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => addVscodePanel()} className="cursor-pointer text-xs">
-        <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
-        VS Code
-      </DropdownMenuItem>
-      {!state.isPassthrough && (
-        <DropdownMenuItem
-          onClick={() => addPlanPanel({ groupId })}
-          className="cursor-pointer text-xs"
-        >
-          <IconFileText className="h-3.5 w-3.5 mr-1.5" />
-          Plan
-        </DropdownMenuItem>
-      )}
-      {!state.hasChanges && (
-        <DropdownMenuItem
-          onClick={() => addChangesPanel(groupId)}
-          className="cursor-pointer text-xs"
-        >
-          <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
-          Changes
-        </DropdownMenuItem>
-      )}
-      {!state.hasFiles && (
-        <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className="cursor-pointer text-xs">
-          <IconFolder className="h-3.5 w-3.5 mr-1.5" />
-          Files
-        </DropdownMenuItem>
-      )}
-      {state.pr && (
-        <DropdownMenuItem onClick={() => addPRPanel()} className="cursor-pointer text-xs">
-          <IconGitPullRequest className="h-3.5 w-3.5 mr-1.5" />
-          {prPanelLabel(state.pr.pr_number)}
-        </DropdownMenuItem>
-      )}
-      <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
-    </>
-  );
 }
 
 export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
@@ -219,16 +129,18 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   if (state.isSidebarGroup) return null;
 
   return (
-    <div className="flex items-center gap-1 pl-1">
+    <div className="flex items-center gap-0.5 pl-0.5">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 w-6 p-0 cursor-pointer"
+            className={HEADER_ACTION_BUTTON_CLASS}
             data-testid="dockview-add-panel-btn"
+            aria-label="Add panel"
+            title="Add panel"
           >
-            <IconPlus className="h-3.5 w-3.5" />
+            <IconPlus className={HEADER_ICON_CLASS} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-44">
@@ -326,7 +238,7 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const isTerminalGroup = group.id === rightBottomGroupId;
 
   return (
-    <div className="flex items-center gap-0.5 pr-1">
+    <div className="flex items-center gap-0.5 pr-0.5">
       {isCenterGroup && <CenterRightActions />}
       {isRightTopGroup && <RightTopGroupActions />}
       {isTerminalGroup && <TerminalGroupRightActions />}
@@ -402,10 +314,11 @@ function RightTopGroupActions() {
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+          className={RAW_HEADER_ACTION_BUTTON_CLASS}
           onClick={toggleRightPanels}
+          aria-label="Hide right panels"
         >
-          <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
+          <IconLayoutSidebarRightCollapse className={HEADER_ICON_CLASS} />
         </button>
       </TooltipTrigger>
       <TooltipContent>Hide right panels</TooltipContent>
@@ -452,11 +365,12 @@ function CenterRightActions() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer"
+          className={HEADER_ACTION_BUTTON_CLASS}
           onClick={handleStartBrowser}
+          aria-label="Open browser preview"
           title="Open browser preview"
         >
-          <IconDeviceDesktop className="h-3.5 w-3.5" />
+          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
         </Button>
       )}
     </div>
@@ -471,26 +385,102 @@ function TerminalGroupRightActions() {
     return state.taskSessions.items[sessionId]?.repository_id ?? null;
   });
   const hasDevScript = Boolean(useActiveSessionDevScript());
-
   const { scripts } = useRepositoryScripts(repositoryId);
-  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
-  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
+
+  if (scripts.length === 0 && !hasDevScript) return null;
+
+  return (
+    <>
+      <TerminalScriptsDropdown
+        scripts={scripts}
+        activeSessionId={activeSessionId}
+        rightBottomGroupId={rightBottomGroupId}
+      />
+      <TerminalDevPreviewButton
+        activeSessionId={activeSessionId}
+        rightBottomGroupId={rightBottomGroupId}
+        visible={hasDevScript}
+      />
+    </>
+  );
+}
+
+type TerminalScriptsDropdownProps = {
+  scripts: ReturnType<typeof useRepositoryScripts>["scripts"];
+  activeSessionId: string | null;
+  rightBottomGroupId: string | null;
+};
+
+function TerminalScriptsDropdown({
+  scripts,
+  activeSessionId,
+  rightBottomGroupId,
+}: TerminalScriptsDropdownProps) {
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!activeSessionId) return;
       try {
         const result = await createUserShell(activeSessionId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId);
+        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
     [activeSessionId, addTerminalPanel, rightBottomGroupId],
   );
+
+  if (scripts.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={HEADER_ACTION_BUTTON_CLASS}
+          aria-label="Run script"
+          title="Run script"
+        >
+          <IconPlayerPlay className={HEADER_ICON_CLASS} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {scripts.map((script) => (
+          <DropdownMenuItem
+            key={script.id}
+            onClick={() => handleRunScript(script.id)}
+            className={MENU_ITEM_CLASS}
+          >
+            <IconTerminal2 className={MENU_ICON_CLASS} />
+            <span className="truncate">{script.name}</span>
+            <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
+              {script.command}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type TerminalDevPreviewButtonProps = {
+  activeSessionId: string | null;
+  rightBottomGroupId: string | null;
+  visible: boolean;
+};
+
+function TerminalDevPreviewButton({
+  activeSessionId,
+  rightBottomGroupId,
+  visible,
+}: TerminalDevPreviewButtonProps) {
+  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
+  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
 
   const handleStartPreview = useCallback(async () => {
     if (!activeSessionId) return;
@@ -506,7 +496,7 @@ function TerminalGroupRightActions() {
     }
     try {
       const shell = await createUserShell(activeSessionId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId);
+      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined);
     } catch {
       // Terminal creation is best-effort
     }
@@ -519,50 +509,18 @@ function TerminalGroupRightActions() {
     rightBottomGroupId,
   ]);
 
-  if (scripts.length === 0 && !hasDevScript) return null;
+  if (!visible) return null;
 
   return (
-    <>
-      {scripts.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 w-6 p-0 cursor-pointer"
-              title="Run script"
-            >
-              <IconPlayerPlay className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {scripts.map((script) => (
-              <DropdownMenuItem
-                key={script.id}
-                onClick={() => handleRunScript(script.id)}
-                className="cursor-pointer text-xs"
-              >
-                <IconTerminal2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                <span className="truncate">{script.name}</span>
-                <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
-                  {script.command}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {hasDevScript && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer"
-          onClick={handleStartPreview}
-          title="Start dev server preview"
-        >
-          <IconDeviceDesktop className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </>
+    <Button
+      size="sm"
+      variant="ghost"
+      className={HEADER_ACTION_BUTTON_CLASS}
+      onClick={handleStartPreview}
+      aria-label="Start dev server preview"
+      title="Start dev server preview"
+    >
+      <IconDeviceDesktop className={HEADER_ICON_CLASS} />
+    </Button>
   );
 }

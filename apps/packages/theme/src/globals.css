@@ -26,6 +26,21 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-running: var(--running);
+  --color-running-foreground: var(--running-foreground);
+  --color-pending: var(--pending);
+  --color-pending-foreground: var(--pending-foreground);
+  --color-remote: var(--remote);
+  --color-remote-foreground: var(--remote-foreground);
+  --color-archived: var(--archived);
+  --color-archived-foreground: var(--archived-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -68,6 +83,21 @@
   --accent: oklch(0.68 0.18 276);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.96 0.02 27);
+  --success: oklch(0.58 0.12 150);
+  --success-foreground: oklch(0.982 0.01 150);
+  --warning: oklch(0.7 0.13 78);
+  --warning-foreground: oklch(0.23 0.035 72);
+  --info: oklch(0.58 0.12 205);
+  --info-foreground: oklch(0.982 0.01 205);
+  --running: var(--primary);
+  --running-foreground: var(--primary-foreground);
+  --pending: oklch(0.556 0 0);
+  --pending-foreground: oklch(0.985 0 0);
+  --remote: oklch(0.57 0.11 185);
+  --remote-foreground: oklch(0.982 0.01 185);
+  --archived: oklch(0.556 0 0);
+  --archived-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -103,6 +133,21 @@
   --accent: oklch(0.62 0.18 276);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.68 0.12 150);
+  --success-foreground: oklch(0.16 0.025 150);
+  --warning: oklch(0.78 0.12 78);
+  --warning-foreground: oklch(0.19 0.035 72);
+  --info: oklch(0.7 0.11 205);
+  --info-foreground: oklch(0.16 0.025 205);
+  --running: var(--primary);
+  --running-foreground: var(--primary-foreground);
+  --pending: oklch(0.708 0 0);
+  --pending-foreground: oklch(0.145 0 0);
+  --remote: oklch(0.68 0.11 185);
+  --remote-foreground: oklch(0.16 0.025 185);
+  --archived: oklch(0.708 0 0);
+  --archived-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -139,9 +184,9 @@
 @keyframes kanban-task-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.12);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 12%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.22);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
   }
 }
