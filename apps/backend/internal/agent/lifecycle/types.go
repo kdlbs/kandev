@@ -356,12 +356,13 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID         string
-	SessionID      string // Task session ID (from task_sessions table)
-	WorkspacePath  string // Path to the workspace/repository
-	AgentProfileID string // Optional - agent profile for the task
-	AgentID        string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID   string // Agent's session ID for conversation resumption (from session metadata)
+	TaskID            string
+	SessionID         string // Task session ID (from task_sessions table)
+	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	WorkspacePath     string // Path to the workspace/repository
+	AgentProfileID    string // Optional - agent profile for the task
+	AgentID           string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID      string // Agent's session ID for conversation resumption (from session metadata)
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

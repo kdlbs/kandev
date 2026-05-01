@@ -34,6 +34,13 @@ func NewShellHandlers(lifecycleMgr *lifecycle.Manager, scriptService scripts.Scr
 	}
 }
 
+func (h *ShellHandlers) resolveScopeID(ctx context.Context, sessionID string) (string, error) {
+	if _, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID); err != nil {
+		return "", fmt.Errorf("failed to ensure execution for scope: %w", err)
+	}
+	return h.lifecycleMgr.ResolveScopeKey(sessionID), nil
+}
+
 // RegisterHandlers registers shell handlers with the WebSocket dispatcher
 func (h *ShellHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionShellStatus, h.wsShellStatus)
@@ -211,7 +218,10 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 		})
 	}
 
-	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
 	shells := interactiveRunner.ListUserShells(scopeID)
 
 	h.logger.Debug("listing user shells",
@@ -255,7 +265,10 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 		return nil, err
 	}
 
-	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
 
 	if command != "" {
 		terminalID := "script-" + uuid.New().String()
@@ -342,7 +355,10 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("interactive runner not available")
 	}
 
-	scopeID := h.lifecycleMgr.ResolveScopeKey(req.SessionID)
+	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
 	if err := interactiveRunner.StopUserShell(ctx, scopeID, req.TerminalID); err != nil {
 		h.logger.Warn("failed to stop user shell",
 			zap.String("session_id", req.SessionID),
@@ -383,7 +399,11 @@ func (h *ShellHandlers) httpListTerminals(c *gin.Context) {
 		return
 	}
 
-	scopeID := h.lifecycleMgr.ResolveScopeKey(sessionID)
+	scopeID, err := h.resolveScopeID(c.Request.Context(), sessionID)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
 	shells := interactiveRunner.ListUserShells(scopeID)
 
 	h.logger.Debug("listing terminals via HTTP",

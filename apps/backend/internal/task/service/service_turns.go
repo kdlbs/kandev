@@ -247,12 +247,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	info := &lifecycle.WorkspaceInfo{
-		TaskID:         taskID,
-		SessionID:      sessionID,
-		WorkspacePath:  workspacePath,
-		AgentProfileID: session.AgentProfileID,
-		AgentID:        agentID,
-		ACPSessionID:   acpSessionID,
+		TaskID:            taskID,
+		SessionID:         sessionID,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+		WorkspacePath:     workspacePath,
+		AgentProfileID:    session.AgentProfileID,
+		AgentID:           agentID,
+		ACPSessionID:      acpSessionID,
 	}
 
 	// Populate executor info for correct runtime selection and remote reconnection

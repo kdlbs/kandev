@@ -375,6 +375,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
+	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
+	// is env-scoped from the first shell/layout request, not only after DB
+	// persistence succeeds.
+	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	assignLaunchTaskEnvironmentID(session, existingEnv)
+
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
 	if err != nil {
 		return nil, err
@@ -391,7 +397,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	// Check for an existing task environment to reuse its worktree
-	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
 	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
 		req.WorktreeID = existingEnv.WorktreeID
 		e.logger.Info("reusing existing task environment worktree",
@@ -490,6 +495,16 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return execution, nil
+}
+
+func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {
+	if existingEnv != nil && existingEnv.ID != "" {
+		session.TaskEnvironmentID = existingEnv.ID
+		return
+	}
+	if session.TaskEnvironmentID == "" {
+		session.TaskEnvironmentID = uuid.New().String()
+	}
 }
 
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
@@ -836,6 +851,7 @@ func (e *Executor) persistTaskEnvironment(
 		workspacePath = filepath.Dir(resp.WorktreePath)
 	}
 	env := &models.TaskEnvironment{
+		ID:                session.TaskEnvironmentID,
 		TaskID:            taskID,
 		RepositoryID:      req.RepositoryID,
 		ExecutorType:      req.ExecutorType,

@@ -14,7 +14,14 @@ import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 
-const EPHEMERAL_COMPONENTS = new Set(["file-editor", "diff-viewer", "commit-detail"]);
+const EPHEMERAL_COMPONENTS = new Set([
+  "file-editor",
+  "browser",
+  "vscode",
+  "commit-detail",
+  "diff-viewer",
+  "pr-detail",
+]);
 
 /** Fetch the saved layout for an env, dropping it if its shape is corrupted. */
 function getHealthyEnvLayout(envId: string): object | null {
@@ -57,7 +64,7 @@ export type EnvSwitchParams = {
 function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): void {
   const toRemove = api.panels.filter((p) => {
     const comp = p.api.component;
-    if (comp === "file-editor" || comp === "diff-viewer" || comp === "commit-detail") {
+    if (EPHEMERAL_COMPONENTS.has(comp)) {
       return true;
     }
     if (

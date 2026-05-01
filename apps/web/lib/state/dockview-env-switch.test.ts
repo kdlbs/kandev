@@ -122,31 +122,21 @@ describe("performEnvSwitch", () => {
     expect(params.api.addPanel).not.toHaveBeenCalled();
   });
 
-  it("skips fast path when saved layout has ephemeral panels (file-editor)", () => {
-    const savedLayout = makeHealthyLayoutWith({
-      "preview:file-editor": { contentComponent: "file-editor" },
-    });
-    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
-    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
-    const params = makeParams();
+  it.each(["file-editor", "browser", "vscode", "commit-detail", "diff-viewer", "pr-detail"])(
+    "skips fast path when saved layout has ephemeral panels (%s)",
+    (contentComponent) => {
+      const savedLayout = makeHealthyLayoutWith({
+        [`preview:${contentComponent}`]: { contentComponent },
+      });
+      vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+      vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
+      const params = makeParams();
 
-    performEnvSwitch(params);
+      performEnvSwitch(params);
 
-    expect(params.api.fromJSON).toHaveBeenCalled();
-  });
-
-  it("skips fast path when saved layout has ephemeral panels (diff-viewer)", () => {
-    const savedLayout = makeHealthyLayoutWith({
-      "preview:file-diff": { contentComponent: "diff-viewer" },
-    });
-    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
-    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
-    const params = makeParams();
-
-    performEnvSwitch(params);
-
-    expect(params.api.fromJSON).toHaveBeenCalled();
-  });
+      expect(params.api.fromJSON).toHaveBeenCalled();
+    },
+  );
 
   it("calls api.layout on the slow path (buildDefault fallback)", () => {
     const params = makeParams();
