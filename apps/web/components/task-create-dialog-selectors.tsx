@@ -87,6 +87,7 @@ type BranchSelectorProps = {
   onRefresh?: () => void;
   refreshing?: boolean;
   fetchedAt?: string;
+  fetchError?: string;
   loading?: boolean;
 };
 
@@ -101,10 +102,16 @@ export const BranchSelector = memo(function BranchSelector({
   onRefresh,
   refreshing,
   fetchedAt,
+  fetchError,
   loading,
 }: BranchSelectorProps) {
   const headerAction = onRefresh ? (
-    <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} fetchedAt={fetchedAt} />
+    <BranchRefreshButton
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      fetchedAt={fetchedAt}
+      fetchError={fetchError}
+    />
   ) : undefined;
   return (
     <Combobox

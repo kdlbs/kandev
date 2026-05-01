@@ -86,6 +86,7 @@ type DialogFormBodyProps = {
   branchesLoading: boolean;
   onRefreshBranches: () => void;
   branchesFetchedAt?: string;
+  branchesFetchError?: string;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: Array<{
     value: string;
@@ -126,6 +127,7 @@ function DialogFormBody({
   branchesLoading,
   onRefreshBranches,
   branchesFetchedAt,
+  branchesFetchError,
   agentProfileOptions,
   executorProfileOptions,
   agentProfiles,
@@ -170,6 +172,7 @@ function DialogFormBody({
           branchesLoading,
           onRefreshBranches,
           branchesFetchedAt,
+          branchesFetchError,
           agentProfiles,
           agentProfilesLoading,
           agentProfileOptions,
@@ -220,6 +223,7 @@ type CreateEditSelectorsRenderArgs = Pick<
   | "branchesLoading"
   | "onRefreshBranches"
   | "branchesFetchedAt"
+  | "branchesFetchError"
   | "agentProfiles"
   | "agentProfilesLoading"
   | "agentProfileOptions"
@@ -247,6 +251,7 @@ function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
       branchesLoading={args.branchesLoading}
       onRefreshBranches={args.onRefreshBranches}
       branchesFetchedAt={args.branchesFetchedAt}
+      branchesFetchError={args.branchesFetchError}
       localBranchesLoading={fs.localBranchesLoading}
       agentProfiles={args.agentProfiles}
       agentProfilesLoading={args.agentProfilesLoading}
@@ -404,6 +409,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     branchesLoading,
     refreshBranches,
     branchesFetchedAt,
+    branchesFetchError,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   const repositoryLocalPath = (() => {
@@ -453,6 +459,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     branchesLoading,
     refreshBranches,
     branchesFetchedAt,
+    branchesFetchError,
     computed,
     handlers,
     submitHandlers,
@@ -472,6 +479,7 @@ function DialogForm({ setup, workspaceId }: DialogFormProps) {
   const { fs, isSessionMode, isCreateMode, isTaskStarted, workflows, agentProfiles } = setup;
   const { snapshots, branchesLoading, computed, handlers, handleKeyDown } = setup;
   const { handleJiraImport, handleLinearImport, refreshBranches, branchesFetchedAt } = setup;
+  const { branchesFetchError } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   return (
@@ -490,6 +498,7 @@ function DialogForm({ setup, workspaceId }: DialogFormProps) {
         branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
         onRefreshBranches={refreshBranches}
         branchesFetchedAt={branchesFetchedAt}
+        branchesFetchError={branchesFetchError}
         agentProfileOptions={computed.agentProfileOptions}
         executorProfileOptions={computed.executorProfileOptions}
         agentProfiles={agentProfiles}

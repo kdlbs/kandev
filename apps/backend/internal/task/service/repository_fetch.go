@@ -140,10 +140,18 @@ func (s *Service) RefreshRepositoryBranches(ctx context.Context, repoID string) 
 	if err != nil {
 		return BranchRefreshResult{}, err
 	}
-	if repo.LocalPath == "" {
+	return s.RefreshBranchesAtPath(ctx, repo.LocalPath)
+}
+
+// RefreshBranchesAtPath validates an already-resolved repository path and runs
+// `git fetch` for it, subject to the same cooldown and single-flight as
+// RefreshRepositoryBranches. Use this when the caller already has the path in
+// hand to avoid a redundant repository lookup.
+func (s *Service) RefreshBranchesAtPath(ctx context.Context, localPath string) (BranchRefreshResult, error) {
+	if localPath == "" {
 		return BranchRefreshResult{}, errors.New("repository local path is empty")
 	}
-	absPath, err := filepath.Abs(repo.LocalPath)
+	absPath, err := filepath.Abs(localPath)
 	if err != nil {
 		return BranchRefreshResult{}, fmt.Errorf("invalid repository path: %w", err)
 	}

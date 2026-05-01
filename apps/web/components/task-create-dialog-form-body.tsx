@@ -31,6 +31,7 @@ type CreateEditSelectorsProps = {
   branchesLoading: boolean;
   onRefreshBranches?: () => void;
   branchesFetchedAt?: string;
+  branchesFetchError?: string;
   localBranchesLoading: boolean;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
@@ -57,6 +58,7 @@ type CreateEditSelectorsProps = {
     onRefresh?: () => void;
     refreshing?: boolean;
     fetchedAt?: string;
+    fetchError?: string;
     loading?: boolean;
   }>;
   AgentSelectorComponent: React.ComponentType<{
@@ -145,6 +147,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     branchesLoading,
     onRefreshBranches,
     branchesFetchedAt,
+    branchesFetchError,
     localBranchesLoading,
     executorProfileOptions,
     executorProfileId,
@@ -193,6 +196,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             onRefresh={!isLocalWithoutGitHubUrl ? onRefreshBranches : undefined}
             refreshing={branchesLoading}
             fetchedAt={branchesFetchedAt}
+            fetchError={branchesFetchError}
             loading={branchesLoading || localBranchesLoading}
           />
         </div>

@@ -277,12 +277,18 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 	repoID := c.Param("id")
 	ctx := c.Request.Context()
 
-	var fetchedAt, fetchError string
-	if c.Query("refresh") == queryValueTrue {
-		fetchedAt, fetchError = h.refreshBranches(ctx, repoID)
+	repo, err := h.service.GetRepository(ctx, repoID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "repository not found")
+		return
 	}
 
-	branches, err := h.service.ListRepositoryBranches(ctx, repoID)
+	var fetchedAt, fetchError string
+	if c.Query("refresh") == queryValueTrue {
+		fetchedAt, fetchError = h.refreshBranchesAtPath(ctx, repoID, repo.LocalPath)
+	}
+
+	branches, err := h.service.ListLocalRepositoryBranches(ctx, repo.LocalPath)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
@@ -292,7 +298,7 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
 		return
 	}
-	current := h.currentBranchForWorkspaceRepo(ctx, repoID)
+	current := h.currentBranchAtPath(ctx, repo.LocalPath)
 	dtoBranches := make([]dto.BranchDTO, len(branches))
 	for i, branch := range branches {
 		dtoBranches[i] = dto.FromBranch(branch)
@@ -306,12 +312,12 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 	})
 }
 
-// refreshBranches runs `git fetch` for the repository and returns the
-// timestamp + error string suitable for the response body. Failures are
-// best-effort: the branches are still returned so a transient network error
-// doesn't blank the dropdown.
-func (h *RepositoryHandlers) refreshBranches(ctx context.Context, repoID string) (fetchedAt, fetchError string) {
-	res, err := h.service.RefreshRepositoryBranches(ctx, repoID)
+// refreshBranchesAtPath runs `git fetch` for the already-resolved repository
+// path and returns the timestamp + error string suitable for the response
+// body. Failures are best-effort: the branches are still returned so a
+// transient network error doesn't blank the dropdown.
+func (h *RepositoryHandlers) refreshBranchesAtPath(ctx context.Context, repoID, localPath string) (fetchedAt, fetchError string) {
+	res, err := h.service.RefreshBranchesAtPath(ctx, localPath)
 	if err != nil {
 		h.logger.Warn("branch refresh failed", zap.String("repo_id", repoID), zap.Error(err))
 		return "", err.Error()
@@ -325,15 +331,13 @@ func (h *RepositoryHandlers) refreshBranches(ctx context.Context, repoID string)
 	return fetchedAt, fetchError
 }
 
-// currentBranchForWorkspaceRepo is best-effort; failures (repo not found,
-// detached HEAD, IO error) return an empty string so the branches response
-// still ships.
-func (h *RepositoryHandlers) currentBranchForWorkspaceRepo(ctx context.Context, repoID string) string {
-	repo, err := h.service.GetRepository(ctx, repoID)
-	if err != nil || repo == nil || repo.LocalPath == "" {
+// currentBranchAtPath is best-effort; failures (empty path, detached HEAD,
+// IO error) return an empty string so the branches response still ships.
+func (h *RepositoryHandlers) currentBranchAtPath(ctx context.Context, localPath string) string {
+	if localPath == "" {
 		return ""
 	}
-	branch, err := h.service.LocalRepositoryCurrentBranch(ctx, repo.LocalPath)
+	branch, err := h.service.LocalRepositoryCurrentBranch(ctx, localPath)
 	if err != nil {
 		return ""
 	}
