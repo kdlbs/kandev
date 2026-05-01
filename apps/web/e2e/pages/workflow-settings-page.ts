@@ -30,19 +30,23 @@ export class WorkflowSettingsPage {
   /** Find a workflow card by the name shown in its input field using its current value. */
   async findWorkflowCard(name: string): Promise<Locator> {
     const cards = this.page.locator('[data-testid^="workflow-card-"]');
-    const count = await cards.count();
-    for (let i = 0; i < count; i++) {
-      const card = cards.nth(i);
+    await expect(cards.first()).toBeVisible();
+
+    const testIds = await cards.evaluateAll((elements) =>
+      elements
+        .map((element) => element.getAttribute("data-testid"))
+        .filter((testId): testId is string => Boolean(testId)),
+    );
+
+    for (const testId of testIds) {
+      const card = this.page.getByTestId(testId);
       const input = card.locator("input").first();
-      const value = await input.inputValue();
+      const value = await input.inputValue({ timeout: 500 }).catch(() => null);
       if (value === name) {
-        // Return a stable locator using the specific data-testid, not positional nth()
-        const testId = await card.getAttribute("data-testid");
-        if (testId) return this.page.getByTestId(testId);
         return card;
       }
     }
-    // Return a locator that won't match so assertions can fail with a good message
+
     return this.page.getByTestId(`workflow-card-not-found-${name}`);
   }
 
