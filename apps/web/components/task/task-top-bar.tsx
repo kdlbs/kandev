@@ -513,7 +513,11 @@ function TopBarRight({
     <div className="flex min-w-0 items-center justify-end gap-2">
       {!isArchived && (
         <TopbarCluster label="Primary version control action">
-          <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
+          <VcsSplitButton
+            sessionId={activeSessionId ?? null}
+            baseBranch={baseBranch}
+            buttonSize="lg"
+          />
         </TopbarCluster>
       )}
       <AttentionStatusGroup

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ComponentProps, type ReactNode } from "react";
 import {
   IconGitCommit,
   IconGitPullRequest,
@@ -24,12 +24,11 @@ import {
   DropdownMenuSubContent,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-
-import type { ReactNode } from "react";
 
 function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -219,6 +218,8 @@ function VcsDropdownItems({
 type VcsSplitButtonProps = {
   sessionId: string | null;
   baseBranch?: string;
+  buttonSize?: ComponentProps<typeof Button>["size"];
+  className?: string;
 };
 
 function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
@@ -251,6 +252,8 @@ function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: strin
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
+  buttonSize = "sm",
+  className,
 }: VcsSplitButtonProps) {
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -287,11 +290,11 @@ const VcsSplitButton = memo(function VcsSplitButton({
   });
 
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden">
+    <div className={cn("inline-flex rounded-md border border-border overflow-hidden", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size="sm"
+            size={buttonSize}
             variant="outline"
             className="rounded-none border-0 cursor-pointer"
             onClick={primaryButtonConfig.onClick}
@@ -312,7 +315,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            size="sm"
+            size={buttonSize}
             variant="outline"
             className="rounded-none border-0 border-l px-2 cursor-pointer"
             disabled={isDisabled}
