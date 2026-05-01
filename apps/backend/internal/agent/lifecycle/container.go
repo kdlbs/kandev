@@ -44,15 +44,20 @@ type ContainerManager struct {
 	commandBuilder *CommandBuilder
 	logger         *logger.Logger
 	networkName    string
+	// resolveAgentctlBinary returns the host path to a linux/amd64 agentctl
+	// binary. Indirected so tests can inject a stub.
+	resolveAgentctlBinary func() (string, error)
 }
 
 // NewContainerManager creates a new ContainerManager
 func NewContainerManager(dockerClient *docker.Client, networkName string, log *logger.Logger) *ContainerManager {
+	resolver := NewAgentctlResolver(log)
 	return &ContainerManager{
-		dockerClient:   dockerClient,
-		commandBuilder: NewCommandBuilder(),
-		logger:         log.WithFields(zap.String("component", "container-manager")),
-		networkName:    networkName,
+		dockerClient:          dockerClient,
+		commandBuilder:        NewCommandBuilder(),
+		logger:                log.WithFields(zap.String("component", "container-manager")),
+		networkName:           networkName,
+		resolveAgentctlBinary: resolver.ResolveLinuxBinary,
 	}
 }
 
@@ -248,20 +253,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		imageName = config.ImageTagOverride
 	}
 
-	// Build command using Agent's BuildCommand
-	cmdOpts := agents.CommandOptions{
-		Model:            config.Model,
-		SessionID:        config.SessionID,
-		PermissionValues: make(map[string]bool),
-	}
-	// Get profile settings if available
-	if config.ProfileInfo != nil {
-		cmdOpts.AutoApprove = config.ProfileInfo.AutoApprove
-		cmdOpts.PermissionValues["auto_approve"] = config.ProfileInfo.AutoApprove
-		cmdOpts.PermissionValues["allow_indexing"] = config.ProfileInfo.AllowIndexing
-		cmdOpts.PermissionValues["dangerously_skip_permissions"] = config.ProfileInfo.DangerouslySkipPermissions
-	}
-	cmd := ag.BuildCommand(cmdOpts)
+	// We don't pre-build the agent CLI command here: agentctl receives it later
+	// via its HTTP API (CreateInstance). The container only needs to launch
+	// agentctl as its main process — see the Entrypoint setup below.
 
 	// Resolve the in-container workspace path. Clone-inside-container mode leaves
 	// config.WorkspacePath empty (no host bind mount); the entrypoint clones into
@@ -285,6 +279,21 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			zap.String("path", config.MainRepoGitDir))
 	}
 
+	// Mount the host agentctl linux binary into the container so user-built
+	// images don't have to bake it in. Resolved via AgentctlResolver — same path
+	// the Sprites executor uses.
+	if cm.resolveAgentctlBinary != nil {
+		agentctlPath, err := cm.resolveAgentctlBinary()
+		if err != nil {
+			return docker.ContainerConfig{}, fmt.Errorf("agentctl linux binary not found: %w", err)
+		}
+		mounts = append(mounts, docker.MountConfig{
+			Source:   agentctlPath,
+			Target:   "/usr/local/bin/agentctl",
+			ReadOnly: true,
+		})
+	}
+
 	// Build environment variables
 	env := cm.buildEnvVars(config)
 
@@ -294,15 +303,28 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	containerName := fmt.Sprintf("kandev-agent-%s", config.InstanceID[:8])
 
-	// If a prepare script is provided, pass it as env var for the entrypoint to run
+	// If a prepare script is provided, pass it as env var for the bootstrap to run
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
+	}
+
+	// We always launch agentctl as the container's main process and fan out the
+	// agent subprocess from there via the agentctl HTTP API. This frees user-built
+	// images from needing to bake an ENTRYPOINT or know which agent to run — they
+	// only need a runtime that supports the agent CLI (typically node + git).
+	//
+	// The agent's BuildCommand result (cmd.Args()) intentionally stops being passed
+	// here; agentctl receives the agent command later via the CreateInstance API.
+	bootstrap := []string{
+		"sh", "-c",
+		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then eval "$KANDEV_PREPARE_SCRIPT"; fi; exec /usr/local/bin/agentctl`,
 	}
 
 	containerCfg := docker.ContainerConfig{
 		Name:        containerName,
 		Image:       imageName,
-		Cmd:         cmd.Args(),
+		Entrypoint:  bootstrap,
+		Cmd:         nil,
 		Env:         env,
 		WorkingDir:  cm.expandMountSource(rt.WorkingDir, workspacePath),
 		Mounts:      mounts,

@@ -18,7 +18,23 @@ import {
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 
 const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
-const DEFAULT_DOCKERFILE = "FROM ubuntu:24.04\n";
+// Self-contained default that produces a working image:
+//   - node + npm/npx so ACP agents (Claude, Codex, OpenCode, Auggie) can be
+//     fetched on demand at runtime
+//   - git so the prepare script can clone the workspace into the container
+//   - ca-certificates + curl as a baseline for any extra tooling users add
+//
+// The kandev backend mounts the agentctl binary into /usr/local/bin/agentctl
+// at container creation time, so users do NOT need to bake it in here.
+const DEFAULT_DOCKERFILE = `FROM node:22-slim
+
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends \\
+       git ca-certificates curl \\
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+`;
 
 type BuildStatus = "idle" | "building" | "success" | "failed";
 

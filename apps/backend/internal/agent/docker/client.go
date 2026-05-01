@@ -26,6 +26,7 @@ import (
 type ContainerConfig struct {
 	Name        string
 	Image       string
+	Entrypoint  []string // Overrides the image ENTRYPOINT (nil = use image default)
 	Cmd         []string
 	Env         []string // Environment variables
 	WorkingDir  string
@@ -196,6 +197,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	// Container configuration
 	containerCfg := &container.Config{
 		Image:      cfg.Image,
+		Entrypoint: cfg.Entrypoint,
 		Cmd:        cfg.Cmd,
 		Env:        cfg.Env,
 		WorkingDir: cfg.WorkingDir,

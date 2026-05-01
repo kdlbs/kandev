@@ -676,6 +676,12 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 			return metadata, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		// Surface the clone URL to the script engine so {{repository.clone_url}}
+		// resolves in prepare scripts even when no host repo path is mounted.
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["repository_clone_url"] = cloneURL
 	}
 
 	return metadata, nil
