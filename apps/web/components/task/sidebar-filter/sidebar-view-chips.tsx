@@ -78,6 +78,7 @@ function SidebarViewChip({
   };
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const pointerMovedRef = useRef(false);
+  const skipNextClickRef = useRef(false);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -100,8 +101,20 @@ function SidebarViewChip({
   const handlePointerUpCapture = useCallback(() => {
     const shouldSelect = pointerStartRef.current && !pointerMovedRef.current;
     resetPointerState();
-    if (shouldSelect) onSelect();
+    if (!shouldSelect) return;
+    skipNextClickRef.current = true;
+    window.setTimeout(() => {
+      skipNextClickRef.current = false;
+    }, 0);
+    onSelect();
   }, [onSelect, resetPointerState]);
+  const handleClick = useCallback(() => {
+    if (skipNextClickRef.current) {
+      skipNextClickRef.current = false;
+      return;
+    }
+    onSelect();
+  }, [onSelect]);
 
   return (
     <button
@@ -126,7 +139,7 @@ function SidebarViewChip({
         isDragging && "z-50 cursor-grabbing",
       )}
       title={view.name}
-      onClick={onSelect}
+      onClick={handleClick}
     >
       <span className="block max-w-[120px] truncate">{view.name}</span>
     </button>
