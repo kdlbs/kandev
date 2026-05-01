@@ -26,8 +26,8 @@ const branchFetchTimeout = 30 * time.Second
 
 // BranchRefreshResult reports the outcome of a `git fetch` issued by the
 // branches API. Skipped is true when the cooldown short-circuited the fetch;
-// in that case FetchedAt is the timestamp of the previous attempt and Err is
-// nil.
+// in that case FetchedAt and Err are copied from the previous attempt so
+// callers see the same outcome until the cooldown expires.
 type BranchRefreshResult struct {
 	FetchedAt time.Time
 	Skipped   bool

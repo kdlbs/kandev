@@ -5,6 +5,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 
+function escapeRe(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test.describe("Branch selector behavior with executor types", () => {
   test.describe.configure({ retries: 1 });
 
@@ -234,10 +238,6 @@ test.describe("Fresh-branch flow", () => {
       .getByRole("option", { name: new RegExp(`^${escapeRe(profileName)}\\b`, "i") })
       .first()
       .click();
-  }
-
-  function escapeRe(s: string) {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   test("toggle off (default) — branch selector disabled, placeholder shows current branch", async ({
@@ -565,7 +565,7 @@ test.describe("Branch refresh + filter", () => {
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
     await testPage.getByTestId("repository-selector").click();
     await testPage
-      .getByRole("option", { name: new RegExp(`^${seededRepoName}\\b`, "i") })
+      .getByRole("option", { name: new RegExp(`^${escapeRe(seededRepoName)}\\b`, "i") })
       .first()
       .click();
     // Worktree executor → branch selector enabled and refresh button visible.

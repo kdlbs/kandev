@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";

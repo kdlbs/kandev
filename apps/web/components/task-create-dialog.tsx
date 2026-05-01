@@ -113,6 +113,7 @@ type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
 };
 
+// eslint-disable-next-line max-lines-per-function -- thin pass-through; each section already factored into its own component
 function DialogFormBody({
   isSessionMode,
   isCreateMode,
