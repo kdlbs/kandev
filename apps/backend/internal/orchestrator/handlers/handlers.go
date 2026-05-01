@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -138,6 +139,12 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
 			zap.Error(err))
+		// Mirror httpEnsureTaskSession's NotFound mapping so the frontend can
+		// distinguish unknown task ids from real server errors. EnsureSession
+		// wraps the repo error as "task not found: %w".
+		if strings.Contains(err.Error(), "task not found") {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to ensure session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

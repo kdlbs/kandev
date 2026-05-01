@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -115,6 +116,81 @@ func TestEnsureSession_Concurrent_ReturnsSameExistingSession(t *testing.T) {
 		if sid != "session1" {
 			t.Errorf("call %d: expected session1, got %q", i, sid)
 		}
+	}
+}
+
+// acquireEnsureLock must serialize callers per task id. The previous attempt
+// to bound map growth (Delete on release) opened a window where a third
+// caller could LoadOrStore a fresh mutex while a second caller still held
+// the about-to-be-discarded one, putting two goroutines in the critical
+// section at the same time. This test pins down that property by counting
+// the maximum observed concurrency under the same task id.
+func TestAcquireEnsureLock_SerializesPerTaskID(t *testing.T) {
+	const N = 16
+	var (
+		active int
+		mu     sync.Mutex
+		maxCon int
+		wg     sync.WaitGroup
+	)
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			release := acquireEnsureLock("task-x")
+			defer release()
+			mu.Lock()
+			active++
+			if active > maxCon {
+				maxCon = active
+			}
+			mu.Unlock()
+			time.Sleep(2 * time.Millisecond)
+			mu.Lock()
+			active--
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if maxCon != 1 {
+		t.Errorf("expected max concurrency 1 under same task id, got %d", maxCon)
+	}
+}
+
+// Distinct task ids must NOT serialize against each other.
+func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
+	const N = 8
+	start := make(chan struct{})
+	var holding int
+	var mu sync.Mutex
+	var peak int
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		taskID := fmt.Sprintf("task-%d", i)
+		go func() {
+			defer wg.Done()
+			release := acquireEnsureLock(taskID)
+			defer release()
+			<-start
+			mu.Lock()
+			holding++
+			if holding > peak {
+				peak = holding
+			}
+			mu.Unlock()
+			time.Sleep(2 * time.Millisecond)
+			mu.Lock()
+			holding--
+			mu.Unlock()
+		}()
+	}
+	// Let all goroutines acquire their distinct locks, then release.
+	time.Sleep(20 * time.Millisecond)
+	close(start)
+	wg.Wait()
+	if peak < 2 {
+		t.Errorf("expected concurrency across distinct task ids, peak=%d", peak)
 	}
 }
 
