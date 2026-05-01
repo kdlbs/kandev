@@ -185,7 +185,7 @@ func parseTerminalRoute(c *gin.Context) terminalRoute {
 func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 	route := parseTerminalRoute(c)
 	if route.id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal target must be /session/:sessionId or /environment/:environmentId"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal route must be /environment/:environmentId for shell terminals or /session/:sessionId?mode=agent for agent terminals"})
 		return
 	}
 
@@ -200,9 +200,8 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 }
 
 func (h *TerminalHandler) handleSessionTerminalRoute(c *gin.Context, sessionID string) {
-	mode := c.Query("mode")
-	if mode != "" && mode != "agent" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session terminal route only supports agent mode"})
+	if c.Query("mode") != "agent" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session terminal route requires mode=agent; shell terminals must use /terminal/environment/:environmentId"})
 		return
 	}
 	h.handleAgentTerminalRoute(c, sessionID)
