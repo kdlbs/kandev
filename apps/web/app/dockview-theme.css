@@ -43,9 +43,9 @@
 .dockview-theme-kandev .dv-tabs-and-actions-container {
   background: var(--background);
   border-bottom: 1px solid var(--border);
-  min-height: 31px;
-  height: 31px;
-  padding: 0 5px;
+  min-height: 36px;
+  height: 36px;
+  padding: 4px 5px 5px;
   align-items: center;
 }
 
