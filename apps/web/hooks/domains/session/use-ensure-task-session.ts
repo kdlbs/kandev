@@ -52,19 +52,14 @@ export function useEnsureTaskSession(
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
-    // Cancel guard: if the user switches tasks or hits retry while this
-    // promise is still in flight, ignore its completion so a stale resolution
-    // doesn't overwrite the new task's status.
+    // Cancel guard so a stale resolution can't overwrite a switched-away task.
     let cancelled = false;
     setStatus("preparing");
     setError(null);
     ensureTaskSession(taskId)
       .then(async () => {
         if (cancelled || launchedKeyRef.current !== key) return;
-        // The backend may answer with source: "existing_primary" or
-        // "existing_newest" for a session our initial listTaskSessions
-        // missed. Force-reload so the store converges on the authoritative
-        // server view rather than staying empty.
+        // Force-reload: backend may have returned an existing_* source our initial list missed.
         await loadSessions(true);
         if (cancelled || launchedKeyRef.current !== key) return;
         setStatus("idle");
