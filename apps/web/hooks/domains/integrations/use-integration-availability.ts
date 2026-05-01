@@ -32,13 +32,20 @@ export function useIntegrationAuthed(
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
+    // Monotonic request id: if a slow earlier probe finishes after a newer
+    // one we ignore it, otherwise an old "auth ok" could clobber a fresh
+    // "auth failed" (or vice versa) and the UI would flap until the next
+    // tick.
+    let requestId = 0;
     async function refresh() {
+      const current = ++requestId;
       try {
         const cfg = await fetchConfig(workspaceId!);
-        if (cancelled) return;
+        if (cancelled || current !== requestId) return;
         setState({ workspaceId, authed: !!cfg?.hasSecret && !!cfg.lastOk });
       } catch {
-        if (!cancelled) setState({ workspaceId, authed: false });
+        if (cancelled || current !== requestId) return;
+        setState({ workspaceId, authed: false });
       }
     }
     void refresh();

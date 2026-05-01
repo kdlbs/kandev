@@ -45,12 +45,12 @@ export function useIntegrationEnabled(
 
   useEffect(() => {
     let cancelled = false;
-    async function init() {
+    function init() {
       if (cancelled) return;
       const next = workspaceId ? readEnabled(workspaceId, storageKey) : true;
       setState({ workspaceId, enabled: next });
     }
-    void init();
+    init();
     if (!workspaceId) return;
     const onChange = () => {
       const next = readEnabled(workspaceId, storageKey);

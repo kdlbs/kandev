@@ -62,7 +62,13 @@ function TriggerButton({
 >) {
   if (triggerStyle === "outline-with-label") {
     return (
-      <Button size="sm" variant="outline" className="cursor-pointer px-2 gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={triggerDisabled}
+        className="cursor-pointer px-2 gap-1"
+      >
         {triggerIcon}
         <span className="text-xs font-medium">{triggerLabel}</span>
       </Button>

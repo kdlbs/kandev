@@ -21,18 +21,15 @@ type JiraLinkButtonProps = {
 export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButtonProps) {
   const available = useJiraAvailable(workspaceId);
 
-  const onSuccess = useCallback(
-    async (key: string) => {
-      if (!taskId) return;
+  const buildLinkedTitle = useCallback(
+    (key: string) => {
       // Strip an existing leading "PROJ-123: " so re-linking a task to a
       // different ticket replaces the prefix instead of stacking
       // ("PROJ-456: PROJ-123: ...").
       const stripped = (taskTitle ?? "").trim().replace(/^[A-Z][A-Z0-9]+-\d+:\s*/, "");
-      const newTitle = stripped ? `${key}: ${stripped}` : key;
-      await updateTask(taskId, { title: newTitle });
-      toast.success(`Linked to ${key}`);
+      return stripped ? `${key}: ${stripped}` : key;
     },
-    [taskId, taskTitle],
+    [taskTitle],
   );
 
   if (!available || !taskId || !workspaceId) return null;
@@ -47,8 +44,18 @@ export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButto
       placeholder="PROJ-123 or paste ticket URL"
       extractKey={(raw) => raw.toUpperCase().match(JIRA_KEY_RE)?.[0] ?? null}
       validationHint="Paste a Jira ticket URL or key (PROJ-123)"
-      fetch={(key) => getJiraTicket(workspaceId, key)}
-      onSuccess={(key) => void onSuccess(key)}
+      // Run getJiraTicket *and* the title update inside the awaited fetch so
+      // a failure on either surfaces as the popover's inline error instead of
+      // an unhandled rejection that leaves the user thinking the link
+      // succeeded.
+      fetch={async (key) => {
+        const ticket = await getJiraTicket(workspaceId, key);
+        await updateTask(taskId, { title: buildLinkedTitle(key) });
+        return ticket;
+      }}
+      onSuccess={(key) => {
+        toast.success(`Linked to ${key}`);
+      }}
       submitLabel="Link"
       submittingLabel="Linking..."
     />

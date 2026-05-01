@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -122,33 +122,31 @@ func TestService_RecordAuthHealth_ClientError(t *testing.T) {
 func TestPoller_Start_ProbesEachConfiguredWorkspace(t *testing.T) {
 	// Smoke test: confirms the prober adapter actually wires
 	// Service.Store().ListConfiguredWorkspaces → Service.RecordAuthHealth
-	// when the loop is started, end-to-end.
-	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-a", "tok-a")
-	f.saveConfig(t, "ws-b", "tok-b")
-	probed := make(chan string, 2)
-	f.client.testAuthFn = func() (*TestConnectionResult, error) {
-		return &TestConnectionResult{OK: true}, nil
-	}
-	f.svc.SetProbeHook(func(workspaceID string) {
-		probed <- workspaceID
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	f.poller.Start(ctx)
-	defer f.poller.Stop()
-
-	seen := map[string]bool{}
-	for len(seen) < 2 {
-		select {
-		case id := <-probed:
-			seen[id] = true
-		case <-time.After(2 * time.Second):
-			t.Fatalf("only saw %v probed within 2s", seen)
+	// when the loop is started, end-to-end. Wrapped in synctest so the
+	// goroutine the poller spawns runs deterministically against fake time
+	// instead of relying on a wall-clock deadline.
+	synctest.Test(t, func(t *testing.T) {
+		f := newPollerFixture(t)
+		f.saveConfig(t, "ws-a", "tok-a")
+		f.saveConfig(t, "ws-b", "tok-b")
+		probed := map[string]bool{}
+		f.client.testAuthFn = func() (*TestConnectionResult, error) {
+			return &TestConnectionResult{OK: true}, nil
 		}
-	}
-	if !seen["ws-a"] || !seen["ws-b"] {
-		t.Errorf("expected both ws-a and ws-b probed, got %v", seen)
-	}
+		f.svc.SetProbeHook(func(workspaceID string) {
+			probed[workspaceID] = true
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		f.poller.Start(ctx)
+		defer f.poller.Stop()
+
+		// Wait for the immediate-on-Start probe pass to finish.
+		synctest.Wait()
+
+		if !probed["ws-a"] || !probed["ws-b"] {
+			t.Errorf("expected both ws-a and ws-b probed, got %v", probed)
+		}
+	})
 }

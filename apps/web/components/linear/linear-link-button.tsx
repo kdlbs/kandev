@@ -20,15 +20,12 @@ type LinearLinkButtonProps = {
 export function LinearLinkButton({ taskId, workspaceId, taskTitle }: LinearLinkButtonProps) {
   const available = useLinearAvailable(workspaceId);
 
-  const onSuccess = useCallback(
-    async (key: string) => {
-      if (!taskId) return;
+  const buildLinkedTitle = useCallback(
+    (key: string) => {
       const stripped = (taskTitle ?? "").trim().replace(/^[A-Z][A-Z0-9]*-\d+:\s*/, "");
-      const newTitle = stripped ? `${key}: ${stripped}` : key;
-      await updateTask(taskId, { title: newTitle });
-      toast.success(`Linked to ${key}`);
+      return stripped ? `${key}: ${stripped}` : key;
     },
-    [taskId, taskTitle],
+    [taskTitle],
   );
 
   if (!available || !taskId || !workspaceId) return null;
@@ -43,8 +40,17 @@ export function LinearLinkButton({ taskId, workspaceId, taskTitle }: LinearLinkB
       placeholder="ENG-123 or paste issue URL"
       extractKey={(raw) => raw.toUpperCase().match(LINEAR_KEY_RE)?.[0] ?? null}
       validationHint="Paste a Linear issue URL or identifier (ENG-123)"
-      fetch={(key) => getLinearIssue(workspaceId, key)}
-      onSuccess={(key) => void onSuccess(key)}
+      // Run getLinearIssue *and* the title update inside the awaited fetch so
+      // a failure on either surfaces as the popover's inline error instead of
+      // an unhandled rejection.
+      fetch={async (key) => {
+        const issue = await getLinearIssue(workspaceId, key);
+        await updateTask(taskId, { title: buildLinkedTitle(key) });
+        return issue;
+      }}
+      onSuccess={(key) => {
+        toast.success(`Linked to ${key}`);
+      }}
       submitLabel="Link"
       submittingLabel="Linking..."
     />
