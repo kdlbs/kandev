@@ -83,7 +83,7 @@ export function sanitizeMermaidCode(code: string): string {
   let quoted = findQuotedRanges(code);
   let result = code.replace(/(\[+)([^\]"]+?)(\]+)/g, (match, open, text, close, offset) => {
     if (inAnyRange(offset, quoted)) return match;
-    if (BRACKET_TRIGGER_RE.test(text) && !text.startsWith('"')) {
+    if (BRACKET_TRIGGER_RE.test(text)) {
       return `${open}"${text}"${close}`;
     }
     return match;
@@ -93,7 +93,7 @@ export function sanitizeMermaidCode(code: string): string {
   quoted = findQuotedRanges(result);
   result = result.replace(/\|([^|"]+?)\|/g, (match, text, offset) => {
     if (inAnyRange(offset, quoted)) return match;
-    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+    if (SPECIAL_CHARS_RE.test(text)) {
       return `|"${text}"|`;
     }
     return match;
@@ -107,7 +107,7 @@ export function sanitizeMermaidCode(code: string): string {
     if (/^(subgraph|end|graph|flowchart|sequenceDiagram)\b/.test(text.trim())) {
       return match;
     }
-    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+    if (SPECIAL_CHARS_RE.test(text)) {
       return `${open}"${text}"${close}`;
     }
     return match;
