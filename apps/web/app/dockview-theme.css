@@ -9,6 +9,7 @@
   --dv-paneview-header-border-color: var(--border);
 
   --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 40px;
   --dv-tabs-and-actions-container-background-color: var(--background);
 
   --dv-activegroup-visiblepanel-tab-background-color: var(--muted);
@@ -43,9 +44,9 @@
 .dockview-theme-kandev .dv-tabs-and-actions-container {
   background: var(--background);
   border-bottom: 1px solid var(--border);
-  min-height: 36px;
-  height: 36px;
-  padding: 4px 5px 5px;
+  min-height: 40px;
+  height: 40px;
+  padding: 7px 5px 5px;
   align-items: center;
 }
 
