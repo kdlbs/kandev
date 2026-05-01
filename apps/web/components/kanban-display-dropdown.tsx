@@ -14,6 +14,11 @@ import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import type { Workspace, Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
+import type { ComponentProps } from "react";
+
+type KanbanDisplayDropdownProps = {
+  triggerSize?: ComponentProps<typeof Button>["size"];
+};
 
 function getRepositoryPlaceholder(
   repositoriesLoading: boolean,
@@ -128,7 +133,7 @@ function RepositorySection({
   );
 }
 
-export function KanbanDisplayDropdown() {
+export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDropdownProps) {
   const {
     workspaces,
     workflows,
@@ -152,7 +157,7 @@ export function KanbanDisplayDropdown() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          size="icon"
+          size={triggerSize}
           data-testid="display-button"
           className="cursor-pointer"
         >

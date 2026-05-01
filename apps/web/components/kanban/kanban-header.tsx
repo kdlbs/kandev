@@ -43,6 +43,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
+import type { ComponentProps } from "react";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -64,6 +65,7 @@ type HeaderUtilityMenuProps = {
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  buttonSize?: ComponentProps<typeof Button>["size"];
 };
 
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
@@ -89,11 +91,17 @@ function BoardUtilitiesMenu({
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
+  buttonSize = "icon",
 }: HeaderUtilityMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" className="cursor-pointer" aria-label="Utilities">
+        <Button
+          variant="outline"
+          size={buttonSize}
+          className="cursor-pointer"
+          aria-label="Utilities"
+        >
           <IconDots className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -161,11 +169,13 @@ function ImproveKandevTopbarButton({ workspaceId }: { workspaceId: string | unde
 function ViewToggleGroup({
   toggleValue,
   onValueChange,
+  size,
   className,
   itemClassName,
 }: {
   toggleValue: string;
   onValueChange: (value: string) => void;
+  size?: ComponentProps<typeof ToggleGroup>["size"];
   className?: string;
   itemClassName?: string;
 }) {
@@ -175,6 +185,7 @@ function ViewToggleGroup({
       value={toggleValue}
       onValueChange={onValueChange}
       variant="outline"
+      size={size}
       className={className}
     >
       {VIEW_TOGGLE_ITEMS.map(({ value, icon: Icon, label }) => (
@@ -239,7 +250,7 @@ function TabletHeader({
               onChange={onSearchChange}
               placeholder="Search..."
               isLoading={isSearchLoading}
-              className="hidden md:flex w-48 lg:w-56"
+              className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
           <Button
@@ -251,16 +262,11 @@ function TabletHeader({
             <IconPlus className="h-4 w-4" />
             <span className="hidden sm:inline ml-1">Add task</span>
           </Button>
-          <QuickChatButton workspaceId={workspaceId} />
+          <QuickChatButton workspaceId={workspaceId} size="lg" />
           <TooltipProvider>
-            <ViewToggleGroup
-              toggleValue={toggleValue}
-              onValueChange={handleViewChange}
-              className="h-8"
-              itemClassName="h-8 w-8"
-            />
+            <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown />
+          <KanbanDisplayDropdown triggerSize="icon-lg" />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <Button
             variant="outline"
@@ -312,7 +318,7 @@ function DesktopHeader({
       onChange={onSearchChange}
       placeholder="Search tasks..."
       isLoading={isSearchLoading}
-      className="w-72 xl:w-80"
+      className="w-72 xl:w-80 [&_input]:h-8"
     />
   ) : null;
   const centerSearch = title === "Home" ? searchInput : null;
@@ -327,6 +333,7 @@ function DesktopHeader({
           {!centerSearch && searchInput}
           <Button
             onClick={onCreateTask}
+            size="lg"
             className="cursor-pointer"
             data-testid="create-task-button"
           >
@@ -334,17 +341,18 @@ function DesktopHeader({
             Add task
           </Button>
           <IntegrationsMenu workspaceId={workspaceId} />
-          <QuickChatButton workspaceId={workspaceId} />
+          <QuickChatButton workspaceId={workspaceId} size="lg" />
           <TooltipProvider>
-            <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
+            <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown />
+          <KanbanDisplayDropdown triggerSize="icon-lg" />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}
             onOpenReleaseNotes={onOpenReleaseNotes}
             showHealthIndicator={showHealthIndicator}
             onOpenHealthDialog={onOpenHealthDialog}
+            buttonSize="icon-lg"
           />
         </>
       }
