@@ -291,8 +291,13 @@ export type AppState = {
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
-  setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
+  setRepositoryBranches: (
+    repositoryId: string,
+    branches: Branch[],
+    meta?: { fetchedAt?: string; fetchError?: string },
+  ) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
+  setRepositoryBranchesFetchError: (repositoryId: string, error: string | undefined) => void;
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   clearRepositoryScripts: (repositoryId: string) => void;

@@ -135,6 +135,7 @@ type Service struct {
 	workflowStepGetter  WorkflowStepGetter
 	startStepResolver   StartStepResolver
 	quickChatDir        string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher       *branchFetcher
 }
 
 // NewService creates a new task service
@@ -156,6 +157,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		eventBus:         eventBus,
 		logger:           log,
 		discoveryConfig:  discoveryConfig,
+		branchFetcher:    newBranchFetcher(log.Zap()),
 	}
 }
 

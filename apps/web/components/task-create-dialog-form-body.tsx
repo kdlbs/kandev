@@ -29,6 +29,9 @@ type CreateEditSelectorsProps = {
   branch: string;
   onBranchChange: (value: string) => void;
   branchesLoading: boolean;
+  onRefreshBranches?: () => void;
+  branchesFetchedAt?: string;
+  branchesFetchError?: string;
   localBranchesLoading: boolean;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
@@ -52,6 +55,11 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     searchPlaceholder: string;
     emptyMessage: string;
+    onRefresh?: () => void;
+    refreshing?: boolean;
+    fetchedAt?: string;
+    fetchError?: string;
+    loading?: boolean;
   }>;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
@@ -127,6 +135,21 @@ function AgentColumn({
   );
 }
 
+function computeBranchDisabled(args: {
+  branchLocked?: boolean;
+  lockedToCurrentBranch: boolean;
+  hasRepositorySelection: boolean;
+  branchesLoading: boolean;
+  localBranchesLoading: boolean;
+  optionCount: number;
+}): boolean {
+  if (args.branchLocked) return true;
+  if (args.lockedToCurrentBranch) return true;
+  if (!args.hasRepositorySelection) return true;
+  if (args.branchesLoading || args.localBranchesLoading) return true;
+  return args.optionCount === 0;
+}
+
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
@@ -138,6 +161,9 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     branch,
     onBranchChange,
     branchesLoading,
+    onRefreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     localBranchesLoading,
     executorProfileOptions,
     executorProfileId,
@@ -164,13 +190,14 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     loading: branchesLoading || localBranchesLoading,
     optionCount: branchOptions.length,
   });
-  const branchDisabled =
-    branchLocked ||
-    lockedToCurrentBranch ||
-    !hasRepositorySelection ||
-    branchesLoading ||
-    localBranchesLoading ||
-    branchOptions.length === 0;
+  const branchDisabled = computeBranchDisabled({
+    branchLocked,
+    lockedToCurrentBranch,
+    hasRepositorySelection,
+    branchesLoading,
+    localBranchesLoading,
+    optionCount: branchOptions.length,
+  });
   // When the local executor locks to the current branch, ignore any branch
   // value the user picked under a different executor — the placeholder
   // should reflect the actual checked-out branch instead.
@@ -188,6 +215,11 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             searchPlaceholder="Search branches..."
             emptyMessage="No branch found."
             disabled={branchDisabled}
+            onRefresh={!isLocalWithoutGitHubUrl ? onRefreshBranches : undefined}
+            refreshing={branchesLoading}
+            fetchedAt={branchesFetchedAt}
+            fetchError={branchesFetchError}
+            loading={branchesLoading || localBranchesLoading}
           />
         </div>
         {isLocalWithoutGitHubUrl && !branchLocked && (

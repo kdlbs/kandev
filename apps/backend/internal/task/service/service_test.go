@@ -98,18 +98,19 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }

@@ -23,22 +23,23 @@ const EMPTY_SHELLS: UserShellInfo[] = [];
  */
 export function useUserShells(sessionId: string | null): UseUserShellsReturn {
   const store = useAppStoreApi();
+  const environmentId = useAppStore((state) =>
+    sessionId ? (state.environmentIdBySessionId[sessionId] ?? null) : null,
+  );
 
-  // Read from store — resolve environmentId for shared workspace state
+  // Read from store by explicit environment ID. Missing env means lifecycle data
+  // is incomplete; do not synthesize a session-scoped shell list.
   const shells = useAppStore((state) => {
-    if (!sessionId) return EMPTY_SHELLS;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.userShells.byEnvironmentId[envKey] ?? EMPTY_SHELLS;
+    if (!environmentId) return EMPTY_SHELLS;
+    return state.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
   });
   const isLoading = useAppStore((state) => {
-    if (!sessionId) return false;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.userShells.loading[envKey] ?? false;
+    if (!environmentId) return false;
+    return state.userShells.loading[environmentId] ?? false;
   });
   const isLoaded = useAppStore((state) => {
-    if (!sessionId) return false;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.userShells.loaded[envKey] ?? false;
+    if (!environmentId) return false;
+    return state.userShells.loaded[environmentId] ?? false;
   });
   const connectionStatus = useAppStore((state) => state.connection.status);
 
@@ -55,7 +56,7 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
 
   // Fetch user shells from backend
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !environmentId) return;
     if (connectionStatus !== "connected") return;
 
     // Detect session change to force refetch
@@ -118,7 +119,7 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
     };
 
     fetchShells();
-  }, [sessionId, connectionStatus, isLoaded, store]);
+  }, [sessionId, environmentId, connectionStatus, isLoaded, store]);
 
   // Actions
   const addShell = (shell: UserShellInfo) => {

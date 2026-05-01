@@ -311,6 +311,7 @@ export function useTerminalInit({
 export type WebSocketConnectionOptions = {
   taskId: string | null;
   sessionId: string | null | undefined;
+  environmentId?: string | null | undefined;
   canConnect: boolean;
   isTerminalReady: boolean;
   fitAndResize: (force?: boolean) => void;
@@ -325,23 +326,33 @@ export type WebSocketConnectionOptions = {
   onConnected: () => void;
 };
 
-function buildWsUrl(
+export function buildTerminalWsUrl(
   wsBaseUrl: string,
-  sessionId: string,
-  mode: "agent" | "shell",
-  terminalId: string | undefined,
-  label?: string,
+  params: {
+    mode: "agent" | "shell";
+    sessionId?: string;
+    environmentId?: string;
+    terminalId?: string;
+    label?: string;
+  },
 ): string {
-  let wsUrl =
-    mode === "agent"
-      ? `${wsBaseUrl}/terminal/${sessionId}?mode=agent`
-      : `${wsBaseUrl}/terminal/${sessionId}?mode=shell&terminalId=${encodeURIComponent(terminalId!)}`;
+  const { mode, sessionId, environmentId, terminalId, label } = params;
+  let wsUrl: string;
+  if (mode === "agent") {
+    if (!sessionId) throw new Error("sessionId is required for agent terminal");
+    wsUrl = `${wsBaseUrl}/terminal/session/${encodeURIComponent(sessionId)}?mode=agent`;
+  } else {
+    if (!environmentId) throw new Error("environmentId is required for shell terminal");
+    if (!terminalId) throw new Error("terminalId is required for shell terminal");
+    wsUrl = `${wsBaseUrl}/terminal/environment/${encodeURIComponent(environmentId)}?terminalId=${encodeURIComponent(terminalId)}`;
+  }
   if (label) wsUrl += `&label=${encodeURIComponent(label)}`;
   return wsUrl;
 }
 
 type ConnectWebSocketOptions = {
-  sessionId: string;
+  sessionId?: string;
+  environmentId?: string;
   wsBaseUrl: string;
   mode: "agent" | "shell";
   terminalId: string | undefined;
@@ -358,6 +369,7 @@ type ConnectWebSocketOptions = {
 
 function connectWebSocket({
   sessionId,
+  environmentId,
   wsBaseUrl,
   mode,
   terminalId,
@@ -384,8 +396,14 @@ function connectWebSocket({
     }
     wsRef.current = null;
   }
-  const wsUrl = buildWsUrl(wsBaseUrl, sessionId, mode, terminalId, label);
-  log("Connecting to", wsUrl, { mode, terminalId, label });
+  const wsUrl = buildTerminalWsUrl(wsBaseUrl, {
+    mode,
+    sessionId,
+    environmentId,
+    terminalId,
+    label,
+  });
+  log("Connecting to", wsUrl, { mode, sessionId, environmentId, terminalId, label });
   const ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
   wsRef.current = ws;
@@ -438,6 +456,7 @@ export { reconnectDelayMs } from "./ws-reconnect";
 export function useWebSocketConnection({
   taskId,
   sessionId,
+  environmentId,
   canConnect,
   isTerminalReady,
   fitAndResize,
@@ -452,17 +471,24 @@ export function useWebSocketConnection({
   onConnected,
 }: WebSocketConnectionOptions) {
   useEffect(() => {
+    const connectionKey = mode === "agent" ? sessionId : environmentId;
     log("WebSocket effect:", {
       taskId,
       sessionId,
+      environmentId,
       mode,
       terminalId,
       canConnect,
       isTerminalReady,
       hasTerminal: !!xtermRef.current,
     });
-    if (!taskId || !sessionId || !canConnect || !isTerminalReady) {
-      log("WebSocket effect: early return", { taskId, sessionId, canConnect, isTerminalReady });
+    if (!taskId || !connectionKey || !canConnect || !isTerminalReady) {
+      log("WebSocket effect: early return", {
+        taskId,
+        connectionKey,
+        canConnect,
+        isTerminalReady,
+      });
       return;
     }
     if (!xtermRef.current || !fitAddonRef.current) {
@@ -475,11 +501,12 @@ export function useWebSocketConnection({
     // (not session-scoped), so the same xterm instance persists across session
     // switches.  Without this reset, the previous session's PTY output leaks
     // into the new session's scrollback.
-    log("Resetting terminal buffer for session", sessionId);
+    log("Resetting terminal buffer for terminal target", connectionKey);
     terminal.reset();
 
     const stopReconnectLoop = startReconnectLoop({
-      sessionId,
+      sessionId: sessionId ?? undefined,
+      environmentId: environmentId ?? undefined,
       wsBaseUrl,
       mode,
       terminalId,
@@ -514,6 +541,7 @@ export function useWebSocketConnection({
   }, [
     taskId,
     sessionId,
+    environmentId,
     canConnect,
     isTerminalReady,
     fitAndResize,

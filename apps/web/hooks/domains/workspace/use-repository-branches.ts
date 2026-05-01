@@ -1,9 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listRepositoryBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
+
+// Stale-while-revalidate: when the cache is older than this we fire a
+// background refresh on hook mount/repo change. The backend additionally
+// enforces a per-repo cooldown so this is the soft, client-side check.
+const CLIENT_STALE_MS = 60_000;
 
 export function useRepositoryBranches(repositoryId: string | null, enabled = true) {
   const branches = useAppStore((state) =>
@@ -17,30 +22,69 @@ export function useRepositoryBranches(repositoryId: string | null, enabled = tru
   const isLoading = useAppStore((state) =>
     repositoryId ? (state.repositoryBranches.loadingByRepositoryId[repositoryId] ?? false) : false,
   );
+  const fetchedAt = useAppStore((state) =>
+    repositoryId ? state.repositoryBranches.fetchedAtByRepositoryId[repositoryId] : undefined,
+  );
+  const fetchError = useAppStore((state) =>
+    repositoryId ? state.repositoryBranches.fetchErrorByRepositoryId[repositoryId] : undefined,
+  );
   const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
   const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
-  const inFlightRef = useRef(false);
+  const setRepositoryBranchesFetchError = useAppStore(
+    (state) => state.setRepositoryBranchesFetchError,
+  );
+  const inFlightRef = useRef<string | null>(null);
+
+  // Stable fetcher closed over the store actions; the repo id is a parameter
+  // so the same identity works for both mount-time fetches and refresh().
+  const runFetch = useCallback(
+    (repoId: string, refresh: boolean) => {
+      if (inFlightRef.current === repoId) return;
+      inFlightRef.current = repoId;
+      setRepositoryBranchesLoading(repoId, true);
+      listRepositoryBranches(repoId, { refresh }, { cache: "no-store" })
+        .then((response) => {
+          setRepositoryBranches(repoId, response.branches, {
+            fetchedAt: response.fetched_at,
+            fetchError: response.fetch_error,
+          });
+        })
+        .catch((err: unknown) => {
+          // Stale-while-revalidate: keep any previously-cached branches in
+          // place on transport failure so the dropdown stays usable. Only the
+          // fetchError is updated so callers can surface the failure.
+          const message = err instanceof Error ? err.message : "request failed";
+          setRepositoryBranchesFetchError(repoId, message);
+        })
+        .finally(() => {
+          if (inFlightRef.current === repoId) inFlightRef.current = null;
+          setRepositoryBranchesLoading(repoId, false);
+        });
+    },
+    [setRepositoryBranches, setRepositoryBranchesLoading, setRepositoryBranchesFetchError],
+  );
 
   useEffect(() => {
     if (!enabled || !repositoryId) return;
-    if (isLoaded || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setRepositoryBranchesLoading(repositoryId, true);
-    // Capture the repositoryId at effect start for the closure
-    const fetchRepoId = repositoryId;
-    listRepositoryBranches(fetchRepoId, { cache: "no-store" })
-      .then((response) => {
-        // Safe to always store: data is keyed by repositoryId in the store
-        setRepositoryBranches(fetchRepoId, response.branches);
-      })
-      .catch(() => {
-        setRepositoryBranches(fetchRepoId, []);
-      })
-      .finally(() => {
-        inFlightRef.current = false;
-        setRepositoryBranchesLoading(fetchRepoId, false);
-      });
-  }, [enabled, isLoaded, repositoryId, setRepositoryBranches, setRepositoryBranchesLoading]);
+    // Cold load: nothing in the cache, do a foreground fetch with refresh so
+    // the user sees fresh remote branches the first time the dialog opens.
+    if (!isLoaded) {
+      runFetch(repositoryId, true);
+      return;
+    }
+    // Warm cache, possibly stale: revalidate in the background. The backend
+    // cooldown ensures this doesn't hammer git when the dialog is reopened
+    // in quick succession.
+    const ageMs = fetchedAt ? Date.now() - new Date(fetchedAt).getTime() : Infinity;
+    if (ageMs >= CLIENT_STALE_MS) {
+      runFetch(repositoryId, true);
+    }
+  }, [enabled, isLoaded, repositoryId, fetchedAt, runFetch]);
 
-  return { branches, isLoading };
+  const refresh = useCallback(() => {
+    if (!repositoryId) return;
+    runFetch(repositoryId, true);
+  }, [repositoryId, runFetch]);
+
+  return { branches, isLoading, fetchedAt, fetchError, refresh };
 }

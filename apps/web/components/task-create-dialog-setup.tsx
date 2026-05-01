@@ -223,6 +223,9 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositoriesLoading,
     branches,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   const repositoryLocalPath = (() => {
@@ -271,6 +274,9 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     snapshots,
     repositoriesLoading,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     computed,
     handlers,
     submitHandlers,

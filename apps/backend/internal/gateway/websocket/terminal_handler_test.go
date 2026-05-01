@@ -2,9 +2,13 @@ package websocket
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestCheckWebSocketOrigin(t *testing.T) {
@@ -141,6 +145,61 @@ func TestStripTerminalResponses(t *testing.T) {
 			got := stripTerminalResponses(tt.input)
 			if !bytes.Equal(got, tt.want) {
 				t.Errorf("stripTerminalResponses(%q)\n got: %q\nwant: %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTerminalRoute(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		wantKind string
+		wantID   string
+	}{
+		{name: "environment route", target: "/environment/env-1", wantKind: terminalRouteEnvironment, wantID: "env-1"},
+		{name: "session route", target: "/session/session-1", wantKind: terminalRouteSession, wantID: "session-1"},
+		{name: "unknown route", target: "/unknown-target", wantKind: "", wantID: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTerminalRoute(&gin.Context{Params: gin.Params{{Key: "target", Value: tt.target}}})
+			if got.kind != tt.wantKind || got.id != tt.wantID {
+				t.Fatalf("parseTerminalRoute() = {%q %q}, want {%q %q}",
+					got.kind, got.id, tt.wantKind, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestSessionTerminalRouteRequiresAgentMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "missing mode", query: ""},
+		{name: "shell mode", query: "?mode=shell"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/terminal/session/session-1"+tt.query, nil)
+
+			handler := &TerminalHandler{}
+			handler.handleSessionTerminalRoute(c, "session-1")
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body["error"] != "session terminal route requires mode=agent; shell terminals must use /terminal/environment/:environmentId" {
+				t.Fatalf("error = %q", body["error"])
 			}
 		})
 	}
