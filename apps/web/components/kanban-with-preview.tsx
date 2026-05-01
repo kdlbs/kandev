@@ -21,6 +21,7 @@ import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
@@ -119,17 +120,6 @@ function useSessionSelectionReset(
     }
   }
   return [value, setValue];
-}
-
-function findTaskInSnapshots(
-  selectedTaskId: string,
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
-): KanbanState["tasks"][number] | null {
-  for (const snapshot of Object.values(snapshots)) {
-    const found = snapshot.tasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId);
-    if (found) return found;
-  }
-  return null;
 }
 
 function useSelectedTask(

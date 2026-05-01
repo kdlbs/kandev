@@ -58,7 +58,7 @@ export type EnsureSessionResponse = {
   session_id?: string;
   state: string;
   agent_profile_id?: string;
-  source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start" | "none";
+  source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start";
   newly_created: boolean;
 };
 

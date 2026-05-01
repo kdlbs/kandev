@@ -220,10 +220,7 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 	}
 	resp, err := h.orchestrator.EnsureSession(c.Request.Context(), taskID)
 	if err != nil {
-		h.logger.Error("failed to ensure task session",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
 	c.JSON(http.StatusOK, resp)

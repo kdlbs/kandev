@@ -8,7 +8,6 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestEnsureSession_RequiresTaskID(t *testing.T) {
@@ -150,7 +149,7 @@ func TestResolveTaskAgentProfile_TaskMetadataWins(t *testing.T) {
 		WorkflowStepID: "step1",
 		Metadata:       map[string]interface{}{"agent_profile_id": "task-profile"},
 	}
-	if got := svc.resolveTaskAgentProfile(context.Background(), task); got != "task-profile" {
+	if got, _ := svc.resolveTaskAgentProfile(context.Background(), task); got != "task-profile" {
 		t.Errorf("expected task-profile, got %q", got)
 	}
 }
@@ -165,7 +164,7 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", AgentProfileID: "step-profile"}
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		task := &models.Task{ID: "t1", WorkflowStepID: "step1"}
-		if got := svc.resolveTaskAgentProfile(ctx, task); got != "step-profile" {
+		if got, _ := svc.resolveTaskAgentProfile(ctx, task); got != "step-profile" {
 			t.Errorf("expected step-profile, got %q", got)
 		}
 	})
@@ -177,7 +176,7 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		stepGetter.workflowAgentProfileID = "wf-profile"
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		task := &models.Task{ID: "t1", WorkflowStepID: "step1"}
-		if got := svc.resolveTaskAgentProfile(ctx, task); got != "wf-profile" {
+		if got, _ := svc.resolveTaskAgentProfile(ctx, task); got != "wf-profile" {
 			t.Errorf("expected wf-profile, got %q", got)
 		}
 	})
@@ -193,7 +192,7 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		}
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 		task := &models.Task{ID: "t1", WorkspaceID: "ws-x"}
-		if got := svc.resolveTaskAgentProfile(ctx, task); got != "ws-profile" {
+		if got, _ := svc.resolveTaskAgentProfile(ctx, task); got != "ws-profile" {
 			t.Errorf("expected ws-profile, got %q", got)
 		}
 	})
@@ -206,11 +205,8 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		}
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 		task := &models.Task{ID: "t1", WorkspaceID: "ws-y"}
-		if got := svc.resolveTaskAgentProfile(ctx, task); got != "" {
+		if got, _ := svc.resolveTaskAgentProfile(ctx, task); got != "" {
 			t.Errorf("expected empty, got %q", got)
 		}
 	})
 }
-
-// silence unused import when v1 isn't referenced directly above.
-var _ = v1.TaskStateInProgress

@@ -16,19 +16,23 @@ type EnsureSessionResponse struct {
 	SessionID      string `json:"session_id,omitempty"`
 	State          string `json:"state"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	Source         string `json:"source"`        // existing_primary | existing_newest | created_prepare | created_start | none
+	Source         string `json:"source"`        // existing_primary | existing_newest | created_prepare | created_start
 	NewlyCreated   bool   `json:"newly_created"` // true when a new session was created by this call
 }
 
 // ensureLocks serializes EnsureSession calls per task id so concurrent callers
-// observe the same session rather than racing to create duplicates.
+// observe the same session rather than racing to create duplicates. Entries are
+// deleted on release so the map does not grow unbounded over the server lifetime.
 var ensureLocks sync.Map // map[taskID]*sync.Mutex
 
 func acquireEnsureLock(taskID string) func() {
 	v, _ := ensureLocks.LoadOrStore(taskID, &sync.Mutex{})
 	mu := v.(*sync.Mutex)
 	mu.Lock()
-	return mu.Unlock
+	return func() {
+		mu.Unlock()
+		ensureLocks.Delete(taskID)
+	}
 }
 
 // EnsureSession is the server-authoritative idempotent entry point for opening
@@ -52,8 +56,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string) (*EnsureSess
 		return nil, fmt.Errorf("task not found: %w", err)
 	}
 
-	agentProfileID := s.resolveTaskAgentProfile(ctx, task)
-	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
+	agentProfileID, step := s.resolveTaskAgentProfile(ctx, task)
 	autoStart := stepAllowsAutoStart(step)
 
 	intent := IntentPrepare
@@ -116,21 +119,25 @@ func existingResponse(taskID string, sess *models.TaskSession, source string) *E
 
 // resolveTaskAgentProfile applies the 4-step resolution chain on the backend:
 // 1) task.metadata.agent_profile_id, 2) workflow step override,
-// 3) workflow default, 4) workspace default. Returns "" when none resolve.
-func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) string {
+// 3) workflow default, 4) workspace default. Returns the resolved profile id
+// (or "" when none resolve) along with the workflow step it loaded (or nil).
+// Returning the step lets callers reuse it (e.g. to gate auto-start) without a
+// second DB lookup.
+func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
+	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
 	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v
+		return v, step
 	}
-	if step := s.lookupWorkflowStep(ctx, task.WorkflowStepID); step != nil {
+	if step != nil {
 		if id := s.resolveStepAgentProfile(ctx, step); id != "" {
-			return id
+			return id, step
 		}
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
 	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {
-		return *ws.DefaultAgentProfileID
+		return *ws.DefaultAgentProfileID, step
 	}
-	return ""
+	return "", step
 }
 
 func (s *Service) lookupWorkflowStep(ctx context.Context, stepID string) *wfmodels.WorkflowStep {

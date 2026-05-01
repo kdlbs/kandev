@@ -1,20 +1,10 @@
 import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import type { KanbanState } from "@/lib/state/slices";
 
 type Task = KanbanState["tasks"][number];
-
-function findTaskInSnapshots(
-  taskId: string,
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
-): Task | null {
-  for (const snapshot of Object.values(snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return null;
-}
 
 export function useTask(taskId: string | null) {
   // The active workflow's tasks live in `kanban.tasks`, but cross-workflow
