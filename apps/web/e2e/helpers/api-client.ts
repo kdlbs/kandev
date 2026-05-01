@@ -441,6 +441,19 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
   }
 
+  async getExecutorProfile(
+    executorId: string,
+    profileId: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    config?: Record<string, string>;
+    prepare_script?: string;
+    cleanup_script?: string;
+  }> {
+    return this.request("GET", `/api/v1/executors/${executorId}/profiles/${profileId}`);
+  }
+
   async listExecutors(): Promise<{
     executors: Array<{
       id: string;
