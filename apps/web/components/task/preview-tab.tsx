@@ -75,7 +75,7 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          className={cn("flex h-full items-center", !isPromoted && "italic")}
+          className={cn("flex h-full items-center cursor-pointer", !isPromoted && "italic")}
           onMouseDown={onMouseDown}
           onDoubleClick={onDoubleClick}
           title={isPromoted ? undefined : "Double-click to keep this tab open"}
@@ -85,12 +85,18 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={handleClose}>Close</ContextMenuItem>
-        <ContextMenuItem onSelect={handleCloseOthers}>Close Others</ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
+          Close
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
+          Close Others
+        </ContextMenuItem>
         {!isPromoted && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem onSelect={handleKeepOpen}>Keep Open</ContextMenuItem>
+            <ContextMenuItem className="cursor-pointer" onSelect={handleKeepOpen}>
+              Keep Open
+            </ContextMenuItem>
           </>
         )}
       </ContextMenuContent>
@@ -120,13 +126,17 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex h-full items-center" onMouseDown={onMouseDown}>
+        <div className="flex h-full items-center cursor-pointer" onMouseDown={onMouseDown}>
           <DockviewDefaultTab {...props} />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={handleClose}>Close</ContextMenuItem>
-        <ContextMenuItem onSelect={handleCloseOthers}>Close Others</ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
+          Close
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
+          Close Others
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

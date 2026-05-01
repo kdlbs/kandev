@@ -40,6 +40,14 @@ import { RepositoryScriptsMenuItems, useActiveSessionDevScript } from "./reposit
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 
+const HEADER_ACTION_BUTTON_CLASS =
+  "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+const RAW_HEADER_ACTION_BUTTON_CLASS =
+  "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
+const HEADER_ICON_CLASS = "h-3.5 w-3.5";
+const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
+const MENU_ITEM_CLASS = "cursor-pointer text-xs";
+
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
   return {
@@ -113,58 +121,52 @@ function AddPanelMenuItems({
         <>
           <DropdownMenuItem
             onClick={onNewSession}
-            className="cursor-pointer text-xs"
+            className={MENU_ITEM_CLASS}
             data-testid="new-session-button"
           >
-            <IconMessagePlus className="h-3.5 w-3.5 mr-1.5" />
+            <IconMessagePlus className={MENU_ICON_CLASS} />
             New Agent
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
         </>
       )}
-      <DropdownMenuItem onClick={onAddTerminal} className="cursor-pointer text-xs">
-        <IconTerminal2 className="h-3.5 w-3.5 mr-1.5" />
+      <DropdownMenuItem onClick={onAddTerminal} className={MENU_ITEM_CLASS}>
+        <IconTerminal2 className={MENU_ICON_CLASS} />
         Terminal
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => addBrowserPanel(undefined, groupId)}
-        className="cursor-pointer text-xs"
+        className={MENU_ITEM_CLASS}
       >
-        <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
+        <IconDeviceDesktop className={MENU_ICON_CLASS} />
         Browser
       </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => addVscodePanel()} className="cursor-pointer text-xs">
-        <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
+      <DropdownMenuItem onClick={() => addVscodePanel()} className={MENU_ITEM_CLASS}>
+        <IconBrandVscode className={MENU_ICON_CLASS} />
         VS Code
       </DropdownMenuItem>
       {!state.isPassthrough && (
-        <DropdownMenuItem
-          onClick={() => addPlanPanel({ groupId })}
-          className="cursor-pointer text-xs"
-        >
-          <IconFileText className="h-3.5 w-3.5 mr-1.5" />
+        <DropdownMenuItem onClick={() => addPlanPanel({ groupId })} className={MENU_ITEM_CLASS}>
+          <IconFileText className={MENU_ICON_CLASS} />
           Plan
         </DropdownMenuItem>
       )}
       {!state.hasChanges && (
-        <DropdownMenuItem
-          onClick={() => addChangesPanel(groupId)}
-          className="cursor-pointer text-xs"
-        >
-          <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
+        <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
+          <IconGitBranch className={MENU_ICON_CLASS} />
           Changes
         </DropdownMenuItem>
       )}
       {!state.hasFiles && (
-        <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className="cursor-pointer text-xs">
-          <IconFolder className="h-3.5 w-3.5 mr-1.5" />
+        <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className={MENU_ITEM_CLASS}>
+          <IconFolder className={MENU_ICON_CLASS} />
           Files
         </DropdownMenuItem>
       )}
       {state.pr && (
-        <DropdownMenuItem onClick={() => addPRPanel()} className="cursor-pointer text-xs">
-          <IconGitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+        <DropdownMenuItem onClick={() => addPRPanel()} className={MENU_ITEM_CLASS}>
+          <IconGitPullRequest className={MENU_ICON_CLASS} />
           {prPanelLabel(state.pr.pr_number)}
         </DropdownMenuItem>
       )}
@@ -219,16 +221,18 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   if (state.isSidebarGroup) return null;
 
   return (
-    <div className="flex items-center gap-1 pl-1">
+    <div className="flex items-center gap-0.5 pl-0.5">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 w-6 p-0 cursor-pointer"
+            className={HEADER_ACTION_BUTTON_CLASS}
             data-testid="dockview-add-panel-btn"
+            aria-label="Add panel"
+            title="Add panel"
           >
-            <IconPlus className="h-3.5 w-3.5" />
+            <IconPlus className={HEADER_ICON_CLASS} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-44">
@@ -326,7 +330,7 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const isTerminalGroup = group.id === rightBottomGroupId;
 
   return (
-    <div className="flex items-center gap-0.5 pr-1">
+    <div className="flex items-center gap-0.5 pr-0.5">
       {isCenterGroup && <CenterRightActions />}
       {isRightTopGroup && <RightTopGroupActions />}
       {isTerminalGroup && <TerminalGroupRightActions />}
@@ -402,10 +406,11 @@ function RightTopGroupActions() {
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+          className={RAW_HEADER_ACTION_BUTTON_CLASS}
           onClick={toggleRightPanels}
+          aria-label="Hide right panels"
         >
-          <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
+          <IconLayoutSidebarRightCollapse className={HEADER_ICON_CLASS} />
         </button>
       </TooltipTrigger>
       <TooltipContent>Hide right panels</TooltipContent>
@@ -452,11 +457,12 @@ function CenterRightActions() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer"
+          className={HEADER_ACTION_BUTTON_CLASS}
           onClick={handleStartBrowser}
+          aria-label="Open browser preview"
           title="Open browser preview"
         >
-          <IconDeviceDesktop className="h-3.5 w-3.5" />
+          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
         </Button>
       )}
     </div>
@@ -529,10 +535,11 @@ function TerminalGroupRightActions() {
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 w-6 p-0 cursor-pointer"
+              className={HEADER_ACTION_BUTTON_CLASS}
+              aria-label="Run script"
               title="Run script"
             >
-              <IconPlayerPlay className="h-3.5 w-3.5" />
+              <IconPlayerPlay className={HEADER_ICON_CLASS} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -540,9 +547,9 @@ function TerminalGroupRightActions() {
               <DropdownMenuItem
                 key={script.id}
                 onClick={() => handleRunScript(script.id)}
-                className="cursor-pointer text-xs"
+                className={MENU_ITEM_CLASS}
               >
-                <IconTerminal2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                <IconTerminal2 className={MENU_ICON_CLASS} />
                 <span className="truncate">{script.name}</span>
                 <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
                   {script.command}
@@ -556,11 +563,12 @@ function TerminalGroupRightActions() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer"
+          className={HEADER_ACTION_BUTTON_CLASS}
           onClick={handleStartPreview}
+          aria-label="Start dev server preview"
           title="Start dev server preview"
         >
-          <IconDeviceDesktop className="h-3.5 w-3.5" />
+          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
         </Button>
       )}
     </>
