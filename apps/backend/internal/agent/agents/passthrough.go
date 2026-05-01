@@ -16,7 +16,8 @@ func (p *StandardPassthrough) PassthroughConfig() PassthroughConfig {
 func (p *StandardPassthrough) BuildPassthroughCommand(opts PassthroughOptions) Command {
 	b := p.Cfg.PassthroughCmd.With().
 		Model(p.Cfg.ModelFlag, opts.Model).
-		Settings(p.PermSettings, opts.PermissionValues)
+		Settings(p.PermSettings, opts.PermissionValues).
+		Flag(opts.CLIFlagTokens...)
 
 	switch {
 	case opts.SessionID != "" && !p.Cfg.SessionResumeFlag.IsEmpty():

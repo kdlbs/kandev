@@ -207,6 +207,6 @@ export async function runStart({
   });
 
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log("[kandev] ready at " + ports.backendUrl);
+  console.log("[kandev] open: " + ports.backendUrl);
   openBrowser(ports.backendUrl);
 }

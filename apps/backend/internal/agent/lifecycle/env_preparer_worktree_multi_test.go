@@ -162,7 +162,6 @@ func newPreparerForTest(t *testing.T) (*WorktreePreparer, *worktree.Manager) {
 	tmp := t.TempDir()
 	cfg := worktree.Config{
 		Enabled:       true,
-		BasePath:      filepath.Join(tmp, "wt"),
 		TasksBasePath: filepath.Join(tmp, "tasks"),
 		BranchPrefix:  "feat/",
 	}

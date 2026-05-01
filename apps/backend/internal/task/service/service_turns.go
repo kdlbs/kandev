@@ -90,20 +90,32 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 }
 
 // GetActiveTurn returns the currently active (non-completed) turn for a session.
+// Returns (nil, nil) when no turn is active. Other errors (DB failures) are returned as-is.
 func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.turns.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.turns.GetActiveTurnBySessionID(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
 }
 
 // getOrStartTurn returns the active turn for a session, or starts a new one if none exists.
 // This is used to ensure messages always have a valid turn ID.
 func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	// First try to get an active turn
-	turn, err := s.turns.GetActiveTurnBySessionID(ctx, sessionID)
-	if err == nil && turn != nil {
+	// Route through GetActiveTurn so the ErrNoRows → (nil, nil) normalization
+	// applies consistently. A real DB read failure is logged before falling
+	// through to StartTurn — same observability contract as the orchestrator's
+	// startTurnForSession adoption path.
+	turn, err := s.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to look up active turn; will create a new one",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if turn != nil {
 		return turn, nil
 	}
 
-	// No active turn, start a new one
+	// No active turn (or read failed), start a new one
 	return s.StartTurn(ctx, sessionID)
 }
 
@@ -243,12 +255,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	info := &lifecycle.WorkspaceInfo{
-		TaskID:         taskID,
-		SessionID:      sessionID,
-		WorkspacePath:  workspacePath,
-		AgentProfileID: session.AgentProfileID,
-		AgentID:        agentID,
-		ACPSessionID:   acpSessionID,
+		TaskID:            taskID,
+		SessionID:         sessionID,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+		WorkspacePath:     workspacePath,
+		AgentProfileID:    session.AgentProfileID,
+		AgentID:           agentID,
+		ACPSessionID:      acpSessionID,
 	}
 
 	// Populate executor info for correct runtime selection and remote reconnection

@@ -11,12 +11,13 @@ import type { TaskSessionState } from "@/lib/types/http";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
-    tasks: { activeTaskId: null, activeSessionId: null },
+    tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
     setTaskSession: vi.fn(),
     setTaskSessionsForTask: vi.fn(),
     setActiveSession: vi.fn(),
+    setActiveSessionAuto: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     ...overrides,
@@ -133,7 +134,7 @@ describe("session.state_changed handler", () => {
 
 function makeAppState(partial: Partial<AppState>): AppState {
   return {
-    tasks: { activeTaskId: null, activeSessionId: null },
+    tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
     ...partial,
@@ -158,14 +159,14 @@ describe("isTerminalSessionState", () => {
 describe("shouldAdoptNewSession", () => {
   it("adopts when there is no active session for the task", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: null },
+      tasks: { activeTaskId: "t-1", activeSessionId: null, pinnedSessionId: null },
     });
     expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
   });
 
   it("adopts when active session belongs to a different task", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-other" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-other", pinnedSessionId: null },
       taskSessions: {
         items: { "s-other": { id: "s-other", task_id: "t-2", state: "RUNNING" } },
       } as unknown as AppState["taskSessions"],
@@ -175,7 +176,7 @@ describe("shouldAdoptNewSession", () => {
 
   it("adopts when active session is already terminal", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
       } as unknown as AppState["taskSessions"],
@@ -185,7 +186,7 @@ describe("shouldAdoptNewSession", () => {
 
   it("does NOT adopt while the current active session is still running", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
       } as unknown as AppState["taskSessions"],
@@ -195,14 +196,14 @@ describe("shouldAdoptNewSession", () => {
 
   it("does NOT adopt when the event is for a non-active task", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: null },
+      tasks: { activeTaskId: "t-1", activeSessionId: null, pinnedSessionId: null },
     });
     expect(shouldAdoptNewSession(state, "t-2", "STARTING")).toBe(false);
   });
 
   it("does NOT adopt terminal state events", () => {
     const state = makeAppState({
-      tasks: { activeTaskId: "t-1", activeSessionId: null },
+      tasks: { activeTaskId: "t-1", activeSessionId: null, pinnedSessionId: null },
     });
     expect(shouldAdoptNewSession(state, "t-1", "COMPLETED")).toBe(false);
   });
@@ -250,7 +251,7 @@ describe("session.state_changed → active session switching", () => {
 
   it("adopts a newly-created session for the active task", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "t-1", activeSessionId: null },
+      tasks: { activeTaskId: "t-1", activeSessionId: null, pinnedSessionId: null },
     });
     const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
@@ -261,12 +262,13 @@ describe("session.state_changed → active session switching", () => {
       payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
     });
 
-    expect(store.getState().setActiveSession).toHaveBeenCalledWith("t-1", "s-new");
+    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 
   it("does not adopt a new session for a task that is not active", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "other-task", activeSessionId: null },
+      tasks: { activeTaskId: "other-task", activeSessionId: null, pinnedSessionId: null },
     });
     const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
@@ -277,12 +279,12 @@ describe("session.state_changed → active session switching", () => {
       payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
     });
 
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 
   it("does not adopt while the current active session is still running", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
       },
@@ -296,7 +298,33 @@ describe("session.state_changed → active session switching", () => {
       payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
     });
 
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  // Regression for the reverse-event-ordering race: if the OLD pinned session's
+  // COMPLETED event arrives before the NEW session's STARTING event, the
+  // terminal-handoff guard (which protects pinning) doesn't run on the COMPLETED
+  // event because s-new isn't yet in the store. When the STARTING event
+  // arrives, shouldAdoptNewSession returns true (old is now terminal) and would
+  // auto-yank the user off their pinned session — unless we re-check pinning on
+  // this path too.
+  it("does not yank a pinned session on reverse event ordering (old COMPLETED, then new STARTING)", () => {
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 });
 
@@ -307,7 +335,7 @@ describe("session.state_changed → active session handoff on terminal", () => {
 
   it("hands off when the current active session transitions to terminal", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
       },
@@ -329,7 +357,8 @@ describe("session.state_changed → active session handoff on terminal", () => {
       payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
     });
 
-    expect(store.getState().setActiveSession).toHaveBeenCalledWith("t-1", "s-new");
+    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 
   // The per-task list here still shows s-old as RUNNING (pre-event state), so
@@ -338,7 +367,7 @@ describe("session.state_changed → active session handoff on terminal", () => {
   // to the same session that just became terminal.
   it("does not hand off when the only candidate is the terminating session itself", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
       },
@@ -359,12 +388,12 @@ describe("session.state_changed → active session handoff on terminal", () => {
       payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
     });
 
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 
   it("does not hand off when all other sessions for the task are terminal", () => {
     const store = makeStore({
-      tasks: { activeTaskId: "t-1", activeSessionId: "s-old" },
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: null },
       taskSessions: {
         items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
       },
@@ -386,6 +415,42 @@ describe("session.state_changed → active session handoff on terminal", () => {
       payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
     });
 
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed → respects user-pinned session", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does NOT hand off when the user pinned the session that just terminated", () => {
+    // User manually clicked s-old, so pinnedSessionId === "s-old".
+    // When s-old terminates we should respect the pin and stay on it.
+    const store = makeStore({
+      tasks: { activeTaskId: "t-1", activeSessionId: "s-old", pinnedSessionId: "s-old" },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,33 @@
 
 All notable changes to Kandev.
 
+## 0.38 - 2026-04-27
+
+### Features
+
+- add 'Has PR' task sidebar filter ([#713](https://github.com/kdlbs/kandev/pull/713))
+- plan checkpointing with rewind UI ([#694](https://github.com/kdlbs/kandev/pull/694))
+- add PR preview environments via Sprites ([#707](https://github.com/kdlbs/kandev/pull/707))
+- opt-in fresh-branch checkout for local executor task creation ([#695](https://github.com/kdlbs/kandev/pull/695))
+- add Jira integration for ticket browsing, import, and task linking ([#705](https://github.com/kdlbs/kandev/pull/705))
+- show repository scripts in dockview "+" menu ([#703](https://github.com/kdlbs/kandev/pull/703))
+- distinguish CI-passed PRs awaiting review from ready-to-merge ([#702](https://github.com/kdlbs/kandev/pull/702))
+- auto-open plan panel with unseen-changes indicator ([#650](https://github.com/kdlbs/kandev/pull/650))
+- add /spec for writing feature specs ([#700](https://github.com/kdlbs/kandev/pull/700))
+- support claude-acp Monitor tool and fix incremental tool_call updates ([#698](https://github.com/kdlbs/kandev/pull/698))
+
+### Bug Fixes
+
+- scope settings workflow list to current workspace ([#714](https://github.com/kdlbs/kandev/pull/714))
+- plug zombie turn leak pinning sessions to RUNNING ([#712](https://github.com/kdlbs/kandev/pull/712))
+- toggle off default-on curated CLI flags ([#711](https://github.com/kdlbs/kandev/pull/711))
+- flush ScheduleWakeup output via synthetic prompt ([#706](https://github.com/kdlbs/kandev/pull/706))
+- show skeleton in file tree header while workspace path loads ([#704](https://github.com/kdlbs/kandev/pull/704))
+- use bash for prepare scripts and fix pnpm install in sprites env ([#701](https://github.com/kdlbs/kandev/pull/701))
+- align sidebar filter toolbar height with panel headers ([#699](https://github.com/kdlbs/kandev/pull/699))
+- derive sidebar session state from most active session ([#697](https://github.com/kdlbs/kandev/pull/697))
+- auto-resume failed sessions with silent workspace-restore fallback ([#696](https://github.com/kdlbs/kandev/pull/696))
+
 ## 0.37 - 2026-04-25
 
 ### Features
@@ -73,7 +100,7 @@ All notable changes to Kandev.
 
 ### Bug Fixes
 
-- release script tags fetching
+- release script tags fetching ([986410ab](https://github.com/kdlbs/kandev/commit/986410ab2ebb1cc25e1ad046c9daae18a58cc150))
 - show repo name instead of full path in task sidebar ([#652](https://github.com/kdlbs/kandev/pull/652))
 - unstick agent session when cancel times out ([#651](https://github.com/kdlbs/kandev/pull/651))
 - anchor PR detail panel to session group on auto-open ([#646](https://github.com/kdlbs/kandev/pull/646))
@@ -1128,5 +1155,4 @@ All notable changes to Kandev.
 ### Merge
 
 - resolve conflicts with main
-
 

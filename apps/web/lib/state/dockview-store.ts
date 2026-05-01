@@ -2,10 +2,10 @@
 import { create } from "zustand";
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from "dockview-react";
 import {
-  setSessionLayout,
-  getSessionMaximizeState,
-  setSessionMaximizeState,
-  removeSessionMaximizeState,
+  setEnvLayout,
+  getEnvMaximizeState,
+  setEnvMaximizeState,
+  removeEnvMaximizeState,
 } from "@/lib/local-storage";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -22,7 +22,7 @@ import {
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
-import { performSessionSwitch } from "./dockview-session-switch";
+import { performEnvSwitch } from "./dockview-env-switch";
 import {
   injectIntentPanels,
   applyActivePanelOverrides,
@@ -129,8 +129,17 @@ type DockviewStore = {
   applyCustomLayout: (layout: SavedLayoutConfig) => void;
   captureCurrentLayout: () => Record<string, unknown>;
   isRestoringLayout: boolean;
-  currentLayoutSessionId: string | null;
-  switchSessionLayout: (oldSessionId: string | null, newSessionId: string) => void;
+  /** ID of the task environment whose layout is currently rendered. Layouts are
+   *  keyed by env so sessions sharing an env reuse one layout. */
+  currentLayoutEnvId: string | null;
+  /** Switch the rendered layout to a new task environment. Same-env switches
+   *  are a no-op (the layout already belongs to that env). `activeSessionId`
+   *  is the session whose chat panel should be present in the new env. */
+  switchEnvLayout: (
+    oldEnvId: string | null,
+    newEnvId: string,
+    activeSessionId: string | null,
+  ) => void;
   deferredPanelActions: DeferredPanelAction[];
   queuePanelAction: (action: DeferredPanelAction) => void;
   pinnedWidths: Map<string, number>;
@@ -146,9 +155,6 @@ type DockviewStore = {
   maximizedGroupId: string | null;
   maximizeGroup: (groupId: string) => void;
   exitMaximizedLayout: () => void;
-  /** One-shot flag: skip the next layout switch for this specific session ID.
-   *  Used when adding a panel within the same task to prevent a full rebuild. */
-  _skipLayoutSwitchForSession: string | null;
 };
 
 type StoreGet = () => DockviewStore;
@@ -390,8 +396,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
-function restoreMaximizeFromStorage(api: DockviewApi, sessionId: string, set: StoreSet): boolean {
-  const saved = getSessionMaximizeState(sessionId);
+function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreSet): boolean {
+  const saved = getEnvMaximizeState(envId);
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
@@ -408,73 +414,63 @@ function restoreMaximizeFromStorage(api: DockviewApi, sessionId: string, set: St
   return true;
 }
 
-/** Consume the one-shot skip flag. Returns true if the switch should be skipped. */
-function consumeSkipFlag(set: StoreSet, get: StoreGet, newSessionId: string): boolean {
-  const flag = get()._skipLayoutSwitchForSession;
-  if (!flag) return false;
-  set({ _skipLayoutSwitchForSession: null });
-  if (flag === newSessionId) {
-    set({ currentLayoutSessionId: newSessionId });
-    return true;
-  }
-  return false;
-}
-
-/** Save the outgoing session's layout & maximize state, then release its portals. */
-function saveOutgoingSession(
+/** Save the outgoing env's layout & maximize state, then release its portals. */
+function saveOutgoingEnv(
   api: DockviewApi,
-  oldSessionId: string | null,
+  oldEnvId: string | null,
   preMaximizeLayout: LayoutState | null,
 ): void {
-  if (!oldSessionId) return;
+  if (!oldEnvId) return;
   if (preMaximizeLayout) {
-    setSessionMaximizeState(oldSessionId, {
+    setEnvMaximizeState(oldEnvId, {
       preMaximizeLayout: preMaximizeLayout as unknown as object,
       maximizedDockviewJson: api.toJSON(),
     });
   } else {
-    removeSessionMaximizeState(oldSessionId);
+    removeEnvMaximizeState(oldEnvId);
   }
   try {
-    setSessionLayout(oldSessionId, api.toJSON());
+    setEnvLayout(oldEnvId, api.toJSON());
   } catch {
     /* ignore */
   }
-  panelPortalManager.releaseBySession(oldSessionId);
+  panelPortalManager.releaseByEnv(oldEnvId);
 }
 
-function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
-  return (oldSessionId: string | null, newSessionId: string) => {
-    const { api, currentLayoutSessionId, preMaximizeLayout } = get();
+function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
+  return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
+    const { api, currentLayoutEnvId, preMaximizeLayout } = get();
     if (!api) return;
-    if (consumeSkipFlag(set, get, newSessionId)) return;
-    if (currentLayoutSessionId === newSessionId) return;
-    // First session adoption — onReady already built the layout; just adopt it.
-    if (!oldSessionId && !currentLayoutSessionId) {
-      set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
-      if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
-      set({ isRestoringLayout: false, currentLayoutSessionId: newSessionId });
+    // Same-env switch (e.g. between sessions of the same task) is a no-op.
+    // The layout, terminals, and env-scoped portals already belong to this env.
+    if (currentLayoutEnvId === newEnvId) return;
+    // First adoption — onReady already built the layout; just adopt it.
+    if (!oldEnvId && !currentLayoutEnvId) {
+      set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
+      if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
+      set({ isRestoringLayout: false, currentLayoutEnvId: newEnvId });
       try {
-        setSessionLayout(newSessionId, api.toJSON());
+        setEnvLayout(newEnvId, api.toJSON());
       } catch {
         /* ignore */
       }
       return;
     }
-    // When oldSessionId is null but there is a live layout session (e.g. the
-    // useSessionSwitchCleanup hook fires after passing through a null state),
-    // fall back to currentLayoutSessionId so we correctly save and release the
-    // outgoing session rather than silently skipping it.
-    const effectiveOld = oldSessionId ?? currentLayoutSessionId;
-    saveOutgoingSession(api, effectiveOld, preMaximizeLayout);
+    // When oldEnvId is null but there is a live layout env (e.g. the
+    // useEnvSwitchCleanup hook fires after passing through a null state),
+    // fall back to currentLayoutEnvId so we correctly save and release the
+    // outgoing env rather than silently skipping it.
+    const effectiveOld = oldEnvId ?? currentLayoutEnvId;
+    saveOutgoingEnv(api, effectiveOld, preMaximizeLayout);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
-    set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
+    set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
-      if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
-      const ids = performSessionSwitch({
+      if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
+      const ids = performEnvSwitch({
         api,
-        oldSessionId: effectiveOld,
-        newSessionId,
+        oldEnvId: effectiveOld,
+        newEnvId,
+        activeSessionId,
         safeWidth: api.width,
         safeHeight: api.height,
         buildDefault: (a) => get().buildDefaultLayout(a),
@@ -492,13 +488,14 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
 function buildMaximizeActions(set: StoreSet, get: StoreGet) {
   return {
     maximizeGroup: (groupId: string) => {
-      const { api, preMaximizeLayout, currentLayoutSessionId } = get();
+      const { api, preMaximizeLayout, currentLayoutEnvId } = get();
       if (!api) return;
       if (preMaximizeLayout) {
         get().exitMaximizedLayout();
         return;
       }
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       const current = fromDockviewApi(api);
       let targetGroup: {
         panels: LayoutState["columns"][0]["groups"][0]["panels"];
@@ -528,9 +525,8 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
-        // Persist to sessionStorage so maximize survives page refresh
-        if (currentLayoutSessionId) {
-          setSessionMaximizeState(currentLayoutSessionId, {
+        if (currentLayoutEnvId) {
+          setEnvMaximizeState(currentLayoutEnvId, {
             preMaximizeLayout: current as unknown as object,
             maximizedDockviewJson: api.toJSON(),
           });
@@ -539,14 +535,15 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       });
     },
     exitMaximizedLayout: () => {
-      const { api, preMaximizeLayout, currentLayoutSessionId } = get();
+      const { api, preMaximizeLayout, currentLayoutEnvId } = get();
       if (!api || !preMaximizeLayout) return;
+      preserveChatScrollDuringLayout();
       const safeWidth = api.width;
       const safeHeight = api.height;
       const liveWidths = get().pinnedWidths;
       set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
-      if (currentLayoutSessionId) {
-        removeSessionMaximizeState(currentLayoutSessionId);
+      if (currentLayoutEnvId) {
+        removeEnvMaximizeState(currentLayoutEnvId);
       }
       applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
       requestAnimationFrame(() => {
@@ -653,13 +650,13 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
   isRestoringLayout: false,
-  currentLayoutSessionId: null,
+  currentLayoutEnvId: null,
   deferredPanelActions: [],
   queuePanelAction: (action) =>
     set((prev) => ({
       deferredPanelActions: [...prev.deferredPanelActions, action],
     })),
-  switchSessionLayout: buildSessionSwitchAction(set, get),
+  switchEnvLayout: buildEnvSwitchAction(set, get),
   buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
   resetLayout: () => {
     const { api } = get();
@@ -669,13 +666,43 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
   preMaximizeLayout: null,
   maximizedGroupId: null,
-  _skipLayoutSwitchForSession: null,
   ...buildMaximizeActions(set, get),
   ...buildPanelActions(set, get),
   ...buildExtraPanelActions(get),
 }));
 
-/** Perform a layout switch between sessions. */
-export function performLayoutSwitch(oldSessionId: string | null, newSessionId: string): void {
-  useDockviewStore.getState().switchSessionLayout(oldSessionId, newSessionId);
+/**
+ * Perform a layout switch between task environments. Same-env (e.g. between
+ * sessions of the same task) is a no-op — terminals + layout stay put.
+ *
+ * `activeSessionId` is the session whose chat panel should be present in the
+ * resulting layout. It can differ across sessions of the same env, but layout
+ * reuse means we just ensure the right session: chat panel is visible.
+ */
+export function performLayoutSwitch(
+  oldEnvId: string | null,
+  newEnvId: string,
+  activeSessionId: string | null,
+): void {
+  useDockviewStore.getState().switchEnvLayout(oldEnvId, newEnvId, activeSessionId);
+}
+
+/**
+ * Release the dockview to a clean default layout — used when selecting a task
+ * that has no session (and prepare failed to launch one). Without this the
+ * dockview keeps the outgoing env's panels live but disconnected from any
+ * active session, and the corrupted state can be persisted on the next save.
+ */
+export function releaseLayoutToDefault(oldEnvId: string | null): void {
+  const { api, currentLayoutEnvId, preMaximizeLayout, buildDefaultLayout } =
+    useDockviewStore.getState();
+  if (!api) return;
+  const effectiveOld = oldEnvId ?? currentLayoutEnvId;
+  saveOutgoingEnv(api, effectiveOld, preMaximizeLayout);
+  useDockviewStore.setState({
+    preMaximizeLayout: null,
+    maximizedGroupId: null,
+    currentLayoutEnvId: null,
+  });
+  buildDefaultLayout(api);
 }

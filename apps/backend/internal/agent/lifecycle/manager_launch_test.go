@@ -175,3 +175,31 @@ func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
 	require.False(t, preparer.called, "preparer should be skipped when no repository path")
 	require.Nil(t, result)
 }
+
+func TestLaunchResolveWorkspacePath_EphemeralCreatesQuickChatDir(t *testing.T) {
+	mgr := newTestManager()
+	mgr.dataDir = t.TempDir()
+
+	req := &LaunchRequest{
+		SessionID:   "session-abc",
+		IsEphemeral: true,
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	require.NotEmpty(t, workspacePath, "ephemeral task should get a quick-chat workspace")
+	require.Contains(t, workspacePath, "quick-chat")
+	require.Contains(t, workspacePath, "session-abc")
+}
+
+func TestLaunchResolveWorkspacePath_NonEphemeralSkipsQuickChatDir(t *testing.T) {
+	mgr := newTestManager()
+	mgr.dataDir = t.TempDir()
+
+	req := &LaunchRequest{
+		SessionID:   "session-xyz",
+		IsEphemeral: false,
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	require.Empty(t, workspacePath, "non-ephemeral task without repo should NOT get a quick-chat workspace")
+}

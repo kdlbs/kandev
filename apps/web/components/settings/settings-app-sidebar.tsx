@@ -13,11 +13,13 @@ import {
   IconKey,
   IconMessageCircle,
   IconBrandGithub,
+  IconHexagon,
   IconSparkles,
   IconWand,
   IconGitBranch,
   IconArrowsShuffle,
   IconTicket,
+  IconPlugConnected,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -108,6 +110,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
             const repositoriesPath = `${workspacePath}/repositories`;
             const githubPath = `${workspacePath}/github`;
             const jiraPath = `${workspacePath}/jira`;
+            const linearPath = `${workspacePath}/linear`;
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
@@ -150,6 +153,14 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                       <Link href={jiraPath}>
                         <IconTicket className="h-3.5 w-3.5" />
                         <span>Jira</span>
+                      </Link>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                  <SidebarMenuSubItem>
+                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === linearPath}>
+                      <Link href={linearPath}>
+                        <IconHexagon className="h-3.5 w-3.5" />
+                        <span>Linear</span>
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
@@ -326,6 +337,16 @@ export function SettingsAppSidebar() {
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
                 <SecretsSidebarSection pathname={pathname} />
+
+                {/* External MCP */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/settings/external-mcp"}>
+                    <Link href="/settings/external-mcp">
+                      <IconPlugConnected className="h-4 w-4" />
+                      <span>External MCP</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
 
                 {/* Changelog */}
                 <SidebarMenuItem>

@@ -87,6 +87,85 @@ func TestQueueMessage(t *testing.T) {
 	})
 }
 
+func TestTransferSession(t *testing.T) {
+	t.Run("moves queued message and pending move from old to new session", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, err := svc.QueueMessage(ctx, "old-sess", "task-1", "hand-off prompt", "", "mcp-move-task", false, nil)
+		require.NoError(t, err)
+		svc.SetPendingMove(ctx, "old-sess", &PendingMove{
+			TaskID:         "task-1",
+			WorkflowStepID: "step-b",
+		})
+
+		svc.TransferSession(ctx, "old-sess", "new-sess")
+
+		// Old session is empty.
+		_, exists := svc.TakeQueued(ctx, "old-sess")
+		assert.False(t, exists)
+		_, exists = svc.TakePendingMove(ctx, "old-sess")
+		assert.False(t, exists)
+
+		// New session has both.
+		msg, exists := svc.TakeQueued(ctx, "new-sess")
+		require.True(t, exists)
+		assert.Equal(t, "hand-off prompt", msg.Content)
+		assert.Equal(t, "new-sess", msg.SessionID)
+
+		move, exists := svc.TakePendingMove(ctx, "new-sess")
+		require.True(t, exists)
+		assert.Equal(t, "step-b", move.WorkflowStepID)
+	})
+
+	t.Run("no-op when source session is empty", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		svc.TransferSession(ctx, "empty-sess", "new-sess")
+
+		_, exists := svc.TakeQueued(ctx, "new-sess")
+		assert.False(t, exists)
+	})
+}
+
+func TestPendingMove(t *testing.T) {
+	t.Run("set then take returns the move and clears it", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		svc.SetPendingMove(ctx, "session-1", &PendingMove{
+			TaskID:         "task-1",
+			WorkflowID:     "wf-1",
+			WorkflowStepID: "step-2",
+			Position:       3,
+		})
+
+		got, exists := svc.TakePendingMove(ctx, "session-1")
+		require.True(t, exists)
+		assert.Equal(t, "task-1", got.TaskID)
+		assert.Equal(t, "step-2", got.WorkflowStepID)
+		assert.Equal(t, 3, got.Position)
+		assert.NotZero(t, got.QueuedAt)
+
+		// Idempotent — second take returns nothing.
+		_, exists = svc.TakePendingMove(ctx, "session-1")
+		assert.False(t, exists)
+	})
+
+	t.Run("setting twice replaces the previous move", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		svc.SetPendingMove(ctx, "session-1", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+		svc.SetPendingMove(ctx, "session-1", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+
+		got, exists := svc.TakePendingMove(ctx, "session-1")
+		require.True(t, exists)
+		assert.Equal(t, "step-b", got.WorkflowStepID)
+	})
+}
+
 func TestTakeQueued(t *testing.T) {
 	t.Run("retrieves and removes queued message", func(t *testing.T) {
 		svc := setupService(t)

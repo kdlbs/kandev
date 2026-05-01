@@ -250,9 +250,7 @@ function launchReleaseApps(prepared: PreparedRelease): {
       backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
       webPort: prepared.webPort,
       agentctlPort: prepared.agentctlPort,
-      mcpPort: 0,
       backendUrl: prepared.backendUrl,
-      mcpUrl: "",
     },
     dbPath: prepared.dbPath,
     logLevel: prepared.logLevel,
@@ -320,6 +318,6 @@ export async function runRelease({
     quiet: !prepared.showOutput,
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log("[kandev] ready at " + prepared.backendUrl);
+  console.log("[kandev] open: " + prepared.backendUrl);
   openBrowser(prepared.backendUrl);
 }

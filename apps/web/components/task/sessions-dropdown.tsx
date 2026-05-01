@@ -102,9 +102,12 @@ function useSessionSelectionHandlers(taskId: string | null) {
   const handleSelectSession = useCallback(
     (sessionId: string, close: () => void) => {
       if (!taskId) return;
-      const oldSessionId = appStore.getState().tasks.activeSessionId;
+      const state = appStore.getState();
+      const oldSessionId = state.tasks.activeSessionId;
+      const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
+      const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
       setActiveSession(taskId, sessionId);
-      performLayoutSwitch(oldSessionId, sessionId);
+      if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
       close();
     },
     [appStore, setActiveSession, taskId],

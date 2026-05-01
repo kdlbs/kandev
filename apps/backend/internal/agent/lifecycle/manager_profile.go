@@ -157,8 +157,12 @@ func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID stri
 	return info.Model, info.Mode
 }
 
-// initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
+// initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
+// We pass MarkBootReady (not MarkReady) for the no-prompt branches: dispatchInitialPrompt only
+// invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
+// signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
+// MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode := m.resolveProfileModelAndMode(ctx, execution.AgentProfileID)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkReady, profileModel, profileMode)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, profileMode)
 }

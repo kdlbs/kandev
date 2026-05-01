@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan } from "@/lib/types/http";
+import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -62,11 +62,24 @@ export type ActiveModelState = {
   bySessionId: Record<string, string>;
 };
 
+/** Ordered slot pair for the compare-revisions feature. Either slot may be
+ * null. Reducers enforce a 2-slot cap and reject duplicates. */
+export type ComparePair = [string | null, string | null];
+
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  revisionsByTaskId: Record<string, TaskPlanRevision[]>;
+  revisionsLoadingByTaskId: Record<string, boolean>;
+  revisionsLoadedByTaskId: Record<string, boolean>;
+  revisionContentCache: Record<string, string>; // revisionId -> content
+  // Phase 6: preview + compare state
+  previewRevisionIdByTaskId: Record<string, string | null>;
+  comparePairByTaskId: Record<string, ComparePair>;
+  // From main: tracks the last `updated_at` the user has seen, so the panel
+  // can flag unseen-changes after agent writes between visits.
   lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
@@ -143,6 +156,15 @@ export type SessionSliceActions = {
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
+  // Revision actions
+  setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
+  upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
+  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
+  cachePlanRevisionContent: (revisionId: string, content: string) => void;
+  // Phase 6: preview + compare actions
+  setPreviewRevision: (taskId: string, revisionId: string | null) => void;
+  toggleComparePair: (taskId: string, revisionId: string) => void;
+  clearComparePair: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;

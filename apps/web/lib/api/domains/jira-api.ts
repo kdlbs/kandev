@@ -1,11 +1,14 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  CreateJiraIssueWatchInput,
   JiraConfig,
+  JiraIssueWatch,
   JiraProject,
   JiraSearchResult,
   JiraTicket,
   SetJiraConfigRequest,
   TestJiraConnectionResult,
+  UpdateJiraIssueWatchInput,
 } from "@/lib/types/jira";
 
 // getJiraConfig returns null when the backend responds 204 (no config yet).
@@ -87,5 +90,67 @@ export async function transitionJiraTicket(
       ...options,
       init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ transitionId }) },
     },
+  );
+}
+
+// --- Issue watches ---
+
+export async function listJiraIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
+  const res = await fetchJson<{ watches: JiraIssueWatch[] }>(
+    `/api/v1/jira/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+  return res.watches ?? [];
+}
+
+export async function createJiraIssueWatch(
+  payload: CreateJiraIssueWatchInput,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<JiraIssueWatch>(`/api/v1/jira/watches/issue`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+  });
+}
+
+// All mutation/trigger endpoints require `workspace_id` so the backend can
+// reject cross-workspace IDOR (a watch UUID from another workspace would
+// otherwise be mutable by id alone). The list/create endpoints already scope
+// by workspace; these now match.
+
+export async function updateJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  payload: UpdateJiraIssueWatchInput,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<JiraIssueWatch>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
+    },
+  );
+}
+
+export async function deleteJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
+  );
+}
+
+export async function triggerJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ newIssues: number }>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}/trigger?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
   );
 }

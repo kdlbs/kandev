@@ -9,6 +9,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -22,7 +23,7 @@ func TestHandshakeIntegration_FullFlow(t *testing.T) {
 		BootstrapNonce: "integration-test-nonce-abc123",
 	}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
-	cs := NewControlServer(cfg, nil, log)
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
 
 	server := httptest.NewServer(cs.Router())
 	defer server.Close()
@@ -56,8 +57,8 @@ func TestHandshakeIntegration_FullFlow(t *testing.T) {
 	}
 
 	// 6. After handshake, authenticated requests should WORK
-	//    (ListInstances will return an error because instMgr is nil,
-	//     but it should NOT be a 401 — it should get past auth)
+	//    (ListInstances may return an endpoint/client error, but it should
+	//     NOT be a 401 — it should get past auth.)
 	_, err = client.ListInstances(ctx)
 	if err != nil {
 		// If the error mentions "unauthorized" or "auth", auth is still failing
@@ -89,7 +90,7 @@ func TestHandshakeIntegration_StandaloneMode(t *testing.T) {
 		// No BootstrapNonce — standalone mode
 	}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
-	cs := NewControlServer(cfg, nil, log)
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
 
 	server := httptest.NewServer(cs.Router())
 	defer server.Close()
@@ -141,5 +142,5 @@ func parseHostPort(t *testing.T, url string) (string, int) {
 
 func containsAuthError(s string) bool {
 	lower := strings.ToLower(s)
-	return strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401")
+	return strings.Contains(lower, "unauthorized") || strings.Contains(lower, "status 401")
 }

@@ -103,7 +103,17 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 // launchPrepare creates a session entry without launching the agent.
+// Passthrough profiles can't be "prepared" without a running PTY — the terminal
+// has nothing to attach to until the agent process exists. Upgrade those calls
+// to a full start so the PTY is ready by the time the user sees the terminal.
+//
+// AutoStart=true means we arrived here from launchStart's blocked-auto-start
+// downgrade path; skipping the upgrade in that case avoids a launchStart ↔
+// launchPrepare bounce.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if !req.AutoStart && s.isPassthroughProfile(ctx, req.AgentProfileID) {
+		return s.launchStart(ctx, req)
+	}
 	sessionID, err := s.PrepareTaskSession(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
@@ -117,6 +127,17 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 		SessionID: sessionID,
 		State:     string(models.TaskSessionStateCreated),
 	}, nil
+}
+
+func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
+	if profileID == "" || s.agentManager == nil {
+		return false
+	}
+	info, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return false
+	}
+	return info.CLIPassthrough
 }
 
 // launchStart creates a new session and launches the agent.
@@ -254,11 +275,31 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
 	}
 
-	return s.LaunchSession(ctx, &LaunchSessionRequest{
+	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Intent:    IntentResume,
 	})
+	if err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	return resp, nil
+}
+
+func normalizeRecoverSessionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isMissingProfileResumeError(err) {
+		return fmt.Errorf("the agent profile used by this session was deleted; start a new session and choose an available agent profile: %w", err)
+	}
+	return err
+}
+
+func isMissingProfileResumeError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "failed to resolve agent profile") ||
+		strings.Contains(msg, "agent profile not found")
 }
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.

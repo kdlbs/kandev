@@ -462,8 +462,9 @@ test.describe("Workflow automation", () => {
    * "in-progress") which don't resolve to actual step UUIDs — they're no-ops.
    *
    * Flow:
-   * 1. Create task with description via dialog + Start Agent → task starts in Backlog
-   * 2. on_turn_start fires (move_to_next) → task moves to In Progress
+   * 1. Create task in Backlog (no start_agent) and navigate to the task page
+   * 2. Send a chat message — only the WS message path runs on_turn_start via
+   *    dispatchPromptAsync, so the Backlog → In Progress move triggers here
    * 3. Agent completes → on_turn_complete fires with move_to_step("review")
    *    which is gracefully skipped (invalid step_id) → task stays in In Progress
    */
@@ -506,48 +507,41 @@ test.describe("Workflow automation", () => {
       enable_preview_on_click: false,
     });
 
-    // --- Create task via dialog with description + Start Agent ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    // Create the task in Backlog without starting the agent — the prompt is
+    // sent below as a chat message so on_turn_start fires.
+    const task = await apiClient.createTask(seedData.workspaceId, "Kanban Flow Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: backlogStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    await testPage.getByTestId("task-title-input").fill("Kanban Flow Task");
-    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
-
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // Task should be in In Progress: on_turn_start fires on the initial prompt
-    // and moves the task from Backlog → In Progress via move_to_next.
-    // After the agent completes, on_turn_complete's move_to_step("review") is
-    // gracefully skipped (invalid step_id), so the task stays in In Progress.
-    const card = kanban.taskCardInColumn("Kanban Flow Task", inProgressStep.id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-
-    // Navigate to session to verify agent completed successfully
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    // Agent response confirms the mock agent ran
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+    // User message → dispatchPromptAsync → on_turn_start (move_to_next) →
+    // Backlog → In Progress.
+    await session.sendMessage("/e2e:simple-message");
+    await expect(session.chat.getByText("/e2e:simple-message")).toBeVisible({ timeout: 10_000 });
+
+    // Stepper reflects the move to In Progress.
+    await expect(session.stepperStep("In Progress")).toHaveAttribute("aria-current", "step", {
       timeout: 30_000,
     });
 
-    // Session transitions to idle — task is still functional
+    // Agent response confirms the mock agent ran; on_turn_complete then fires
+    // with move_to_step("review") — invalid step_id → gracefully skipped.
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Stepper shows In Progress as current step
-    await expect(session.stepperStep("In Progress")).toHaveAttribute("aria-current", "step", {
-      timeout: 15_000,
-    });
+    // Task stays in In Progress on the kanban board (invalid step_id is a no-op).
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardInColumn("Kanban Flow Task", inProgressStep.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
   });
 
   /**

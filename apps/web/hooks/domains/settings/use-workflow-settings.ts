@@ -7,9 +7,18 @@ import type { Workflow } from "@/lib/types/http";
 /**
  * Manages workflow list state for the settings page, synced with WS events
  * from the Zustand store. Supports local edits (dirty tracking) and temp drafts.
+ *
+ * `workspaceId` scopes the visible workflows to the current workspace so that
+ * stale entries from previously visited workspaces (still cached in the global
+ * Zustand store) don't leak into another workspace's settings page.
  */
-export function useWorkflowSettings(initialWorkflows: Workflow[]) {
+export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: string) {
   const storeWorkflows = useAppStore((state) => state.workflows.items);
+  const scopedStoreWorkflows = useMemo(
+    () =>
+      workspaceId ? storeWorkflows.filter((w) => w.workspaceId === workspaceId) : storeWorkflows,
+    [storeWorkflows, workspaceId],
+  );
   const [workflowItems, setWorkflowItems] = useState<Workflow[]>(initialWorkflows);
   const [savedWorkflowItems, setSavedWorkflowItems] = useState<Workflow[]>(initialWorkflows);
 
@@ -45,7 +54,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
   const prevStoreIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const currentStoreIds = new Set(storeWorkflows.map((w) => w.id));
+    const currentStoreIds = new Set(scopedStoreWorkflows.map((w) => w.id));
     const prevStoreIds = prevStoreIdsRef.current;
 
     // IDs that were in the store last render but are gone now → actually deleted via WS.
@@ -60,7 +69,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
       const tempWorkspaceIds = new Set(
         prev.filter((w) => w.id.startsWith("temp-")).map((w) => w.workspace_id),
       );
-      return storeWorkflows
+      return scopedStoreWorkflows
         .filter((sw) => !localIds.has(sw.id) && !tempWorkspaceIds.has(sw.workspaceId))
         .map((sw) => storeItemToWorkflow(sw));
     };
@@ -72,7 +81,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
       const filtered = prev.filter((w) => !deletedIds.has(w.id));
       const updated = filtered.map((w) => {
         if (w.id.startsWith("temp-")) return w;
-        const sw = storeWorkflows.find((s) => s.id === w.id);
+        const sw = scopedStoreWorkflows.find((s) => s.id === w.id);
         if (sw && sw.name !== w.name) return { ...w, name: sw.name };
         return w;
       });
@@ -93,7 +102,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
       if (toAdd.length === 0 && filtered.length === prev.length) return prev;
       return [...toAdd, ...filtered];
     });
-  }, [storeWorkflows]);
+  }, [scopedStoreWorkflows]);
 
   const savedWorkflowsById = useMemo(() => {
     return new Map(savedWorkflowItems.map((w) => [w.id, w]));

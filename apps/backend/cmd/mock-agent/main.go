@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -89,6 +90,11 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
 
+	// Emit available commands asynchronously after the session/new response
+	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
+	// here, which lets clients populate slash menus before the first prompt.
+	go a.emitAvailableCommandsAfterDelay(sid)
+
 	return acp.NewSessionResponse{
 		SessionId: sid,
 		Models:    mockSessionModels(),
@@ -131,8 +137,15 @@ func mockSessionModes() *acp.SessionModeState {
 func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
+	// Reset emit state so the resume re-advertises commands (matches real
+	// agents which re-emit on session/load).
+	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
+
+	// Re-emit available commands after the session/load response flushes.
+	go a.emitAvailableCommandsAfterDelay(req.SessionId)
+
 	return acp.LoadSessionResponse{}, nil
 }
 
@@ -162,9 +175,9 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionCo
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
-// emitAvailableCommandsOnce sends the available commands list once per session,
-// on the first prompt. Emitting during Prompt (not NewSession) avoids writing
-// notifications to stdout before the JSON-RPC session response.
+// emitAvailableCommandsOnce sends the available commands list once per session.
+// Idempotent — guarded by `commandsEmitted` so callers (NewSession, LoadSession,
+// first Prompt) can call it freely.
 func (a *mockAgent) emitAvailableCommandsOnce(ctx context.Context, sid acp.SessionId) {
 	a.mu.Lock()
 	if a.commandsEmitted[sid] {
@@ -182,6 +195,16 @@ func (a *mockAgent) emitAvailableCommandsOnce(ctx context.Context, sid acp.Sessi
 			},
 		},
 	})
+}
+
+// emitAvailableCommandsAfterDelay defers the emit so the JSON-RPC response for
+// session/new or session/load is written to stdout first. Real ACP agents
+// (OpenCode, Claude) emit available_commands_update notifications immediately
+// after these handshakes, so kandev clients can populate slash menus before
+// the first prompt — eager-init for quick chat depends on this.
+func (a *mockAgent) emitAvailableCommandsAfterDelay(sid acp.SessionId) {
+	time.Sleep(50 * time.Millisecond)
+	a.emitAvailableCommandsOnce(context.Background(), sid)
 }
 
 // mockAvailableCommands returns the slash commands supported by the mock agent.

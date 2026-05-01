@@ -118,3 +118,83 @@ type SearchResult struct {
 func SecretKeyForWorkspace(workspaceID string) string {
 	return "jira:" + workspaceID + ":token"
 }
+
+// DefaultIssueWatchPollInterval is the polling cadence assigned to a watcher
+// when the caller does not specify one. Five minutes balances freshness against
+// Atlassian rate limits when many workspaces have watches configured.
+const DefaultIssueWatchPollInterval = 300
+
+// IssueWatch configures periodic JQL polling: a workspace-scoped watcher runs
+// the JQL on a schedule and emits a NewJiraIssueEvent for each matching ticket
+// the orchestrator hasn't already turned into a Kandev task.
+//
+// Unlike the GitHub equivalent, JIRA issues have no repository affinity — the
+// target workflow step's defaults determine where the resulting task runs, so
+// there's no `repos` column.
+type IssueWatch struct {
+	ID                  string     `json:"id" db:"id"`
+	WorkspaceID         string     `json:"workspaceId" db:"workspace_id"`
+	WorkflowID          string     `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID      string     `json:"workflowStepId" db:"workflow_step_id"`
+	JQL                 string     `json:"jql" db:"jql"`
+	AgentProfileID      string     `json:"agentProfileId" db:"agent_profile_id"`
+	ExecutorProfileID   string     `json:"executorProfileId" db:"executor_profile_id"`
+	Prompt              string     `json:"prompt" db:"prompt"`
+	Enabled             bool       `json:"enabled" db:"enabled"`
+	PollIntervalSeconds int        `json:"pollIntervalSeconds" db:"poll_interval_seconds"`
+	LastPolledAt        *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
+	CreatedAt           time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt           time.Time  `json:"updatedAt" db:"updated_at"`
+}
+
+// IssueWatchTask deduplicates task creation per (watch, ticket) tuple. The
+// UNIQUE constraint on (issue_watch_id, issue_key) prevents two concurrent
+// pollers from racing to create duplicate tasks for the same ticket.
+type IssueWatchTask struct {
+	ID           string    `json:"id" db:"id"`
+	IssueWatchID string    `json:"issueWatchId" db:"issue_watch_id"`
+	IssueKey     string    `json:"issueKey" db:"issue_key"`
+	IssueURL     string    `json:"issueUrl" db:"issue_url"`
+	TaskID       string    `json:"taskId" db:"task_id"`
+	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+}
+
+// NewJiraIssueEvent is published on the bus whenever the poller observes a
+// ticket matching a watch that has no existing dedup row. The orchestrator
+// consumes this to create (and optionally auto-start) a Kandev task.
+type NewJiraIssueEvent struct {
+	IssueWatchID      string      `json:"issueWatchId"`
+	WorkspaceID       string      `json:"workspaceId"`
+	WorkflowID        string      `json:"workflowId"`
+	WorkflowStepID    string      `json:"workflowStepId"`
+	AgentProfileID    string      `json:"agentProfileId"`
+	ExecutorProfileID string      `json:"executorProfileId"`
+	Prompt            string      `json:"prompt"`
+	Issue             *JiraTicket `json:"issue"`
+}
+
+// CreateIssueWatchRequest is the payload for POST /api/v1/jira/watches/issue.
+type CreateIssueWatchRequest struct {
+	WorkspaceID         string `json:"workspaceId"`
+	WorkflowID          string `json:"workflowId"`
+	WorkflowStepID      string `json:"workflowStepId"`
+	JQL                 string `json:"jql"`
+	AgentProfileID      string `json:"agentProfileId"`
+	ExecutorProfileID   string `json:"executorProfileId"`
+	Prompt              string `json:"prompt"`
+	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	Enabled             *bool  `json:"enabled,omitempty"`
+}
+
+// UpdateIssueWatchRequest is the payload for PATCH /api/v1/jira/watches/issue/:id.
+// All fields are pointers so the caller can omit ones it doesn't want to change.
+type UpdateIssueWatchRequest struct {
+	WorkflowID          *string `json:"workflowId,omitempty"`
+	WorkflowStepID      *string `json:"workflowStepId,omitempty"`
+	JQL                 *string `json:"jql,omitempty"`
+	AgentProfileID      *string `json:"agentProfileId,omitempty"`
+	ExecutorProfileID   *string `json:"executorProfileId,omitempty"`
+	Prompt              *string `json:"prompt,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	PollIntervalSeconds *int    `json:"pollIntervalSeconds,omitempty"`
+}

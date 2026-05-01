@@ -23,9 +23,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/api"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
-	mcpserver "github.com/kandev/kandev/internal/agentctl/server/mcp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )

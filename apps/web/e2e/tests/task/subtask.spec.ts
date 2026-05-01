@@ -301,7 +301,8 @@ test.describe("Subtask inheritance", () => {
 
     // 2. Create parent task via API with explicit executor_profile_id so the
     //    parent session records it. The mock agent runs the MCP script which
-    //    creates the subtask with parent_id="self".
+    //    creates the subtask with parent_id="self". A repository is required
+    //    so the parent (non-ephemeral) task gets a real workspace path.
     const parentTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Executor Inherit Parent Task",
@@ -311,6 +312,7 @@ test.describe("Subtask inheritance", () => {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         executor_profile_id: executorProfile.id,
+        repository_ids: [seedData.repositoryId],
       },
     );
     expect(parentTask.id).toBeTruthy();

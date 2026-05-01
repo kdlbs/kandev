@@ -372,8 +372,29 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		Type:     models.MessageTypeToolCall,
 		Metadata: map[string]interface{}{"tool_call_id": "tc-6", "status": "error"},
 	}
+	// Permission_request messages share `tool_call_id` in metadata but their `status`
+	// is the user's approve/reject decision, not the tool call state. The sweep must
+	// leave them alone — otherwise an "approved" prompt would be reset and re-shown.
+	approvedPermission := &models.Message{
+		ID: "msg-perm-approved-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-7", "pending_id": "p-1", "status": "approved"},
+	}
+	rejectedPermission := &models.Message{
+		ID: "msg-perm-rejected-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-8", "pending_id": "p-2", "status": "rejected"},
+	}
+	pendingPermission := &models.Message{
+		ID: "msg-perm-pending-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve this?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-9", "pending_id": "p-3", "status": "pending"},
+	}
 
-	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2, pendingTool, inProgressTool, errorTool} {
+	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2, pendingTool, inProgressTool, errorTool, approvedPermission, rejectedPermission, pendingPermission} {
 		if err := repo.CreateMessage(ctx, msg); err != nil {
 			t.Fatalf("failed to create message %s: %v", msg.ID, err)
 		}
@@ -385,7 +406,8 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		t.Fatalf("CompletePendingToolCallsForTurn failed: %v", err)
 	}
 
-	// Should have updated 4 non-terminal tool call messages (running x2, pending, in_progress)
+	// Should have updated 4 non-terminal tool call messages (running x2, pending, in_progress).
+	// Permission_request messages must be excluded even though they carry tool_call_id.
 	if affected != 4 {
 		t.Errorf("expected 4 affected rows, got %d", affected)
 	}
@@ -430,6 +452,21 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 		t.Errorf("expected msg-error-1 status 'error' (unchanged), got %v", msg7.Metadata["status"])
 	}
 
+	// Verify permission_request messages were NOT affected — their status carries the
+	// user's decision (approve/reject) which the sweep must never overwrite.
+	msgPermApproved, _ := repo.GetMessage(ctx, "msg-perm-approved-1")
+	if msgPermApproved.Metadata["status"] != "approved" {
+		t.Errorf("expected msg-perm-approved-1 status 'approved' (unchanged), got %v", msgPermApproved.Metadata["status"])
+	}
+	msgPermRejected, _ := repo.GetMessage(ctx, "msg-perm-rejected-1")
+	if msgPermRejected.Metadata["status"] != "rejected" {
+		t.Errorf("expected msg-perm-rejected-1 status 'rejected' (unchanged), got %v", msgPermRejected.Metadata["status"])
+	}
+	msgPermPending, _ := repo.GetMessage(ctx, "msg-perm-pending-1")
+	if msgPermPending.Metadata["status"] != "pending" {
+		t.Errorf("expected msg-perm-pending-1 status 'pending' (unchanged), got %v", msgPermPending.Metadata["status"])
+	}
+
 	// Running again should affect 0 rows
 	affected2, err := repo.CompletePendingToolCallsForTurn(ctx, turnID)
 	if err != nil {
@@ -437,6 +474,64 @@ func TestSQLiteRepository_CompletePendingToolCallsForTurn(t *testing.T) {
 	}
 	if affected2 != 0 {
 		t.Errorf("expected 0 affected rows on second call, got %d", affected2)
+	}
+}
+
+// TestSQLiteRepository_GetMessageByToolCallID_ExcludesPermissionRequest locks
+// in the second half of the approval-reappear fix: a tool_call message and a
+// permission_request message can both carry the same tool_call_id (the
+// permission_request stores it for FE pairing). The lookup must always return
+// the tool_call row — otherwise a downstream tool_update would land on the
+// permission_request and overwrite the user's approve/reject decision.
+func TestSQLiteRepository_GetMessageByToolCallID_ExcludesPermissionRequest(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-1")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-1")
+
+	// Permission_request created FIRST so an ORDER BY created_at ASC sweep
+	// without the type filter would race to it. The fix must ignore type
+	// ordering and always return the tool_call row.
+	permMsg := &models.Message{
+		ID: "msg-perm-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Approve?",
+		Type:     models.MessageTypePermissionRequest,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-1", "pending_id": "p-1", "status": "pending"},
+	}
+	if err := repo.CreateMessage(ctx, permMsg); err != nil {
+		t.Fatalf("create permission message: %v", err)
+	}
+	toolMsg := &models.Message{
+		ID: "msg-tool-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-1", "status": "running"},
+	}
+	if err := repo.CreateMessage(ctx, toolMsg); err != nil {
+		t.Fatalf("create tool_call message: %v", err)
+	}
+
+	got, err := repo.GetMessageByToolCallID(ctx, sessionID, "tc-1")
+	if err != nil {
+		t.Fatalf("GetMessageByToolCallID: %v", err)
+	}
+	if got.Type != models.MessageTypeToolCall {
+		t.Errorf("expected tool_call row, got type=%s id=%s", got.Type, got.ID)
+	}
+	if got.ID != toolMsg.ID {
+		t.Errorf("expected msg-tool-1, got %s", got.ID)
+	}
+
+	// And when only the permission_request exists, the lookup must return an
+	// error (not match the permission_request as a fallback).
+	if _, err := repo.GetMessageByToolCallID(ctx, sessionID, "tc-not-here"); err == nil {
+		t.Error("expected error for missing tool_call_id, got nil")
 	}
 }
 

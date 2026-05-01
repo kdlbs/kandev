@@ -2,32 +2,22 @@ import path from "node:path";
 import fs from "node:fs";
 
 import pkg from "../package.json";
+import { parseArgs, ParseError, resolvePorts } from "./args";
 import { runDev } from "./dev";
 import { runRelease } from "./run";
 import { runStart } from "./start";
 import { ensureValidPort } from "./ports";
 import { maybePromptForUpdate } from "./update";
 
-type Command = "run" | "dev" | "start";
-
-type CliOptions = {
-  command: Command;
-  version?: string;
-  backendPort?: number;
-  webPort?: number;
-  verbose?: boolean;
-  debug?: boolean;
-};
-
 function printHelp() {
   console.log(`kandev launcher
 
 Usage:
-  kandev run [--version <tag>] [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
-  kandev dev [--backend-port <port>] [--web-port <port>]
-  kandev start [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
-  kandev [--version <tag>] [--backend-port <port>] [--web-port <port>] [--verbose] [--debug]
-  kandev --dev [--backend-port <port>] [--web-port <port>]
+  kandev run [--version <tag>] [--port <port>] [--verbose] [--debug]
+  kandev dev [--port <port>]
+  kandev start [--port <port>] [--verbose] [--debug]
+  kandev [--version <tag>] [--port <port>] [--verbose] [--debug]
+  kandev --dev [--port <port>]
 
 Examples:
   kandev
@@ -36,81 +26,29 @@ Examples:
   kandev dev
   kandev start
   kandev --version v0.1.0
-  kandev --backend-port 18080 --web-port 13000
+  kandev --port 3000
   kandev --debug
 
 Options:
-  dev             Use local repo for dev (make dev + next dev) if available.
-  start           Use local production build (make build + next start).
-  run             Use release bundles (default).
+  dev              Use local repo for dev (make dev + next dev) if available.
+  start            Use local production build (make build + next start).
+  run              Use release bundles (default).
   --dev            Alias for "dev".
   --version        Release tag to install (default: latest).
-  --backend-port   Override backend port (or KANDEV_BACKEND_PORT env var).
-  --web-port       Override web port (or KANDEV_WEB_PORT env var).
+  --port           Port for the Go backend (the URL kandev opens on in
+                   start/run). Alias for --backend-port. Also reads
+                   KANDEV_PORT or KANDEV_BACKEND_PORT.
   --verbose, -v    Show info logs from backend + web.
   --debug          Show debug logs + agent message dumps.
   --help, -h       Show help.
+
+Advanced:
+  --backend-port       Same as --port.
+  --web-internal-port  Override the internal Next.js port. The Go backend
+                       reverse-proxies to it; users hit the backend port.
+                       Also reads KANDEV_WEB_PORT.
+  --web-port           Deprecated alias for --web-internal-port.
 `);
-}
-
-function parseArgs(argv: string[]): CliOptions {
-  const opts: CliOptions = { command: "run" };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === "--help" || arg === "-h") {
-      printHelp();
-      process.exit(0);
-    }
-    if (arg === "dev" || arg === "run" || arg === "start") {
-      opts.command = arg;
-      continue;
-    }
-    if (arg === "--version") {
-      opts.version = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--version=")) {
-      opts.version = arg.split("=")[1];
-      continue;
-    }
-    if (arg === "--dev") {
-      opts.command = "dev";
-      continue;
-    }
-    if (arg === "--backend-port") {
-      opts.backendPort = Number(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--backend-port=")) {
-      opts.backendPort = Number(arg.split("=")[1]);
-      continue;
-    }
-    if (arg === "--web-port") {
-      opts.webPort = Number(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--web-port=")) {
-      opts.webPort = Number(arg.split("=")[1]);
-      continue;
-    }
-    if (arg === "--verbose" || arg === "-v") {
-      opts.verbose = true;
-      continue;
-    }
-    if (arg === "--debug") {
-      opts.debug = true;
-      continue;
-    }
-  }
-  return opts;
-}
-
-function envPort(name: string): number | undefined {
-  const val = process.env[name];
-  return val ? Number(val) : undefined;
 }
 
 function findRepoRoot(startDir: string): string | null {
@@ -137,14 +75,21 @@ function findRepoRoot(startDir: string): string | null {
 }
 
 async function main(): Promise<void> {
-  const raw = parseArgs(process.argv.slice(2));
-  const backendPort = ensureValidPort(
-    raw.backendPort ?? envPort("KANDEV_BACKEND_PORT"),
-    "backend port",
-  );
-  const webPort = ensureValidPort(raw.webPort ?? envPort("KANDEV_WEB_PORT"), "web port");
+  const { options, showHelp, deprecatedFlags } = parseArgs(process.argv.slice(2));
+  if (showHelp) {
+    printHelp();
+    return;
+  }
 
-  if (raw.command === "dev") {
+  for (const flag of deprecatedFlags) {
+    process.stderr.write(`[kandev] ${flag} is deprecated; use --web-internal-port\n`);
+  }
+
+  const resolved = resolvePorts(options, process.env);
+  const backendPort = ensureValidPort(resolved.backendPort, "backend port");
+  const webPort = ensureValidPort(resolved.webPort, "web port");
+
+  if (options.command === "dev") {
     const repoRoot = findRepoRoot(process.cwd());
     if (!repoRoot) {
       throw new Error("Unable to locate repo root for dev. Run from the repo.");
@@ -153,26 +98,37 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (raw.command === "start") {
+  if (options.command === "start") {
     const repoRoot = findRepoRoot(process.cwd());
     if (!repoRoot) {
       throw new Error("Unable to locate repo root for start. Run from the repo.");
     }
-    await runStart({ repoRoot, backendPort, webPort, verbose: raw.verbose, debug: raw.debug });
+    await runStart({
+      repoRoot,
+      backendPort,
+      webPort,
+      verbose: options.verbose,
+      debug: options.debug,
+    });
     return;
   }
 
   await maybePromptForUpdate(pkg.version, process.argv.slice(2));
   await runRelease({
-    version: raw.version,
+    version: options.version,
     backendPort,
     webPort,
-    verbose: raw.verbose,
-    debug: raw.debug,
+    verbose: options.verbose,
+    debug: options.debug,
   });
 }
 
 main().catch((err) => {
+  if (err instanceof ParseError) {
+    console.error(`[kandev] ${err.message}`);
+    console.error("[kandev] run --help for usage");
+    process.exit(2);
+  }
   console.error(`[kandev] ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

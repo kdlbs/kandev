@@ -47,6 +47,14 @@ function buildUserSettingsState(
   return { ...mapUserSettingsResponse(resp), workspaceId };
 }
 
+function readAgentProfileId(
+  metadata: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const value = metadata.agent_profile_id;
+  return typeof value === "string" ? value : undefined;
+}
+
 function resolveActiveId<T extends { id: string }>(
   items: T[],
   preferredId?: string,
@@ -159,6 +167,7 @@ export default async function Page({ searchParams }: PageProps) {
         sessionId: t.primary_session_id!,
         workspaceId: t.workspace_id,
         name: t.title !== "Quick Chat" ? t.title : undefined,
+        agentProfileId: readAgentProfileId(t.metadata),
       }));
 
     initialState = {

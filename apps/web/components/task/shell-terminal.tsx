@@ -18,6 +18,8 @@ import { matchesShortcut } from "@/lib/keyboard/utils";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
+import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard-assists";
+import { sendShellInput } from "@/lib/terminal/send-shell-input";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -73,6 +75,7 @@ function useTerminalInit({
     const webLinksAddon = new WebLinksAddon(linkHandler);
     terminal.loadAddon(webLinksAddon);
     terminal.open(terminalRef.current);
+    suppressIOSKeyboardAssists(terminalRef.current);
     exposeBufferReader(terminalRef.current, terminal);
     fitAddon.fit();
     xtermRef.current = terminal;
@@ -332,9 +335,8 @@ function useShellInputHandler(opts: {
   isReadOnlyMode: boolean;
   taskId: string | null;
   sessionId: string | null | undefined;
-  send: (action: string, payload: Record<string, unknown>) => void;
 }) {
-  const { xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send } = opts;
+  const { xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId } = opts;
   useEffect(() => {
     if (!xtermRef.current || isReadOnlyMode) return;
     onDataDisposableRef.current?.dispose();
@@ -342,13 +344,13 @@ function useShellInputHandler(opts: {
     if (!taskId || !sessionId) return;
     onDataDisposableRef.current = xtermRef.current.onData((data) => {
       if (/^\x1b\[\d+;\d+R$/.test(data) || /^\x1b\[\d+R$/.test(data)) return;
-      send("shell.input", { session_id: sessionId, data });
+      sendShellInput(sessionId, data);
     });
     return () => {
       onDataDisposableRef.current?.dispose();
       onDataDisposableRef.current = null;
     };
-  }, [taskId, sessionId, send, isReadOnlyMode, xtermRef, onDataDisposableRef]);
+  }, [taskId, sessionId, isReadOnlyMode, xtermRef, onDataDisposableRef]);
 }
 
 function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode: boolean) {
@@ -429,7 +431,7 @@ export function ShellTerminal({
     onClose: search.close,
   });
 
-  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId, send });
+  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId });
   useShellTerminalKeyHandler({
     xtermRef,
     isReadOnlyMode,

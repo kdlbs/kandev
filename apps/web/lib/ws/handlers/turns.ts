@@ -39,9 +39,14 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
 
       // Safety net: mark any tool calls still in a non-terminal state as "complete".
       // This handles edge cases where tool_update events were dropped or not processed.
+      // Permission_request messages also carry `tool_call_id` in metadata, but their
+      // `status` represents the user's approve/reject decision — not the tool call
+      // state — so they must be excluded from the sweep. Forcing them to "complete"
+      // wipes "approved"/"rejected" and re-shows the prompt buttons in the UI.
       const messages = store.getState().messages.bySession[payload.session_id];
       if (messages) {
         for (const msg of messages) {
+          if (msg.type === "permission_request") continue;
           const meta = msg.metadata as Record<string, unknown> | undefined;
           if (meta?.tool_call_id && meta?.status !== "complete" && meta?.status !== "error") {
             store.getState().updateMessage({

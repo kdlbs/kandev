@@ -10,7 +10,6 @@ import { IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
 import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
 import {
@@ -133,14 +132,14 @@ function useAutoSelectExecutorProfile(
 
 function activateSubtaskSession(opts: {
   sessionId: string;
-  oldSessionId: string | null;
   taskId: string;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
 }) {
   opts.setActiveTask(opts.taskId);
   opts.setActiveSession(opts.taskId, opts.sessionId);
-  performLayoutSwitch(opts.oldSessionId, opts.sessionId);
+  // Layout switch is handled by useEnvSwitchCleanup when the new session's
+  // task_environment_id is present; the hook subscribes to env-id updates.
   replaceTaskUrl(opts.taskId);
 }
 
@@ -175,7 +174,6 @@ function NewSubtaskForm({
   onClose,
 }: SubtaskFormProps) {
   const { toast } = useToast();
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -276,7 +274,6 @@ function NewSubtaskForm({
       if (newSessionId) {
         activateSubtaskSession({
           sessionId: newSessionId,
-          oldSessionId: activeSessionId ?? null,
           taskId: response.id,
           setActiveTask,
           setActiveSession,
@@ -293,7 +290,6 @@ function NewSubtaskForm({
       executorProfileId,
       parentTaskId,
       attachments,
-      activeSessionId,
       setActiveTask,
       setActiveSession,
     ],

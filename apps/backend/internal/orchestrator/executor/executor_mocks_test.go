@@ -190,9 +190,11 @@ type mockRepository struct {
 	getTaskSessionFunc func(ctx context.Context, id string) (*models.TaskSession, error)
 
 	// Track calls for verification
-	createTaskSessionCalls []*models.TaskSession
-	updateTaskSessionCalls []*models.TaskSession
-	setSessionPrimaryCalls []string
+	createTaskSessionCalls     []*models.TaskSession
+	updateTaskSessionCalls     []*models.TaskSession
+	setSessionPrimaryCalls     []string
+	createTaskEnvironmentCalls []*models.TaskEnvironment
+	updateTaskEnvironmentCalls []*models.TaskEnvironment
 }
 
 func newMockRepository() *mockRepository {
@@ -638,13 +640,13 @@ func (m *mockRepository) CreateTaskEnvironment(_ context.Context, env *models.Ta
 	if env.ID == "" {
 		env.ID = "env-" + env.TaskID
 	}
+	m.createTaskEnvironmentCalls = append(m.createTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
-	for i, r := range env.Repos {
+	for _, r := range env.Repos {
 		r.TaskEnvironmentID = env.ID
 		if r.ID == "" {
 			r.ID = env.ID + "-repo-" + r.RepositoryID
 		}
-		_ = i
 	}
 	if len(env.Repos) > 0 {
 		m.taskEnvironmentRepos[env.ID] = append(m.taskEnvironmentRepos[env.ID], env.Repos...)
@@ -655,6 +657,7 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	if env.ID == "" {
 		return nil
 	}
+	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
 }

@@ -21,6 +21,26 @@ describe("applyFilters — basics", () => {
   });
 });
 
+describe("applyFilters — hasPR", () => {
+  it("filters by hasPR is true (task with linked PR)", () => {
+    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is", value: true })]);
+    expect(out.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("filters by hasPR is false (task without linked PR)", () => {
+    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is", value: false })]);
+    expect(out.map((t) => t.id)).toEqual(["b"]);
+  });
+
+  it("supports is_not negation on hasPR", () => {
+    const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
+    const out = applyFilters(tasks, [C({ dimension: "hasPR", op: "is_not", value: true })]);
+    expect(out.map((t) => t.id)).toEqual(["b"]);
+  });
+});
+
 describe("applyFilters — per-dimension", () => {
   it("filters by isPRReview is true (watcher-created task)", () => {
     const tasks = [task({ id: "a", isPRReview: true }), task({ id: "b" })];

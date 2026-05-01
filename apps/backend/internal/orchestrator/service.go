@@ -221,6 +221,9 @@ type Service struct {
 	// Issue task creator for auto-creating tasks from issue watch events
 	issueTaskCreator IssueTaskCreator
 
+	// Jira service for issue watch dedup operations
+	jiraService JiraService
+
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
@@ -336,6 +339,7 @@ func NewService(
 	handlers := watcher.EventHandlers{
 		OnTaskDeleted:          s.handleTaskDeleted,
 		OnAgentRunning:         s.handleAgentRunning,
+		OnAgentBootReady:       s.handleAgentBootReady,
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
@@ -463,10 +467,39 @@ func (s *Service) initWorkflowEngine() {
 	s.workflowEngine = engine.New(store, callbacks)
 }
 
-// startTurnForSession starts a new turn for the session and stores it.
+// startTurnForSession ensures the session has an active turn and returns its ID.
+//
+// Idempotent: if an open turn already exists (either tracked in activeTurns or
+// only present in the DB — the latter happens when service.CreateMessage lazily
+// started a turn for an inbound user message before the orchestrator's prompt
+// cycle began, or when the backend restarted with open turns in the DB), it is
+// adopted rather than duplicated. A new turn is created only when none exists.
+//
+// This avoids the classic dual-creation leak: user message → service.CreateMessage
+// starts turn X (DB only) → PromptTask → startTurnForSession → would create turn Y
+// (DB + activeTurns), leaving X open forever because nothing tracks it.
 func (s *Service) startTurnForSession(ctx context.Context, sessionID string) string {
 	if s.turnService == nil {
 		return ""
+	}
+
+	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
+		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			return turnID
+		}
+	}
+
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
+		s.activeTurns.Store(sessionID, turn.ID)
+		return turn.ID
+	} else if err != nil {
+		// A real DB read failure here would otherwise be silently dropped, and
+		// we'd fall through to StartTurn — potentially writing a duplicate next
+		// to an existing open turn we couldn't see. Log it; the next sweep via
+		// completeTurnForSession will mop up any duplicate.
+		s.logger.Warn("failed to look up active turn before starting a new one",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	turn, err := s.turnService.StartTurn(ctx, sessionID)
@@ -481,27 +514,51 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 	return turn.ID
 }
 
-// completeTurnForSession completes the active turn for the session.
+// completeTurnForSession closes any open turn for the session.
+//
+// The DB is the source of truth — activeTurns is just an in-memory cache that
+// can drift (see startTurnForSession) or be wiped by a backend restart. We
+// query the DB for any open turn and close it. Loops to mop up multiple
+// zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
 	if s.turnService == nil {
 		return
 	}
 
-	turnIDVal, ok := s.activeTurns.LoadAndDelete(sessionID)
-	if !ok {
-		return
-	}
+	s.activeTurns.Delete(sessionID)
 
-	turnID, ok := turnIDVal.(string)
-	if !ok || turnID == "" {
-		return
+	const maxIterations = 16
+	closed := 0
+	for closed < maxIterations {
+		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to look up active turn",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
+		if turn == nil {
+			return
+		}
+		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
+			// GetActiveTurn returns the latest open turn — retrying here
+			// would just hit the same row and loop. Bail; the next
+			// completeTurnForSession call will pick it up.
+			s.logger.Warn("failed to complete turn; will retry on next sweep",
+				zap.String("session_id", sessionID),
+				zap.String("turn_id", turn.ID),
+				zap.Error(err))
+			return
+		}
+		closed++
 	}
-
-	if err := s.turnService.CompleteTurn(ctx, turnID); err != nil {
-		s.logger.Warn("failed to complete turn",
+	// Only warn if turns are *still* accumulating after the cap. Closing
+	// exactly maxIterations turns and then finding the session clean is not a
+	// runaway.
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+		s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
 			zap.String("session_id", sessionID),
-			zap.String("turn_id", turnID),
-			zap.Error(err))
+			zap.Int("max_iterations", maxIterations))
 	}
 }
 
@@ -586,6 +643,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to JIRA integration events
+	s.subscribeJiraEvents()
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()

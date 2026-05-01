@@ -71,6 +71,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:              req.TaskID,
 		SessionID:           req.SessionID,
+		TaskEnvironmentID:   req.TaskEnvironmentID,
 		TaskTitle:           req.TaskTitle,
 		AgentProfileID:      req.AgentProfileID,
 		WorkspacePath:       req.RepositoryURL, // May be empty - lifecycle manager handles this
@@ -84,6 +85,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		ExecutorConfig:      req.ExecutorConfig,
 		PreviousExecutionID: req.PreviousExecutionID,
 		McpMode:             req.McpMode,
+		IsEphemeral:         req.IsEphemeral,
 		SetupScript:         req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,

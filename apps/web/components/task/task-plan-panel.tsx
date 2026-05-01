@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { PanelRoot, PanelBody } from "./panel-primitives";
+import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
+import { TaskPlanRevisions } from "./task-plan-revisions";
 import dynamic from "next/dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -15,10 +16,10 @@ import type {
   TextSelection,
   CommentForEditor,
 } from "@/components/editors/tiptap/tiptap-plan-editor";
+import type { TaskPlanRevision } from "@/lib/types/http";
 import type { Editor } from "@tiptap/core";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
-import { usePanelSearch } from "@/hooks/use-panel-search";
-import { planSearchPluginKey } from "@/components/editors/tiptap/search-highlight-extension";
+import { usePlanFindShortcut } from "./use-plan-find-shortcut";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -43,7 +44,22 @@ type TaskPlanPanelProps = {
 };
 
 function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
-  const { plan, isLoading, isSaving, savePlan } = useTaskPlan(taskId, { visible });
+  const {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    loadRevisionContent,
+    revertTo,
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
+  } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
@@ -114,6 +130,16 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     editorWrapperRef,
     editorInstanceRef,
     editorInstance,
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    loadRevisionContent,
+    revertTo,
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
   };
 }
 
@@ -122,37 +148,16 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   visible = true,
 }: TaskPlanPanelProps) {
   const state = useTaskPlanPanelState(taskId, visible);
-  const {
-    plan,
-    isLoading,
-    isSaving,
-    savePlan,
-    activeSessionId,
-    draftContent,
-    setDraftContent,
-    editorKey,
-    isEditorFocused,
-    handleEmptyStateClick,
-    hasUnsavedChanges,
-    commentState,
-    selectionState,
-    handleEditorReady,
-    handleCommentDeleted,
-    commentHighlights,
-    isAgentBusy,
-    isAgentCreatingPlan,
-    editorWrapperRef,
-    editorInstanceRef,
-    editorInstance,
-  } = state;
-
   // Ctrl+S to save immediately
-  useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
+  useSaveShortcut(
+    state.hasUnsavedChanges,
+    state.isSaving,
+    state.savePlan,
+    state.draftContent,
+    state.plan?.title,
+  );
 
-  // Ctrl+F in-document find
-  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
-
-  if (isLoading) {
+  if (state.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
@@ -169,35 +174,64 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     );
   }
 
-  const { textSelection, setTextSelection } = selectionState;
+  return <PlanPanelContent taskId={taskId} state={state} />;
+});
 
+function PlanPanelContent({
+  taskId,
+  state,
+}: {
+  taskId: string;
+  state: ReturnType<typeof useTaskPlanPanelState>;
+}) {
+  const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
+  const { textSelection, setTextSelection } = selectionState;
+  // Ctrl+F in-document find (registers a keydown listener on the editor wrapper)
+  const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
   return (
     <PanelRoot data-testid="plan-panel">
+      <PlanPanelHeader
+        taskId={taskId}
+        revisions={state.revisions}
+        isLoadingRevisions={state.isLoadingRevisions}
+        isSaving={state.isSaving}
+        onOpenRevisions={state.loadRevisions}
+        onRevert={state.revertTo}
+        loadRevisionContent={state.loadRevisionContent}
+        previewRevisionId={state.previewRevisionId}
+        setPreviewRevision={state.setPreviewRevision}
+        comparePair={state.comparePair}
+        toggleCompareSelection={state.toggleCompareSelection}
+        clearComparePair={state.clearComparePair}
+      />
       <PanelBody
         padding={false}
         scroll={false}
-        className={cn("relative transition-colors cursor-text", isAgentBusy && "bg-background")}
+        className={cn(
+          "relative transition-colors cursor-text",
+          state.isAgentBusy && "bg-background",
+        )}
         ref={editorWrapperRef}
-        onClick={handleEmptyStateClick}
+        onClick={state.handleEmptyStateClick}
         data-panel-kind="plan"
       >
         <PlanEditor
-          key={`${taskId}-${editorKey}`}
-          value={draftContent}
-          onChange={setDraftContent}
+          key={`${taskId}-${state.editorKey}`}
+          value={state.draftContent}
+          onChange={state.setDraftContent}
           placeholder="Start typing your plan..."
-          onSelectionChange={activeSessionId ? setTextSelection : undefined}
-          comments={commentHighlights}
+          onSelectionChange={state.activeSessionId ? setTextSelection : undefined}
+          comments={state.commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}
-          onCommentDeleted={handleCommentDeleted}
-          onEditorReady={handleEditorReady}
+          onCommentDeleted={state.handleCommentDeleted}
+          onEditorReady={state.handleEditorReady}
         />
         <PlanEmptyState
-          isLoading={isLoading}
-          draftContent={draftContent}
-          isEditorFocused={isEditorFocused}
-          isAgentCreatingPlan={isAgentCreatingPlan}
-          onClick={handleEmptyStateClick}
+          isLoading={state.isLoading}
+          draftContent={state.draftContent}
+          isEditorFocused={state.isEditorFocused}
+          isAgentCreatingPlan={state.isAgentCreatingPlan}
+          onClick={state.handleEmptyStateClick}
         />
         {planSearch.isOpen && (
           <PanelSearchBar
@@ -213,15 +247,15 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
 
       <PlanSelectionPopoverWrapper
         textSelection={textSelection}
-        activeSessionId={activeSessionId}
+        activeSessionId={state.activeSessionId}
         taskId={taskId}
-        commentState={commentState}
+        commentState={state.commentState}
         editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
       />
     </PanelRoot>
   );
-});
+}
 
 function removeCommentMark(editor: Editor | null, commentId: string) {
   if (!editor) return;
@@ -441,66 +475,6 @@ function usePlanSelection(
   return { textSelection, setTextSelection, handleCommentHighlightClick, handleSelectionClose };
 }
 
-/** Ctrl+F find-in-plan shortcut + editor wiring */
-function usePlanFindShortcut(
-  wrapperRef: React.RefObject<HTMLDivElement | null>,
-  editor: Editor | null,
-) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
-
-  const readMatchInfo = useCallback(() => {
-    if (!editor) return;
-    const s = planSearchPluginKey.getState(editor.state);
-    if (!s) return;
-    const next = {
-      current: s.matches.length ? s.current + 1 : 0,
-      total: s.matches.length,
-    };
-    // Bail out when nothing changed — TipTap fires `transaction` on every cursor
-    // move, and allocating a new object identity would re-render this hook on
-    // every keystroke / click in the editor (and can cascade into update loops).
-    setMatchInfo((prev) =>
-      prev.current === next.current && prev.total === next.total ? prev : next,
-    );
-  }, [editor]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const handler = () => readMatchInfo();
-    editor.on("transaction", handler);
-    return () => {
-      editor.off("transaction", handler);
-    };
-  }, [editor, readMatchInfo]);
-
-  useEffect(() => {
-    if (!editor) return;
-    if (!isOpen) return;
-    editor.commands.setPlanSearchQuery(query);
-  }, [query, isOpen, editor]);
-
-  useEffect(() => {
-    if (isOpen) return;
-    if (!editor) return;
-    editor.commands.clearPlanSearch();
-  }, [isOpen, editor]);
-
-  const open = useCallback(() => setIsOpen(true), []);
-  const close = useCallback(() => setIsOpen(false), []);
-  const findNext = useCallback(() => {
-    editor?.commands.planSearchNext();
-  }, [editor]);
-  const findPrev = useCallback(() => {
-    editor?.commands.planSearchPrev();
-  }, [editor]);
-
-  usePanelSearch({ containerRef: wrapperRef, isOpen, onOpen: open, onClose: close });
-
-  return { isOpen, open, close, query, setQuery, findNext, findPrev, matchInfo };
-}
-
 /** Ctrl+S save shortcut */
 function useSaveShortcut(
   hasUnsavedChanges: boolean,
@@ -576,5 +550,60 @@ function PlanEmptyState({
         </div>
       </div>
     </div>
+  );
+}
+
+type PlanPanelHeaderProps = {
+  taskId: string;
+  revisions: TaskPlanRevision[];
+  isLoadingRevisions: boolean;
+  isSaving: boolean;
+  onOpenRevisions: () => void;
+  onRevert: (id: string) => Promise<TaskPlanRevision | null>;
+  loadRevisionContent: (revisionId: string) => Promise<string>;
+  previewRevisionId: string | null;
+  setPreviewRevision: (revisionId: string | null) => void;
+  comparePair: [string | null, string | null];
+  toggleCompareSelection: (revisionId: string) => void;
+  clearComparePair: () => void;
+};
+
+// Header bar lives only to host the rewind button. The plan's title (default
+// "Plan") is already shown by the dockview/mobile tab above the panel, so we
+// don't repeat it here.
+function PlanPanelHeader({
+  taskId,
+  revisions,
+  isLoadingRevisions,
+  isSaving,
+  onOpenRevisions,
+  onRevert,
+  loadRevisionContent,
+  previewRevisionId,
+  setPreviewRevision,
+  comparePair,
+  toggleCompareSelection,
+  clearComparePair,
+}: PlanPanelHeaderProps) {
+  return (
+    <PanelHeaderBarSplit
+      left={null}
+      right={
+        <TaskPlanRevisions
+          taskId={taskId}
+          revisions={revisions}
+          isLoading={isLoadingRevisions}
+          isSaving={isSaving}
+          onOpen={onOpenRevisions}
+          onRevert={onRevert}
+          loadRevisionContent={loadRevisionContent}
+          previewRevisionId={previewRevisionId}
+          setPreviewRevision={setPreviewRevision}
+          comparePair={comparePair}
+          toggleCompareSelection={toggleCompareSelection}
+          clearComparePair={clearComparePair}
+        />
+      }
+    />
   );
 }

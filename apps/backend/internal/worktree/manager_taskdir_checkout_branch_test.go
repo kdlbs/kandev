@@ -9,7 +9,6 @@ import (
 
 func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testing.T) {
 	cfg := newTestConfig(t)
-	cfg.TasksBasePath = cfg.BasePath
 	log := newTestLogger()
 	store := newMockStore()
 
@@ -78,7 +77,6 @@ func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testin
 
 func TestCreateInTaskDir_RemoteBaseRefDoesNotSetUpstream(t *testing.T) {
 	cfg := newTestConfig(t)
-	cfg.TasksBasePath = cfg.BasePath
 	log := newTestLogger()
 	store := newMockStore()
 

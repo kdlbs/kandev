@@ -242,6 +242,16 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-option-description");
   }
 
+  /** All visible "Approve / Deny" rows for pending permission requests. */
+  permissionActionRows(): Locator {
+    return this.chat.getByTestId("permission-action-row");
+  }
+
+  /** All "Approve" buttons for pending permission requests. */
+  permissionApproveButtons(): Locator {
+    return this.chat.getByTestId("permission-approve");
+  }
+
   /** Reset context button in the chat input toolbar. */
   resetContextButton(): Locator {
     return this.page.getByTestId("reset-context-button");
@@ -493,6 +503,41 @@ export class SessionPage {
   }
 
   /**
+   * Assert the live dockview groups all have positive widths and that the sum
+   * of the root-level column widths is approximately equal to the api width.
+   * Catches "central group has zero/wrong width" corruption that persists
+   * across task switches when a corrupted layout is saved to per-session storage.
+   */
+  async expectLayoutHealthy(): Promise<void> {
+    const result = await this.page.evaluate(() => {
+      type Group = { id: string; width: number; height: number };
+      type Api = { width: number; height: number; groups: Group[] };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const bad = api.groups.filter((g) => !(g.width > 1));
+      const totalWidth = api.groups.reduce((s, g) => s + (g.width > 0 ? g.width : 0), 0);
+      return {
+        apiWidth: api.width,
+        groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
+        badCount: bad.length,
+        totalWidth,
+      };
+    });
+    expect(result.error, result.error).toBeUndefined();
+    expect(
+      result.badCount,
+      `Found ${result.badCount} dockview groups with width <= 1: ${JSON.stringify(result.groups)}`,
+    ).toBe(0);
+    // Sum of group widths should match api width within a small rounding tolerance.
+    // Note: groups can be stacked vertically so totalWidth may exceed apiWidth (one column,
+    // multiple groups) — only flag if totalWidth is much smaller than apiWidth (squished).
+    expect(
+      result.totalWidth! >= (result.apiWidth ?? 0) - 4,
+      `Total group widths (${result.totalWidth}) much smaller than api width (${result.apiWidth}): ${JSON.stringify(result.groups)}`,
+    ).toBe(true);
+  }
+
+  /**
    * Assert the dockview layout columns fill the container with no large empty gap.
    * Catches bugs where columns don't expand after api.fromJSON() + setConstraints
    * (e.g. missing api.layout() call).
@@ -635,10 +680,11 @@ export class SessionPage {
     return this.page.getByRole("alertdialog");
   }
 
-  /** Primary star icon inside a dockview tab. */
+  /** Primary star icon inside a dockview session tab. The star is rendered as a
+   *  sibling of `.dv-default-tab` inside the `data-testid="session-tab-<id>"`
+   *  wrapper, so we anchor on that wrapper rather than `.dv-default-tab` itself. */
   primaryStarInTab(text: string): Locator {
-    const tab = this.page.locator(`.dv-default-tab:has-text('${text}')`);
-    return tab.locator(".tabler-icon-star").first();
+    return this.sessionTabByText(text).locator(".tabler-icon-star").first();
   }
 
   /** "Move to next step" button in the chat status bar. */
@@ -694,6 +740,136 @@ export class SessionPage {
   /** Bulk discard button for a variant. */
   changesBulkDiscardButton(variant: "unstaged" | "staged" = "unstaged"): Locator {
     return this.changes.getByTestId(`bulk-discard-${variant}`);
+  }
+
+  // --- Plan revisions / rewind ---
+
+  /** Rewind button in the plan panel header (opens revision history popover). */
+  rewindButton(): Locator {
+    return this.planPanel.getByTestId("plan-rewind-button");
+  }
+
+  /** Plan revisions popover (opens after clicking rewind). */
+  revisionsPopover(): Locator {
+    return this.page.getByTestId("plan-revisions-popover");
+  }
+
+  /** All revision rows inside the popover, newest-first. */
+  revisionRows(): Locator {
+    return this.revisionsPopover().getByTestId("plan-revision-row");
+  }
+
+  /** Specific revision row by number. */
+  revisionRow(n: number): Locator {
+    return this.revisionsPopover().locator(`[data-revision-number="${n}"]`);
+  }
+
+  /** Revert button scoped to a given revision row. */
+  revertButton(row: Locator): Locator {
+    return row.getByTestId("plan-revision-revert-button");
+  }
+
+  /** Revert-confirm dialog. */
+  revertConfirmDialog(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-dialog");
+  }
+
+  revertConfirmOk(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-ok");
+  }
+
+  revertConfirmCancel(): Locator {
+    return this.page.getByTestId("plan-revert-confirm-cancel");
+  }
+
+  /** TipTap editor inside the plan panel (for typing user edits). */
+  planEditor(): Locator {
+    return this.planPanel.locator(".ProseMirror");
+  }
+
+  /** Open the rewind popover and wait for it to render. No-op when already open. */
+  async openRewind(): Promise<void> {
+    if (await this.revisionsPopover().isVisible()) return;
+    await this.rewindButton().click();
+    await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
+  }
+
+  /** Open rewind, click revert on the row with the given revision number, and confirm. */
+  async revertToRevision(n: number): Promise<void> {
+    await this.openRewind();
+    await this.revertButton(this.revisionRow(n)).click();
+    await expect(this.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
+    await this.revertConfirmOk().click();
+  }
+
+  // --- Plan revision preview & compare (Phase 6) ---
+
+  /** Click the row body (not the Revert/Compare buttons) to open the preview dialog. */
+  revisionRowBody(row: Locator): Locator {
+    return row.getByTestId("plan-revision-row-body");
+  }
+
+  previewDialog(): Locator {
+    return this.page.getByTestId("plan-revision-preview-dialog");
+  }
+
+  previewBody(): Locator {
+    return this.page.getByTestId("plan-revision-preview-body");
+  }
+
+  previewRestoreButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-restore");
+  }
+
+  previewCompareWithCurrentButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-compare-with-current");
+  }
+
+  previewCompareWithPreviousButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-compare-with-previous");
+  }
+
+  previewCloseButton(): Locator {
+    return this.page.getByTestId("plan-revision-preview-close");
+  }
+
+  diffDialog(): Locator {
+    return this.page.getByTestId("plan-revision-diff-dialog");
+  }
+
+  diffSummary(): Locator {
+    return this.page.getByTestId("plan-revision-diff-summary");
+  }
+
+  diffLines(kind?: "add" | "remove" | "context"): Locator {
+    const root = this.diffDialog();
+    if (!kind) return root.getByTestId("plan-revision-diff-line");
+    return root.locator(`[data-testid="plan-revision-diff-line"][data-line-kind="${kind}"]`);
+  }
+
+  diffSplitCells(kind?: "add" | "remove" | "context" | "empty"): Locator {
+    const root = this.diffDialog();
+    if (!kind) return root.getByTestId("plan-revision-diff-split-cell");
+    return root.locator(`[data-testid="plan-revision-diff-split-cell"][data-line-kind="${kind}"]`);
+  }
+
+  diffModeToggle(mode: "unified" | "split"): Locator {
+    return this.page.getByTestId(`plan-revision-diff-mode-${mode}`);
+  }
+
+  diffRestoreButton(): Locator {
+    return this.page.getByTestId("plan-revision-diff-restore");
+  }
+
+  diffCloseButton(): Locator {
+    return this.page.getByTestId("plan-revision-diff-close");
+  }
+
+  /** Open rewind and click into the row body to bring up the preview dialog. */
+  async openRevisionPreview(n: number): Promise<void> {
+    await this.openRewind();
+    await this.revisionRowBody(this.revisionRow(n)).click();
+    await expect(this.previewDialog()).toBeVisible({ timeout: 5_000 });
   }
 
   // --- Panel search helpers (Ctrl+F feature) ---

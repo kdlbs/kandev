@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
+import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -82,6 +83,7 @@ type DialogFormBodyProps = {
   hasDescription: boolean;
   workspaceId: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
+  onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: Array<{
     value: string;
@@ -121,6 +123,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isTaskStarted,
     workspaceId,
     onJiraImport,
+    onLinearImport,
     agentProfileOptions,
     executorProfileOptions,
     agentProfiles,
@@ -171,6 +174,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
+        onLinearImport={onLinearImport}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}
@@ -274,6 +278,22 @@ function useJiraImportHandler(fs: DialogFormState) {
   );
 }
 
+function useLinearImportHandler(fs: DialogFormState) {
+  return useCallback(
+    (issue: LinearIssue) => {
+      const title = `[${issue.identifier}] ${issue.title}`;
+      fs.setTaskName(title);
+      fs.setHasTitle(true);
+      const description = issue.description?.trim()
+        ? `${issue.description}\n\n---\nLinear: ${issue.url}`
+        : `Linear: ${issue.url}`;
+      fs.descriptionInputRef.current?.setValue(description);
+      fs.setHasDescription(true);
+    },
+    [fs],
+  );
+}
+
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
@@ -342,10 +362,7 @@ function useSubmitHandlersWiring({
  * fresh-branch consent flow. Multi-row tasks hide fresh-branch in the UI,
  * so we only need to resolve a path when there is exactly one row.
  */
-function resolveSingleRowLocalPath(
-  fs: DialogFormState,
-  repositories: Repository[],
-): string {
+function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository[]): string {
   if (fs.repositories.length !== 1) return "";
   const row = fs.repositories[0];
   if (row.localPath) return row.localPath;
@@ -423,6 +440,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     freshBranchAvailable,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),
+    handleLinearImport: useLinearImportHandler(fs),
   };
 }
 
@@ -434,7 +452,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { computed, handlers, handleKeyDown, freshBranchAvailable } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
-  const { handleJiraImport } = setup;
+  const { handleJiraImport, handleLinearImport } = setup;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -463,6 +481,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             hasDescription={fs.hasDescription}
             workspaceId={workspaceId}
             onJiraImport={handleJiraImport}
+            onLinearImport={handleLinearImport}
             agentProfileOptions={computed.agentProfileOptions}
             executorProfileOptions={computed.executorProfileOptions}
             agentProfiles={agentProfiles}

@@ -17,7 +17,9 @@ import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
+import { LinearImportBar } from "@/components/linear/linear-import-bar";
 import type { JiraTicket } from "@/lib/types/jira";
+import type { LinearIssue } from "@/lib/types/linear";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -261,6 +263,11 @@ type TaskFormInputsProps = {
     disabled?: boolean;
     onImport: (ticket: JiraTicket) => void;
   };
+  linearImport?: {
+    workspaceId: string | null;
+    disabled?: boolean;
+    onImport: (issue: LinearIssue) => void;
+  };
 };
 
 function useFileAttachments() {
@@ -476,6 +483,7 @@ type FormInputsToolbarProps = {
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
   jiraImport?: TaskFormInputsProps["jiraImport"];
+  linearImport?: TaskFormInputsProps["linearImport"];
 };
 
 function FormInputsToolbar({
@@ -485,6 +493,7 @@ function FormInputsToolbar({
   isEnhancingPrompt,
   isUtilityConfigured,
   jiraImport,
+  linearImport,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -501,6 +510,13 @@ function FormInputsToolbar({
           workspaceId={jiraImport.workspaceId}
           disabled={jiraImport.disabled}
           onImport={jiraImport.onImport}
+        />
+      )}
+      {linearImport && (
+        <LinearImportBar
+          workspaceId={linearImport.workspaceId}
+          disabled={linearImport.disabled}
+          onImport={linearImport.onImport}
         />
       )}
     </div>
@@ -520,6 +536,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   isEnhancingPrompt,
   isUtilityConfigured,
   jiraImport,
+  linearImport,
 }: TaskFormInputsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
@@ -586,6 +603,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
           jiraImport={jiraImport}
+          linearImport={linearImport}
         />
         <input
           ref={fileInputRef}

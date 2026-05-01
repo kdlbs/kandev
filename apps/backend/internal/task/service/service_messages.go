@@ -462,7 +462,22 @@ func (s *Service) createToolCallMessageFallback(ctx context.Context, sessionID, 
 }
 
 // applyToolCallMessageUpdate applies status, result, normalized data, and title to a tool call message.
+//
+// Defensive guard: a permission_request row also carries `tool_call_id` in metadata, so
+// any future code path that hands such a row in here would otherwise silently overwrite
+// the user's approve/reject decision and retype it to tool_execute. The repository's
+// GetMessageByToolCallID excludes permission_request, but the guard makes the invariant
+// explicit at the layer that does the writing.
 func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, result, title string, normalized *streams.NormalizedPayload) {
+	if message.Type == models.MessageTypePermissionRequest {
+		// Error severity: the repo-layer GetMessageByToolCallID filter is supposed
+		// to make this branch unreachable. Reaching it means a caller bug; surface
+		// it loudly so the invariant violation isn't silently swallowed.
+		s.logger.Error("applyToolCallMessageUpdate refusing to overwrite permission_request",
+			zap.String("message_id", message.ID),
+			zap.String("incoming_status", status))
+		return
+	}
 	if message.Metadata == nil {
 		message.Metadata = make(map[string]interface{})
 	}

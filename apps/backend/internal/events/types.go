@@ -49,9 +49,11 @@ const (
 
 // Event types for task plans
 const (
-	TaskPlanCreated = "task_plan.created"
-	TaskPlanUpdated = "task_plan.updated"
-	TaskPlanDeleted = "task_plan.deleted"
+	TaskPlanCreated         = "task_plan.created"
+	TaskPlanUpdated         = "task_plan.updated"
+	TaskPlanDeleted         = "task_plan.deleted"
+	TaskPlanRevisionCreated = "task_plan.revision.created"
+	TaskPlanReverted        = "task_plan.reverted"
 )
 
 // Event types for session turns
@@ -117,7 +119,8 @@ const (
 const (
 	AgentStarted           = "agent.started"
 	AgentRunning           = "agent.running"
-	AgentReady             = "agent.ready" // Agent finished prompt, ready for follow-up
+	AgentBootReady         = "agent.boot_ready" // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
+	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
 	AgentStopped           = "agent.stopped"
@@ -201,6 +204,11 @@ const (
 	GitHubNewIssue       = "github.new_issue"        // New issue found matching issue watch
 	GitHubTaskPRUpdated  = "github.task_pr.updated"  // TaskPR record updated (for UI refresh)
 	GitHubWatchEvent     = "github.watch.event"      // Watch created/deleted
+)
+
+// Event types for Jira integration
+const (
+	JiraNewIssue = "jira.new_issue" // New issue found matching a Jira issue watch
 )
 
 // BuildShellOutputSubject creates a shell output subject for a specific session

@@ -6,4 +6,4 @@ See `.agents/skills/spec/SKILL.md` for the workflow.
 
 | Slug | Status | Created | PR |
 |------|--------|---------|----|
-| _(no specs yet)_ | — | — | — |
+| [external-mcp](external-mcp/spec.md) | draft | 2026-04-28 | — |

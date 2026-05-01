@@ -171,17 +171,28 @@ function maybeAdoptSessionOnTransition(
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;
+    // Reverse-ordering guard: if the events arrive as old=COMPLETED then
+    // new=STARTING (instead of the typical new=STARTING then old=COMPLETED),
+    // shouldAdoptNewSession returns true on the second event because the old
+    // session is now terminal. But the user may have pinned the old session —
+    // in that case the symmetric guard below was skipped (no terminal event
+    // for the new session), and we'd auto-yank them off their pinned session
+    // here. Match the terminal-handoff path's pinning check.
+    if (oldSessionId && state.tasks.pinnedSessionId === oldSessionId) return;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
-    state.setActiveSession(taskId, sessionId);
+    state.setActiveSessionAuto(taskId, sessionId);
     return;
   }
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
+    // If the user explicitly pinned this session (manual click), don't yank
+    // them away just because the workflow moved it to a terminal state.
+    if (state.tasks.pinnedSessionId === sessionId) return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
-      state.setActiveSession(taskId, replacement);
+      state.setActiveSessionAuto(taskId, replacement);
     }
   }
 }

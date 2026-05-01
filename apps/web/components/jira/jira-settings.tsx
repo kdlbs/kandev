@@ -14,6 +14,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
+import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { useJiraEnabled } from "@/components/jira/my-jira/use-jira-enabled";
 import {
   getJiraConfig,
@@ -561,6 +562,7 @@ export function JiraSettings({ workspaceId }: JiraSettingsProps) {
           </CardContent>
         </Card>
       </SettingsSection>
+      {s.config?.hasSecret && <JiraIssueWatchersSection workspaceId={workspaceId} />}
       <TaskPresetsSection />
     </div>
   );

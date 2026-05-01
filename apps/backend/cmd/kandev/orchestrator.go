@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	jirapkg "github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -248,6 +249,24 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 	})
 }
 
+// jiraServiceAdapter exposes the JIRA service's issue-watch dedup methods to
+// the orchestrator without leaking the rest of the package surface area.
+type jiraServiceAdapter struct {
+	svc *jirapkg.Service
+}
+
+func (a *jiraServiceAdapter) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, issueURL string) (bool, error) {
+	return a.svc.Store().ReserveIssueWatchTask(ctx, watchID, issueKey, issueURL)
+}
+
+func (a *jiraServiceAdapter) AssignIssueWatchTaskID(ctx context.Context, watchID, issueKey, taskID string) error {
+	return a.svc.Store().AssignIssueWatchTaskID(ctx, watchID, issueKey, taskID)
+}
+
+func (a *jiraServiceAdapter) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey string) error {
+	return a.svc.Store().ReleaseIssueWatchTask(ctx, watchID, issueKey)
+}
+
 // repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.
 type repoLocalPathUpdater struct {
 	svc *taskservice.Service
@@ -272,9 +291,29 @@ type repositoryResolverAdapter struct {
 }
 
 // ResolveForReview implements orchestrator.RepositoryResolver.
+//
+// If the workspace already has a Repository configured for the given provider
+// info with a non-empty LocalPath, that repo is reused and no clone is
+// performed. Otherwise the repo is cloned into the kandev-managed location and
+// a Repository entity is created.
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
+	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
+	}
+	if existing != nil && existing.LocalPath != "" {
+		baseBranch := defaultBranch
+		if baseBranch == "" {
+			baseBranch = existing.DefaultBranch
+		}
+		if baseBranch == "" {
+			baseBranch = a.detectAndPersistDefaultBranch(ctx, existing, existing.LocalPath)
+		}
+		return existing.ID, baseBranch, nil
+	}
+
 	cloneURL, err := repoclone.CloneURL(provider, owner, name, a.protocol)
 	if err != nil {
 		return "", "", fmt.Errorf("unsupported provider: %w", err)

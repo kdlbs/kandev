@@ -79,3 +79,49 @@ export interface JiraSearchResult {
   isLast: boolean;
   nextPageToken?: string;
 }
+
+/**
+ * A workspace-scoped JQL poller. The backend re-evaluates the JQL on
+ * `pollIntervalSeconds` cadence and creates a Kandev task in the configured
+ * workflow step for each newly-matching ticket.
+ */
+export interface JiraIssueWatch {
+  id: string;
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  jql: string;
+  agentProfileId: string;
+  executorProfileId: string;
+  prompt: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  /** Last poll timestamp, or null when the watch has never run. */
+  lastPolledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateJiraIssueWatchInput {
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  jql: string;
+  agentProfileId?: string;
+  executorProfileId?: string;
+  prompt?: string;
+  pollIntervalSeconds?: number;
+  enabled?: boolean;
+}
+
+/** Patch shape: every field is optional so the UI can change one knob at a time. */
+export interface UpdateJiraIssueWatchInput {
+  workflowId?: string;
+  workflowStepId?: string;
+  jql?: string;
+  agentProfileId?: string;
+  executorProfileId?: string;
+  prompt?: string;
+  enabled?: boolean;
+  pollIntervalSeconds?: number;
+}

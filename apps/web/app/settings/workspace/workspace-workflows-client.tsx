@@ -504,7 +504,7 @@ function useWorkspaceWorkflowsPage(
   const router = useRouter();
   const { toast } = useToast();
   const { workflowItems, setWorkflowItems, setSavedWorkflowItems, isWorkflowDirty } =
-    useWorkflowSettings(workflows);
+    useWorkflowSettings(workflows, workspace?.id);
 
   const importExport = useWorkflowImportExport(workspace, router, toast);
   const {

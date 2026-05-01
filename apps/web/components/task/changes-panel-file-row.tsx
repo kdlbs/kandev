@@ -94,12 +94,16 @@ export function FileRow({
         />
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
-            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
+            {folder && (
+              <span className="text-foreground/60 truncate min-w-0 [flex-shrink:9999]">
+                {folder}/
+              </span>
+            )}
+            <span className="font-medium text-foreground truncate min-w-0">{name}</span>
           </p>
         </button>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}

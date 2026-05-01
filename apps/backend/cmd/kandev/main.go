@@ -31,6 +31,7 @@ import (
 
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
+	linearpkg "github.com/kandev/kandev/internal/linear"
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -284,8 +285,7 @@ func startAgentInfrastructure(
 	}
 	addCleanup(worktreeCleanup)
 	log.Info("Worktree Manager initialized",
-		zap.Bool("enabled", cfg.Worktree.Enabled),
-		zap.String("base_path", cfg.Worktree.BasePath))
+		zap.Bool("enabled", cfg.Worktree.Enabled))
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
@@ -333,13 +333,22 @@ func startAgentInfrastructure(
 		log.Info("GitHub poller started")
 	}
 
-	// Start JIRA auth-health poller. Probes stored credentials for every
-	// configured workspace on a fixed cadence so the UI can show a real
-	// connected/disconnected status without doing its own polling.
+	// Start JIRA poller. Drives two background loops sharing one service: an
+	// auth-health probe (so the UI can show connect status without polling
+	// JIRA itself) and an issue-watch loop that runs configured JQL queries
+	// and emits NewJiraIssueEvent for the orchestrator to turn into tasks.
 	if services.Jira != nil {
+		orchestratorSvc.SetJiraService(&jiraServiceAdapter{svc: services.Jira})
 		jiraPoller := jirapkg.NewPoller(services.Jira, log)
 		jiraPoller.Start(ctx)
 		addCleanup(func() error { jiraPoller.Stop(); return nil })
+	}
+
+	// Start Linear auth-health poller, mirroring the Jira poller.
+	if services.Linear != nil {
+		linearPoller := linearpkg.NewPoller(services.Linear, log)
+		linearPoller.Start(ctx)
+		addCleanup(func() error { linearPoller.Stop(); return nil })
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
@@ -428,7 +437,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -466,6 +475,7 @@ func buildHTTPServer(
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
+	addCleanup func(func() error),
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -473,6 +483,11 @@ func buildHTTPServer(
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
+
+	port := cfg.Server.Port
+	if port == 0 {
+		port = ports.Backend
+	}
 
 	registerRoutes(routeParams{
 		router:                  router,
@@ -496,15 +511,13 @@ func buildHTTPServer(
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
+		addCleanup:              addCleanup,
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
+		httpPort:                port,
 		log:                     log,
 	})
 
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
-	}
 	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      router,

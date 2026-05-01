@@ -17,14 +17,26 @@ import (
 // don't hammer Atlassian when many workspaces are configured.
 const defaultAuthPollInterval = 90 * time.Second
 
-// Poller probes the stored Jira credentials of every configured workspace on a
-// fixed cadence and persists the result on the JiraConfig row. The frontend
-// reads those fields via getJiraConfig to render the connected/disconnected
-// indicator without doing its own probing.
+// defaultIssuePollTickInterval is how often the issue-watch loop wakes up to
+// look at every enabled watcher. The actual JQL is only re-run for a watcher
+// when its per-watch `PollIntervalSeconds` has elapsed since `LastPolledAt`,
+// so this is the *minimum* granularity, not the *actual* cadence. 60 seconds
+// matches the smallest interval the UI accepts; the gating check then rate-
+// limits each individual watcher.
+const defaultIssuePollTickInterval = 60 * time.Second
+
+// Poller drives two background loops sharing a single Service:
+//   - auth health: probes stored credentials so the UI can show connect status.
+//   - issue watches: runs each enabled watcher's JQL and emits NewJiraIssueEvent
+//     for every matching ticket the orchestrator hasn't yet seen.
+//
+// Both loops are cancelled together via Stop.
 type Poller struct {
-	service  *Service
-	logger   *logger.Logger
-	interval time.Duration
+	service       *Service
+	logger        *logger.Logger
+	authInterval  time.Duration
+	issueInterval time.Duration
+	issueTickHook func() // tests use this to observe each issue-watch tick.
 
 	// mu guards started/cancel/wg against concurrent Start/Stop calls.
 	mu      sync.Mutex
@@ -33,12 +45,26 @@ type Poller struct {
 	started bool
 }
 
-// NewPoller returns a poller that uses the default 90s cadence.
+// NewPoller returns a poller using the default cadences.
 func NewPoller(svc *Service, log *logger.Logger) *Poller {
-	return &Poller{service: svc, logger: log, interval: defaultAuthPollInterval}
+	return &Poller{
+		service:       svc,
+		logger:        log,
+		authInterval:  defaultAuthPollInterval,
+		issueInterval: defaultIssuePollTickInterval,
+	}
 }
 
-// Start launches the background loop. Calling Start more than once without
+// SetIssueTickHook installs a callback fired at the end of each issue-watch
+// tick. Production code never sets this; tests use it to wait for a tick
+// without sleep-polling.
+func (p *Poller) SetIssueTickHook(fn func()) {
+	p.mu.Lock()
+	p.issueTickHook = fn
+	p.mu.Unlock()
+}
+
+// Start launches both background loops. Calling Start more than once without
 // Stop is a no-op.
 func (p *Poller) Start(ctx context.Context) {
 	p.mu.Lock()
@@ -48,9 +74,10 @@ func (p *Poller) Start(ctx context.Context) {
 	}
 	p.started = true
 	ctx, p.cancel = context.WithCancel(ctx)
-	p.wg.Add(1)
+	p.wg.Add(2)
 	go p.loop(ctx)
-	p.logger.Info("Jira auth poller started")
+	go p.issueWatchLoop(ctx)
+	p.logger.Info("Jira poller started")
 }
 
 // Stop cancels the loop and waits for it to drain.
@@ -69,7 +96,7 @@ func (p *Poller) Stop() {
 	p.mu.Lock()
 	p.started = false
 	p.mu.Unlock()
-	p.logger.Info("Jira auth poller stopped")
+	p.logger.Info("Jira poller stopped")
 }
 
 func (p *Poller) loop(ctx context.Context) {
@@ -77,7 +104,7 @@ func (p *Poller) loop(ctx context.Context) {
 	// Run an initial probe immediately so the UI gets a status without waiting
 	// the full interval after backend startup.
 	p.probeAll(ctx)
-	ticker := time.NewTicker(p.interval)
+	ticker := time.NewTicker(p.authInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -86,6 +113,81 @@ func (p *Poller) loop(ctx context.Context) {
 		case <-ticker.C:
 			p.probeAll(ctx)
 		}
+	}
+}
+
+// issueWatchLoop drives the periodic JQL-poll → publish-event flow. Unlike
+// the auth loop, this one waits a full interval before its first tick so the
+// backend doesn't hammer JIRA the moment it starts.
+func (p *Poller) issueWatchLoop(ctx context.Context) {
+	defer p.wg.Done()
+	ticker := time.NewTicker(p.issueInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.checkIssueWatches(ctx)
+			p.fireIssueTickHook()
+		}
+	}
+}
+
+func (p *Poller) checkIssueWatches(ctx context.Context) {
+	watches, err := p.service.Store().ListEnabledIssueWatches(ctx)
+	if err != nil {
+		p.logger.Warn("jira poller: list enabled issue watches failed", zap.Error(err))
+		return
+	}
+	if len(watches) == 0 {
+		return
+	}
+	for _, w := range watches {
+		if ctx.Err() != nil {
+			return
+		}
+		if !isIssueWatchDue(w, time.Now()) {
+			continue
+		}
+		newTickets, err := p.service.CheckIssueWatch(ctx, w)
+		if err != nil {
+			p.logger.Debug("jira poller: check issue watch failed",
+				zap.String("watch_id", w.ID), zap.Error(err))
+			continue
+		}
+		for _, t := range newTickets {
+			p.logger.Info("new jira issue found for watch",
+				zap.String("watch_id", w.ID),
+				zap.String("issue_key", t.Key),
+				zap.String("summary", t.Summary))
+			p.service.publishNewJiraIssueEvent(ctx, w, t)
+		}
+	}
+}
+
+// isIssueWatchDue reports whether enough time has passed since the watch was
+// last polled to re-run its JQL on this tick. A watch with no LastPolledAt
+// (never polled, or DB row freshly created) is always due. PollIntervalSeconds
+// <= 0 falls back to the default — the same normalisation the store applies on
+// write — so a corrupt row never blocks polling forever.
+func isIssueWatchDue(w *IssueWatch, now time.Time) bool {
+	if w.LastPolledAt == nil {
+		return true
+	}
+	interval := w.PollIntervalSeconds
+	if interval <= 0 {
+		interval = DefaultIssueWatchPollInterval
+	}
+	return now.Sub(*w.LastPolledAt) >= time.Duration(interval)*time.Second
+}
+
+func (p *Poller) fireIssueTickHook() {
+	p.mu.Lock()
+	hook := p.issueTickHook
+	p.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 }
 

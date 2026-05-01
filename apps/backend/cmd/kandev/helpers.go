@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -26,6 +28,7 @@ import (
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ports"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
@@ -34,7 +37,9 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/jira"
+	"github.com/kandev/kandev/internal/linear"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -333,8 +338,10 @@ type routeParams struct {
 	secretsSvc              *secrets.Service
 	secretStore             secrets.SecretStore
 	mcpConfigSvc            *mcpconfig.Service
+	addCleanup              func(func() error)
 	webInternalURL          string
 	pprofEnabled            bool
+	httpPort                int
 	log                     *logger.Logger
 }
 
@@ -475,6 +482,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered JIRA handlers (HTTP + WebSocket)")
 	}
 
+	if p.services.Linear != nil {
+		linear.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Linear, p.log)
+		p.log.Debug("Registered Linear handlers (HTTP + WebSocket)")
+	}
+
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
@@ -507,7 +519,7 @@ func registerMCPAndDebugRoutes(
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.log,
+		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
@@ -518,12 +530,66 @@ func registerMCPAndDebugRoutes(
 	p.lifecycleMgr.SetMCPHandler(p.gateway.Dispatcher)
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
+	// External MCP endpoint — exposes config tools + create_task to external coding
+	// agents (Claude Code, Cursor, etc.) at /mcp on the backend HTTP server.
+	registerExternalMCP(p)
+
 	debughandlers.RegisterRoutes(p.router, p.log)
 	p.log.Debug("Registered Debug handlers (HTTP)")
 
 	if p.pprofEnabled {
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
+	}
+}
+
+// registerExternalMCP mounts an MCP server on the backend HTTP router so external
+// coding agents can connect to Kandev at /mcp, /mcp/sse, /mcp/message. The MCP
+// routes are gated by a loopback-only middleware because the endpoint is
+// unauthenticated in v1 — see docs/specs/external-mcp/spec.md.
+func registerExternalMCP(p routeParams) {
+	port := p.httpPort
+	if port == 0 {
+		port = ports.Backend
+	}
+	baseURL := fmt.Sprintf("http://localhost:%d", port)
+
+	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	srv := mcpserver.NewExternal(backendClient, baseURL, p.log, "")
+	mcpGroup := p.router.Group("", loopbackOnlyMiddleware(p.log))
+	srv.RegisterBackendRoutes(mcpGroup)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return srv.Close(ctx)
+		})
+	}
+	p.log.Info("Registered external MCP endpoint",
+		zap.String("base_url", baseURL),
+		zap.String("streamable_http", baseURL+"/mcp"),
+		zap.String("sse", baseURL+"/mcp/sse"),
+		zap.String("sse_message", baseURL+"/mcp/message"))
+}
+
+// loopbackOnlyMiddleware rejects requests that did not originate from the
+// loopback interface. The external MCP endpoint has no authentication in v1,
+// so it must only accept connections from the same machine.
+func loopbackOnlyMiddleware(log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+		if err != nil {
+			host = c.Request.RemoteAddr
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			log.Warn("rejected non-loopback MCP request",
+				zap.String("remote_addr", c.Request.RemoteAddr),
+				zap.String("path", c.Request.URL.Path))
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		c.Next()
 	}
 }
 

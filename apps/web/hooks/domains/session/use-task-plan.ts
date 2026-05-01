@@ -1,12 +1,17 @@
 import { useEffect, useCallback, useState, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   getTaskPlan,
   createTaskPlan,
   updateTaskPlan,
   deleteTaskPlan,
+  listPlanRevisions,
+  getPlanRevision,
+  revertPlanRevision,
 } from "@/lib/api/domains/plan-api";
-import type { TaskPlan } from "@/lib/types/http";
+import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+
+const EMPTY_REVISIONS: readonly TaskPlanRevision[] = Object.freeze([]);
 
 /**
  * Hook to fetch and manage the plan for a task.
@@ -119,6 +124,8 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     }
   }, [taskId, setTaskPlan, setTaskPlanSaving]);
 
+  const revisionsBundle = useTaskPlanRevisions(taskId, setTaskPlanSaving, setError);
+
   return {
     plan: plan ?? null,
     isLoading,
@@ -127,5 +134,138 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     savePlan,
     deletePlan: removePlan,
     refetch: fetchPlan,
+    ...revisionsBundle,
+  };
+}
+
+const EMPTY_PAIR: readonly [string | null, string | null] = Object.freeze([
+  null,
+  null,
+]) as readonly [string | null, string | null];
+
+function useTaskPlanRevisions(
+  taskId: string | null,
+  setTaskPlanSaving: (taskId: string, saving: boolean) => void,
+  setError: (err: string | null) => void,
+) {
+  const revisions = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsByTaskId[taskId] ?? EMPTY_REVISIONS) : EMPTY_REVISIONS,
+  ) as TaskPlanRevision[];
+  const isLoadingRevisions = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsLoadingByTaskId[taskId] ?? false) : false,
+  );
+  const isRevisionsLoaded = useAppStore((state) =>
+    taskId ? (state.taskPlans.revisionsLoadedByTaskId[taskId] ?? false) : false,
+  );
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const storeApi = useAppStoreApi();
+  const setPlanRevisions = useAppStore((state) => state.setPlanRevisions);
+  const setPlanRevisionsLoading = useAppStore((state) => state.setPlanRevisionsLoading);
+  const cachePlanRevisionContent = useAppStore((state) => state.cachePlanRevisionContent);
+
+  const loadRevisions = useCallback(async () => {
+    if (!taskId) return;
+    setPlanRevisionsLoading(taskId, true);
+    try {
+      const list = await listPlanRevisions(taskId);
+      setPlanRevisions(taskId, list);
+    } catch (err) {
+      console.error("Failed to load plan revisions:", err);
+      setError(err instanceof Error ? err.message : "Failed to load revisions");
+    } finally {
+      setPlanRevisionsLoading(taskId, false);
+    }
+  }, [taskId, setPlanRevisions, setPlanRevisionsLoading, setError]);
+
+  // Load revisions once on mount — events may have fired before the WS connected.
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    if (!taskId || isRevisionsLoaded || isLoadingRevisions) return;
+    loadRevisions();
+  }, [taskId, connectionStatus, isRevisionsLoaded, isLoadingRevisions, loadRevisions]);
+
+  const loadRevisionContent = useCallback(
+    async (revisionId: string): Promise<string> => {
+      // Read the cache lazily via the store API inside the callback so this
+      // function's identity stays stable across cache updates. Selecting the
+      // cache object as a hook input would re-create the callback whenever
+      // any task's content was cached, which retriggers the dialogs'
+      // content-fetch effects (cache short-circuits, but the work is wasted).
+      const cached = storeApi.getState().taskPlans.revisionContentCache[revisionId];
+      if (cached !== undefined) return cached;
+      // Pass taskId so the backend can enforce revision-belongs-to-task.
+      const rev = await getPlanRevision(revisionId, taskId ?? undefined);
+      const content = rev.content ?? "";
+      cachePlanRevisionContent(revisionId, content);
+      return content;
+    },
+    [taskId, storeApi, cachePlanRevisionContent],
+  );
+
+  const revertTo = useCallback(
+    async (revisionId: string, authorName?: string): Promise<TaskPlanRevision | null> => {
+      if (!taskId) return null;
+      setTaskPlanSaving(taskId, true);
+      setError(null);
+      try {
+        return await revertPlanRevision(taskId, revisionId, authorName);
+      } catch (err) {
+        console.error("Failed to revert plan:", err);
+        setError(err instanceof Error ? err.message : "Failed to revert plan");
+        return null;
+      } finally {
+        setTaskPlanSaving(taskId, false);
+      }
+    },
+    [taskId, setTaskPlanSaving, setError],
+  );
+
+  return {
+    revisions,
+    isLoadingRevisions,
+    loadRevisions,
+    loadRevisionContent,
+    revertTo,
+    ...usePreviewCompareState(taskId),
+  };
+}
+
+/** Phase 6: preview + compare selectors and actions, scoped to the active task. */
+function usePreviewCompareState(taskId: string | null) {
+  const previewRevisionId = useAppStore((state) =>
+    taskId ? (state.taskPlans.previewRevisionIdByTaskId[taskId] ?? null) : null,
+  );
+  const comparePair = useAppStore((state) =>
+    taskId ? (state.taskPlans.comparePairByTaskId[taskId] ?? EMPTY_PAIR) : EMPTY_PAIR,
+  ) as [string | null, string | null];
+  const setPreviewRevisionStore = useAppStore((state) => state.setPreviewRevision);
+  const toggleComparePairStore = useAppStore((state) => state.toggleComparePair);
+  const clearComparePairStore = useAppStore((state) => state.clearComparePair);
+
+  const setPreviewRevision = useCallback(
+    (revisionId: string | null) => {
+      if (!taskId) return;
+      setPreviewRevisionStore(taskId, revisionId);
+    },
+    [taskId, setPreviewRevisionStore],
+  );
+  const toggleCompareSelection = useCallback(
+    (revisionId: string) => {
+      if (!taskId) return;
+      toggleComparePairStore(taskId, revisionId);
+    },
+    [taskId, toggleComparePairStore],
+  );
+  const clearComparePair = useCallback(() => {
+    if (!taskId) return;
+    clearComparePairStore(taskId);
+  }, [taskId, clearComparePairStore]);
+
+  return {
+    previewRevisionId,
+    setPreviewRevision,
+    comparePair,
+    toggleCompareSelection,
+    clearComparePair,
   };
 }

@@ -53,6 +53,14 @@ export const DIMENSION_METAS: DimensionMeta[] = [
     defaultValue: true,
   },
   {
+    dimension: "hasPR",
+    label: "Has PR",
+    valueKind: "boolean",
+    ops: ["is", "is_not"],
+    defaultOp: "is",
+    defaultValue: true,
+  },
+  {
     dimension: "state",
     label: "State",
     valueKind: "enum",

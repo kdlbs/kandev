@@ -158,6 +158,69 @@ test.describe("Session layout", () => {
     // Terminal should be gone (it was closed)
     await expect(session.terminal).not.toBeVisible({ timeout: 5_000 });
   });
+
+  test("maximize chat panel preserves scroll position", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Seed a session whose script emits enough messages to overflow the chat list,
+    // so the user can be scrolled away from the bottom.
+    const script = Array.from(
+      { length: 30 },
+      (_, i) =>
+        `e2e:message("Message number ${i + 1} - lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua")`,
+    ).join("\n");
+
+    await seedTaskWithSession(testPage, apiClient, seedData, "Chat Maximize Scroll", script);
+
+    const chatList = testPage.locator(".chat-message-list:visible").first();
+    await chatList.waitFor({ state: "visible", timeout: 10_000 });
+
+    // Wait for the message list to overflow so we have room to scroll up.
+    await expect
+      .poll(async () => chatList.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "Waiting for chat to overflow",
+      })
+      .toBeGreaterThan(200);
+
+    // Scroll to roughly the middle so we are clearly away from the top.
+    // (Exact scrollTop won't match after maximize because the panel resizes
+    // and content reflows — we only assert the bug invariant: scroll did
+    // not snap back to 0/top.)
+    const targetScrollTop = await chatList.evaluate((el) => {
+      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      return el.scrollTop;
+    });
+    expect(targetScrollTop).toBeGreaterThan(100);
+
+    // Click maximize on the dockview group whose tab is the chat session tab.
+    // Note: the chat panel content is rendered via a portal outside `.dv-groupview`,
+    // so we identify the group by its tab (`session-tab-<id>`) instead.
+    const chatMaxBtn = testPage
+      .locator(
+        `.dv-groupview:has([data-testid^="session-tab-"]) .dv-tabs-and-actions-container [data-testid="dockview-maximize-btn"]`,
+      )
+      .first();
+    await chatMaxBtn.click();
+
+    // Re-locate after layout change (panel content may be re-mounted).
+    const chatListAfter = testPage.locator(".chat-message-list:visible").first();
+    await chatListAfter.waitFor({ state: "visible", timeout: 5_000 });
+
+    // Bug invariant: after maximize, scrollTop must NOT snap back to 0.
+    // The fix preserves the user's vertical position so they remain anchored
+    // somewhere mid/bottom of the conversation, not jumped to the top.
+    // Poll instead of a fixed sleep — the rAF restore lands within ~1 frame
+    // after isRestoringLayout clears.
+    await expect
+      .poll(async () => chatListAfter.evaluate((el) => el.scrollTop), {
+        timeout: 2_000,
+        message: "scroll position should be restored after maximize",
+      })
+      .toBeGreaterThan(50);
+  });
 });
 
 test.describe("Session tab cleanup", () => {

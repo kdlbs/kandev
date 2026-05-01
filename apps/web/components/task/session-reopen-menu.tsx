@@ -59,8 +59,8 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
   const handleClick = useCallback(
     (sessionId: string, label: string, groupId?: string) => {
       if (!api) return;
-      // Skip the next layout switch for this session to prevent a full rebuild.
-      useDockviewStore.setState({ _skipLayoutSwitchForSession: sessionId });
+      // Reopening a session within the same task = same env, so the env switch
+      // action no-ops naturally. We just create the chat panel.
       addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],

@@ -57,18 +57,21 @@ const (
 	ActionEnvironmentDelete = "environment.delete"
 
 	// Task actions
-	ActionTaskList       = "task.list"
-	ActionTaskCreate     = "task.create"
-	ActionTaskGet        = "task.get"
-	ActionTaskUpdate     = "task.update"
-	ActionTaskDelete     = "task.delete"
-	ActionTaskMove       = "task.move"
-	ActionTaskState      = "task.state"
-	ActionTaskArchive    = "task.archive"
-	ActionTaskPlanCreate = "task.plan.create"
-	ActionTaskPlanGet    = "task.plan.get"
-	ActionTaskPlanUpdate = "task.plan.update"
-	ActionTaskPlanDelete = "task.plan.delete"
+	ActionTaskList              = "task.list"
+	ActionTaskCreate            = "task.create"
+	ActionTaskGet               = "task.get"
+	ActionTaskUpdate            = "task.update"
+	ActionTaskDelete            = "task.delete"
+	ActionTaskMove              = "task.move"
+	ActionTaskState             = "task.state"
+	ActionTaskArchive           = "task.archive"
+	ActionTaskPlanCreate        = "task.plan.create"
+	ActionTaskPlanGet           = "task.plan.get"
+	ActionTaskPlanUpdate        = "task.plan.update"
+	ActionTaskPlanDelete        = "task.plan.delete"
+	ActionTaskPlanRevisionsList = "task.plan.revisions.list"
+	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
+	ActionTaskPlanRevert        = "task.plan.revert"
 
 	ActionTaskSessionList    = "task.session.list"
 	ActionTaskSessionResume  = "task.session.resume"
@@ -159,6 +162,8 @@ const (
 	ActionTaskPlanCreated          = "task.plan.created"
 	ActionTaskPlanUpdated          = "task.plan.updated"
 	ActionTaskPlanDeleted          = "task.plan.deleted"
+	ActionTaskPlanRevisionCreated  = "task.plan.revision.created"
+	ActionTaskPlanReverted         = "task.plan.reverted"
 	ActionAgentUpdated             = "agent.updated"
 	ActionAgentAvailableUpdated    = "agent.available.updated"
 	ActionWorkspaceCreated         = "workspace.created"
@@ -345,6 +350,7 @@ const (
 	ActionMCPDeleteTask      = "mcp.delete_task"
 	ActionMCPArchiveTask     = "mcp.archive_task"
 	ActionMCPUpdateTaskState = "mcp.update_task_state"
+	ActionMCPMessageTask     = "mcp.message_task"
 )
 
 // GitHub integration actions
@@ -394,6 +400,17 @@ const (
 	ActionJiraTicketGet        = "jira.ticket.get"
 	ActionJiraTicketTransition = "jira.ticket.transition"
 	ActionJiraProjectsList     = "jira.projects.list"
+)
+
+// Linear integration actions
+const (
+	ActionLinearConfigGet       = "linear.config.get"
+	ActionLinearConfigSet       = "linear.config.set"
+	ActionLinearConfigDelete    = "linear.config.delete"
+	ActionLinearConfigTest      = "linear.config.test"
+	ActionLinearIssueGet        = "linear.issue.get"
+	ActionLinearIssueTransition = "linear.issue.transition"
+	ActionLinearTeamsList       = "linear.teams.list"
 )
 
 // Error codes

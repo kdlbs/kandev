@@ -226,6 +226,7 @@ type AgentProfileInfo struct {
 type LaunchAgentRequest struct {
 	TaskID              string
 	SessionID           string
+	TaskEnvironmentID   string // Env owning this session (shared across sessions in the same task)
 	TaskTitle           string // Human-readable task title for semantic worktree naming
 	AgentProfileID      string
 	RepositoryURL       string
@@ -241,6 +242,7 @@ type LaunchAgentRequest struct {
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "config" activates config-mode tools
+	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string

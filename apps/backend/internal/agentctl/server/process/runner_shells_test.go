@@ -144,7 +144,7 @@ func TestInteractiveRunner_CreateUserShell_DifferentSessions(t *testing.T) {
 	r1 := runner.CreateUserShell("session-1")
 	r2 := runner.CreateUserShell("session-2")
 
-	// Both should be "Terminal" (first in each session)
+	// Both should be "Terminal" (first in each scope)
 	if r1.Label != "Terminal" {
 		t.Errorf("session-1 Label = %q, want 'Terminal'", r1.Label)
 	}
@@ -152,7 +152,48 @@ func TestInteractiveRunner_CreateUserShell_DifferentSessions(t *testing.T) {
 		t.Errorf("session-2 Label = %q, want 'Terminal'", r2.Label)
 	}
 	if r1.Closable || r2.Closable {
-		t.Error("first terminal in each session should not be closable")
+		t.Error("first terminal in each scope should not be closable")
+	}
+}
+
+// Two sessions in the same task share a TaskEnvironmentID, and callers pass
+// that env as the scopeID. The runner must return one shared shell list for
+// them — that's the whole reason terminals are env-keyed.
+func TestInteractiveRunner_SharedScope_AcrossSessions(t *testing.T) {
+	log := newTestLogger(t)
+	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
+	envID := "env-shared"
+
+	first := runner.CreateUserShell(envID)
+	second := runner.CreateUserShell(envID)
+
+	// Subsequent shell in the same scope must increment.
+	if first.Label != "Terminal" {
+		t.Errorf("first Label = %q, want 'Terminal'", first.Label)
+	}
+	if second.Label != "Terminal 2" {
+		t.Errorf("second Label = %q, want 'Terminal 2' (same scope, incremented)", second.Label)
+	}
+
+	// Both terminals must show up when any session in that env lists shells.
+	shells := runner.ListUserShells(envID)
+	if len(shells) != 2 {
+		t.Fatalf("ListUserShells(envID) returned %d, want 2", len(shells))
+	}
+	ids := map[string]bool{}
+	for _, s := range shells {
+		ids[s.TerminalID] = true
+	}
+	if !ids[first.TerminalID] || !ids[second.TerminalID] {
+		t.Error("ListUserShells did not include both shells created under the shared scope")
+	}
+
+	// A different env must remain isolated.
+	otherShells := runner.ListUserShells("env-other")
+	for _, s := range otherShells {
+		if s.TerminalID == first.TerminalID || s.TerminalID == second.TerminalID {
+			t.Error("shells leaked across envs — scope isolation broken")
+		}
 	}
 }
 

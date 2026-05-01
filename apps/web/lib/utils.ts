@@ -171,6 +171,46 @@ export function formatRelativeTime(dateString: string): string {
 }
 
 /**
+ * Format a date string with minute-level precision and short context.
+ * Examples: "just now", "5m ago", "Today, 14:32", "Yesterday, 14:32",
+ * "Apr 25, 14:32", "Apr 25 2025, 14:32".
+ */
+export function formatPreciseTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+
+  if (diffSec < 10) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffMin < 60) return `${diffMin}m ago`;
+
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) return `Today, ${time}`;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate();
+  if (isYesterday) return `Yesterday, ${time}`;
+
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const dateLabel = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  });
+  return `${dateLabel}, ${time}`;
+}
+
+/**
  * Convert an absolute file path to a relative path based on a workspace root.
  * If the path is within the workspace, returns the relative portion.
  * Otherwise, returns the original path (with home directory formatting applied).

@@ -29,6 +29,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
 	"clarification-timeout":   scenarioClarificationTimeout,
+	"multi-permission":        scenarioMultiPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
 }
@@ -94,6 +95,34 @@ func scenarioReadAndEdit(e *emitter) {
 
 	fixedDelay(50)
 	e.text("Read and edit scenario complete.")
+}
+
+// scenarioMultiPermission: three sequential bash tools, each requiring permission.
+// Reproduces the "approvals reappear at turn complete" bug — user approves all
+// three, then when the turn ends the approval prompts must NOT come back.
+func scenarioMultiPermission(e *emitter) {
+	fixedDelay(50)
+	e.text("Running three commands that need approval.")
+
+	for i, label := range []string{"first", "second", "third"} {
+		fixedDelay(50)
+		id := nextToolID()
+		input := map[string]any{
+			"command":     fmt.Sprintf("echo %s", label),
+			"description": fmt.Sprintf("Step %d: %s", i+1, label),
+		}
+		e.startTool(id, fmt.Sprintf("Run %s command", label), acp.ToolKindExecute, input)
+		allowed := e.requestPermission(id, fmt.Sprintf("Run %s command", label), acp.ToolKindExecute, input)
+		fixedDelay(50)
+		if allowed {
+			e.completeTool(id, map[string]any{"output": label})
+		} else {
+			e.completeTool(id, map[string]any{"output": "denied"})
+		}
+	}
+
+	fixedDelay(50)
+	e.text("Multi-permission scenario complete.")
 }
 
 // scenarioPermissionFlow: tool requiring permission with fixed delays.

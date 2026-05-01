@@ -3,11 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
@@ -456,43 +454,10 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	}
 }
 
-// waitForSessionReady polls the session state after a resume operation until the agent
-// is ready to accept prompts. It returns nil when the session reaches WAITING_FOR_INPUT
-// state, or an error if the session transitions to FAILED or the timeout is exceeded.
+// waitForSessionReady delegates to the shared service.WaitForSessionReady helper.
+// Kept as a thin wrapper so existing tests on this method continue to pass.
 func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID string) error {
-	const (
-		pollInterval = 1 * time.Second
-		maxWait      = 90 * time.Second
-	)
-	deadline := time.Now().Add(maxWait)
-	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for session to become ready after resume")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
-		}
-		session, err := h.service.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return fmt.Errorf("failed to check session state: %w", err)
-		}
-		switch session.State {
-		case models.TaskSessionStateWaitingForInput:
-			return nil
-		case models.TaskSessionStateFailed:
-			errMsg := session.ErrorMessage
-			if errMsg == "" {
-				errMsg = "session failed during resume"
-			}
-			return fmt.Errorf("session failed after resume: %s", errMsg)
-		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
-			return fmt.Errorf("session in unexpected state after resume: %s", session.State)
-		default:
-			// STARTING or RUNNING — keep polling
-		}
-	}
+	return h.service.WaitForSessionReady(ctx, sessionID)
 }
 
 type wsListMessagesRequest struct {

@@ -9,6 +9,7 @@ export {
 } from "./session-runtime/session-runtime-slice";
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
+export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -22,6 +23,12 @@ export type {
 } from "./session-runtime/types";
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
 export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
+export type {
+  JiraSlice,
+  JiraSliceState,
+  JiraSliceActions,
+  JiraIssueWatchesState,
+} from "./jira/types";
 
 // Re-export commonly used types from each domain
 export type {

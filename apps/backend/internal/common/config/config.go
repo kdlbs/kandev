@@ -151,7 +151,6 @@ type RepositoryDiscoveryConfig struct {
 // WorktreeConfig holds Git worktree configuration for concurrent agent execution.
 type WorktreeConfig struct {
 	Enabled             bool   `mapstructure:"enabled"`             // Enable worktree mode
-	BasePath            string `mapstructure:"basePath"`            // Base directory for worktrees (default: ~/.kandev/worktrees)
 	DefaultBranch       string `mapstructure:"defaultBranch"`       // Default base branch (default: main)
 	CleanupOnRemove     bool   `mapstructure:"cleanupOnRemove"`     // Remove worktree directory on task deletion
 	FetchTimeoutSeconds int    `mapstructure:"fetchTimeoutSeconds"` // Git fetch timeout before worktree creation
@@ -184,19 +183,6 @@ type AgentConfig struct {
 	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
 	// Set at runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
-
-	// McpServerEnabled enables the standalone MCP server (default: false)
-	// Note: MCP is now embedded in agentctl and tunnels to backend via WebSocket.
-	// This setting is only for running a separate standalone MCP server process.
-	McpServerEnabled bool `mapstructure:"mcpServerEnabled"`
-
-	// McpServerPort is the port for the standalone MCP server (default: 40429)
-	McpServerPort int `mapstructure:"mcpServerPort"`
-
-	// McpServerURL is the URL of the Kandev MCP server for task management
-	// If set, agents with supports_mcp=true will be configured with this MCP server
-	// Note: With the new architecture, MCP is embedded in agentctl and this is typically not needed.
-	McpServerURL string `mapstructure:"mcpServerUrl"`
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
@@ -276,9 +262,6 @@ func setDefaults(v *viper.Viper) {
 	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
-	v.SetDefault("agent.mcpServerEnabled", false) // MCP is now embedded in agentctl
-	v.SetDefault("agent.mcpServerPort", ports.MCP)
-	v.SetDefault("agent.mcpServerUrl", "")
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")
@@ -295,7 +278,6 @@ func setDefaults(v *viper.Viper) {
 
 	// Worktree defaults
 	v.SetDefault("worktree.enabled", true)
-	v.SetDefault("worktree.basePath", "")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
 	v.SetDefault("worktree.fetchTimeoutSeconds", 60)
@@ -356,8 +338,6 @@ func LoadWithPath(configPath string) (*Config, error) {
 	// so we explicitly bind keys where env var naming differs from config key naming.
 	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
-	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
-	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
 	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")

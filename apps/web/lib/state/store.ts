@@ -28,6 +28,7 @@ import {
   createSessionRuntimeSlice,
   createUISlice,
   createGitHubSlice,
+  createJiraSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -35,6 +36,7 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultJiraState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -133,7 +135,12 @@ export type {
   PRWatchesState,
   ReviewWatchesState,
   IssueWatchesState,
+  JiraSlice,
+  JiraSliceState,
+  JiraSliceActions,
+  JiraIssueWatchesState,
 } from "./slices";
+import type { JiraIssueWatch } from "@/lib/types/jira";
 
 // Combined AppState type
 export type AppState = {
@@ -203,6 +210,9 @@ export type AppState = {
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
 
+  // JIRA slice
+  jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -242,6 +252,14 @@ export type AppState = {
   removeIssueWatch: (id: string) => void;
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
+
+  // JIRA actions
+  setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
+  setJiraIssueWatchesLoading: (loading: boolean) => void;
+  addJiraIssueWatch: (watch: JiraIssueWatch) => void;
+  updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
+  removeJiraIssueWatch: (id: string) => void;
+  resetJiraIssueWatches: () => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -331,7 +349,7 @@ export type AppState = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (sessionId: string, workspaceId: string) => void;
+  openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;
@@ -369,6 +387,7 @@ export type AppState = {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
   clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
@@ -396,6 +415,21 @@ export type AppState = {
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
+  // Plan revision actions
+  setPlanRevisions: (
+    taskId: string,
+    revisions: import("@/lib/types/http").TaskPlanRevision[],
+  ) => void;
+  upsertPlanRevision: (
+    taskId: string,
+    revision: import("@/lib/types/http").TaskPlanRevision,
+  ) => void;
+  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
+  cachePlanRevisionContent: (revisionId: string, content: string) => void;
+  // Plan revision preview + compare actions
+  setPreviewRevision: (taskId: string, revisionId: string | null) => void;
+  toggleComparePair: (taskId: string, revisionId: string) => void;
+  clearComparePair: (taskId: string) => void;
   // Queue actions
   setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
@@ -463,6 +497,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createJiraSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
@@ -514,6 +550,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
+      jiraIssueWatches: merged.jiraIssueWatches,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

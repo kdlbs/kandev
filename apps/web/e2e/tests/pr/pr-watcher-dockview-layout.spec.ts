@@ -1,4 +1,7 @@
+import { execSync } from "node:child_process";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -22,8 +25,28 @@ test.describe("PR watcher dockview layout stability", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+
+    // --- Register the GitHub repo so the PR watcher can resolve it to a real
+    // local path (the seed repo created in test-base.ts has no provider info,
+    // and clone-from-real-GitHub fails for the mocked testorg/testrepo). ---
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "GitHub Test Repo",
+      provider: "github",
+      provider_owner: "testorg",
+      provider_name: "testrepo",
+    });
+
+    // Create the PR head branches in the local seed repo so the executor's
+    // git checkout for auto-started review tasks succeeds (in production these
+    // branches would have been fetched during clone).
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    for (const branch of ["fix/auth", "feat/dashboard", "docs/update"]) {
+      execSync(`git branch -f ${branch} main`, { cwd: repoDir, env: gitEnv });
+    }
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(

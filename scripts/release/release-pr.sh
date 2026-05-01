@@ -47,6 +47,7 @@ CURRENT_CLI_MAJOR=0
 CURRENT_CLI_MINOR=0
 CURRENT_CLI_PATCH=0
 CURRENT_APP_TAG=""
+CURRENT_APP_TAG_FOUND=0
 CURRENT_APP_MAJOR=0
 CURRENT_APP_MINOR=0
 
@@ -232,6 +233,7 @@ detect_current_app_version() {
   local tags
   tags="$(git -C "$ROOT_DIR" tag --list 'v*')"
 
+  CURRENT_APP_TAG_FOUND=0
   local found=0
   local best_major=0
   local best_minor=0
@@ -239,7 +241,7 @@ detect_current_app_version() {
 
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
-    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)$ ]]; then
       local major="${BASH_REMATCH[1]}"
       local minor="${BASH_REMATCH[2]}"
       if [[ "$found" -eq 0 ]] || (( 10#$major > 10#$best_major )) || \
@@ -254,6 +256,7 @@ detect_current_app_version() {
   CURRENT_APP_MAJOR="$best_major"
   CURRENT_APP_MINOR="$best_minor"
   CURRENT_APP_TAG="v${CURRENT_APP_MAJOR}.${CURRENT_APP_MINOR}"
+  CURRENT_APP_TAG_FOUND="$found"
 
   if [[ "$found" -eq 1 ]]; then
     log "Current app tag:     $(bold "$CURRENT_APP_TAG") $(dim "(latest git tag matching vM.m)")"
@@ -371,7 +374,7 @@ ensure_prerequisites() {
   log_ok "Working tree is clean"
 
   log "Fetching tags from origin..."
-  run_cmd git -C "$ROOT_DIR" fetch --tags
+  run_cmd git -C "$ROOT_DIR" fetch --tags origin
   log_ok "Tags fetched"
 }
 
@@ -420,6 +423,75 @@ ensure_app_tag_available() {
     die "Tag $NEXT_APP_TAG already exists on origin."
   fi
   log_ok "Tag $(bold "$NEXT_APP_TAG") is available"
+}
+
+latest_origin_app_tag() {
+  local refs
+  if ! refs="$(git -C "$ROOT_DIR" ls-remote --tags origin 'refs/tags/v*')"; then
+    return 2
+  fi
+
+  local found=0
+  local best_major=0
+  local best_minor=0
+  local ref tag
+
+  while read -r _ ref; do
+    [[ -z "${ref:-}" ]] && continue
+    tag="${ref#refs/tags/}"
+    tag="${tag%\^\{\}}"
+    if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)$ ]]; then
+      local major="${BASH_REMATCH[1]}"
+      local minor="${BASH_REMATCH[2]}"
+      if [[ "$found" -eq 0 ]] || (( 10#$major > 10#$best_major )) || \
+        (( 10#$major == 10#$best_major && 10#$minor > 10#$best_minor )); then
+        found=1
+        best_major="$major"
+        best_minor="$minor"
+      fi
+    fi
+  done <<<"$refs"
+
+  [[ "$found" -eq 1 ]] || return 1
+  echo "v${best_major}.${best_minor}"
+}
+
+ensure_latest_app_tag_present() {
+  [[ "$APP_SELECTED" -eq 1 ]] || return 0
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  log "Verifying latest app tag $(bold "$CURRENT_APP_TAG") is present locally..."
+  if [[ "$CURRENT_APP_TAG_FOUND" -eq 0 ]]; then
+    local origin_status
+    if latest_origin_app_tag >/dev/null; then
+      origin_status=0
+    else
+      origin_status="$?"
+    fi
+    if [[ "$origin_status" -eq 0 ]]; then
+      die "No local app tag found, but origin has app tags. Fetch origin tags and retry."
+    fi
+    if [[ "$origin_status" -ne 1 ]]; then
+      die "Could not reach origin to verify app tags. Check your connection and retry."
+    fi
+    log_ok "No prior app tags on origin or locally"
+    return 0
+  fi
+
+  local origin_app_tag
+  if ! origin_app_tag="$(latest_origin_app_tag)"; then
+    die "Could not determine latest app tag from origin. Refusing to generate CHANGELOG.md."
+  fi
+
+  if [[ "$CURRENT_APP_TAG" != "$origin_app_tag" ]]; then
+    die "Latest local app tag is $CURRENT_APP_TAG, but origin latest is $origin_app_tag. Refusing to generate CHANGELOG.md."
+  fi
+
+  if ! git -C "$ROOT_DIR" rev-parse --verify --quiet "refs/tags/$CURRENT_APP_TAG" >/dev/null; then
+    die "Latest app tag $CURRENT_APP_TAG is missing locally after fetching origin tags. Refusing to generate CHANGELOG.md."
+  fi
+
+  log_ok "Latest app tag $(bold "$CURRENT_APP_TAG") is present"
 }
 
 # -- Release plan --------------------------------------------------------------
@@ -508,6 +580,10 @@ apply_cli_release() {
 
 generate_changelog() {
   [[ "$APP_SELECTED" -eq 1 ]] || return 0
+
+  log "Refreshing origin tags before changelog generation..."
+  run_cmd git -C "$ROOT_DIR" fetch --tags origin
+  ensure_latest_app_tag_present
 
   log "Generating changelog for $(bold "$NEXT_APP_TAG")..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -705,6 +781,7 @@ main() {
   detect_current_cli_version
   detect_current_app_version
   compute_next_versions
+  ensure_latest_app_tag_present
   ensure_app_tag_available
   compute_total_steps
   print_plan

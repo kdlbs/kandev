@@ -1,0 +1,149 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
+
+vi.mock("@/lib/local-storage", () => ({
+  getEnvLayout: vi.fn(() => null),
+}));
+
+vi.mock("./dockview-layout-builders", () => ({
+  applyLayoutFixups: vi.fn(() => ({
+    sidebarGroupId: "g1",
+    centerGroupId: "g2",
+    rightTopGroupId: "g3",
+    rightBottomGroupId: "g4",
+  })),
+}));
+
+vi.mock("./layout-manager", () => ({
+  fromDockviewApi: vi.fn(() => ({ columns: [] })),
+  savedLayoutMatchesLive: vi.fn(() => false),
+  layoutStructuresMatch: vi.fn(() => false),
+}));
+
+import { getEnvLayout } from "@/lib/local-storage";
+import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
+
+function makeMockApi() {
+  return {
+    panels: [],
+    layout: vi.fn(),
+    fromJSON: vi.fn(),
+    getPanel: vi.fn(() => null),
+    addPanel: vi.fn(),
+  } as unknown as EnvSwitchParams["api"];
+}
+
+function makeHealthyLayoutWith(extraPanels: Record<string, { contentComponent: string }>) {
+  return {
+    grid: {
+      root: {
+        type: "leaf" as const,
+        size: 800,
+        data: { id: "g1", views: ["chat"], activeView: "chat" },
+      },
+      height: 600,
+      width: 800,
+      orientation: "HORIZONTAL" as const,
+    },
+    panels: {
+      chat: { contentComponent: "chat" },
+      ...extraPanels,
+    },
+    activeGroup: "g1",
+  } as unknown as ReturnType<typeof getEnvLayout>;
+}
+
+function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
+  return {
+    api: makeMockApi(),
+    oldEnvId: "old-env",
+    newEnvId: "new-env",
+    activeSessionId: "new-session",
+    safeWidth: 800,
+    safeHeight: 600,
+    buildDefault: vi.fn(),
+    getDefaultLayout: vi.fn(() => ({ columns: [] })),
+    ...overrides,
+  };
+}
+
+describe("performEnvSwitch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls api.layout on the fast path when structures match", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performEnvSwitch(params);
+
+    expect(params.api.layout).toHaveBeenCalledWith(800, 600);
+  });
+
+  it("calls api.layout on the fast path when saved layout matches", () => {
+    vi.mocked(getEnvLayout).mockReturnValueOnce(makeHealthyLayoutWith({}));
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performEnvSwitch(params);
+
+    expect(params.api.layout).toHaveBeenCalledWith(800, 600);
+    expect(params.api.fromJSON).not.toHaveBeenCalled();
+  });
+
+  it("creates session panel inline on the fast path when it does not exist", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const params = makeParams();
+
+    performEnvSwitch(params);
+
+    expect(params.api.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "session:new-session",
+        component: "chat",
+        params: { sessionId: "new-session" },
+      }),
+    );
+  });
+
+  it("skips addPanel on the fast path when the session panel already exists", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const panel = { id: "session:new-session", api: { component: "chat" }, group: { id: "g1" } };
+    const params = makeParams({
+      api: {
+        ...makeMockApi(),
+        getPanel: vi.fn((id: string) => (id === "session:new-session" ? panel : null)),
+      } as unknown as EnvSwitchParams["api"],
+    });
+
+    performEnvSwitch(params);
+
+    expect(params.api.addPanel).not.toHaveBeenCalled();
+  });
+
+  it.each(["file-editor", "browser", "vscode", "commit-detail", "diff-viewer", "pr-detail"])(
+    "skips fast path when saved layout has ephemeral panels (%s)",
+    (contentComponent) => {
+      const savedLayout = makeHealthyLayoutWith({
+        [`preview:${contentComponent}`]: { contentComponent },
+      });
+      vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+      vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
+      const params = makeParams();
+
+      performEnvSwitch(params);
+
+      expect(params.api.fromJSON).toHaveBeenCalled();
+    },
+  );
+
+  it("calls api.layout on the slow path (buildDefault fallback)", () => {
+    const params = makeParams();
+
+    performEnvSwitch(params);
+
+    expect(params.api.layout).toHaveBeenCalledWith(800, 600);
+    expect(params.buildDefault).toHaveBeenCalledWith(params.api);
+  });
+});
