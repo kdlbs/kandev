@@ -1,9 +1,16 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconBrandGithub, IconHexagon, IconTicket } from "@tabler/icons-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
 import { useLinearAvailable } from "@/components/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -43,6 +50,8 @@ const INTEGRATION_ICONS = {
   linear: IconHexagon,
 } satisfies Record<IntegrationId, typeof IconBrandGithub>;
 
+const HOVER_CLOSE_DELAY_MS = 120;
+
 export function getAvailableIntegrationLinks({
   githubReady,
   jiraAvailable,
@@ -79,40 +88,69 @@ function useConfiguredIntegrationLinks(workspaceId: string | undefined): Integra
   });
 }
 
-function DesktopIntegrationButton({ link }: { link: IntegrationLink }) {
-  const Icon = INTEGRATION_ICONS[link.id];
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          asChild
-          variant="ghost"
-          size="lg"
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <Link href={link.href} aria-label={`Open ${link.label}`}>
-            <Icon className="h-4 w-4" />
-            <span className="hidden xl:inline">{link.label}</span>
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Open {link.label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-export function IntegrationNavButtons({ workspaceId }: IntegrationsProps) {
+export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
   const links = useConfiguredIntegrationLinks(workspaceId);
+  const [open, setOpen] = useState(false);
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, []);
+
+  const clearCloseTimeout = () => {
+    if (!closeTimeoutRef.current) return;
+    clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = null;
+  };
+
+  const openOnHover = () => {
+    clearCloseTimeout();
+    setOpen(true);
+  };
+
+  const closeAfterHover = () => {
+    clearCloseTimeout();
+    closeTimeoutRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
+  };
 
   if (links.length === 0) return null;
 
   return (
-    <nav className="flex items-center gap-1" aria-label="Configured integrations">
-      {links.map((link) => (
-        <DesktopIntegrationButton key={link.id} link={link} />
-      ))}
-    </nav>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="text-muted-foreground hover:text-foreground"
+          aria-label="Integrations"
+          onPointerEnter={openOnHover}
+          onPointerLeave={closeAfterHover}
+        >
+          <IconPlugConnected className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-48"
+        onPointerEnter={openOnHover}
+        onPointerLeave={closeAfterHover}
+      >
+        <DropdownMenuLabel>Integrations</DropdownMenuLabel>
+        {links.map((link) => {
+          const Icon = INTEGRATION_ICONS[link.id];
+          return (
+            <DropdownMenuItem key={link.id} asChild className="cursor-pointer">
+              <Link href={link.href}>
+                <Icon className="h-4 w-4 text-muted-foreground" />
+                {link.label}
+              </Link>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

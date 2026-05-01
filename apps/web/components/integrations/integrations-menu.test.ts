@@ -1,6 +1,28 @@
-import { describe, expect, it } from "vitest";
-import { getAvailableIntegrationLinks, getGitHubIntegrationStatus } from "./integrations-menu";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  getAvailableIntegrationLinks,
+  getGitHubIntegrationStatus,
+  IntegrationsMenu,
+} from "./integrations-menu";
 import type { GitHubStatus } from "@/lib/types/github";
+
+const useGitHubStatusMock = vi.hoisted(() => vi.fn());
+const useJiraAvailableMock = vi.hoisted(() => vi.fn());
+const useLinearAvailableMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/hooks/domains/github/use-github-status", () => ({
+  useGitHubStatus: useGitHubStatusMock,
+}));
+
+vi.mock("@/components/jira/my-jira/use-jira-availability", () => ({
+  useJiraAvailable: useJiraAvailableMock,
+}));
+
+vi.mock("@/components/linear/use-linear-availability", () => ({
+  useLinearAvailable: useLinearAvailableMock,
+}));
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
   return {
@@ -12,6 +34,28 @@ function status(overrides: Partial<GitHubStatus>): GitHubStatus {
     ...overrides,
   };
 }
+
+function mockAvailability({
+  githubReady,
+  jiraAvailable,
+  linearAvailable,
+}: {
+  githubReady: boolean;
+  jiraAvailable: boolean;
+  linearAvailable: boolean;
+}) {
+  useGitHubStatusMock.mockReturnValue({
+    status: githubReady ? status({ token_configured: true }) : status({}),
+    loading: false,
+  });
+  useJiraAvailableMock.mockReturnValue(jiraAvailable);
+  useLinearAvailableMock.mockReturnValue(linearAvailable);
+}
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("getGitHubIntegrationStatus", () => {
   it("treats a configured token as ready even before live auth is green", () => {
@@ -58,5 +102,30 @@ describe("getAvailableIntegrationLinks", () => {
         linearAvailable: false,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("IntegrationsMenu", () => {
+  it("opens configured integration links on hover", async () => {
+    mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: false });
+
+    render(createElement(IntegrationsMenu, { workspaceId: "workspace-1" }));
+
+    const trigger = screen.getByRole("button", { name: "Integrations" });
+    expect(screen.queryByText("GitHub")).toBeNull();
+
+    fireEvent.pointerEnter(trigger);
+
+    expect(await screen.findByText("GitHub")).toBeTruthy();
+    expect(screen.getByText("Jira")).toBeTruthy();
+    expect(screen.queryByText("Linear")).toBeNull();
+  });
+
+  it("does not render when no integrations are configured", () => {
+    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+
+    render(createElement(IntegrationsMenu, { workspaceId: "workspace-1" }));
+
+    expect(screen.queryByRole("button", { name: "Integrations" })).toBeNull();
   });
 });
