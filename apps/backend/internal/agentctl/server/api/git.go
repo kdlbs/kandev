@@ -696,31 +696,51 @@ func (s *Server) runGitLogForRepo(
 	return gitOp.GetLog(c.Request.Context(), baseCommit, limit)
 }
 
-// handleGitLogMultiRepo fans the request out across every per-repo tracker,
-// stamps RepositoryName on each returned commit, and merges into a single
-// log sorted by committed_at descending. Per-repo limits are applied
-// individually; the merged result is then truncated to the request limit.
-func (s *Server) handleGitLogMultiRepo(
-	c *gin.Context,
-	req GitLogRequest,
-	subpaths []string,
-	limit int,
-) {
+// perRepoLogOutcome captures the outcome of running git log against a single
+// repo subpath. Exactly one of result/err is set; result.Success may still be
+// false if the per-repo command itself reported a failure.
+type perRepoLogOutcome struct {
+	subpath string
+	result  *process.GitLogResult
+	err     error
+}
+
+// mergeGitLogResults combines per-repo log outcomes into a single response
+// suitable for the multi-repo log endpoint. It is extracted from
+// handleGitLogMultiRepo so the merge/error-aggregation logic is unit-testable
+// without spinning up a real Manager.
+//
+// Behavior:
+//   - Successful repos contribute their commits (each tagged with RepositoryName).
+//   - Failed repos (transport error or result.Success=false) contribute an
+//     entry to PerRepoErrors so the frontend can render an "incomplete" warning.
+//   - Success=true iff at least one repo succeeded. If every repo failed,
+//     Success=false with a summary in Error.
+//   - Commits are sorted newest-first across repos and truncated to limit.
+func mergeGitLogResults(outcomes []perRepoLogOutcome, limit int) process.GitLogResult {
 	merged := make([]*process.GitCommitInfo, 0)
-	for _, sub := range subpaths {
-		result, err := s.runGitLogForRepo(c, req, limit, sub)
-		if err != nil {
-			s.logger.Warn("git log for repo failed; skipping",
-				zap.String("repo", sub), zap.Error(err))
+	perRepoErrors := make([]process.GitLogRepoError, 0)
+	for _, o := range outcomes {
+		if o.err != nil {
+			perRepoErrors = append(perRepoErrors, process.GitLogRepoError{
+				RepositoryName: o.subpath,
+				Error:          o.err.Error(),
+			})
 			continue
 		}
-		if !result.Success {
-			s.logger.Warn("git log for repo returned failure; skipping",
-				zap.String("repo", sub), zap.String("error", result.Error))
+		if o.result == nil || !o.result.Success {
+			errMsg := ""
+			if o.result != nil {
+				errMsg = o.result.Error
+			}
+			perRepoErrors = append(perRepoErrors, process.GitLogRepoError{
+				RepositoryName: o.subpath,
+				Error:          errMsg,
+			})
 			continue
 		}
-		for _, commit := range result.Commits {
-			commit.RepositoryName = sub
+		for _, commit := range o.result.Commits {
+			commit.RepositoryName = o.subpath
 			merged = append(merged, commit)
 		}
 	}
@@ -728,14 +748,61 @@ func (s *Server) handleGitLogMultiRepo(
 	// Sort newest-first across repos. Falls back to insertion order if either
 	// timestamp is unparseable.
 	sortCommitsByCommittedAtDesc(merged)
-	if len(merged) > limit {
+	if limit > 0 && len(merged) > limit {
 		merged = merged[:limit]
 	}
 
-	c.JSON(http.StatusOK, process.GitLogResult{
-		Success: true,
-		Commits: merged,
-	})
+	resp := process.GitLogResult{Commits: merged}
+	if len(perRepoErrors) > 0 {
+		resp.PerRepoErrors = perRepoErrors
+	}
+	// Success iff at least one repo succeeded. When every repo failed we mark
+	// the response failed and put a one-line summary in Error so callers that
+	// only check Success/Error keep working without inspecting PerRepoErrors.
+	switch {
+	case len(outcomes) > 0 && len(perRepoErrors) == len(outcomes):
+		resp.Success = false
+		resp.Error = fmt.Sprintf("git log failed for all %d repositories", len(outcomes))
+	default:
+		resp.Success = true
+	}
+	return resp
+}
+
+// handleGitLogMultiRepo fans the request out across every per-repo tracker,
+// stamps RepositoryName on each returned commit, and merges into a single
+// log sorted by committed_at descending. Per-repo limits are applied
+// individually; the merged result is then truncated to the request limit.
+//
+// Per-repo failures are surfaced via PerRepoErrors rather than silently
+// dropped, so the frontend can render an "incomplete" warning instead of
+// pretending the missing repo simply has no history. The merged response
+// stays Success=true as long as at least one repo succeeded; if every repo
+// failed, Success=false with a summary in Error.
+func (s *Server) handleGitLogMultiRepo(
+	c *gin.Context,
+	req GitLogRequest,
+	subpaths []string,
+	limit int,
+) {
+	outcomes := make([]perRepoLogOutcome, 0, len(subpaths))
+	for _, sub := range subpaths {
+		result, err := s.runGitLogForRepo(c, req, limit, sub)
+		if err != nil {
+			s.logger.Warn("git log for repo failed",
+				zap.String("repo", sub), zap.Error(err))
+		} else if !result.Success {
+			s.logger.Warn("git log for repo returned failure",
+				zap.String("repo", sub), zap.String("error", result.Error))
+		}
+		outcomes = append(outcomes, perRepoLogOutcome{
+			subpath: sub,
+			result:  result,
+			err:     err,
+		})
+	}
+
+	c.JSON(http.StatusOK, mergeGitLogResults(outcomes, limit))
 }
 
 // handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff

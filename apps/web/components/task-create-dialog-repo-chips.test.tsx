@@ -8,11 +8,9 @@ import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 // branch-specific assertions; the mockBySource handle lets a test prove
 // which kind of source the chip passed in.
 const lastBranchSource = vi.hoisted((): { value: unknown } => ({ value: null }));
-const mockBranches = vi.hoisted(
-  (): { value: { branches: Branch[]; isLoading: boolean } } => ({
-    value: { branches: [], isLoading: false },
-  }),
-);
+const mockBranches = vi.hoisted((): { value: { branches: Branch[]; isLoading: boolean } } => ({
+  value: { branches: [], isLoading: false },
+}));
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: (source: unknown) => {
@@ -59,8 +57,10 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
   } as unknown as DialogFormState;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- noop for test-only callback signature
 const NOOP = (_key: string, _value: string) => undefined;
 
+// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
   it("renders one chip per row plus an Add button", () => {
     render(
@@ -235,10 +235,7 @@ describe("RepoChipsRow", () => {
     );
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
     fireEvent.click(screen.getByText("projects/local-project"));
-    expect(onRowRepositoryChange).toHaveBeenCalledWith(
-      "r0",
-      "/home/me/projects/local-project",
-    );
+    expect(onRowRepositoryChange).toHaveBeenCalledWith("r0", "/home/me/projects/local-project");
   });
 
   // Regression: discovered (path-keyed) rows used to call the branch loader

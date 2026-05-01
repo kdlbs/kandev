@@ -24,11 +24,14 @@ interface UseGitOperationsReturn {
   // Operation methods. The optional `repo` parameter is the multi-repo subpath
   // (e.g. "kandev"); pass empty/undefined for single-repo workspaces. Multi-repo
   // workspaces MUST scope each call to one repo — bulk callers fan out themselves.
-  pull: (rebase?: boolean) => Promise<GitOperationResult>;
-  push: (options?: { force?: boolean; setUpstream?: boolean }) => Promise<GitOperationResult>;
-  rebase: (baseBranch: string) => Promise<GitOperationResult>;
-  merge: (baseBranch: string) => Promise<GitOperationResult>;
-  abort: (operation: "merge" | "rebase") => Promise<GitOperationResult>;
+  pull: (rebase?: boolean, repo?: string) => Promise<GitOperationResult>;
+  push: (
+    options?: { force?: boolean; setUpstream?: boolean },
+    repo?: string,
+  ) => Promise<GitOperationResult>;
+  rebase: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
+  merge: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
+  abort: (operation: "merge" | "rebase", repo?: string) => Promise<GitOperationResult>;
   commit: (
     message: string,
     stageAll?: boolean,
@@ -46,6 +49,7 @@ interface UseGitOperationsReturn {
     body: string,
     baseBranch?: string,
     draft?: boolean,
+    repo?: string,
   ) => Promise<PRCreateResult>;
 
   // State
@@ -61,23 +65,36 @@ type ExecuteOperation = <T extends GitOperationResult>(
 ) => Promise<T>;
 
 function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
-  const pull = async (rebase = false) =>
-    executeOperation<GitOperationResult>("worktree.pull", { rebase });
+  const pull = async (rebase = false, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.pull", {
+      rebase,
+      ...(repo ? { repo } : {}),
+    });
 
-  const push = async (options?: { force?: boolean; setUpstream?: boolean }) =>
+  const push = async (options?: { force?: boolean; setUpstream?: boolean }, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.push", {
       force: options?.force ?? false,
       set_upstream: options?.setUpstream ?? false,
+      ...(repo ? { repo } : {}),
     });
 
-  const rebase = async (baseBranch: string) =>
-    executeOperation<GitOperationResult>("worktree.rebase", { base_branch: baseBranch });
+  const rebase = async (baseBranch: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.rebase", {
+      base_branch: baseBranch,
+      ...(repo ? { repo } : {}),
+    });
 
-  const merge = async (baseBranch: string) =>
-    executeOperation<GitOperationResult>("worktree.merge", { base_branch: baseBranch });
+  const merge = async (baseBranch: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.merge", {
+      base_branch: baseBranch,
+      ...(repo ? { repo } : {}),
+    });
 
-  const abort = async (operation: "merge" | "rebase") =>
-    executeOperation<GitOperationResult>("worktree.abort", { operation });
+  const abort = async (operation: "merge" | "rebase", repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.abort", {
+      operation,
+      ...(repo ? { repo } : {}),
+    });
 
   const commit = async (message: string, stageAll = true, amend = false, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.commit", {
@@ -126,12 +143,14 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
     body: string,
     baseBranch?: string,
     draft?: boolean,
+    repo?: string,
   ): Promise<PRCreateResult> =>
     executeOperation<PRCreateResult & GitOperationResult>("worktree.create_pr", {
       title,
       body,
       base_branch: baseBranch ?? "",
       draft: draft ?? true,
+      ...(repo ? { repo } : {}),
     });
 
   return {

@@ -326,6 +326,18 @@ type GitLogResult struct {
 	Success bool             `json:"success"`
 	Commits []*GitCommitInfo `json:"commits"`
 	Error   string           `json:"error,omitempty"`
+	// PerRepoErrors lists per-repo failures during a multi-repo log fan-out.
+	// Empty/nil for single-repo responses or when every repo succeeded. Mirrors
+	// the server's process.GitLogResult.PerRepoErrors field.
+	PerRepoErrors []GitLogRepoError `json:"per_repo_errors,omitempty"`
+}
+
+// GitLogRepoError describes a single per-repo failure from a multi-repo log
+// fan-out. Mirrors the server's process.GitLogRepoError type so callers using
+// the agentctl client can deserialize and surface partial failures.
+type GitLogRepoError struct {
+	RepositoryName string `json:"repository_name"`
+	Error          string `json:"error"`
 }
 
 // GitCommitInfo represents a single commit in the log.

@@ -1,38 +1,78 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { GitOperationResult, PRCreateResult } from "@/hooks/use-git-operations";
 import type { useToast } from "@/components/toast-provider";
+import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
 
-// Accepts both useGitOperations and SessionGit
-interface GitOps {
-  pull: (rebase?: boolean) => Promise<GitOperationResult>;
-  push: (options?: { force?: boolean; setUpstream?: boolean }) => Promise<GitOperationResult>;
-  rebase: (baseBranch: string) => Promise<GitOperationResult>;
-  commit: (
-    message: string,
-    stageAll?: boolean,
-    amend?: boolean,
-    repo?: string,
-  ) => Promise<GitOperationResult>;
-  stage: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
-  unstage: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
-  discard: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
-  revertCommit: (commitSHA: string, repo?: string) => Promise<GitOperationResult>;
-  reset: (commitSHA: string, mode: "soft" | "hard", repo?: string) => Promise<GitOperationResult>;
-  createPR: (
-    title: string,
-    body: string,
-    baseBranch?: string,
-    draft?: boolean,
-  ) => Promise<PRCreateResult>;
-  isLoading: boolean;
-}
+// Bug 7: drop the local GitOps shape — `SessionGit` is the single source of
+// truth for all the methods this module needs (pull, push, rebase, merge,
+// commit, stage, unstage, discard, revertCommit, reset, createPR, isLoading).
+// Callers pass the SessionGit returned by `useSessionGit` directly.
+type GitOps = Pick<
+  SessionGit,
+  | "pull"
+  | "push"
+  | "rebase"
+  | "merge"
+  | "commit"
+  | "stage"
+  | "unstage"
+  | "discard"
+  | "revertCommit"
+  | "reset"
+  | "createPR"
+  | "isLoading"
+>;
 type Toast = ReturnType<typeof useToast>["toast"];
-type GitOperationFn = (
-  op: () => Promise<{ success: boolean; output: string; error?: string }>,
-  name: string,
-) => Promise<void>;
+type GitOperationResultLike = {
+  success: boolean;
+  output: string;
+  error?: string;
+  per_repo?: PerRepoOperationResult[];
+};
+type GitOperationFn = (op: () => Promise<GitOperationResultLike>, name: string) => Promise<void>;
+
+/**
+ * Builds the toast description for a fan-out result. When `per_repo` is
+ * present, summarise per-repo successes/failures instead of returning the
+ * raw output (which was just the last repo's text and hid partial-success).
+ */
+function describePerRepo(
+  perRepo: PerRepoOperationResult[],
+  operationName: string,
+): { title: string; description: string; variant: "success" | "error" } {
+  const succeeded = perRepo.filter((r) => r.success);
+  const failed = perRepo.filter((r) => !r.success);
+  const succeededNames = succeeded.map((r) => r.repository_name).join(", ");
+  const failedSummary = failed
+    .map((r) => `${r.repository_name}: ${r.error || "unknown error"}`)
+    .join("; ");
+  if (failed.length === 0) {
+    return {
+      title: `${operationName} successful`,
+      description: `${operationName} succeeded in ${succeeded.length} repos: ${succeededNames}`,
+      variant: "success",
+    };
+  }
+  if (succeeded.length === 0) {
+    return {
+      title: `${operationName} failed`,
+      description: `Failed in ${failed.length} repos — ${failedSummary}`,
+      variant: "error",
+    };
+  }
+  // Partial success: surface as error so the user notices, but include the
+  // succeeded list in the description so they don't retry the whole op.
+  return {
+    title: `${operationName} partially succeeded`,
+    description: `${operationName} succeeded in ${succeeded.length} of ${perRepo.length} repos (${succeededNames}); failed in ${failedSummary}`,
+    variant: "error",
+  };
+}
+
+function labelWithRepo(label: string, repo: string | undefined): string {
+  return repo ? `${label} (${repo})` : label;
+}
 
 export function useChangesGitHandlers(
   gitOps: GitOps,
@@ -40,12 +80,17 @@ export function useChangesGitHandlers(
   baseBranch: string | undefined,
 ) {
   const handleGitOperation = useCallback(
-    async (
-      operation: () => Promise<{ success: boolean; output: string; error?: string }>,
-      operationName: string,
-    ) => {
+    async (operation: () => Promise<GitOperationResultLike>, operationName: string) => {
       try {
         const result = await operation();
+        // Bug 2: when the underlying op fanned out across multiple repos,
+        // describe the per-repo breakdown instead of the legacy flat
+        // success/error so partial successes are visible.
+        if (result.per_repo && result.per_repo.length > 1) {
+          const { title, description, variant } = describePerRepo(result.per_repo, operationName);
+          toast({ title, description, variant });
+          return;
+        }
         const variant = result.success ? "success" : "error";
         const title = result.success ? `${operationName} successful` : `${operationName} failed`;
         const description = result.success
@@ -63,19 +108,41 @@ export function useChangesGitHandlers(
     [toast],
   );
 
-  const handlePull = useCallback(() => {
-    handleGitOperation(() => gitOps.pull(), "Pull");
-  }, [handleGitOperation, gitOps]);
-  const handleRebase = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    handleGitOperation(() => gitOps.rebase(targetBranch), "Rebase");
-  }, [handleGitOperation, gitOps, baseBranch]);
-  const handlePush = useCallback(() => {
-    handleGitOperation(() => gitOps.push(), "Push");
-  }, [handleGitOperation, gitOps]);
-  const handleForcePush = useCallback(() => {
-    handleGitOperation(() => gitOps.push({ force: true }), "Force push");
-  }, [handleGitOperation, gitOps]);
+  const handlePull = useCallback(
+    (repo?: string) => {
+      handleGitOperation(() => gitOps.pull(false, repo), labelWithRepo("Pull", repo));
+    },
+    [handleGitOperation, gitOps],
+  );
+  const handleRebase = useCallback(
+    (repo?: string) => {
+      const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+      handleGitOperation(() => gitOps.rebase(targetBranch, repo), labelWithRepo("Rebase", repo));
+    },
+    [handleGitOperation, gitOps, baseBranch],
+  );
+  const handleMerge = useCallback(
+    (repo?: string) => {
+      const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+      handleGitOperation(() => gitOps.merge(targetBranch, repo), labelWithRepo("Merge", repo));
+    },
+    [handleGitOperation, gitOps, baseBranch],
+  );
+  const handlePush = useCallback(
+    (repo?: string) => {
+      handleGitOperation(() => gitOps.push(undefined, repo), labelWithRepo("Push", repo));
+    },
+    [handleGitOperation, gitOps],
+  );
+  const handleForcePush = useCallback(
+    (repo?: string) => {
+      handleGitOperation(
+        () => gitOps.push({ force: true }, repo),
+        labelWithRepo("Force push", repo),
+      );
+    },
+    [handleGitOperation, gitOps],
+  );
   const handleRevertCommit = useCallback(
     (sha: string, repo?: string) => {
       handleGitOperation(() => gitOps.revertCommit(sha, repo), "Revert commit");
@@ -87,6 +154,7 @@ export function useChangesGitHandlers(
     handleGitOperation,
     handlePull,
     handleRebase,
+    handleMerge,
     handlePush,
     handleForcePush,
     handleRevertCommit,

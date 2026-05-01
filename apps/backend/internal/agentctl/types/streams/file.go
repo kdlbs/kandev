@@ -31,6 +31,11 @@ type FileChangeNotification struct {
 	// Timestamp is when the change was detected.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository emitted this file change in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so per-repo views can scope refresh signals correctly.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// Path is the file path relative to workspace root.
 	Path string `json:"path"`
 

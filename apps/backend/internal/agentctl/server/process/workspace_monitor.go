@@ -190,8 +190,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		wt.tryUpdateGitStatus(ctx)
 		wt.updateFiles(ctx)
 		wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
-			Timestamp: time.Now(),
-			Operation: types.FileOpRefresh,
+			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
+			Operation:      types.FileOpRefresh,
 		})
 	}
 	return false
@@ -353,12 +354,19 @@ func (wt *WorkspaceTracker) emitFileChanges(changes []types.FileChangeNotificati
 	const maxSpecificChanges = 50
 	if len(changes) == 0 || len(changes) > maxSpecificChanges {
 		wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
-			Timestamp: time.Now(),
-			Operation: types.FileOpRefresh,
+			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
+			Operation:      types.FileOpRefresh,
 		})
 		return
 	}
 	for i := range changes {
+		// Stamp repository name on every emitted notification when this tracker
+		// is scoped to a multi-repo subpath. Callers that build the slice may
+		// not know the tracker's repo, so we set it here as the single source.
+		if changes[i].RepositoryName == "" {
+			changes[i].RepositoryName = wt.repositoryName
+		}
 		wt.notifyWorkspaceStreamFileChange(changes[i])
 	}
 }
@@ -368,8 +376,9 @@ func (wt *WorkspaceTracker) emitFileChanges(changes []types.FileChangeNotificati
 // subscribers without waiting for the next poll cycle.
 func (wt *WorkspaceTracker) notifyFileChange(relPath, operation string) {
 	wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
-		Timestamp: time.Now(),
-		Path:      relPath,
-		Operation: operation,
+		Timestamp:      time.Now(),
+		RepositoryName: wt.repositoryName,
+		Path:           relPath,
+		Operation:      operation,
 	})
 }

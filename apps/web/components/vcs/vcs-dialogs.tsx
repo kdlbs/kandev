@@ -21,8 +21,12 @@ import {
   PRDescriptionField,
   PRBranchSummary,
 } from "./vcs-dialog-fields";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import {
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "@/hooks/domains/session/use-session-git-status";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
+import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
@@ -31,8 +35,10 @@ import { useToast } from "@/components/toast-provider";
 import type { FileInfo } from "@/lib/state/slices";
 
 type VcsDialogsContextValue = {
-  openCommitDialog: () => void;
-  openPRDialog: () => void;
+  /** When `repo` is provided, the commit is scoped to that repo only. */
+  openCommitDialog: (repo?: string) => void;
+  /** When `repo` is provided, the PR is scoped to that repo only. */
+  openPRDialog: (repo?: string) => void;
 };
 
 const VcsDialogsContext = createContext<VcsDialogsContextValue | null>(null);
@@ -53,17 +59,27 @@ type VcsDialogsProviderProps = {
 
 type FileSummary = { count: number; additions: number; deletions: number };
 
-function computeFileSummary(files: Record<string, FileInfo> | undefined): FileSummary {
-  const count = files ? Object.keys(files).length : 0;
+/**
+ * Counts files for the commit dialog summary.
+ * - When `stageAll=true` (the default), include every file (staged + unstaged)
+ *   because the commit op stages them all before committing.
+ * - When `stageAll=false`, count only staged files — those are the only files
+ *   the commit will actually include. Counting all here would over-state what
+ *   the commit produces and surprise the user post-commit.
+ */
+function computeFileSummary(
+  files: Record<string, FileInfo> | undefined,
+  stageAll: boolean = true,
+): FileSummary {
+  if (!files) return { count: 0, additions: 0, deletions: 0 };
+  const considered = (Object.values(files) as FileInfo[]).filter((f) => stageAll || f.staged);
   let additions = 0;
   let deletions = 0;
-  if (files && count > 0) {
-    for (const file of Object.values(files) as FileInfo[]) {
-      additions += file.additions || 0;
-      deletions += file.deletions || 0;
-    }
+  for (const file of considered) {
+    additions += file.additions || 0;
+    deletions += file.deletions || 0;
   }
-  return { count, additions, deletions };
+  return { count: considered.length, additions, deletions };
 }
 
 function FileSummaryText({ count, additions, deletions }: FileSummary) {
@@ -86,6 +102,8 @@ function FileSummaryText({ count, additions, deletions }: FileSummary) {
 type CommitDialogProps = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** When set, the dialog title shows the repo name and the summary is repo-scoped. */
+  scopedRepo?: string;
   fileSummary: FileSummary;
   commitMessage: string;
   onCommitMessageChange: (v: string) => void;
@@ -105,6 +123,7 @@ type CommitDialogProps = {
 function CommitDialog({
   open,
   onOpenChange,
+  scopedRepo,
   fileSummary,
   commitMessage,
   onCommitMessageChange,
@@ -126,7 +145,7 @@ function CommitDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitCommit className="h-5 w-5" />
-            Commit Changes
+            {scopedRepo ? `Commit Changes — ${scopedRepo}` : "Commit Changes"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -199,6 +218,8 @@ function CommitDialog({
 type PRDialogProps = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** When set, the dialog title shows the repo name. */
+  scopedRepo?: string;
   displayBranch?: string | null;
   baseBranch?: string;
   prTitle: string;
@@ -219,6 +240,7 @@ type PRDialogProps = {
 function PRDialog({
   open,
   onOpenChange,
+  scopedRepo,
   displayBranch,
   baseBranch,
   prTitle,
@@ -241,7 +263,7 @@ function PRDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitPullRequest className="h-5 w-5" />
-            Create Pull Request
+            {scopedRepo ? `Create Pull Request — ${scopedRepo}` : "Create Pull Request"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -305,7 +327,10 @@ type UseCommitDialogReturn = {
   setBody: (v: string) => void;
   stageAll: boolean;
   setStageAll: (v: boolean) => void;
-  openDialog: () => void;
+  /** Repo this commit is scoped to in multi-repo mode; "" = all repos with staged. */
+  repo: string;
+  setRepo: (v: string) => void;
+  openDialog: (repo?: string) => void;
 };
 
 function useCommitDialogState(): UseCommitDialogReturn {
@@ -313,13 +338,29 @@ function useCommitDialogState(): UseCommitDialogReturn {
   const [message, setMessage] = useState("");
   const [body, setBody] = useState("");
   const [stageAll, setStageAll] = useState(true);
-  const openDialog = useCallback(() => {
+  const [repo, setRepo] = useState("");
+  const openDialog = useCallback((nextRepo?: string) => {
     setMessage("");
     setBody("");
     setStageAll(true);
+    // Defensive: callers binding `openDialog` directly to onClick can leak the
+    // React MouseEvent into nextRepo. Only accept actual repo strings.
+    setRepo(typeof nextRepo === "string" ? nextRepo : "");
     setOpen(true);
   }, []);
-  return { open, setOpen, message, setMessage, body, setBody, stageAll, setStageAll, openDialog };
+  return {
+    open,
+    setOpen,
+    message,
+    setMessage,
+    body,
+    setBody,
+    stageAll,
+    setStageAll,
+    repo,
+    setRepo,
+    openDialog,
+  };
 }
 
 type UsePRDialogReturn = {
@@ -331,7 +372,10 @@ type UsePRDialogReturn = {
   setBody: (v: string) => void;
   draft: boolean;
   setDraft: (v: boolean) => void;
-  openDialog: (taskTitle?: string) => void;
+  /** Repo this PR is scoped to in multi-repo mode; "" = workspace root. */
+  repo: string;
+  setRepo: (v: string) => void;
+  openDialog: (taskTitle?: string, repo?: string) => void;
 };
 
 function usePRDialogState(): UsePRDialogReturn {
@@ -339,12 +383,84 @@ function usePRDialogState(): UsePRDialogReturn {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
-  const openDialog = useCallback((taskTitle?: string) => {
+  const [repo, setRepo] = useState("");
+  const openDialog = useCallback((taskTitle?: string, nextRepo?: string) => {
     setTitle(taskTitle || "");
     setBody("");
+    // Defensive: callers binding `openDialog` directly to onClick can leak the
+    // React MouseEvent into nextRepo. Only accept actual repo strings.
+    setRepo(typeof nextRepo === "string" ? nextRepo : "");
     setOpen(true);
   }, []);
-  return { open, setOpen, title, setTitle, body, setBody, draft, setDraft, openDialog };
+  return {
+    open,
+    setOpen,
+    title,
+    setTitle,
+    body,
+    setBody,
+    draft,
+    setDraft,
+    repo,
+    setRepo,
+    openDialog,
+  };
+}
+
+/**
+ * Computes the file summary for the commit dialog: an explicit repo scope
+ * uses that repo's files; an empty scope in multi-repo sums across every
+ * repo (showing the fan-out total); single-repo falls back to the legacy
+ * workspace-level status.
+ */
+function useScopedFileSummary({
+  scopedRepo,
+  statusByRepo,
+  gitStatus,
+  isMultiRepo,
+  stageAll,
+}: {
+  scopedRepo: string;
+  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>;
+  gitStatus: ReturnType<typeof useSessionGitStatus>;
+  isMultiRepo: boolean;
+  /** Mirrors the dialog's "Stage all changes before committing" checkbox. */
+  stageAll: boolean;
+}): FileSummary {
+  return useMemo(() => {
+    if (scopedRepo) {
+      const scoped = statusByRepo.find((s) => s.repository_name === scopedRepo);
+      return computeFileSummary(scoped?.status?.files, stageAll);
+    }
+    if (isMultiRepo) {
+      let count = 0;
+      let additions = 0;
+      let deletions = 0;
+      for (const { status } of statusByRepo) {
+        const s = computeFileSummary(status?.files, stageAll);
+        count += s.count;
+        additions += s.additions;
+        deletions += s.deletions;
+      }
+      return { count, additions, deletions };
+    }
+    return computeFileSummary(gitStatus?.files, stageAll);
+  }, [scopedRepo, statusByRepo, gitStatus, isMultiRepo, stageAll]);
+}
+
+/**
+ * Resolves the label shown in dialog titles. Explicit repo wins; otherwise
+ * empty scope resolves to the primary single-repo display name, or "All
+ * repos" when the workspace has multiple repos and the dialog is fanning out.
+ */
+function pickRepoLabel(
+  scopedRepo: string,
+  isMultiRepo: boolean,
+  resolveDisplayName: (name: string) => string | undefined,
+): string {
+  if (scopedRepo) return resolveDisplayName(scopedRepo) || scopedRepo;
+  if (isMultiRepo) return "All repos";
+  return resolveDisplayName("") || "Repository";
 }
 
 function useCreatePRHandler(
@@ -357,7 +473,13 @@ function useCreatePRHandler(
     if (!ps.title.trim()) return;
     ps.setOpen(false);
     try {
-      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft);
+      const result = await createPR(
+        ps.title.trim(),
+        ps.body.trim(),
+        baseBranch,
+        ps.draft,
+        ps.repo || undefined,
+      );
       if (result.success) {
         const title = ps.draft ? "Draft PR created" : "PR created";
         toast({
@@ -385,6 +507,66 @@ function useCreatePRHandler(
   }, [ps, baseBranch, createPR, toast]);
 }
 
+function useVcsDialogsState(
+  sessionId: string | null,
+  taskTitle: string | undefined,
+  baseBranch: string | undefined,
+) {
+  const cs = useCommitDialogState();
+  const ps = usePRDialogState();
+  const { toast } = useToast();
+  const gitWithFeedback = useGitWithFeedback();
+  const gitStatus = useSessionGitStatus(sessionId);
+  const statusByRepo = useSessionGitStatusByRepo(sessionId);
+  // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
+  // useGitOperations.commit hits the workspace root, which fails for multi-repo
+  // tasks because the task root isn't itself a git repo (exit 1).
+  const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
+  const repoDisplayName = useRepoDisplayName(sessionId);
+  const isMultiRepo = repoNames.filter((r) => r !== "").length > 1;
+  const fileSummary = useScopedFileSummary({
+    scopedRepo: cs.repo,
+    statusByRepo,
+    gitStatus,
+    isMultiRepo,
+    stageAll: cs.stageAll,
+  });
+  const handleCommit = useCallback(async () => {
+    if (!cs.message.trim()) return;
+    cs.setOpen(false);
+    const title = cs.message.trim();
+    const body = cs.body.trim();
+    const fullMessage = body ? `${title}\n\n${body}` : title;
+    const label = cs.repo ? `Commit (${cs.repo})` : "Commit";
+    await gitWithFeedback(
+      () => commit(fullMessage, cs.stageAll, false, cs.repo || undefined),
+      label,
+    );
+    cs.setMessage("");
+    cs.setBody("");
+    cs.setRepo("");
+  }, [cs, gitWithFeedback, commit]);
+  const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
+  const contextValue = useMemo(
+    () => ({
+      openCommitDialog: cs.openDialog,
+      openPRDialog: (repo?: string) => ps.openDialog(taskTitle, repo),
+    }),
+    [cs.openDialog, ps, taskTitle],
+  );
+  return {
+    cs,
+    ps,
+    isGitLoading,
+    fileSummary,
+    handleCommit,
+    handleCreatePR,
+    contextValue,
+    repoDisplayName,
+    isMultiRepo,
+  };
+}
+
 export function VcsDialogsProvider({
   sessionId,
   baseBranch,
@@ -392,15 +574,10 @@ export function VcsDialogsProvider({
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
-  const cs = useCommitDialogState();
-  const ps = usePRDialogState();
-  const { toast } = useToast();
-  const gitWithFeedback = useGitWithFeedback();
-  const gitStatus = useSessionGitStatus(sessionId);
-  // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
-  // useGitOperations.commit hits the workspace root, which fails for multi-repo
-  // tasks because the task root isn't itself a git repo (exit 1).
-  const { commit, createPR, isLoading: isGitLoading } = useSessionGit(sessionId);
+  const state = useVcsDialogsState(sessionId, taskTitle, baseBranch);
+  const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
+  const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName);
+  const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName);
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,
@@ -412,28 +589,6 @@ export function VcsDialogsProvider({
     generatePRTitle,
     generatePRDescription,
   } = useUtilityAgentGenerator({ sessionId, taskTitle });
-  const fileSummary = computeFileSummary(gitStatus?.files);
-
-  const handleCommit = useCallback(async () => {
-    if (!cs.message.trim()) return;
-    cs.setOpen(false);
-    const title = cs.message.trim();
-    const body = cs.body.trim();
-    const fullMessage = body ? `${title}\n\n${body}` : title;
-    await gitWithFeedback(() => commit(fullMessage, cs.stageAll), "Commit");
-    cs.setMessage("");
-    cs.setBody("");
-  }, [cs, gitWithFeedback, commit]);
-
-  const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
-
-  const contextValue = useMemo(
-    () => ({
-      openCommitDialog: cs.openDialog,
-      openPRDialog: () => ps.openDialog(taskTitle),
-    }),
-    [cs.openDialog, ps, taskTitle],
-  );
 
   return (
     <VcsDialogsContext.Provider value={contextValue}>
@@ -441,6 +596,7 @@ export function VcsDialogsProvider({
       <CommitDialog
         open={cs.open}
         onOpenChange={cs.setOpen}
+        scopedRepo={effectiveRepoLabel}
         fileSummary={fileSummary}
         commitMessage={cs.message}
         onCommitMessageChange={cs.setMessage}
@@ -459,6 +615,7 @@ export function VcsDialogsProvider({
       <PRDialog
         open={ps.open}
         onOpenChange={ps.setOpen}
+        scopedRepo={effectivePRLabel}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
         prTitle={ps.title}

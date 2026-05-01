@@ -265,9 +265,10 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 				zap.String("previous", previousHead),
 				zap.String("current", currentHead))
 			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
-				Timestamp:    time.Now(),
-				PreviousHead: previousHead,
-				CurrentHead:  currentHead,
+				Timestamp:      time.Now(),
+				RepositoryName: wt.repositoryName,
+				PreviousHead:   previousHead,
+				CurrentHead:    currentHead,
 			})
 		case !wt.isAncestor(ctx, previousHead, currentHead):
 			// Case 2: History was rewritten - previousHead is not reachable from currentHead
@@ -276,9 +277,10 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 				zap.String("previous", previousHead),
 				zap.String("current", currentHead))
 			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
-				Timestamp:    time.Now(),
-				PreviousHead: previousHead,
-				CurrentHead:  currentHead,
+				Timestamp:      time.Now(),
+				RepositoryName: wt.repositoryName,
+				PreviousHead:   previousHead,
+				CurrentHead:    currentHead,
 			})
 		default:
 			// Case 3: HEAD moved forward normally - get new commits
@@ -321,6 +323,7 @@ func (wt *WorkspaceTracker) handleBranchSwitch(ctx context.Context, previousBran
 	if baseCommit != "" {
 		wt.notifyWorkspaceStreamBranchSwitch(&types.GitBranchSwitchNotification{
 			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
 			PreviousBranch: previousBranch,
 			CurrentBranch:  currentBranch,
 			CurrentHead:    currentHead,

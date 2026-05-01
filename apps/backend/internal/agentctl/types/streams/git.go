@@ -134,6 +134,11 @@ type GitResetNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this reset belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Changes panel can scope per-repo group state.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// PreviousHead is the SHA HEAD was pointing to before the reset.
 	PreviousHead string `json:"previous_head"`
 
@@ -146,6 +151,11 @@ type GitResetNotification struct {
 type GitBranchSwitchNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
+
+	// RepositoryName identifies which repository this branch switch belongs to
+	// in multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Changes panel can update the matching per-repo group.
+	RepositoryName string `json:"repository_name,omitempty"`
 
 	// PreviousBranch is the branch name before the switch.
 	PreviousBranch string `json:"previous_branch"`

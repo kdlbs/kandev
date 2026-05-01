@@ -253,6 +253,10 @@ type GitResetData struct {
 	PreviousHead string `json:"previous_head"`
 	CurrentHead  string `json:"current_head"`
 	DeletedCount int    `json:"deleted_count"`
+	// RepositoryName identifies which repo this reset belongs to in multi-repo
+	// task workspaces. Empty for single-repo. Carried to the frontend so the
+	// Changes panel can scope its per-repo group state.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 type GitBranchSwitchData struct {
@@ -260,6 +264,10 @@ type GitBranchSwitchData struct {
 	CurrentBranch  string `json:"current_branch"`
 	CurrentHead    string `json:"current_head"`
 	BaseCommit     string `json:"base_commit"`
+	// RepositoryName identifies which repo this branch switch belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried to the
+	// frontend so the Changes panel can update the matching per-repo group.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 type GitSnapshotData struct {
@@ -285,6 +293,10 @@ type FileChangeEventPayload struct {
 	Path      string `json:"path"`
 	Operation string `json:"operation"`
 	Timestamp string `json:"timestamp"`
+	// RepositoryName identifies which repo emitted this file change in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so per-repo views can scope refresh signals correctly.
+	RepositoryName string `json:"repository_name,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

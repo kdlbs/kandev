@@ -17,8 +17,19 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
 import { PanelHeaderBarSplit } from "./panel-primitives";
+
+type PerRepoStatus = {
+  repository_name: string;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  hasStaged: boolean;
+  hasUnstaged: boolean;
+};
 
 function BranchHoverCard({
   displayBranch,
@@ -58,22 +69,68 @@ function BranchHoverCard({
   );
 }
 
+function PullTriggerContent({
+  behindCount,
+  isPulling,
+  isRebasing,
+}: {
+  behindCount: number;
+  isPulling: boolean;
+  isRebasing: boolean;
+}) {
+  const isPullRelated = isPulling || isRebasing;
+  let label: string;
+  if (isPulling) label = "Pulling…";
+  else if (isRebasing) label = "Rebasing…";
+  else label = "Pull";
+  return (
+    <>
+      {isPullRelated ? (
+        <IconLoader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <IconCloudDownload className="h-3 w-3" />
+      )}
+      {label}
+      {behindCount > 0 && !isPullRelated && (
+        <span className="text-yellow-500 text-[10px]">{behindCount}</span>
+      )}
+      {!isPullRelated && <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />}
+    </>
+  );
+}
+
 function PullDropdown({
   behindCount,
   isLoading,
   loadingOperation,
-  onPull,
-  onRebase,
+  repoNames,
+  perRepoStatus,
+  onRepoPull,
+  onRepoRebase,
+  onRepoMerge,
+  repoDisplayName,
 }: {
   behindCount: number;
   isLoading: boolean;
   loadingOperation: string | null;
-  onPull: () => void;
-  onRebase: () => void;
+  /** Always non-empty (single-repo includes the empty-name entry). */
+  repoNames: string[];
+  perRepoStatus: PerRepoStatus[];
+  onRepoPull: (repo: string) => void;
+  onRepoRebase: (repo: string) => void;
+  onRepoMerge: (repo: string) => void;
+  /** Maps a repository_name to its display label. */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const isPulling = loadingOperation === "pull";
   const isRebasing = loadingOperation === "rebase";
-  const isPullRelated = isPulling || isRebasing;
+  // For single-repo (empty repo entry), the trigger label uses the global
+  // behindCount; for multi-repo we show the per-repo behinds inside the menu
+  // labels and the trigger summarises with the max.
+  const triggerBehind =
+    perRepoStatus.length > 0
+      ? Math.max(behindCount, ...perRepoStatus.map((s) => s.behind))
+      : behindCount;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -83,37 +140,83 @@ function PullDropdown({
           className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
           disabled={isLoading}
         >
-          {isPullRelated ? (
-            <IconLoader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <IconCloudDownload className="h-3 w-3" />
-          )}
-          {isPulling && "Pulling…"}
-          {!isPulling && isRebasing && "Rebasing…"}
-          {!isPulling && !isRebasing && "Pull"}
-          {behindCount > 0 && !isPullRelated && (
-            <span className="text-yellow-500 text-[10px]">{behindCount}</span>
-          )}
-          {!isPullRelated && <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />}
+          <PullTriggerContent
+            behindCount={triggerBehind}
+            isPulling={isPulling}
+            isRebasing={isRebasing}
+          />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onClick={onPull} className="cursor-pointer text-xs gap-2">
-          <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
-          Pull
-          {behindCount > 0 && (
-            <span className="ml-auto text-muted-foreground text-[10px]">{behindCount} behind</span>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onRebase} className="cursor-pointer text-xs gap-2">
-          <IconGitCherryPick className="h-3.5 w-3.5 text-muted-foreground" />
-          Rebase
-          {behindCount > 0 && (
-            <span className="ml-auto text-muted-foreground text-[10px]">{behindCount} behind</span>
-          )}
-        </DropdownMenuItem>
+      <DropdownMenuContent align="end" className="w-56">
+        <PerRepoPullMenu
+          repoNames={repoNames}
+          perRepoStatus={perRepoStatus}
+          onRepoPull={onRepoPull}
+          onRepoRebase={onRepoRebase}
+          onRepoMerge={onRepoMerge}
+          repoDisplayName={repoDisplayName}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function PerRepoPullMenu({
+  repoNames,
+  perRepoStatus,
+  onRepoPull,
+  onRepoRebase,
+  onRepoMerge,
+  repoDisplayName,
+}: {
+  repoNames: string[];
+  perRepoStatus: PerRepoStatus[];
+  onRepoPull: (repo: string) => void;
+  onRepoRebase: (repo: string) => void;
+  onRepoMerge: (repo: string) => void;
+  repoDisplayName?: (repositoryName: string) => string | undefined;
+}) {
+  const statusByName = new Map(perRepoStatus.map((s) => [s.repository_name, s]));
+  return (
+    <>
+      {repoNames.map((repo, idx) => {
+        const s = statusByName.get(repo);
+        const behind = s?.behind ?? 0;
+        const label = repoDisplayName?.(repo) || repo || "Repository";
+        return (
+          <div key={repo || "__no_repo__"}>
+            {idx > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className="text-[10px] text-muted-foreground/70 uppercase tracking-wide flex items-center justify-between">
+              <span className="truncate">{label}</span>
+              {behind > 0 && (
+                <span className="text-yellow-500 normal-case tracking-normal">{behind} behind</span>
+              )}
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => onRepoPull(repo)}
+              className="cursor-pointer text-xs gap-2"
+            >
+              <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
+              Pull
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onRepoRebase(repo)}
+              className="cursor-pointer text-xs gap-2"
+            >
+              <IconGitCherryPick className="h-3.5 w-3.5 text-muted-foreground" />
+              Rebase
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onRepoMerge(repo)}
+              className="cursor-pointer text-xs gap-2"
+            >
+              <IconGitMerge className="h-3.5 w-3.5 text-muted-foreground" />
+              Merge
+            </DropdownMenuItem>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -128,8 +231,12 @@ export function ChangesPanelHeader({
   loadingOperation,
   onOpenDiffAll,
   onOpenReview,
-  onPull,
-  onRebase,
+  repoNames,
+  perRepoStatus,
+  onRepoPull,
+  onRepoRebase,
+  onRepoMerge,
+  repoDisplayName,
 }: {
   hasChanges: boolean;
   hasCommits: boolean;
@@ -141,8 +248,13 @@ export function ChangesPanelHeader({
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
-  onPull: () => void;
-  onRebase: () => void;
+  /** Always non-empty (single-repo includes the empty-name entry). */
+  repoNames: string[];
+  perRepoStatus: PerRepoStatus[];
+  onRepoPull: (repo: string) => void;
+  onRepoRebase: (repo: string) => void;
+  onRepoMerge: (repo: string) => void;
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
@@ -180,8 +292,12 @@ export function ChangesPanelHeader({
             behindCount={behindCount}
             isLoading={isLoading}
             loadingOperation={loadingOperation}
-            onPull={onPull}
-            onRebase={onRebase}
+            repoNames={repoNames}
+            perRepoStatus={perRepoStatus}
+            onRepoPull={onRepoPull}
+            onRepoRebase={onRepoRebase}
+            onRepoMerge={onRepoMerge}
+            repoDisplayName={repoDisplayName}
           />
         </>
       }

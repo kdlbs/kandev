@@ -843,9 +843,10 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 			g.logger.Warn("failed to resolve HEAD after reset", zap.Error(headErr))
 		} else {
 			reset := &streams.GitResetNotification{
-				Timestamp:    time.Now().UTC(),
-				PreviousHead: previousHead,
-				CurrentHead:  strings.TrimSpace(newHead),
+				Timestamp:      time.Now().UTC(),
+				RepositoryName: g.repoName,
+				PreviousHead:   previousHead,
+				CurrentHead:    strings.TrimSpace(newHead),
 			}
 			g.workspaceTracker.NotifyGitReset(reset)
 		}

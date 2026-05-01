@@ -3,9 +3,7 @@ import { render, screen, cleanup, fireEvent, within } from "@testing-library/rea
 import type { ComponentProps } from "react";
 
 vi.mock("./changes-panel-file-row", () => ({
-  FileRow: ({ file }: { file: { path: string } }) => (
-    <li data-testid="file-row">{file.path}</li>
-  ),
+  FileRow: ({ file }: { file: { path: string } }) => <li data-testid="file-row">{file.path}</li>,
   BulkActionBar: () => null,
   DefaultActionButtons: () => null,
 }));
@@ -30,6 +28,8 @@ vi.mock("@/hooks/use-multi-select", () => ({
 import { FileListSection, CommitsSection } from "./changes-panel-timeline";
 
 const REPO_HEADER_TID = "changes-repo-header";
+const COMMIT_ROW_TID = "commit-row";
+const COMMITS_SECTION_TOGGLE_TID = "commits-section-collapse-toggle";
 
 afterEach(cleanup);
 
@@ -57,7 +57,12 @@ function file(path: string, repo?: string): Props["files"][number] {
 }
 
 describe("FileListSection — multi-repo grouping", () => {
-  it("renders no repo header when files lack a repository_name (single-repo)", () => {
+  it("renders a single repo header (uniform UI) for files without a repository_name", () => {
+    // Per-repo headers always render now, including in single-repo / untagged
+    // mode — the resolver fills in the workspace primary repo name (or a
+    // neutral "Repository" fallback). This keeps the UX consistent across
+    // single-repo and multi-repo workspaces and gives us per-repo Stage all /
+    // Commit / Unstage all buttons in both modes.
     render(
       <FileListSection
         {...baseProps}
@@ -68,7 +73,7 @@ describe("FileListSection — multi-repo grouping", () => {
         files={[file("a.ts"), file("b.ts")]}
       />,
     );
-    expect(screen.queryAllByTestId(REPO_HEADER_TID)).toHaveLength(0);
+    expect(screen.getAllByTestId(REPO_HEADER_TID)).toHaveLength(1);
     expect(screen.getAllByTestId("file-row")).toHaveLength(2);
   });
 
@@ -160,15 +165,10 @@ describe("CommitsSection", () => {
   }
 
   it("starts collapsed by default — commits are reference info, not the primary signal", () => {
-    render(
-      <CommitsSection
-        commits={[commit("abc123", "first")]}
-        isLast
-      />,
-    );
+    render(<CommitsSection commits={[commit("abc123", "first")]} isLast />);
     // Header is rendered, but commit rows are hidden until the user expands.
-    expect(screen.queryByTestId("commit-row")).toBeNull();
-    const toggle = screen.getByTestId("commits-section-collapse-toggle");
+    expect(screen.queryByTestId(COMMIT_ROW_TID)).toBeNull();
+    const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -184,7 +184,7 @@ describe("CommitsSection", () => {
       />,
     );
     // Expand the section first so the inner repo headers and commit rows render.
-    fireEvent.click(screen.getByTestId("commits-section-collapse-toggle"));
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
 
     const headers = screen.getAllByTestId("commits-repo-header");
     expect(headers).toHaveLength(2);
@@ -192,19 +192,18 @@ describe("CommitsSection", () => {
     expect(headers[0].textContent).toContain("2");
     expect(headers[1].textContent).toContain("backend");
     expect(headers[1].textContent).toContain("1");
-    expect(screen.getAllByTestId("commit-row")).toHaveLength(3);
+    expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(3);
   });
 
-  it("renders flat (no per-repo headers) for single-repo or untagged commits", () => {
-    render(
-      <CommitsSection
-        commits={[commit("c1", "msg"), commit("c2", "msg")]}
-        isLast
-      />,
-    );
-    fireEvent.click(screen.getByTestId("commits-section-collapse-toggle"));
-    expect(screen.queryAllByTestId("commits-repo-header")).toHaveLength(0);
-    expect(screen.getAllByTestId("commit-row")).toHaveLength(2);
+  it("renders a single commits-repo header (uniform UI) for untagged commits", () => {
+    // The Commits section, like the file lists, always groups by repo now.
+    // For untagged or single-repo commits we get one group with the empty
+    // repository_name; the header still renders so the per-repo Push / PR
+    // buttons live in a consistent place across single-repo and multi-repo.
+    render(<CommitsSection commits={[commit("c1", "msg"), commit("c2", "msg")]} isLast />);
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
+    expect(screen.getAllByTestId("commits-repo-header")).toHaveLength(1);
+    expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
   });
 
   // Regression: previously isLatest was computed against the merged list, so
@@ -225,8 +224,8 @@ describe("CommitsSection", () => {
         onRevertCommit={() => undefined}
       />,
     );
-    fireEvent.click(screen.getByTestId("commits-section-collapse-toggle"));
-    const rows = screen.getAllByTestId("commit-row");
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
+    const rows = screen.getAllByTestId(COMMIT_ROW_TID);
     const latestByShas = rows
       .filter((r) => r.getAttribute("data-is-latest") === "true")
       .map((r) => r.getAttribute("data-sha"));

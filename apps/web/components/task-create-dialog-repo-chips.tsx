@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { IconPlus, IconX, IconCode, IconGitBranch } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -15,6 +15,7 @@ import {
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
 import type { Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
+import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 
 /**
  * Chip row for the task-create dialog. Renders one chip per row in
@@ -145,19 +146,24 @@ type RepoChipProps = {
   onRemove: () => void;
 };
 
-function RepoChip({
+function useRepoChipData({
   row,
   workspaceId,
   repositories,
   discoveredRepositories,
   excludedRepoIds,
-  onRepositoryChange,
   onBranchChange,
-  onRemove,
-}: RepoChipProps) {
+}: Pick<
+  RepoChipProps,
+  | "row"
+  | "workspaceId"
+  | "repositories"
+  | "discoveredRepositories"
+  | "excludedRepoIds"
+  | "onBranchChange"
+>) {
   const filteredRepos = useMemo(
-    () =>
-      repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
+    () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
     [repositories, excludedRepoIds, row.repositoryId],
   );
   // Discovered (on-machine) repos not yet imported into the workspace. Drop
@@ -193,30 +199,60 @@ function RepoChip({
   }, [workspaceId, row.repositoryId, row.localPath]);
   const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!branchSource);
 
-  const repoOptions: PillOption[] = useMemo(() => {
-    return [
+  // Once branches load for this row, pre-fill the branch pill with the user's
+  // last-used branch (when present) or main/master/origin/main/origin/master.
+  // Skipped if the user already picked a branch on this row.
+  useEffect(() => {
+    if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
+    autoSelectBranch(branches, onBranchChange);
+  }, [branchSource, branchesLoading, branches, row.branch, onBranchChange]);
+
+  const repoOptions: PillOption[] = useMemo(
+    () => [
       ...filteredRepos.map((r) => ({ value: r.id, label: r.name })),
       ...filteredDiscovered.map((r) => ({
         value: r.path,
         label: shortRepoPath(r.path),
         keywords: [r.path],
       })),
-    ];
-  }, [filteredRepos, filteredDiscovered]);
+    ],
+    [filteredRepos, filteredDiscovered],
+  );
   const branchOptions: PillOption[] = useMemo(() => branches.map(branchToOption), [branches]);
+  return { repoOptions, branchOptions, branchesLoading };
+}
 
+function RepoChip({
+  row,
+  workspaceId,
+  repositories,
+  discoveredRepositories,
+  excludedRepoIds,
+  onRepositoryChange,
+  onBranchChange,
+  onRemove,
+}: RepoChipProps) {
+  const { repoOptions, branchOptions, branchesLoading } = useRepoChipData({
+    row,
+    workspaceId,
+    repositories,
+    discoveredRepositories,
+    excludedRepoIds,
+    onBranchChange,
+  });
   const repoLabel =
     repositories.find((r) => r.id === row.repositoryId)?.name ??
-    discoveredRepositories.find((r) => r.path === row.localPath)?.path?.split("/").pop() ??
+    discoveredRepositories
+      .find((r) => r.path === row.localPath)
+      ?.path?.split("/")
+      .pop() ??
     "";
   const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchPlaceholder = !hasRepo
-    ? "branch"
-    : branchesLoading
-      ? "loading…"
-      : branchOptions.length === 0
-        ? "no branches"
-        : "branch";
+  const branchPlaceholder = computeBranchPlaceholder(
+    hasRepo,
+    branchesLoading,
+    branchOptions.length,
+  );
 
   return (
     <span
@@ -259,6 +295,13 @@ function RepoChip({
 }
 
 type PillOption = { value: string; label: string; keywords?: string[] };
+
+function computeBranchPlaceholder(hasRepo: boolean, loading: boolean, optionCount: number): string {
+  if (!hasRepo) return "branch";
+  if (loading) return "loading…";
+  if (optionCount === 0) return "no branches";
+  return "branch";
+}
 
 function normalizeRepoPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/g, "");

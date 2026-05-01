@@ -22,9 +22,10 @@ import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
-import { FileRow, BulkActionBar, DefaultActionButtons } from "./changes-panel-file-row";
-import { CommitRow, type CommitItem } from "./commit-row";
+import { FileRow, BulkActionBar } from "./changes-panel-file-row";
+import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
+import { CommitsRepoGroup, RepoGroupItem } from "./changes-panel-repo-groups";
 
 // --- Timeline visual components ---
 
@@ -134,12 +135,24 @@ type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
-  // Multi-repo: handlers receive the commit's repository_name so amend/revert/
-  // reset land in the right git repo. Without it the op runs at the workspace
-  // root, which fails ("can only revert latest commit") for multi-repo tasks.
+  // Handlers receive the commit's repository_name so amend/revert/reset land
+  // in the right git repo. The empty string routes to the workspace root for
+  // single-repo workspaces.
   onRevertCommit?: (sha: string, repo?: string) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
+  /** Per-repo Push button rendered in each commits group header. */
+  onRepoPush?: (repo: string) => void;
+  /** Per-repo Create PR button rendered in each commits group header. */
+  onRepoCreatePR?: (repo: string) => void;
+  /** Maps a repository_name to its display label (used for the empty single-repo case). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** The session's base branch — passed through to the per-repo PR dialog. */
+  repoBaseBranch?: string;
+  /** Per-repo branch / ahead / behind summary; used for the "ahead" indicator. */
+  perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
+  /** Existing PR URL keyed by repository_name; "" key for single-repo. */
+  prByRepo?: Record<string, string | undefined>;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
@@ -151,9 +164,18 @@ export function CommitsSection({
   onRevertCommit,
   onAmendCommit,
   onResetToCommit,
+  onRepoPush,
+  onRepoCreatePR,
+  repoDisplayName,
+  repoBaseBranch,
+  perRepoStatus,
+  prByRepo,
 }: CommitsSectionProps) {
+  // Always group by repo. Single-repo shows up as one group with an empty
+  // repository_name; the group header still renders with a display label and
+  // per-repo buttons (Push, Create PR) so the UX is uniform across modes.
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
-  const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
+  const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
 
   return (
     <TimelineSection
@@ -167,95 +189,25 @@ export function CommitsSection({
       data-testid="commits-section"
     >
       <ul data-testid="commits-list" className="space-y-0.5">
-        {showRepoHeaders
-          ? groups.map((g) => (
-              <CommitsRepoGroup
-                key={g.repositoryName || "__no_repo__"}
-                repositoryName={g.repositoryName}
-                groupCommits={g.items}
-                onOpenCommitDetail={onOpenCommitDetail}
-                onAmendCommit={onAmendCommit}
-                onRevertCommit={onRevertCommit}
-                onResetToCommit={onResetToCommit}
-              />
-            ))
-          : commits.map((commit, index) => (
-              <CommitRow
-                key={`${commit.commit_sha}-${index}`}
-                commit={commit}
-                // Single-repo: only the newest unpushed commit is "latest"
-                // (revert/amend are gated on this in CommitRow).
-                isLatest={index === commits.findIndex((c) => c.pushed !== true)}
-                onOpenCommitDetail={onOpenCommitDetail}
-                onAmendCommit={commit.pushed ? undefined : onAmendCommit}
-                onRevertCommit={commit.pushed ? undefined : onRevertCommit}
-                onResetToCommit={commit.pushed ? undefined : onResetToCommit}
-              />
-            ))}
+        {groups.map((g) => (
+          <CommitsRepoGroup
+            key={g.repositoryName || "__no_repo__"}
+            repositoryName={g.repositoryName}
+            displayName={repoDisplayName?.(g.repositoryName)}
+            groupCommits={g.items}
+            aheadCount={aheadByRepo.get(g.repositoryName) ?? 0}
+            existingPrUrl={prByRepo?.[g.repositoryName] ?? prByRepo?.[""]}
+            baseBranch={repoBaseBranch}
+            onOpenCommitDetail={onOpenCommitDetail}
+            onAmendCommit={onAmendCommit}
+            onRevertCommit={onRevertCommit}
+            onResetToCommit={onResetToCommit}
+            onRepoPush={onRepoPush}
+            onRepoCreatePR={onRepoCreatePR}
+          />
+        ))}
       </ul>
     </TimelineSection>
-  );
-}
-
-function CommitsRepoGroup({
-  repositoryName,
-  groupCommits,
-  onOpenCommitDetail,
-  onAmendCommit,
-  onRevertCommit,
-  onResetToCommit,
-}: {
-  repositoryName: string;
-  groupCommits: CommitItem[];
-  onOpenCommitDetail?: (sha: string) => void;
-  onAmendCommit?: (currentMessage: string, repo?: string) => void;
-  onRevertCommit?: (sha: string, repo?: string) => void;
-  onResetToCommit?: (sha: string, repo?: string) => void;
-}) {
-  const [collapsed, setCollapsed] = useState(false);
-  // Each repo has its own "latest unpushed commit" — revert/amend in this
-  // group must target THIS repo's newest, not the merged-list newest. Using
-  // the global firstUnpushedIndex would mark only one commit across all repos
-  // as latest and trigger "can only revert latest commit" everywhere else.
-  const firstUnpushedInGroup = groupCommits.findIndex((c) => c.pushed !== true);
-  return (
-    <li
-      data-testid="commits-repo-group"
-      data-repository-name={repositoryName || ""}
-    >
-      <button
-        type="button"
-        className="w-full flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80"
-        data-testid="commits-repo-header"
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed((c) => !c)}
-      >
-        {collapsed ? (
-          <IconChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-        ) : (
-          <IconChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-        )}
-        <span className="truncate">{repositoryName || "Other"}</span>
-        <span className="text-muted-foreground/50 normal-case tracking-normal">
-          {groupCommits.length}
-        </span>
-      </button>
-      {!collapsed && (
-        <ul className="space-y-0.5">
-          {groupCommits.map((commit, index) => (
-            <CommitRow
-              key={commit.commit_sha}
-              commit={commit}
-              isLatest={index === firstUnpushedInGroup}
-              onOpenCommitDetail={onOpenCommitDetail}
-              onAmendCommit={commit.pushed ? undefined : onAmendCommit}
-              onRevertCommit={commit.pushed ? undefined : onRevertCommit}
-              onResetToCommit={commit.pushed ? undefined : onResetToCommit}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
   );
 }
 
@@ -272,6 +224,8 @@ type ActionButtonsSectionProps = {
   canCreatePR: boolean;
   existingPrUrl?: string;
   isLast?: boolean;
+  /** Hide the Push button (per-repo Push is rendered elsewhere in multi-repo). */
+  hidePush?: boolean;
 };
 
 export function ActionButtonsSection({
@@ -285,6 +239,7 @@ export function ActionButtonsSection({
   canCreatePR,
   existingPrUrl,
   isLast = true,
+  hidePush = false,
 }: ActionButtonsSectionProps) {
   const prExists = !!existingPrUrl;
   const createPrDisabled = !canCreatePR || prExists || isLoading;
@@ -318,48 +273,53 @@ export function ActionButtonsSection({
           </TooltipTrigger>
           {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="flex items-center">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
-                onClick={onPush}
-                disabled={pushDisabled}
-              >
-                {isPushing ? (
-                  <IconLoader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <IconCloudUpload className="h-3 w-3" />
-                )}
-                Push
-                {aheadCount > 0 && !isPushing && (
-                  <span className="text-muted-foreground">{aheadCount} ahead</span>
-                )}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
-                    disabled={pushDisabled}
-                  >
-                    <IconChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem className="cursor-pointer gap-2 text-xs" onClick={onForcePush}>
-                    <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
-                    Force Push (with lease)
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          </TooltipTrigger>
-          {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
-        </Tooltip>
+        {!hidePush && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
+                  onClick={onPush}
+                  disabled={pushDisabled}
+                >
+                  {isPushing ? (
+                    <IconLoader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <IconCloudUpload className="h-3 w-3" />
+                  )}
+                  Push
+                  {aheadCount > 0 && !isPushing && (
+                    <span className="text-muted-foreground">{aheadCount} ahead</span>
+                  )}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
+                      disabled={pushDisabled}
+                    >
+                      <IconChevronDown className="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      className="cursor-pointer gap-2 text-xs"
+                      onClick={onForcePush}
+                    >
+                      <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
+                      Force Push (with lease)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </TooltipTrigger>
+            {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
+          </Tooltip>
+        )}
       </div>
     </TimelineSection>
   );
@@ -388,6 +348,13 @@ type FileListSectionProps = {
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[]) => void;
+  // Per-repo action handlers shown inline with each repo group header. Always
+  // rendered, including single-repo (with one entry pre-selected) — the empty
+  // `repo` argument routes ops to the workspace root in that case.
+  onRepoAction?: (repo: string) => void;
+  onRepoSecondaryAction?: (repo: string) => void;
+  /** Maps a repository_name to its display label; called per group header. */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 };
 
 /**
@@ -396,7 +363,7 @@ type FileListSectionProps = {
  * workspaces fall back to a flat list (no header) so the existing UI is
  * unchanged.
  */
-function FileListBody(props: {
+type FileListBodyProps = {
   variant: "unstaged" | "staged";
   files: ChangedFile[];
   pendingStageFiles: Set<string>;
@@ -407,13 +374,18 @@ function FileListBody(props: {
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
-}) {
+  /** Per-repo group header actions; primary = Stage all (unstaged) / Commit (staged). */
+  onRepoAction?: (repo: string) => void;
+  onRepoSecondaryAction?: (repo: string) => void;
+  primaryLabel: string;
+  secondaryLabel?: string;
+  /** Maps a repository_name to its display label (e.g. "" → workspace primary repo name). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
+};
+
+function FileListBody(props: FileListBodyProps) {
   const { variant, files, pendingStageFiles, multiSelect } = props;
-  const groups = useMemo(
-    () => groupByRepositoryName(files, (f) => f.repositoryName),
-    [files],
-  );
-  const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
+  const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders
   // for the lifetime of this section instance (resets on unmount).
@@ -431,7 +403,7 @@ function FileListBody(props: {
     <FileRow
       key={`${file.repositoryName ?? ""}:${file.path}`}
       file={file}
-      isPending={pendingStageFiles.has(file.path)}
+      isPending={pendingStageFiles.has(`${file.repositoryName ?? ""}::${file.path}`)}
       isSelected={multiSelect.isSelected(file.path)}
       onSelect={multiSelect.handleClick}
       onOpenDiff={props.onOpenDiff}
@@ -450,40 +422,20 @@ function FileListBody(props: {
         tabIndex={-1}
         onKeyDown={props.onKeyDown}
       >
-        {groups.map((group) =>
-          showRepoHeaders ? (
-            <li
-              key={group.repositoryName || "__no_repo__"}
-              data-testid="changes-repo-group"
-              data-repository-name={group.repositoryName || ""}
-            >
-              <button
-                type="button"
-                className="w-full flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80"
-                data-testid="changes-repo-header"
-                aria-expanded={!collapsedRepos.has(group.repositoryName)}
-                onClick={() => toggleRepo(group.repositoryName)}
-              >
-                {collapsedRepos.has(group.repositoryName) ? (
-                  <IconChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                ) : (
-                  <IconChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                )}
-                <span className="truncate">{group.repositoryName || "Other"}</span>
-                <span className="text-muted-foreground/50 normal-case tracking-normal">
-                  {group.items.length}
-                </span>
-              </button>
-              {!collapsedRepos.has(group.repositoryName) && (
-                <ul className="space-y-0.5">{group.items.map(renderRow)}</ul>
-              )}
-            </li>
-          ) : (
-            // Single-repo flat list: render rows inline so the DOM shape stays
-            // identical to the pre-multi-repo behavior.
-            group.items.map(renderRow)
-          ),
-        )}
+        {groups.map((group) => (
+          <RepoGroupItem
+            key={group.repositoryName || "__no_repo__"}
+            group={group}
+            collapsed={collapsedRepos.has(group.repositoryName)}
+            onToggle={() => toggleRepo(group.repositoryName)}
+            renderRow={renderRow}
+            primaryLabel={props.primaryLabel}
+            secondaryLabel={props.secondaryLabel}
+            onRepoAction={props.onRepoAction}
+            onRepoSecondaryAction={props.onRepoSecondaryAction}
+            displayName={props.repoDisplayName?.(group.repositoryName)}
+          />
+        ))}
       </ul>
     </div>
   );
@@ -507,7 +459,9 @@ export function FileListSection(props: FileListSectionProps) {
   const filePaths = useMemo(() => files.map((f) => f.path), [files]);
   const multiSelect = useMultiSelect({ items: filePaths });
   const hasSelection = multiSelect.selectedPaths.size > 0;
-
+  // Multi-repo when any file has a repositoryName. Per-repo group headers
+  // own the action buttons in this case; the bottom-of-section global
+  // buttons would be redundant, so we skip them.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape" && hasSelection) multiSelect.clearSelection();
@@ -535,29 +489,23 @@ export function FileListSection(props: FileListSectionProps) {
           onUnstage={onUnstage}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
+          primaryLabel={props.actionLabel}
+          secondaryLabel={props.secondaryActionLabel}
+          onRepoAction={props.onRepoAction}
+          onRepoSecondaryAction={props.onRepoSecondaryAction}
+          repoDisplayName={props.repoDisplayName}
         />
       )}
-      {files.length > 0 && (
+      {files.length > 0 && hasSelection && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          {hasSelection ? (
-            <BulkActionBar
-              variant={variant}
-              selectionCount={multiSelect.selectedPaths.size}
-              selectedPaths={multiSelect.selectedPaths}
-              onBulkStage={props.onBulkStage}
-              onBulkUnstage={props.onBulkUnstage}
-              onBulkDiscard={props.onBulkDiscard}
-            />
-          ) : (
-            <DefaultActionButtons
-              actionLabel={props.actionLabel}
-              isActionLoading={props.isActionLoading}
-              onAction={props.onAction}
-              secondaryActionLabel={props.secondaryActionLabel}
-              isSecondaryActionLoading={props.isSecondaryActionLoading}
-              onSecondaryAction={props.onSecondaryAction}
-            />
-          )}
+          <BulkActionBar
+            variant={variant}
+            selectionCount={multiSelect.selectedPaths.size}
+            selectedPaths={multiSelect.selectedPaths}
+            onBulkStage={props.onBulkStage}
+            onBulkUnstage={props.onBulkUnstage}
+            onBulkDiscard={props.onBulkDiscard}
+          />
         </div>
       )}
     </TimelineSection>

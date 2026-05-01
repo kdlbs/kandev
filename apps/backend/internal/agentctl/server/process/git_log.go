@@ -11,6 +11,18 @@ type GitLogResult struct {
 	Success bool             `json:"success"`
 	Commits []*GitCommitInfo `json:"commits"`
 	Error   string           `json:"error,omitempty"`
+	// PerRepoErrors lists per-repo failures during a multi-repo log fan-out.
+	// Empty/nil for single-repo responses or when every repo succeeded. The
+	// merged response keeps Success=true as long as at least one repo
+	// succeeded; callers inspect this slice to surface partial failures.
+	PerRepoErrors []GitLogRepoError `json:"per_repo_errors,omitempty"`
+}
+
+// GitLogRepoError describes a single per-repo failure from a multi-repo log
+// fan-out. It is omitted from the response entirely for single-repo responses.
+type GitLogRepoError struct {
+	RepositoryName string `json:"repository_name"`
+	Error          string `json:"error"`
 }
 
 // GitCommitInfo represents a single commit in the log.

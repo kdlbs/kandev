@@ -284,8 +284,9 @@ func (p *EventPublisher) PublishGitReset(execution *AgentExecution, reset *agent
 		AgentID:   execution.ID,
 		Timestamp: reset.Timestamp.Format(time.RFC3339Nano),
 		Reset: &GitResetData{
-			PreviousHead: reset.PreviousHead,
-			CurrentHead:  reset.CurrentHead,
+			PreviousHead:   reset.PreviousHead,
+			CurrentHead:    reset.CurrentHead,
+			RepositoryName: reset.RepositoryName,
 		},
 	})
 }
@@ -303,6 +304,7 @@ func (p *EventPublisher) PublishBranchSwitch(execution *AgentExecution, branchSw
 			CurrentBranch:  branchSwitch.CurrentBranch,
 			CurrentHead:    branchSwitch.CurrentHead,
 			BaseCommit:     branchSwitch.BaseCommit,
+			RepositoryName: branchSwitch.RepositoryName,
 		},
 	})
 }
@@ -316,12 +318,13 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 	sessionID := execution.SessionID
 
 	payload := FileChangeEventPayload{
-		TaskID:    execution.TaskID,
-		SessionID: sessionID,
-		AgentID:   execution.ID,
-		Path:      notification.Path,
-		Operation: notification.Operation,
-		Timestamp: notification.Timestamp.Format(time.RFC3339Nano),
+		TaskID:         execution.TaskID,
+		SessionID:      sessionID,
+		AgentID:        execution.ID,
+		Path:           notification.Path,
+		Operation:      notification.Operation,
+		Timestamp:      notification.Timestamp.Format(time.RFC3339Nano),
+		RepositoryName: notification.RepositoryName,
 	}
 
 	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", payload)

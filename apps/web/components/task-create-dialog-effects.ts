@@ -78,14 +78,15 @@ export function useRepositoryAutoSelectEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  // Auto-seed the unified repos list with the user's last-used repo (or the
-  // workspace's only repo) on open. Skipped when URL mode is active or the
-  // user already has at least one row picked.
+  // On open, ensure there's always at least one chip rendered: prefer the
+  // user's last-used repo (or the workspace's only repo) so the chip lands
+  // pre-filled, but fall back to an empty row so the picker is visible
+  // instead of just the "+" button. URL mode is excluded — that flow swaps
+  // the chip row for a URL input.
   const { repositories: rows, useGitHubUrl, setRepositories } = fs;
   useEffect(() => {
     if (!open || !workspaceId || useGitHubUrl) return;
-    const hasPickedRow = rows.some((r) => r.repositoryId || r.localPath);
-    if (hasPickedRow) return;
+    if (rows.length > 0) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
     let pickId: string | null = null;
     if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
@@ -93,10 +94,10 @@ export function useRepositoryAutoSelectEffect(
     } else if (repositories.length === 1) {
       pickId = repositories[0].id;
     }
-    if (!pickId) return;
-    const id = pickId;
     void Promise.resolve().then(() =>
-      setRepositories([{ key: "row-0", repositoryId: id, branch: "" }]),
+      setRepositories([
+        pickId ? { key: "row-0", repositoryId: pickId, branch: "" } : { key: "row-0", branch: "" },
+      ]),
     );
   }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
 }

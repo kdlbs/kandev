@@ -377,15 +377,16 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 			TaskID:    data.TaskID,
 			Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
 			Commit: &lifecycle.GitCommitData{
-				CommitSHA:    data.Commit.CommitSHA,
-				ParentSHA:    data.Commit.ParentSHA,
-				Message:      data.Commit.Message,
-				AuthorName:   data.Commit.AuthorName,
-				AuthorEmail:  data.Commit.AuthorEmail,
-				FilesChanged: data.Commit.FilesChanged,
-				Insertions:   data.Commit.Insertions,
-				Deletions:    data.Commit.Deletions,
-				CommittedAt:  data.Commit.CommittedAt,
+				CommitSHA:      data.Commit.CommitSHA,
+				ParentSHA:      data.Commit.ParentSHA,
+				Message:        data.Commit.Message,
+				AuthorName:     data.Commit.AuthorName,
+				AuthorEmail:    data.Commit.AuthorEmail,
+				FilesChanged:   data.Commit.FilesChanged,
+				Insertions:     data.Commit.Insertions,
+				Deletions:      data.Commit.Deletions,
+				CommittedAt:    data.Commit.CommittedAt,
+				RepositoryName: data.Commit.RepositoryName,
 			},
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
@@ -415,8 +416,9 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 			TaskID:    data.TaskID,
 			Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
 			Reset: &lifecycle.GitResetData{
-				PreviousHead: data.Reset.PreviousHead,
-				CurrentHead:  data.Reset.CurrentHead,
+				PreviousHead:   data.Reset.PreviousHead,
+				CurrentHead:    data.Reset.CurrentHead,
+				RepositoryName: data.Reset.RepositoryName,
 			},
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
@@ -485,6 +487,7 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 				CurrentBranch:  data.BranchSwitch.CurrentBranch,
 				CurrentHead:    data.BranchSwitch.CurrentHead,
 				BaseCommit:     data.BranchSwitch.BaseCommit,
+				RepositoryName: data.BranchSwitch.RepositoryName,
 			},
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
