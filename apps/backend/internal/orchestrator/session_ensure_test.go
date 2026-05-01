@@ -227,7 +227,7 @@ func TestEnsureSession_Concurrent_CreatesSingleSession(t *testing.T) {
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("seed workflow: %v", err)
 	}
-	if err := repo.CreateTask(ctx, &models.Task{ID: "task1", WorkflowID: "wf1", Title: "T", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task1", WorkflowID: "wf1", WorkspaceID: "ws1", Title: "T", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
 	// PrepareTaskSession resolves agent_profile_id from task metadata via

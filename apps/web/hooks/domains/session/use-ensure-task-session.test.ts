@@ -2,9 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 const mockEnsureTaskSession = vi.fn();
-let mockSessionsResult: { sessions: Array<{ id: string }>; isLoaded: boolean } = {
+const mockLoadSessions = vi.fn().mockResolvedValue(undefined);
+let mockSessionsResult: {
+  sessions: Array<{ id: string }>;
+  isLoaded: boolean;
+  loadSessions: (force?: boolean) => Promise<void>;
+} = {
   sessions: [],
   isLoaded: true,
+  loadSessions: mockLoadSessions,
 };
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -26,7 +32,8 @@ function flushMicrotasks() {
 describe("useEnsureTaskSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSessionsResult = { sessions: [], isLoaded: true };
+    mockLoadSessions.mockResolvedValue(undefined);
+    mockSessionsResult = { sessions: [], isLoaded: true, loadSessions: mockLoadSessions };
     mockEnsureTaskSession.mockResolvedValue({
       success: true,
       task_id: "task-1",
@@ -47,14 +54,26 @@ describe("useEnsureTaskSession", () => {
     expect(result.current.status).toBe("idle");
   });
 
+  it("force-reloads the session list after a successful ensure", async () => {
+    renderHook(() => useEnsureTaskSession(TASK));
+    await flushMicrotasks();
+    // Two awaits: ensure().then(loadSessions(true)).then(setStatus).
+    await flushMicrotasks();
+    expect(mockLoadSessions).toHaveBeenCalledWith(true);
+  });
+
   it("no-ops when the task already has a session", () => {
-    mockSessionsResult = { sessions: [{ id: "sess-1" }], isLoaded: true };
+    mockSessionsResult = {
+      sessions: [{ id: "sess-1" }],
+      isLoaded: true,
+      loadSessions: mockLoadSessions,
+    };
     renderHook(() => useEnsureTaskSession(TASK));
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });
 
   it("no-ops while sessions are still loading", () => {
-    mockSessionsResult = { sessions: [], isLoaded: false };
+    mockSessionsResult = { sessions: [], isLoaded: false, loadSessions: mockLoadSessions };
     renderHook(() => useEnsureTaskSession(TASK));
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });

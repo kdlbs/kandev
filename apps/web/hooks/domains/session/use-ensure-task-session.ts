@@ -34,7 +34,7 @@ export function useEnsureTaskSession(
 ): UseEnsureTaskSessionResult {
   const enabled = opts?.enabled ?? true;
   const taskId = task?.id ?? null;
-  const { sessions, isLoaded } = useTaskSessions(taskId);
+  const { sessions, isLoaded, loadSessions } = useTaskSessions(taskId);
 
   const [status, setStatus] = useState<EnsureTaskSessionStatus>("idle");
   const [error, setError] = useState<Error | null>(null);
@@ -52,18 +52,34 @@ export function useEnsureTaskSession(
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
+    // Cancel guard: if the user switches tasks or hits retry while this
+    // promise is still in flight, ignore its completion so a stale resolution
+    // doesn't overwrite the new task's status.
+    let cancelled = false;
     setStatus("preparing");
     setError(null);
     ensureTaskSession(taskId)
-      .then(() => {
+      .then(async () => {
+        if (cancelled || launchedKeyRef.current !== key) return;
+        // The backend may answer with source: "existing_primary" or
+        // "existing_newest" for a session our initial listTaskSessions
+        // missed. Force-reload so the store converges on the authoritative
+        // server view rather than staying empty.
+        await loadSessions(true);
+        if (cancelled || launchedKeyRef.current !== key) return;
         setStatus("idle");
       })
       .catch((err: unknown) => {
+        if (cancelled || launchedKeyRef.current !== key) return;
         setStatus("error");
         setError(err instanceof Error ? err : new Error(String(err)));
         launchedKeyRef.current = null;
       });
-  }, [enabled, taskId, isLoaded, sessions.length, retryToken]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, taskId, isLoaded, loadSessions, sessions.length, retryToken]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const retry = useCallback(() => {
