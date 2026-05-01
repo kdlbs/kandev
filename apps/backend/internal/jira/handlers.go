@@ -37,6 +37,12 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/tickets", c.httpSearchTickets)
 	api.GET("/tickets/:key", c.httpGetTicket)
 	api.POST("/tickets/:key/transitions", c.httpDoTransition)
+
+	api.GET("/watches/issue", c.httpListIssueWatches)
+	api.POST("/watches/issue", c.httpCreateIssueWatch)
+	api.PATCH("/watches/issue/:id", c.httpUpdateIssueWatch)
+	api.DELETE("/watches/issue/:id", c.httpDeleteIssueWatch)
+	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
 }
 
 // --- HTTP handlers ---
@@ -169,6 +175,133 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"transitioned": true})
+}
+
+// --- Issue watch HTTP handlers ---
+
+func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		return
+	}
+	watches, err := c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watches": watches})
+}
+
+func (c *Controller) httpCreateIssueWatch(ctx *gin.Context) {
+	var req CreateIssueWatchRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	w, err := c.service.CreateIssueWatch(ctx.Request.Context(), &req)
+	if err != nil {
+		c.writeIssueWatchError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, w)
+}
+
+func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
+	var req UpdateIssueWatchRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	w, err := c.service.UpdateIssueWatch(ctx.Request.Context(), id, &req)
+	if err != nil {
+		c.writeIssueWatchError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, w)
+}
+
+func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
+	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), id); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+// httpTriggerIssueWatch runs a single immediate poll of the watch. Useful from
+// the UI to verify a JQL change without waiting for the next 5-minute tick.
+// Returns the count of newly-discovered tickets so the user gets feedback even
+// when the matching tickets fan out asynchronously through the orchestrator.
+func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	w, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		c.writeIssueWatchError(ctx, err)
+		return
+	}
+	if !workspaceMatches(ctx, w.WorkspaceID) {
+		// 404 not 403 — don't reveal whether the ID exists.
+		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		return
+	}
+	tickets, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	for _, t := range tickets {
+		c.service.publishNewJiraIssueEvent(ctx.Request.Context(), w, t)
+	}
+	ctx.JSON(http.StatusOK, gin.H{"newIssues": len(tickets)})
+}
+
+// assertWatchInWorkspace guards mutation/trigger endpoints against IDOR: the
+// caller must supply `?workspace_id=...` matching the watch's workspace. The
+// list/create endpoints already require this query; mirroring it here closes
+// the gap where a known watch UUID from another workspace could be mutated.
+// Writes the response and returns false on mismatch — caller bails out.
+func (c *Controller) assertWatchInWorkspace(ctx *gin.Context, id string) bool {
+	w, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		c.writeIssueWatchError(ctx, err)
+		return false
+	}
+	if !workspaceMatches(ctx, w.WorkspaceID) {
+		// Use 404 so a probing client can't tell whether a watch ID exists in
+		// another workspace.
+		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		return false
+	}
+	return true
+}
+
+// workspaceMatches returns true when the request's `workspace_id` query param
+// matches the resource's stored workspace. Empty query is rejected so the
+// caller can't bypass the check by omitting the parameter.
+func workspaceMatches(ctx *gin.Context, resourceWorkspace string) bool {
+	q := ctx.Query("workspace_id")
+	return q != "" && q == resourceWorkspace
+}
+
+func (c *Controller) writeIssueWatchError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrIssueWatchNotFound) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrInvalidConfig) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.writeClientError(ctx, err)
 }
 
 // errCodeJiraNotConfigured is the wire-level code surfaced to the UI when the

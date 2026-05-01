@@ -333,10 +333,12 @@ func startAgentInfrastructure(
 		log.Info("GitHub poller started")
 	}
 
-	// Start JIRA auth-health poller. Probes stored credentials for every
-	// configured workspace on a fixed cadence so the UI can show a real
-	// connected/disconnected status without doing its own polling.
+	// Start JIRA poller. Drives two background loops sharing one service: an
+	// auth-health probe (so the UI can show connect status without polling
+	// JIRA itself) and an issue-watch loop that runs configured JQL queries
+	// and emits NewJiraIssueEvent for the orchestrator to turn into tasks.
 	if services.Jira != nil {
+		orchestratorSvc.SetJiraService(&jiraServiceAdapter{svc: services.Jira})
 		jiraPoller := jirapkg.NewPoller(services.Jira, log)
 		jiraPoller.Start(ctx)
 		addCleanup(func() error { jiraPoller.Stop(); return nil })

@@ -97,7 +97,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Initialize JIRA service
 	jiraSecrets := &jiraSecretAdapter{store: repos.Secrets}
-	jiraSvc, _, jiraErr := jira.Provide(dbPool.Writer(), dbPool.Reader(), jiraSecrets, log)
+	jiraSvc, _, jiraErr := jira.Provide(dbPool.Writer(), dbPool.Reader(), jiraSecrets, eventBus, log)
 	if jiraErr != nil {
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(jiraErr))
 	}
