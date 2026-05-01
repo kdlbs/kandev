@@ -13,10 +13,12 @@ import {
 import {
   IconBrandGithub,
   IconChevronDown,
+  IconHexagon,
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
+import { useLinearAvailable } from "@/components/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import type { GitHubStatus } from "@/lib/types/github";
 
@@ -31,6 +33,11 @@ type MobileIntegrationsSectionProps = IntegrationsProps & {
 function getJiraHref(workspaceId: string | undefined, available: boolean): string {
   if (available) return "/jira";
   return workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings";
+}
+
+export function getLinearHref(workspaceId: string | undefined, available: boolean): string {
+  if (available) return "/linear";
+  return workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings";
 }
 
 function getStatusLabel(connected: boolean, loading: boolean | undefined): string {
@@ -66,9 +73,11 @@ function IntegrationStatusBadge({
 export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
   const { status, loading } = useGitHubStatus();
   const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
   const githubHref = githubStatus.ready ? "/github" : "/settings/general/github";
   const jiraHref = getJiraHref(workspaceId, jiraAvailable);
+  const linearHref = getLinearHref(workspaceId, linearAvailable);
 
   return (
     <DropdownMenu>
@@ -99,6 +108,13 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
             <IntegrationStatusBadge connected={jiraAvailable} />
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href={linearHref} className="gap-3">
+            <IconHexagon className="h-4 w-4 text-muted-foreground" />
+            <span className="flex-1">Linear</span>
+            <IntegrationStatusBadge connected={linearAvailable} />
+          </Link>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -110,9 +126,11 @@ export function MobileIntegrationsSection({
 }: MobileIntegrationsSectionProps) {
   const { status, loading } = useGitHubStatus();
   const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
   const githubHref = githubStatus.ready ? "/github" : "/settings/general/github";
   const jiraHref = getJiraHref(workspaceId, jiraAvailable);
+  const linearHref = getLinearHref(workspaceId, linearAvailable);
 
   return (
     <div className="space-y-3">
@@ -133,6 +151,13 @@ export function MobileIntegrationsSection({
           <IconTicket className="h-4 w-4" />
           <span className="flex-1 text-left">Jira</span>
           <IntegrationStatusBadge connected={jiraAvailable} />
+        </Link>
+      </Button>
+      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
+        <Link href={linearHref} onClick={onNavigate}>
+          <IconHexagon className="h-4 w-4" />
+          <span className="flex-1 text-left">Linear</span>
+          <IntegrationStatusBadge connected={linearAvailable} />
         </Link>
       </Button>
     </div>

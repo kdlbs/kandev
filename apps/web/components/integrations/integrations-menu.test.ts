@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getGitHubIntegrationStatus } from "./integrations-menu";
+import { getGitHubIntegrationStatus, getLinearHref } from "./integrations-menu";
 import type { GitHubStatus } from "@/lib/types/github";
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
@@ -33,5 +33,19 @@ describe("getGitHubIntegrationStatus", () => {
       ready: false,
       label: "Setup",
     });
+  });
+});
+
+describe("getLinearHref", () => {
+  it("links to the Linear workspace when available", () => {
+    expect(getLinearHref("workspace-1", true)).toBe("/linear");
+  });
+
+  it("links to workspace settings when Linear still needs setup", () => {
+    expect(getLinearHref("workspace-1", false)).toBe("/settings/workspace/workspace-1/linear");
+  });
+
+  it("falls back to settings when there is no active workspace", () => {
+    expect(getLinearHref(undefined, false)).toBe("/settings");
   });
 });
