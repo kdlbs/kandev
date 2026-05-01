@@ -21,7 +21,6 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { CommitStatBadge } from "@/components/diff-stat";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { BranchPathPopover } from "@/components/task/branch-path-popover";
@@ -71,11 +70,6 @@ type TaskTopBarProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
-};
-
-type GitStatusSummary = {
-  ahead: number;
-  behind: number;
 };
 
 type TopBarLeftProps = {
@@ -174,7 +168,6 @@ const TaskTopBar = memo(function TaskTopBar({
         taskId={taskId}
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
-        gitStatus={git}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -311,48 +304,6 @@ function TopBarLeft({
   );
 }
 
-/** Ahead/Behind commit status badges */
-function GitAheadBehindBadges({
-  gitStatus,
-  baseBranch,
-}: {
-  gitStatus: GitStatusSummary;
-  baseBranch?: string;
-}) {
-  const ahead = gitStatus?.ahead ?? 0;
-  const behind = gitStatus?.behind ?? 0;
-  if (ahead === 0 && behind === 0) return null;
-  const compareRef = baseBranch || "main";
-  return (
-    <div className="flex items-center gap-1">
-      {ahead > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              <CommitStatBadge label={`${ahead} ahead`} tone="ahead" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of {compareRef}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      {behind > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              <CommitStatBadge label={`${behind} behind`} tone="behind" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {behind} commit{behind !== 1 ? "s" : ""} behind {compareRef}
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 function TopbarCluster({
   label,
   className = "",
@@ -421,11 +372,24 @@ function MoreToolsMenu({
   );
 }
 
+function SettingsButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+          <Link href="/settings/general" aria-label="Settings">
+            <IconSettings className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function AttentionStatusGroup({
   taskId,
   activeSessionId,
-  baseBranch,
-  gitStatus,
   isArchived,
   workspaceId,
   isRemoteExecutor,
@@ -434,8 +398,6 @@ function AttentionStatusGroup({
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
-  baseBranch?: string;
-  gitStatus: GitStatusSummary;
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
@@ -444,7 +406,6 @@ function AttentionStatusGroup({
 }) {
   return (
     <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
-      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
@@ -463,30 +424,33 @@ function AttentionStatusGroup({
 
 function TopbarToolsGroup({
   activeSessionId,
-  workspaceId,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
 }: {
   activeSessionId?: string | null;
-  workspaceId?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
 }) {
+  const showDebugMenu = DEBUG_UI && onToggleDebugOverlay;
+
   return (
     <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">
       {!isArchived && (
         <>
-          <QuickChatButton workspaceId={workspaceId} />
           <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
-      <MoreToolsMenu
-        showDebugOverlay={showDebugOverlay}
-        onToggleDebugOverlay={onToggleDebugOverlay}
-      />
+      {showDebugMenu ? (
+        <MoreToolsMenu
+          showDebugOverlay={showDebugOverlay}
+          onToggleDebugOverlay={onToggleDebugOverlay}
+        />
+      ) : (
+        <SettingsButton />
+      )}
     </TopbarCluster>
   );
 }
@@ -496,7 +460,6 @@ function TopBarRight({
   taskId,
   activeSessionId,
   baseBranch,
-  gitStatus,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -508,7 +471,6 @@ function TopBarRight({
   taskId?: string | null;
   activeSessionId?: string | null;
   baseBranch?: string;
-  gitStatus: GitStatusSummary;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -519,6 +481,11 @@ function TopBarRight({
 }) {
   return (
     <div className="flex min-w-0 items-center justify-end gap-2">
+      {!isArchived && (
+        <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
+          <QuickChatButton workspaceId={workspaceId} />
+        </TopbarCluster>
+      )}
       {!isArchived && (
         <TopbarCluster label="Primary version control action">
           <VcsSplitButton
@@ -531,8 +498,6 @@ function TopBarRight({
       <AttentionStatusGroup
         taskId={taskId}
         activeSessionId={activeSessionId}
-        baseBranch={baseBranch}
-        gitStatus={gitStatus}
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
@@ -541,7 +506,6 @@ function TopBarRight({
       />
       <TopbarToolsGroup
         activeSessionId={activeSessionId}
-        workspaceId={workspaceId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}

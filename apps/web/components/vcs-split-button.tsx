@@ -71,7 +71,7 @@ function buildPrConfig(aheadCount: number, openPRDialog: () => void): PrimaryBut
   return {
     icon: <IconGitPullRequest className="h-4 w-4" />,
     label: "Create PR",
-    badge: aheadCount > 0 ? aheadCount : null,
+    badge: null,
     tooltip: `Create PR (${aheadCount} commit${aheadCount !== 1 ? "s" : ""} ahead)`,
     onClick: openPRDialog,
   };
@@ -81,7 +81,7 @@ function buildPushConfig(aheadCount: number, handlePush: () => void): PrimaryBut
   return {
     icon: <IconCloudUpload className="h-4 w-4" />,
     label: "Push",
-    badge: aheadCount > 0 ? aheadCount : null,
+    badge: null,
     tooltip: `Push ${aheadCount} commit${aheadCount !== 1 ? "s" : ""} to remote`,
     onClick: handlePush,
   };
@@ -95,7 +95,7 @@ function buildRebaseConfig(
   return {
     icon: <IconGitCherryPick className="h-4 w-4" />,
     label: "Rebase",
-    badge: behindCount > 0 ? behindCount : null,
+    badge: null,
     tooltip: `Rebase onto ${baseBranch || "origin/main"} (${behindCount} behind)`,
     onClick: handleRebase,
   };
@@ -128,6 +128,49 @@ function buildPrimaryButtonConfig({
   if (primaryAction === "pr") return buildPrConfig(aheadCount, openPRDialog);
   if (primaryAction === "rebase") return buildRebaseConfig(behindCount, baseBranch, handleRebase);
   return buildCommitConfig(uncommittedFileCount, openCommitDialog);
+}
+
+type DivergenceTone = "ahead" | "behind";
+
+const divergenceToneClass: Record<DivergenceTone, string> = {
+  ahead: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
+  behind: "border-yellow-500/40 bg-yellow-500/10 text-yellow-500",
+};
+
+function DivergencePill({
+  tone,
+  value,
+  label,
+}: {
+  tone: DivergenceTone;
+  value: number;
+  label: string;
+}) {
+  if (value <= 0) return null;
+
+  return (
+    <span
+      aria-label={`${value} ${label}`}
+      className={cn(
+        "inline-flex h-5 items-center rounded-md border px-1.5 text-[11px] font-semibold leading-none tabular-nums",
+        divergenceToneClass[tone],
+      )}
+    >
+      {tone === "ahead" ? "↑" : "↓"}
+      {value}
+    </span>
+  );
+}
+
+function GitDivergencePills({ ahead, behind }: { ahead: number; behind: number }) {
+  if (ahead <= 0 && behind <= 0) return null;
+
+  return (
+    <span className="ml-1 inline-flex items-center gap-1">
+      <DivergencePill tone="ahead" value={ahead} label="commits ahead" />
+      <DivergencePill tone="behind" value={behind} label="commits behind" />
+    </span>
+  );
 }
 
 type VcsDropdownItemsProps = {
@@ -308,6 +351,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
                 {primaryButtonConfig.badge}
               </span>
             )}
+            <GitDivergencePills ahead={aheadCount} behind={behindCount} />
           </Button>
         </TooltipTrigger>
         <TooltipContent>{primaryButtonConfig.tooltip}</TooltipContent>
