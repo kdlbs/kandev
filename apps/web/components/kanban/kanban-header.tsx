@@ -65,6 +65,7 @@ type HeaderUtilityMenuProps = {
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  showStatsLink?: boolean;
   buttonSize?: ComponentProps<typeof Button>["size"];
 };
 
@@ -93,6 +94,7 @@ function BoardUtilitiesMenu({
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
+  showStatsLink = true,
   buttonSize = "icon",
 }: HeaderUtilityMenuProps) {
   return (
@@ -121,13 +123,17 @@ function BoardUtilitiesMenu({
           />
           {showHealthIndicator ? "Health issues" : "System health"}
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href="/stats">
-            <IconChartBar className="h-4 w-4" />
-            Stats
-          </Link>
-        </DropdownMenuItem>
+        {showStatsLink && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild className="cursor-pointer">
+              <Link href="/stats">
+                <IconChartBar className="h-4 w-4" />
+                Stats
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuItem asChild className="cursor-pointer">
           <Link href="/settings">
             <IconSettings className="h-4 w-4" />
@@ -139,7 +145,13 @@ function BoardUtilitiesMenu({
   );
 }
 
-function ImproveKandevTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
+function ImproveKandevTopbarButton({
+  workspaceId,
+  buttonSize = "icon-lg",
+}: {
+  workspaceId: string | undefined;
+  buttonSize?: ComponentProps<typeof Button>["size"];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   return (
@@ -148,7 +160,7 @@ function ImproveKandevTopbarButton({ workspaceId }: { workspaceId: string | unde
         <TooltipTrigger asChild>
           <Button
             variant="outline"
-            size="icon"
+            size={buttonSize}
             onClick={() => setOpen(true)}
             className="cursor-pointer"
             data-testid="improve-kandev-button"
@@ -164,6 +176,35 @@ function ImproveKandevTopbarButton({ workspaceId }: { workspaceId: string | unde
         workspaceId={workspaceId ?? null}
         onSuccess={(task) => router.push(linkToTask(task.id))}
       />
+    </>
+  );
+}
+
+function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
+  return (
+    <>
+      <Button
+        asChild
+        variant="ghost"
+        size="lg"
+        className="cursor-pointer text-muted-foreground hover:text-foreground"
+      >
+        <Link href="/stats" aria-label="Stats">
+          <IconChartBar className="h-4 w-4" />
+          Stats
+        </Link>
+      </Button>
+      <IntegrationsMenu workspaceId={workspaceId} />
+      <ImproveKandevTopbarButton workspaceId={workspaceId} />
+    </>
+  );
+}
+
+function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
+  return (
+    <>
+      <IntegrationsMenu workspaceId={workspaceId} />
+      <ImproveKandevTopbarButton workspaceId={workspaceId} />
     </>
   );
 }
@@ -239,13 +280,21 @@ function TabletHeader({
   handleViewChange: (value: string) => void;
   setMenuOpen: (open: boolean) => void;
 }) {
+  const isHome = title === "Home";
+
   return (
     <PageTopbar
       title={title}
       subtitle={workspaceLabel}
       className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={title === "Home" ? "root" : "breadcrumb"}
-      leftActions={<IntegrationsMenu workspaceId={workspaceId} />}
+      variant={isHome ? "root" : "breadcrumb"}
+      leftActions={
+        isHome ? (
+          <HomeLeftActions workspaceId={workspaceId} />
+        ) : (
+          <WorkspaceLeftActions workspaceId={workspaceId} />
+        )
+      }
       actionsClassName="gap-2"
       actions={
         <>
@@ -272,7 +321,6 @@ function TabletHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
           <KanbanDisplayDropdown triggerSize="icon-lg" />
-          <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <Button
             variant="outline"
             size="icon-lg"
@@ -328,6 +376,11 @@ function DesktopHeader({
   ) : null;
   const isHome = title === "Home";
   const centerSearch = isHome ? searchInput : null;
+  const leftActions = isHome ? (
+    <HomeLeftActions workspaceId={workspaceId} />
+  ) : (
+    <WorkspaceLeftActions workspaceId={workspaceId} />
+  );
 
   return (
     <PageTopbar
@@ -336,7 +389,7 @@ function DesktopHeader({
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
-      leftActions={<IntegrationsMenu workspaceId={workspaceId} />}
+      leftActions={leftActions}
       actions={
         <>
           {!centerSearch && searchInput}
@@ -354,12 +407,12 @@ function DesktopHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
           <KanbanDisplayDropdown triggerSize="icon-lg" />
-          <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}
             onOpenReleaseNotes={onOpenReleaseNotes}
             showHealthIndicator={showHealthIndicator}
             onOpenHealthDialog={onOpenHealthDialog}
+            showStatsLink={!isHome}
             buttonSize="icon-lg"
           />
         </>

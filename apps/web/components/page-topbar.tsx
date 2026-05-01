@@ -60,7 +60,7 @@ export function PageTopbar({
       {leading}
       {variant === "root" ? (
         <div className="relative z-10 flex min-w-0 items-center">
-          <span className="truncate text-sm font-semibold">{rootLabel}</span>
+          <span className="truncate text-[15px] font-semibold leading-none">{rootLabel}</span>
         </div>
       ) : (
         <Breadcrumb className="relative z-10 min-w-0">
